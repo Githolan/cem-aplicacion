@@ -9,7 +9,7 @@ from sqlalchemy.exc import DBAPIError
 from tests.test_circuito_pagos_0072 import ficha, segundo_ejecutor
 from tests.test_orden_pago_neutra import cbu_sintetico
 from tests.test_pago_manual_0055 import e as e  # noqa: F401  (es un fixture)
-from tests.test_pago_manual_0055 import emitida, ver
+from tests.test_pago_manual_0055 import emitida, otro_consejero, ver
 from tests.test_pague_otra_cosa_0075 import (
     DIFERENCIA,
     con_diferencia,
@@ -99,12 +99,14 @@ def test_sin_reclamo_no_se_cierra(motor_migrate, e):
     assert fila_de(motor_migrate, d)["cerrada_en"] is None
 
 
-def test_cerrado_no_se_recupera_ni_se_cierra_de_nuevo(motor_migrate, e):
+def test_cerrado_no_se_recupera_ni_se_cierra_de_nuevo(motor_migrate, motor_app, e):
     o, d = reclamada(motor_migrate, e)
     assert cierre(e, e.mc2, o, d).status_code == 200
     base = f"ordenes-pago/{o}/pago-manual/diferencia/{d}"
     assert post(e, e.mc2, f"{base}/recuperada", {}).status_code == 409
-    assert cierre(e, e.mc1, o, d).status_code == 409
+    # Otra persona que sí podría cerrar (mc1 aprobó: desde `0102` no concilia).
+    y = otro_consejero(motor_migrate, motor_app, e)
+    assert cierre(e, y, o, d).status_code == 409
     assert fila_de(motor_migrate, d)["cerrada_por"] == e.mc2
 
 

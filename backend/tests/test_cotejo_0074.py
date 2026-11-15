@@ -306,7 +306,7 @@ def test_sin_la_columna_del_numero_tambien_compara_por_importe_y_fecha(motor_mig
 
 def test_el_mismo_numero_con_otro_importe_no_coincide(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
-    resultado = subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p, importe="-1,00")))
+    resultado = subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p, importe="-1,00")))
     assert resultado["cotejados"] == 0 and cotejo(motor_migrate, p) is None
     assert [x["pago_id"] for x in resultado["aca_no_banco"]] == [str(p)]
     assert resultado["banco_no_aca"][0]["importe_centavos"] == 100
@@ -347,7 +347,7 @@ def test_el_resultado_solo_trae_lo_que_hay_que_mirar_y_del_periodo(motor_migrate
 def test_lo_que_entro_a_la_cuenta_no_es_un_debito_sin_registrar(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
-    resultado = subio(e, e.mc1, extracto(
+    resultado = subio(e, e.mc2, extracto(
         linea_del_pago(motor_migrate, p), linea(fecha, "10.000,00", "0048213998"),
     ))  # fmt: skip
     assert resultado["total_banco_no_aca"] == 0

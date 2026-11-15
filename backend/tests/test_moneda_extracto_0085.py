@@ -1,6 +1,8 @@
 """La moneda del extracto, contra PostgreSQL real (`0085`). Datos SINTETICOS / PRUEBA / NO REAL.
 Decisión 9 del propietario, 07-11-2026: un pago de USD 1.000 no coincide con un débito de ARS 1.000.
-"""
+
+Coteja mc2: mc1 aprobó las órdenes de la escena y, desde `0102`, no coteja; con mc1 un «no
+coincide» no probaría nada."""
 
 import pytest
 from sqlalchemy import text
@@ -45,7 +47,7 @@ def columnas_guardadas(motor_migrate, cons) -> dict:
 def test_un_pago_en_dolares_no_coincide_con_un_debito_en_pesos(motor_migrate, e):
     _, p = en_dolares(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    r = subio(e, e.mc1, cuerpo)  # sin elegir: la sugerida, ARS
+    r = subio(e, e.mc2, cuerpo)  # sin elegir: la sugerida, ARS
     assert r["cotejados"] == 0
     assert cotejo(motor_migrate, p) is None
     assert r["total_banco_no_aca"] == 1 and r["banco_no_aca"][0]["moneda"] == "ARS"
@@ -55,49 +57,49 @@ def test_un_pago_en_dolares_no_coincide_con_un_debito_en_pesos(motor_migrate, e)
 def test_control_el_mismo_debito_en_su_moneda_coincide(motor_migrate, e):
     _, p = en_dolares(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    assert subio(e, e.mc1, cuerpo, EN_DOLARES)["cotejados"] == 1
+    assert subio(e, e.mc2, cuerpo, EN_DOLARES)["cotejados"] == 1
     assert cotejo(motor_migrate, p) is not None
 
 
 def test_sin_numero_tampoco_coincide_por_importe_y_fecha(motor_migrate, e):
     _, p = en_dolares(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p, referencia=""))
-    assert subio(e, e.mc1, cuerpo)["cotejados"] == 0
+    assert subio(e, e.mc2, cuerpo)["cotejados"] == 0
     assert cotejo(motor_migrate, p) is None
 
 
 def test_un_pago_en_pesos_no_coincide_con_un_extracto_en_dolares(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    assert subio(e, e.mc1, cuerpo, EN_DOLARES)["cotejados"] == 0
-    assert subio(e, e.mc1, cuerpo)["cotejados"] == 1  # control: en pesos sí
+    assert subio(e, e.mc2, cuerpo, EN_DOLARES)["cotejados"] == 0
+    assert subio(e, e.mc2, cuerpo)["cotejados"] == 1  # control: en pesos sí
 
 
 def test_queda_guardada_con_las_columnas_y_se_cambia_al_subir(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    subio(e, e.mc1, cuerpo, EN_DOLARES)
+    subio(e, e.mc2, cuerpo, EN_DOLARES)
     assert columnas_guardadas(motor_migrate, e.cons)["moneda"] == "USD"
-    assert pendientes(e, e.mc1)["moneda_extracto"] == "USD"
+    assert pendientes(e, e.mc2)["moneda_extracto"] == "USD"
     # Con las columnas guardadas, cambiar solo la moneda.
-    assert subio(e, e.mc1, cuerpo, {"moneda": "ARS"})["cotejados"] == 1
+    assert subio(e, e.mc2, cuerpo, {"moneda": "ARS"})["cotejados"] == 1
     assert columnas_guardadas(motor_migrate, e.cons)["moneda"] == "ARS"
 
 
 def test_sin_columnas_sugiere_pesos(motor_migrate, e):
-    assert pendientes(e, e.mc1)["moneda_extracto"] == "ARS"
+    assert pendientes(e, e.mc2)["moneda_extracto"] == "ARS"
 
 
 def test_una_moneda_mal_escrita_no_se_acepta(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
-    r = subir(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)), COLUMNAS | {"moneda": "pesos"})
+    r = subir(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)), COLUMNAS | {"moneda": "pesos"})
     assert codigo(r) == (422, "peticion_invalida"), r.text
 
 
 def test_la_base_no_acepta_un_par_en_otra_moneda(motor_migrate, motor_app, e):
     """Aunque la API lo pida: `cotejar_por_extracto` vuelve a mirar."""
     _, p = en_dolares(motor_migrate, e)
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)))
     with motor_migrate.connect() as c:
         movimiento = c.execute(
             text("select id from nucleo.movimiento_extracto where consorcio_id = :c"),
@@ -105,12 +107,12 @@ def test_la_base_no_acepta_un_par_en_otra_moneda(motor_migrate, motor_app, e):
         ).scalar_one()
     with (
         pytest.raises(Exception, match="no coincide"),
-        transaccion(motor_app, persona_id=e.mc1, consorcio_id=e.cons) as c,
+        transaccion(motor_app, persona_id=e.mc2, consorcio_id=e.cons) as c,
     ):
         c.execute(
             text("select nucleo.cotejar_por_extracto(cast(:p as jsonb), :a, 'api', :s)"),
-            {"p": f'[{{"movimiento": "{movimiento}", "pago": "{p}"}}]', "a": e.mc1,
-             "s": e.sesion[e.mc1]},
+            {"p": f'[{{"movimiento": "{movimiento}", "pago": "{p}"}}]', "a": e.mc2,
+             "s": e.sesion[e.mc2]},
         )  # fmt: skip
     assert cotejo(motor_migrate, p) is None
 
@@ -118,6 +120,6 @@ def test_la_base_no_acepta_un_par_en_otra_moneda(motor_migrate, motor_app, e):
 def test_el_mismo_archivo_en_otra_moneda_son_otras_lineas(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    assert subio(e, e.mc1, cuerpo, EN_DOLARES)["movimientos_nuevos"] == 1
-    assert subio(e, e.mc1, cuerpo, EN_DOLARES)["movimientos_nuevos"] == 0  # control: no duplica
-    assert subio(e, e.mc1, cuerpo)["movimientos_nuevos"] == 1
+    assert subio(e, e.mc2, cuerpo, EN_DOLARES)["movimientos_nuevos"] == 1
+    assert subio(e, e.mc2, cuerpo, EN_DOLARES)["movimientos_nuevos"] == 0  # control: no duplica
+    assert subio(e, e.mc2, cuerpo)["movimientos_nuevos"] == 1

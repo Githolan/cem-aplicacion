@@ -347,7 +347,7 @@ def test_un_debito_por_lo_aprobado_no_es_el_de_la_diferencia(motor_migrate, e):
     d = con_diferencia(motor_migrate, e, o)
     resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
     aprobado = f"-{IMPORTE // 100},{IMPORTE % 100:02d}"
-    r = subio(e, e.mc1, extracto(linea_de(motor_migrate, d, importe=aprobado)))
+    r = subio(e, e.mc2, extracto(linea_de(motor_migrate, d, importe=aprobado)))
     assert (r["cotejados"], r["total_banco_no_aca"]) == (0, 1)
     assert [x["pago_id"] for x in r["aca_no_banco"]] == [str(d)]
     assert r["aca_no_banco"][0]["importe_centavos"] == int(REAL_DE_MENOS * 100)
