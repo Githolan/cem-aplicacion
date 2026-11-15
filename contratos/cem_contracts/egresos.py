@@ -520,7 +520,9 @@ class FichaProveedorConsulta(BaseModel):
     documentacion: list[DocumentacionProveedor]
     rubros_legales: list[str]
     faltantes: list[RequisitoFaltante]
-    requisitos: list[RequisitoLegal] = Field(description="La matriz legal, para decirla en palabras.")
+    requisitos: list[RequisitoLegal] = Field(
+        description="La matriz legal, para decirla en palabras."
+    )
     configuracion: ConfiguracionProveedores
 
 
