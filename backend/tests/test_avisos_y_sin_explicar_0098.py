@@ -333,6 +333,7 @@ def test_un_edificio_sin_el_modo_de_egresos_no_avisa(motor_migrate, motor_app):
 
 
 # Pregunta 8: lo que el extracto no explica ------------------------------------------------------
+# Sube y coteja mc2: mc1 aprobó las órdenes de la escena y, desde `0102`, no coteja su pago.
 
 
 def sin_explicar(e, quien) -> dict:
@@ -357,7 +358,7 @@ def test_lo_que_el_extracto_no_explica_llega_a_quien_concilia_y_a_la_administrac
     for quien in (e.mc1, e.adm):
         assert sin_explicar(e, quien) == {"elementos": [], "siguiente": None, "total": 0}
         assert bandeja(e, quien)["sin_explicar"] == 0
-    subio(e, e.mc1, extracto(
+    subio(e, e.mc2, extracto(
         linea_del_pago(motor_migrate, p), linea(fecha, "-12.400,00", "0048213999"),
     ))  # fmt: skip
     for quien in (e.mc1, e.mc2, e.adm):
@@ -372,11 +373,11 @@ def test_lo_que_el_extracto_no_explica_llega_a_quien_concilia_y_a_la_administrac
 def test_lo_registrado_sin_conciliar_explica_su_debito(motor_migrate, e):
     o = emitida(motor_migrate, e)
     p = registrada(motor_migrate, e, o)
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)))
     assert sin_explicar(e, e.mc1)["total"] == 0
     # Control: otro débito del mismo extracto, sin pago, sí queda.
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p), linea(fecha, "-7,50", "")))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p), linea(fecha, "-7,50", "")))
     assert sin_explicar(e, e.mc1)["total"] == 1
 
 
@@ -398,7 +399,7 @@ def test_un_pago_ya_cotejado_no_explica_otro_debito_igual(motor_migrate, e):
     moneda sin referencia. Contra a668127 la lista daba 0: el pago consumido lo ocultaba."""
     _, p = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p), linea(fecha, f"-{PESOS}", "")))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p), linea(fecha, f"-{PESOS}", "")))
     with motor_migrate.connect() as c:
         atado = c.execute(text("select movimiento_id from nucleo.cotejo_pago where pago_id = :p"),
                           {"p": p}).scalar_one()  # fmt: skip
@@ -422,7 +423,7 @@ def con_un_debito_sin_explicar(motor_migrate, e) -> tuple[UUID, str]:
     """Un pago cotejado por su línea y una comisión de 7,50 que nada explica."""
     _, p = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p), linea(fecha, "-7,50", "")))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p), linea(fecha, "-7,50", "")))
     [m] = sin_explicar(e, e.mc1)["elementos"]
     return p, m["movimiento_id"]
 
@@ -541,7 +542,7 @@ def marcado_y_otro_pago_igual(motor_migrate, e) -> tuple[bytes, str, UUID, UUID]
     _, p1 = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, p1)["fecha_operacion"]
     cuerpo = extracto(linea_del_pago(motor_migrate, p1), linea(fecha, f"-{PESOS}", ""))
-    subio(e, e.mc1, cuerpo)
+    subio(e, e.mc2, cuerpo)
     [m] = sin_explicar(e, e.mc1)["elementos"]
     assert no_es_pago(e, e.mc1, m["movimiento_id"]).status_code == 200
     _, p2 = pagado(motor_migrate, e)
@@ -554,7 +555,7 @@ def marcado_y_otro_pago_igual(motor_migrate, e) -> tuple[bytes, str, UUID, UUID]
 def test_subir_otra_vez_el_extracto_no_coteja_un_pago_con_el_debito_marcado(motor_migrate, e):
     """Contra 6b2de4d el pago nuevo quedaba cotejado con la comisión marcada."""
     cuerpo, _, _, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
-    resultado = subio(e, e.mc1, cuerpo)
+    resultado = subio(e, e.mc2, cuerpo)
     assert resultado["cotejados"] == 0 and cotejo(motor_migrate, p2) is None
     # El pago queda como lo que está acá y no en el banco; la línea marcada no es «del banco».
     assert [x["pago_id"] for x in resultado["aca_no_banco"]] == [str(p2)]
@@ -565,20 +566,20 @@ def test_la_base_no_coteja_un_debito_marcado_por_ningun_camino(motor_migrate, e)
     """La regla está en la tabla del cotejo: aunque alguien pida el par directo a la base."""
     _, m, p1, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
     par = json.dumps([{"movimiento": m, "pago": str(p2)}])
-    niega(motor_migrate, e, e.mc1, COTEJAR_EXTRACTO, "movimiento_no_es_pago", pares=par)
+    niega(motor_migrate, e, e.mc2, COTEJAR_EXTRACTO, "movimiento_no_es_pago", pares=par)
     assert cotejo(motor_migrate, p2) is None
     # Control: un segundo débito igual, sin marcar, sí se coteja con el mismo pago. (La huella de
     # la línea no lleva la descripción: el segundo es otro por ser la segunda aparición.)
     fecha = dato_pago(motor_migrate, p2)["fecha_operacion"]
     igual = linea(fecha, f"-{PESOS}", "")
-    otra = subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p1), igual, igual))
+    otra = subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p1), igual, igual))
     assert otra["cotejados"] == 1 and cotejo(motor_migrate, p2)["origen"] == "extracto"
 
 
 def test_a_mano_se_coteja_el_pago_y_el_debito_marcado_sigue_marcado(motor_migrate, e):
     """El cotejo a mano es por pago, sin débito: no alcanza a la línea marcada."""
     _, m, _, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
-    r = tildar(e, e.mc1, p2)
+    r = tildar(e, e.mc2, p2)
     assert r.status_code == 200, r.json()
     fila = cotejo(motor_migrate, p2)
     assert (fila["origen"], fila["movimiento_id"]) == ("manual", None)
@@ -636,9 +637,9 @@ def test_quien_concilia_retira_la_marca_y_el_debito_vuelve_a_la_lista(motor_migr
 def test_retirada_la_marca_el_debito_se_coteja_otra_vez(motor_migrate, e):
     """El disparador mira solo las marcas vigentes."""
     cuerpo, m, _, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
-    assert subio(e, e.mc1, cuerpo)["cotejados"] == 0  # control: marcado, no se coteja
+    assert subio(e, e.mc2, cuerpo)["cotejados"] == 0  # control: marcado, no se coteja
     assert retirar(e, e.mc1, m).status_code == 200
-    resultado = subio(e, e.mc1, cuerpo)
+    resultado = subio(e, e.mc2, cuerpo)
     assert resultado["cotejados"] == 1
     assert str(cotejo(motor_migrate, p2)["movimiento_id"]) == m
     # Cotejado, ya no se puede volver a marcar.
@@ -719,7 +720,7 @@ def paginas(e, quien, ruta: str, limite: int) -> list[list[str]]:
 def tres_debitos_sin_explicar(motor_migrate, e) -> list[str]:
     _, p = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
-    subio(e, e.mc1, extracto(*(linea(fecha, f"-{n},00", "") for n in (11, 12, 13))))
+    subio(e, e.mc2, extracto(*(linea(fecha, f"-{n},00", "") for n in (11, 12, 13))))
     todos = sin_explicar(e, e.mc1)
     assert todos["total"] == 3 and todos["siguiente"] is None  # control: entran en una página
     return [x["movimiento_id"] for x in todos["elementos"]]

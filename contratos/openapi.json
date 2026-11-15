@@ -17383,7 +17383,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/{pago_id}/conciliacion": {
       "post": {
-        "description": "Lee la orden con la revisión ya verificada y evalúa la separación con quien la preparó y\ncon quien registró el pago. La base compara además con quien preparó cada versión, por la\nidentidad guardada en cada acto.",
+        "description": "Lee la orden con la revisión ya verificada y evalúa la separación con quienes aprobaron\nalguna versión y con quien registró el pago. La base compara además por la identidad\nguardada en cada acto.",
         "operationId": "conciliar_pago_manual_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual__pago_id__conciliacion_post",
         "parameters": [
           {

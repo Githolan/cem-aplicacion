@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 14-11-2026 (tanda 10 de fricción, el código como el diseño B, rama `friccion/tanda-10-codigo-como-diseno` desde `main` = `8da8180`: sin migración, sigue `0099`; contrato `0.69.0`).
+**Actualizado:** 15-11-2026 (quien aprueba no concilia, rama `separacion/aprobador-no-concilia` desde `main` = `1b8dd22`: migración `0102`; contrato `0.70.0`). Staging en `1b8dd22` (base `0101`); producción sigue en `1535bd7`.
 
 ## Qué existe
 
@@ -1173,3 +1173,18 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **D-34 (decisión 7):** en `/mandatos`, los `terminado`, `dado_de_baja` y `error_carga` van plegados en «Mandatos anteriores (N)».
    - **Doble punto:** `momento()` de `egresos/comun.ts` es de 12 horas y termina en «a. m.»/«p. m.»; seguido de «.» daba «a. m..». Ahora `momentoAlFinal` en «Registros anteriores» («a. m. Observado:»), en la factura adjunta (`textoDeLaAdjunta`), en la orden retirada (`textoRetiro`, que ahora recibe el momento ya con su punto) y en «Extracto subido el …» (`SinExplicar.tsx`). Búsqueda en todo `frontend/src`: los demás formatos con hora y punto detrás (`Mandatos`, `Cuenta`, `Invitar`, `SegundoFactor`, `EntrarConContrasena`) son `h23`, sin «a. m.»; los de `Contactos`, `ContactosGestion` y `Documentos` (12 horas) no llevan punto detrás.
    - **Sin tocar:** «(ese día ya no rige)» en `/mandatos` queda como está (respuesta del propietario del 14-11; el diseño proponía «Hasta el … inclusive»).
+
+52. **Tanda 11: las preguntas abiertas de las tandas 4 y 6** (PR #245, fusionado en `8cbfe9d`, en staging desde el 14-11-2026 a la noche). Respuestas del propietario del 14-11, todas sí. Migración `0100`; contrato `0.70.0`.
+   - **G-40:** «Desasociar la cuenta…» en el detalle de un mandato de administración externa con cuenta asociada, plegado, con motivo; el detalle dice «Con cuenta asociada» o «Sin cuenta asociada».
+   - **G-15:** «Subir el acta desde acá» dentro de «Registrar una decisión», con la misma carga de Documentos; el acta queda elegida sola cuando el antivirus la libera. Las respuestas que llegan tarde (cambio de edificio, decisión registrada, otra acta subida) no pisan el estado (`generacionActa`).
+   - **G-44:** la fila del mandato recién dado de alta queda marcada «Recién dado de alta» hasta el próximo acto.
+   - **G-26:** el inicio de quien confirma vínculos dice «N vínculos esperan confirmación» en la fila del Padrón; si la lectura falla, lo dice y ofrece «Reintentar» (`VinculosPorConfirmar.ts`).
+   - **G-52 y G-53:** contactos de emergencia en una sola pantalla `/contactos`; `/contactos/gestion` lleva ahí. **G-54:** «Marcar como comprobado» solo si nunca se comprobó, tiene un dato señalado o la última comprobación tiene más de 12 meses (`MESES_DE_VALIDEZ_DE_LA_COMPROBACION`).
+   - **Tanda 4:** el freno dice «otra cuenta de la misma persona» cuando la separación negó por otra cuenta del mismo ser humano (`por_otra_cuenta`, solo elige el texto).
+   - **P-14, moneda por edificio:** `nucleo.moneda_consorcio` (el peso rige siempre y no tiene fila); «Moneda» aparece solo con dólares habilitados; 422 `moneda_no_habilitada` y disparador en `orden_pago_version`; habilita soporte con `scripts.moneda_consorcio`. Relleno: ningún edificio de staging tenía nada en dólares.
+53. **Cierre de P-14** (PR #246, fusionado en `1b8dd22`, en staging desde el 15-11-2026). Migración `0101`; contrato sin cambios (`0.70.0`). La moneda no habilitada se rechaza también en contratos (API 422 y base) y en umbrales (script y base), con el disparador de `0100`; la exportación del consorcio suma `ordenes_pago/moneda_habilitada.json`.
+54. **Quien aprueba no concilia; quien prepara sí puede** (rama `separacion/aprobador-no-concilia`, desde `main` = `1b8dd22`, 15-11-2026). Decisión del propietario del 15-11: «Que quien aprueba no concilie, quien prepara sí puede conciliar.» Migración `0102`; contrato sin cambios.
+   - **Política:** `egresos.conciliar_pago` separa ahora `no_es_quien_aprobo` y `no_es_quien_ejecuto` (antes `no_es_quien_preparo` y `no_es_quien_ejecuto`). Vale para todo lo que se hace con esa política: conciliar, confirmar que no se pagó, resolver una diferencia, cotejar con el banco (a mano o con el extracto) y anular un cotejo.
+   - **Base (`0102`):** `nucleo.exigir_no_aprobo_la_orden` (quien aprobó **cualquier** versión de la orden, por la identidad guardada en cada aprobación y por la misma persona con otra cuenta; niega con `no_es_quien_aprobo`) reemplaza a `exigir_no_preparo` en las diez funciones que la llamaban; la migración comprueba esa lista y falla si la base tiene otra. `exigir_no_preparo` se borra (el downgrade la vuelve a crear). `nucleo.lee_quien_aprobo_la_orden` le dice a la bandeja que no ofrezca conciliar a quien aprobó.
+   - **API:** `_aprobaron` lee quiénes aprobaron alguna versión y la ruta lo niega antes que la base con «La orden la aprobó esta cuenta: el pago lo concilia otra persona del Consejo.» (`YA_PARTICIPO`). El mensaje de `no_es_quien_aprobo` pasa a «Quien aprobó la orden no la paga ni concilia su pago.» (backend y `egresos/comun.ts`).
+   - **No cambia:** quien prepara no aprueba; quien aprueba no paga ni ve la cuenta; quien vio la cuenta, registró, tomó o declaró el pago no lo concilia.

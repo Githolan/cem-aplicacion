@@ -429,9 +429,10 @@ def test_pagada_marca_cotejar_como_actual_y_cotejada_completa_la_barra(motor_mig
     f = ficha(e, e.adm, o)
     assert (f["situacion"], f["estado_visible"]) == ("pagada", "pagada")
     assert f["barra"] == {"hechos": 4, "actual": "ahora"} and f["cotejado_en"] is None
-    assert bandeja(e, e.mc1)["por_cotejar"] == 1
+    assert bandeja(e, e.mc2)["por_cotejar"] == 1
     assert bandeja(e, e.adm)["por_cotejar"] == 0  # quien no coteja
-    r = post(e, e.mc1, "pagos/cotejo", {"pagos": [str(p)]})
+    assert bandeja(e, e.mc1)["por_cotejar"] == 0  # quien aprobó tampoco (`0102`)
+    r = post(e, e.mc2, "pagos/cotejo", {"pagos": [str(p)]})
     assert r.status_code == 200, r.json()
     for quien in (e.adm, e.mc1, e.mc2):  # la barra es de la orden, no de quien mira
         f = ficha(e, quien, o)
@@ -439,7 +440,7 @@ def test_pagada_marca_cotejar_como_actual_y_cotejada_completa_la_barra(motor_mig
         assert f["barra"] == {"hechos": 5, "actual": None} and f["cotejado_en"] is not None
     [x] = consulta(e, e.adm, "?filtro=pagados")["elementos"]
     assert (x["situacion"], x["estado_visible"]) == ("pagada_y_cotejada", "pagada_y_cotejada")
-    assert bandeja(e, e.mc1)["por_cotejar"] == 0
+    assert bandeja(e, e.mc2)["por_cotejar"] == 0
 
 
 # §4.4: no repetir y nada terminado en hacer, contra la base ----------------------------------

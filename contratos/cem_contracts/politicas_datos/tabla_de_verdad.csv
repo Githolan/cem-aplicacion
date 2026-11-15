@@ -462,7 +462,9 @@ H3,egresos.revisar_orden,MC,AA,,vigente,si,,200,concedido_por_facultad,el miembr
 H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro;ejecuto=otro,200,concedido_por_facultad,otro miembro del Consejo concilia el pago manual que registró quien ejecutó (31-10)
 H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro;ejecuto=yo,403,no_es_quien_ejecuto,quien registró el pago no lo concilia: sería autovalidarse
 H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro2;ejecuto=otro;misma_identidad=otro,403,no_es_quien_ejecuto,la misma persona con otra cuenta tampoco concilia lo que registró (A13-C)
-H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=yo;ejecuto=otro,403,no_es_quien_preparo,quien preparó la orden no concilia su pago
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=yo;aprobaron=otro;ejecuto=otro,200,concedido_por_facultad,quien preparó la orden sí concilia el pago que registró otro (propietario 15-11)
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro;aprobaron=yo;ejecuto=otro,403,no_es_quien_aprobo,quien aprobó la orden no concilia su pago (propietario 15-11)
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro2;aprobaron=otro;ejecuto=otro2;misma_identidad=otro,403,no_es_quien_aprobo,la misma persona con otra cuenta tampoco concilia lo que aprobó (A13-C)
 H3,egresos.conciliar_pago,AD,AA,,vigente,si,preparo=otro;ejecuto=otro,403,sin_concesion,el administrador no concilia: egresos.aprobar_orden es solo del Consejo
 H3,egresos.conciliar_pago,MC,C,,vigente,si,preparo=otro;ejecuto=otro,403,modo_no_admitido,en Consejo la plataforma no tiene egresos
 §10.5,consorcios.mis_acciones,P,C,,sin_mandato,si,,200,concedido_por_ambito,la propietaria pide lo que alcanza en su consorcio

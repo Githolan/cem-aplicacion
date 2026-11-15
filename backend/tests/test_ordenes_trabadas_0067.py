@@ -94,7 +94,8 @@ def test_quien_vio_la_cuenta_y_renuncio_declara_y_otro_consejero_confirma(
     o = trabada(motor_migrate, motor_app, e)
     d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo=MOTIVO)
     assert declaraciones(motor_migrate, o) == [(e.adm, True)]
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)
+    # Confirma mc2: mc1 aprobó la orden y, desde `0102`, no confirma.
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -361,7 +362,8 @@ def test_por_http_quien_renuncio_ve_la_orden_y_declara_y_el_consejo_confirma(
     assert lista_por_aclarar(e, e.adm) == []
     [d] = en_revision(e, o)["declaraciones"]
     assert d["confirmable"] is True
-    r = post(e, e.mc1, f"ordenes-pago/{o}/pago-manual/no-realizado/{d['id']}/confirmacion", {})
+    # Confirma mc2: mc1 aprobó la orden y, desde `0102`, no confirma.
+    r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/no-realizado/{d['id']}/confirmacion", {})
     assert (r.status_code, r.json()["estado"]) == (200, "fallida"), r.text
 
 

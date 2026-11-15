@@ -2,9 +2,9 @@
 NO REAL: ninguna cuenta es de un banco (prefijo 999) y no se mueve dinero.
 
 Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §2, §3, §11, §12 y §14. La escena es la de
-`test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia. Por cada
-`paso`, un caso que aparece y un control que no. Cada sí de la base se compara con lo que hace el
-acto: si la bandeja ofrece algo, la ruta lo acepta.
+`test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia (`0102`:
+quien aprobó no concilia). Por cada `paso`, un caso que aparece y un control que no. Cada sí de
+la base se compara con lo que hace el acto: si la bandeja ofrece algo, la ruta lo acepta.
 """
 
 from datetime import timedelta
@@ -44,6 +44,7 @@ from tests.test_pago_manual_0055 import (
     con_ejecutar,
     emitida,
     evidencia,
+    otro_consejero,
     registrada,
     segunda_apertura,
     ver,
@@ -331,7 +332,9 @@ def test_conciliar_lo_ve_otro_consejero_y_quien_registro_espera(motor_migrate, e
     assert r.status_code == 200, r.json()
 
 
-def test_quien_vio_la_cuenta_sin_registrar_no_ve_conciliar_y_si_igual_pide_403(motor_migrate, e):
+def test_quien_vio_la_cuenta_sin_registrar_no_ve_conciliar_y_si_igual_pide_403(
+    motor_migrate, motor_app, e
+):
     """§14: el hueco de `test_hueco_conocido_quien_vio_la_cuenta_sin_registrar`, cerrado."""
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
@@ -342,17 +345,36 @@ def test_quien_vio_la_cuenta_sin_registrar_no_ve_conciliar_y_si_igual_pide_403(m
     conciliacion = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
     r = post(e, e.mc2, conciliacion, {"resultado": "conforme"})
     assert codigo(r) == (403, "no_es_quien_ejecuto")
-    # Control: otro consejero, que no vio la cuenta. La bandeja se lo ofrece y la ruta concede.
-    assert paso(e, e.mc1, o) == "conciliar"
-    assert post(e, e.mc1, conciliacion, {"resultado": "conforme"}).status_code == 200
+    # Control: otro consejero, que no vio la cuenta ni aprobó. La bandeja se lo ofrece y la ruta
+    # concede.
+    y = otro_consejero(motor_migrate, motor_app, e)
+    assert paso(e, y, o) == "conciliar"
+    assert post(e, y, conciliacion, {"resultado": "conforme"}).status_code == 200
 
 
 def test_quien_preparo_con_otra_cuenta_no_ve_conciliar(motor_migrate, motor_app, e):
+    """En esta escena la administración también registró el pago: eso la deja afuera. Haber
+    preparado la orden, solo, ya no (`0102`)."""
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     o = emitida(motor_migrate, e)
     registrada(motor_migrate, e, o)
     assert paso(e, otra, o) == "espera_conciliar"
     assert ficha(e, otra, o)["puede_conciliar"] is False
+
+
+def test_quien_aprobo_espera_conciliar_y_si_igual_pide_403(motor_migrate, e):
+    """`0102`: a quien aprobó la orden la bandeja no le ofrece conciliar su pago."""
+    o = emitida(motor_migrate, e)  # aprobada por mc1
+    p = registrada(motor_migrate, e, o)
+    assert paso(e, e.mc1, o) == "espera_conciliar"
+    assert ficha(e, e.mc1, o)["puede_conciliar"] is False
+    conciliacion = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
+    assert codigo(post(e, e.mc1, conciliacion, {"resultado": "conforme"})) == (
+        403, "ya_participo",
+    )  # fmt: skip
+    # Control: otro consejero, con el mismo pago.
+    assert paso(e, e.mc2, o) == "conciliar"
+    assert post(e, e.mc2, conciliacion, {"resultado": "conforme"}).status_code == 200
 
 
 def test_otra_cuenta_de_quien_vio_la_cuenta_tampoco_concilia(motor_migrate, motor_app, e):
@@ -363,7 +385,7 @@ def test_otra_cuenta_de_quien_vio_la_cuenta_tampoco_concilia(motor_migrate, moto
     registrada(motor_migrate, e, o)
     segunda_apertura(motor_migrate, e, e.mc2, o)
     assert paso(e, otra, o) == "espera_conciliar"
-    assert paso(e, e.mc1, o) == "conciliar"  # control
+    assert paso(e, otro_consejero(motor_migrate, motor_app, e), o) == "conciliar"  # control
 
 
 # Corregir ------------------------------------------------------------------------------------
