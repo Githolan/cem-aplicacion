@@ -210,6 +210,11 @@ class CodigoError(StrEnum):
     """La orden ya tiene su factura, o hay otra subida en el antivirus (`0099`)."""
     FACTURA_NO_VIGENTE = "factura_no_vigente"
     """La factura que se quiso reemplazar ya no es la adjunta que vale para la orden (`0099`)."""
+    DOCUMENTACION_NO_VIGENTE = "documentacion_no_vigente"
+    """El seguro o la habilitación que se quiso reemplazar no es uno que vale, de ese tipo y de ese
+    proveedor (`0103`)."""
+    DOCUMENTACION_EN_REVISION = "documentacion_en_revision"
+    """Ya hay otro reemplazo de esa constancia en el antivirus (`0103`)."""
     APROBACION_VENCIDA = "aprobacion_vencida"
     """La aprobación tiene más de 7 días: la orden se renueva y vuelve a revisión (decisión 1A)."""
     APROBACION_VIGENTE = "aprobacion_vigente"

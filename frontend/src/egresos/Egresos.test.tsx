@@ -24,7 +24,8 @@ import {
   VOLVIO_LA_RED,
   TEXTO_SESION_VENCIDA,
 } from "./comun";
-import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO } from "./Proveedores";
+import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, MARCA_VENCIDA } from "./Proveedores";
+import { AVISO_VENCIDA, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO } from "./DocumentacionProveedor";
 import { CUIT_INVALIDO } from "../CampoCuit";
 import { CUENTA_INVALIDA } from "../cuentaBancaria";
 
@@ -48,6 +49,9 @@ const C2 = "abababab-abab-4bab-8bab-abababababab";
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Orden = components["schemas"]["OrdenPago"];
+
+/** La ficha sin seguros ni habilitaciones (RF50, app 0103), de quien puede cargarlos. */
+const SIN_DOCUMENTACION = { documentacion: [], puede_cargar_documentacion: true };
 
 function proveedor(extra: Partial<Proveedor> = {}): Proveedor {
   return {
@@ -297,16 +301,143 @@ describe("página /egresos/proveedores", () => {
               creada_en: "2026-10-20T15:00:00Z",
             },
           ],
+          ...SIN_DOCUMENTACION,
         }),
       ...extra,
     });
+
+  // RF50 (app 0103): seguros y habilitaciones con vigencia. Vencido marca y no excluye.
+  const D1 = "88888888-8888-4888-8888-888888888888";
+  const DOCUMENTACION = `${BASE}/proveedores/${P1}/documentacion`;
+  function documentacion(extra: Partial<components["schemas"]["DocumentacionProveedor"]> = {}) {
+    return {
+      id: D1,
+      proveedor_id: P1,
+      tipo: "seguro" as const,
+      descripcion: "ART del personal SINTETICA",
+      vence_el: "2026-11-01",
+      documento_id: DOC,
+      version_documento_id: DOC,
+      estado: "vencida" as const,
+      cargada_por_nombre: "Persona Ficticia",
+      cargada_en: "2026-10-20T15:00:00Z",
+      reemplaza_a: null,
+      documento_vigente: true,
+      ...extra,
+    };
+  }
+
+  it("RF50: la lista marca al proveedor con documentación vencida y la ficha lo avisa sin frenar nada", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        [`GET ${BASE}/proveedores`]: () =>
+          Response.json({ elementos: [proveedor()], documentacion_vencida: [P1], documentacion_por_vencer: [] }),
+        [`GET ${BASE}/proveedores/${P1}`]: () =>
+          Response.json({
+            proveedor: proveedor(),
+            versiones: [],
+            documentacion: [
+              documentacion(),
+              documentacion({ id: O1, tipo: "habilitacion", descripcion: "Matricula SINTETICA", estado: "vigente", vence_el: "2027-03-31" }),
+              documentacion({ id: PERSONA, descripcion: "Poliza vieja SINTETICA", estado: "reemplazada" }),
+            ],
+            puede_cargar_documentacion: true,
+          }),
+      }),
+    );
+    const { container } = abrir("/egresos/proveedores");
+    const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
+    expect(fila.textContent).toContain(MARCA_VENCIDA);
+    fireEvent.click(fila);
+    expect(await screen.findByText(AVISO_VENCIDA)).toBeTruthy();
+    const lista = screen.getByRole("list", { name: "Seguros y habilitaciones" });
+    expect(within(lista).getByText("Vencido el 01/11/2026")).toBeTruthy();
+    expect(within(lista).getByText("Vigente hasta el 31/03/2027")).toBeTruthy();
+    // Lo reemplazado va a la historia, no a la lista; cada una que vale se puede reemplazar.
+    expect(within(lista).queryByText(/Poliza vieja/)).toBeNull();
+    expect(within(lista).getAllByRole("button", { name: "Reemplazar" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Agregar un seguro o una habilitación" })).toBeTruthy();
+    // No frena: cambiar los datos sigue a mano.
+    expect(screen.getByRole("button", { name: "Cambiar los datos" })).toBeTruthy();
+    await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("RF50: quien no carga documentos ve el estado pero no los botones", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        [`GET ${BASE}/proveedores/${P1}`]: () =>
+          Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: false }),
+      }),
+    );
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    expect(await screen.findByText("Vencido el 01/11/2026")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reemplazar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agregar un seguro o una habilitación" })).toBeNull();
+  });
+
+  it("RF50: sin constancias no marca ni avisa", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir("/egresos/proveedores");
+    const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
+    expect(fila.textContent).not.toContain(MARCA_VENCIDA);
+    fireEvent.click(fila);
+    expect(await screen.findByText(SIN_DOCUMENTACION_TEXTO)).toBeTruthy();
+    expect(screen.queryByText(AVISO_VENCIDA)).toBeNull();
+  });
+
+  it("RF50: reemplazar manda el tipo, la descripción, el vencimiento y la constancia; sin vencimiento no manda nada", async () => {
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: () =>
+        Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: true }),
+      [`POST ${DOCUMENTACION}`]: () =>
+        Response.json(
+          {
+            proveedor_id: P1,
+            constancia_id: O1,
+            documento_id: DOC,
+            archivo: { id: DOC, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: H1 },
+          },
+          { status: 201 },
+        ),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reemplazar" }));
+    const hoja = await screen.findByRole("dialog");
+    const poliza = new File(["%PDF-1.4 SINTETICO"], "poliza.pdf", { type: "application/pdf" });
+    const subidas = () => api.mock.calls.map(([q]) => q as Request).filter((q) => q.method === "POST");
+    // Control: sin la fecha no se manda nada y se dice qué falta.
+    fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), { target: { files: [poliza] } });
+    expect(await within(hoja).findByText("Falta la fecha de vencimiento.")).toBeTruthy();
+    expect(subidas()).toHaveLength(0);
+
+    fireEvent.change(within(hoja).getByLabelText("Vence el"), { target: { value: "2027-11-01" } });
+    fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), { target: { files: [poliza] } });
+    expect(await within(hoja).findByText(/Listo: quedó cargado/)).toBeTruthy();
+    expect(subidas()).toHaveLength(1);
+    const pedido = subidas()[0] as Request;
+    const url = new URL(pedido.url);
+    expect(url.pathname).toBe(DOCUMENTACION);
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      tipo: "seguro",
+      descripcion: "ART del personal SINTETICA",
+      vence_el: "2027-11-01",
+      reemplaza: D1,
+    });
+    expect(pedido.headers.get("Content-Type")).toBe("application/pdf");
+    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+  });
 
   it("un proveedor sin CUIT lo carga por su ruta, con la versión que se vio", async () => {
     const CARGA = `${BASE}/proveedores/${P1}/cuit`;
     const sinCuit = proveedor({ cuit: null });
     const api = conLista({
       [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [sinCuit] }),
-      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [], ...SIN_DOCUMENTACION }),
       [`POST ${CARGA}`]: () => Response.json({ id: P1, version: 2 }),
     });
     vi.stubGlobal("fetch", api);
@@ -325,7 +456,7 @@ describe("página /egresos/proveedores", () => {
     const sinCuit = proveedor({ cuit: null });
     const api = conLista({
       [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [sinCuit] }),
-      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [], ...SIN_DOCUMENTACION }),
       [`POST ${CARGA}`]: () => error("cuit_ya_cargado", 409, { campos: ["body.cuit"] }),
     });
     vi.stubGlobal("fetch", api);
@@ -389,7 +520,7 @@ describe("página /egresos/proveedores", () => {
       "fetch",
       conLista({
         [`GET ${BASE}/proveedores/${P1}`]: () =>
-          Response.json({ proveedor: proveedor({ version: 2 }), versiones: [vigente, anterior] }),
+          Response.json({ proveedor: proveedor({ version: 2 }), versiones: [vigente, anterior], ...SIN_DOCUMENTACION }),
       }),
     );
     abrir("/egresos/proveedores");
@@ -456,7 +587,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
     expect(await screen.findByText("El edificio no tiene proveedores cargados.")).toBeTruthy();
-    soltar(Response.json({ proveedor: proveedor(), versiones: [] }));
+    soltar(Response.json({ proveedor: proveedor(), versiones: [], ...SIN_DOCUMENTACION }));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByRole("button", { name: "Cambiar los datos" })).toBeNull();
     expect(screen.queryByText("Limpieza Ficticia SRL")).toBeNull();
@@ -646,7 +777,7 @@ describe("página /egresos/proveedores", () => {
     const simulado = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [conDocumento] }),
-      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: conDocumento, versiones: [] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: conDocumento, versiones: [], ...SIN_DOCUMENTACION }),
       [`POST ${BASE}/proveedores/${P1}/versiones`]: () => Response.json({ id: P1, version: 2 }),
     });
     vi.stubGlobal("fetch", simulado);
@@ -699,7 +830,7 @@ describe("página /egresos/proveedores", () => {
     let cambio = false;
     const simulado = conLista({
       [`GET ${BASE}/proveedores/${P1}`]: () =>
-        Response.json({ proveedor: cambio ? proveedor({ version: 2, rubro: "limpieza integral" }) : proveedor(), versiones: [] }),
+        Response.json({ proveedor: cambio ? proveedor({ version: 2, rubro: "limpieza integral" }) : proveedor(), versiones: [], ...SIN_DOCUMENTACION }),
       [`POST ${BASE}/proveedores/${P1}/versiones`]: () => {
         if (cambio) return Response.json({ id: P1, version: 3 });
         cambio = true;
@@ -733,7 +864,7 @@ describe("página /egresos/proveedores", () => {
     let cambio = false;
     const simulado = conLista({
       [`GET ${BASE}/proveedores/${P1}`]: () =>
-        cambio ? error("no_encontrado", 404) : Response.json({ proveedor: proveedor(), versiones: [] }),
+        cambio ? error("no_encontrado", 404) : Response.json({ proveedor: proveedor(), versiones: [], ...SIN_DOCUMENTACION }),
       [`POST ${BASE}/proveedores/${P1}/versiones`]: () => {
         cambio = true;
         return error("version_desactualizada", 409);

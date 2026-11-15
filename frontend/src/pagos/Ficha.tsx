@@ -26,6 +26,7 @@ import {
   TEXTO_CONDICION,
   textoFranja,
 } from "../egresos/comun";
+import { TEXTO_TIPO, textoEstado } from "../egresos/DocumentacionProveedor";
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, type MonedasDelEdificio, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
@@ -880,6 +881,14 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
             </p>
           )}
 
+          {/* RF50 (app 0103): lo vencido o por vencer del proveedor marca la orden y no la frena. */}
+          {ficha.documentacion_proveedor.length > 0 && (
+            <p className="aviso-pendiente" role="note">
+              Documentación del proveedor:{" "}
+              {ficha.documentacion_proveedor.map((d) => `${TEXTO_TIPO[d.tipo]} ${d.descripcion}: ${textoEstado(d).toLowerCase()}`).join("; ")}.
+              No impide aprobar ni pagar.
+            </p>
+          )}
           {enDecision && v.alerta_fraccionamiento && (
             <p className="aviso-info" role="note">
               {TEXTO_ALERTA_FRACCIONAMIENTO}

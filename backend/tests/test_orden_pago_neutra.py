@@ -949,8 +949,11 @@ RUTAS = {
     "retirar_orden_pago", "retiro_orden_pago_lectura",
     # 0099: adjuntar la factura que falta a una orden aprobada, sin versión nueva.
     "adjuntar_factura_orden_pago",
+    # 0103: los seguros y las habilitaciones del proveedor (RF50).
+    "cargar_documentacion_proveedor", "documentacion_proveedor_lectura",
 }  # fmt: skip
-"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093` y `0099`)."""
+"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093`, `0099` y
+`0103`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):

@@ -48,6 +48,7 @@ pytestmark = [pytest.mark.db, pytest.mark.redis]
 
 MIGRACION = RAIZ / "migrations" / "versions" / "0089_quitar_y_retirar_documentos.py"
 MIGRACION_0099 = RAIZ / "migrations" / "versions" / "0099_factura_adjunta_sin_version.py"
+MIGRACION_0103 = RAIZ / "migrations" / "versions" / "0103_documentacion_del_proveedor.py"
 MOTIVO = "Póliza vencida: la reemplaza la del período nuevo"
 
 
@@ -341,8 +342,10 @@ def test_cada_tabla_que_cita_documentos_esta_en_la_lista(motor_migrate):
             "select tgrelid::regclass::text from pg_trigger"
             " where tgname = 'documento_citado_vigente'"
         )).scalars())  # fmt: skip
-    # `0099` suma la constancia de la factura adjunta a una orden aprobada.
-    citan = {t for t, _ in m.REFERENCIAS + _migracion(MIGRACION_0099).REFERENCIAS_NUEVAS}
+    # `0099` suma la constancia de la factura adjunta a una orden aprobada, y `0103` la de los
+    # seguros y las habilitaciones del proveedor.
+    citan = {t for t, _ in m.REFERENCIAS + _migracion(MIGRACION_0099).REFERENCIAS_NUEVAS
+             + _migracion(MIGRACION_0103).REFERENCIAS_NUEVAS}  # fmt: skip
     # Control: la búsqueda encuentra las dos que se sabe que no citan.
     assert set(m.NO_CITAN) <= en_el_catalogo
     assert en_el_catalogo == citan | set(m.NO_CITAN)

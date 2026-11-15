@@ -117,7 +117,7 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     acciones: [{ codigo: CALCULAR as never, tipo: "principal" }], estado_visible: "lista_para_pagar", barra: null,
     que_decir: CALCULAR, esperando_desde: null, despues: "listo", cotejado_en: null, posible_duplicada_de: null,
     cierre_sin_pago: null, puede_cerrar_sin_pagar: false, factura_adjunta: null, puede_subir_factura: false,
-    factura_reemplazo: null, facturas_anteriores: [], puede_reemplazar_factura: false,
+    factura_reemplazo: null, facturas_anteriores: [], puede_reemplazar_factura: false, documentacion_proveedor: [],
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null, puede_corregir_diferencia: false, diferencias_anteriores: [],
     puede_modificar: false, puede_retirar: false, retiro: null, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
@@ -4720,5 +4720,35 @@ describe("tanda 10: el código como el diseño", () => {
     const registro = await screen.findByText(/Observado: No coincide el número/);
     expect(registro.textContent).toMatch(/a\.\sm\.\sObservado: No coincide el número$/); // los espacios de la hora son duros
     expect(registro.textContent).not.toContain("..");
+  });
+});
+
+describe("RF50: la documentación vencida del proveedor marca la orden (app 0103)", () => {
+  const vencida = {
+    id: "45454545-4545-4545-8545-454545454545",
+    proveedor_id: "22222222-2222-4222-8222-222222222222",
+    tipo: "seguro",
+    descripcion: "ART SINTETICA",
+    vence_el: "2026-11-01",
+    documento_id: "45454545-4545-4545-8545-454545454546",
+    version_documento_id: "45454545-4545-4545-8545-454545454547",
+    estado: "vencida",
+    cargada_por_nombre: "Persona Ficticia",
+    cargada_en: "2026-10-20T15:00:00Z",
+    reemplaza_a: null,
+    documento_vigente: true,
+  } as const;
+
+  it("lo dice en una línea y deja las acciones como estaban", async () => {
+    abrirFicha(ficha({ documentacion_proveedor: [vencida] }));
+    const linea = await screen.findByText(/^Documentación del proveedor:/);
+    expect(linea.textContent).toContain("Seguro ART SINTETICA: vencido el 01/11/2026");
+    expect(linea.textContent).toContain("No impide aprobar ni pagar.");
+  });
+
+  it("control: sin nada vencido ni por vencer no hay línea", async () => {
+    abrirFicha(ficha());
+    await screen.findByRole("heading", { level: 2 });
+    expect(screen.queryByText(/^Documentación del proveedor:/)).toBeNull();
   });
 });

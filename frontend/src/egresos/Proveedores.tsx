@@ -37,6 +37,7 @@ import {
   sobreLoNuevo,
   TEXTO_ESTADO_PROVEEDOR,
 } from "./comun";
+import { DocumentacionProveedor } from "./DocumentacionProveedor";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
 import { REQUISITOS } from "../permisos";
@@ -53,7 +54,11 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // lectura nunca la trae. Desde una orden, llega con lo leído de la factura y vuelve a la orden.
 
 type Proveedor = components["schemas"]["Proveedor"];
-type Version = components["schemas"]["VersionProveedor"];
+type FichaProveedor = components["schemas"]["ProveedorConVersiones"];
+
+/** La marca de la lista (RF50, app 0103): vencido marca, no excluye. */
+export const MARCA_VENCIDA = "Documentación vencida";
+export const MARCA_POR_VENCER = "Documentación por vencer";
 
 export const RUTA_PROVEEDORES = "/egresos/proveedores";
 const CBU = "[0-9]{22}";
@@ -61,7 +66,7 @@ const CBU = "[0-9]{22}";
 type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_servicio" }
-  | { tipo: "ok"; proveedores: Proveedor[] };
+  | { tipo: "ok"; proveedores: Proveedor[]; vencida: ReadonlySet<string>; porVencer: ReadonlySet<string> };
 
 type Datos = {
   cuit: string;
@@ -243,7 +248,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const navegar = useNavigate();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
-  const [ficha, setFicha] = useState<{ proveedor: Proveedor; versiones: Version[] } | null>(null);
+  const [ficha, setFicha] = useState<FichaProveedor | null>(null);
   /** La fila que abrió la ficha (comentario 21): al volver a la lista, el foco vuelve a ella. */
   const { abrir: abrirFila, cerrar: cerrarFila, refFila } = useFichas<string>();
   const [formulario, setFormulario] = useState<Formulario | null>(factura === null ? null : { modo: "alta" });
@@ -274,7 +279,13 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         exigirSesion(response);
         if (!vigente) return;
         const codigo = codigoDe(error);
-        if (data !== undefined) setLectura({ tipo: "ok", proveedores: data.elementos });
+        if (data !== undefined)
+          setLectura({
+            tipo: "ok",
+            proveedores: data.elementos,
+            vencida: new Set(data.documentacion_vencida),
+            porVencer: new Set(data.documentacion_por_vencer),
+          });
         else if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver los proveedores", reintentar: () => setVuelta((v) => v + 1) });
         else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
@@ -558,7 +569,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   {lectura.proveedores.map((p) => (
                     <li key={p.id}>
                       <FilaDeRegistro titulo={p.razon_social} refFila={refFila(p.id)} deshabilitada={enviando} alAbrir={() => verFicha(p)}
-                        resumen={`${p.cuit ?? "Sin CUIT"} · ${TEXTO_ESTADO_PROVEEDOR[p.estado]} · Cuenta ${cuentaEnmascarada(p.cuenta_ultimos_digitos)}`} />
+                        resumen={[
+                          p.cuit ?? "Sin CUIT",
+                          TEXTO_ESTADO_PROVEEDOR[p.estado],
+                          `Cuenta ${cuentaEnmascarada(p.cuenta_ultimos_digitos)}`,
+                          lectura.vencida.has(p.id) ? MARCA_VENCIDA : lectura.porVencer.has(p.id) ? MARCA_POR_VENCER : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")} />
                     </li>
                   ))}
                 </ul>
@@ -595,6 +613,17 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   </ol>
                 </details>
               )}
+              <DocumentacionProveedor
+                consorcio={consorcio}
+                proveedor={ficha.proveedor}
+                documentacion={ficha.documentacion}
+                puedeCargar={ficha.puede_cargar_documentacion}
+                aEntrar={aEntrar}
+                alCambiar={() => {
+                  verFicha(ficha.proveedor);
+                  setVuelta((v) => v + 1);
+                }}
+              />
               <div className="formulario">
                 <div className="acciones">
                   {/* Un solo botón principal (P-27): cargar el CUIT mientras falte; si no, cambiar los datos. */}

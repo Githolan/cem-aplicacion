@@ -981,6 +981,8 @@
           "documento_invalido",
           "factura_ya_adjunta",
           "factura_no_vigente",
+          "documentacion_no_vigente",
+          "documentacion_en_revision",
           "aprobacion_vencida",
           "aprobacion_vigente",
           "aprobaciones_insuficientes",

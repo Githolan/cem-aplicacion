@@ -117,6 +117,9 @@ CLAVES_POR_ENTIDAD = {
     "contrato_confirmacion": {"contrato_id", "proveedor_id", "proveedor_version",
                               "confirmada_por_nombre", "creada_en"},
     "contrato_baja": {"contrato_id", "baja_por_nombre", "creada_en"},
+    "documentacion_proveedor": {"id", "proveedor_id", "tipo", "descripcion", "vence_el",
+                                "documento_id", "version_documento_id", "cargada_por_nombre",
+                                "cargada_en", "reemplaza_a"},
     "orden": {"id", "estado", "version_vigente", "preparada_por_nombre", "creada_en",
               "actualizada_en", "aprobada_en", "motivo_rechazo"},
     "orden_version": {"orden_id", "numero", "importe_centavos", "moneda", "concepto",
@@ -1279,6 +1282,7 @@ TABLA_DE_LA_ENTIDAD = {
     "contrato": "nucleo.contrato_proveedor",
     "contrato_confirmacion": "nucleo.contrato_proveedor_confirmacion",
     "contrato_baja": "nucleo.contrato_proveedor_baja",
+    "documentacion_proveedor": "nucleo.documentacion_proveedor",
     "orden": "nucleo.orden_pago",
     "orden_version": "nucleo.orden_pago_version",
     "orden_aprobacion": "nucleo.orden_pago_aprobacion",
@@ -1323,6 +1327,11 @@ RETIRAR_NO_ES_PAGO = (
 ADJUNTAR_FACTURA = (
     "select nucleo.adjuntar_factura_orden_pago(:orden, :version, null, 'Factura SINTETICA',"
     " 'application/pdf', 1, repeat('b', 64), :actor, :origen, :sesion)"
+)
+CARGAR_DOCUMENTACION = (
+    "select nucleo.cargar_documentacion_proveedor(:proveedor, 'seguro', 'ART SINTETICA',"
+    " current_date, null, 'Poliza SINTETICA', 'application/pdf', 1, repeat('c', 64), :actor,"
+    " :origen, :sesion)"
 )
 TRANSICIONES = (
     "select count(*) from auditoria.eventos where consorcio_id = :c and entidad = 'orden_pago'"
@@ -1445,6 +1454,8 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     pagadas = [pagada(motor_migrate, s), pagada(motor_migrate, s)]
     # La factura subida después a una pagada que no la tenía (0099).
     llamar(motor_migrate, s, s.adm, ADJUNTAR_FACTURA, orden=pagadas[1], version=1)
+    # Un seguro del proveedor (RF50, 0103).
+    llamar(motor_migrate, s, s.adm, CARGAR_DOCUMENTACION)
     cotejadas(motor_migrate, s, pagadas)
     leida(motor_migrate, motor_app, s, pagadas[0])
     leida_para_carga(motor_migrate, motor_app, s)

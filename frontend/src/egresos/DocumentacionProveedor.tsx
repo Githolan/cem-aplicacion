@@ -1,0 +1,308 @@
+import { useCallback, useId, useRef, useState } from "react";
+
+import { api } from "../api/cliente";
+import type { components } from "../api/tipos";
+import { useAvisoAlSalir } from "../avisoAlSalir";
+import { TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "../archivos";
+import { TEXTO_SUBIENDO } from "../CargaConLectura";
+import { encabezadoCsrf } from "../csrf";
+import { mensajeDeError as mensajeDeCarga } from "../Documentos";
+import { codigoDe, SIN_CONEXION } from "../fallas";
+import { Hoja } from "../Hoja";
+import { SubirArchivo } from "../SubirArchivo";
+import { ENCABEZADO_IDEMPOTENCIA, fechaLegible, LARGO_TITULO, mensajeDeActo, renovarClave } from "./comun";
+import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "./useConsorcio";
+
+// Seguros y habilitaciones en la ficha del proveedor (RF50; app 0103; diseño
+// `RF50_Seguros_y_Habilitaciones.md` del repositorio CEM). Un documento vencido marca al proveedor y
+// no lo excluye: se le puede seguir contratando y pagando. El estado lo calcula la base con el día
+// del edificio; aquí solo se dice en palabras. Agregar o reemplazar es un solo paso: completar qué es
+// y hasta cuándo vale, y elegir el archivo. Lo que el rol no puede hacer no aparece.
+
+export type Documentacion = components["schemas"]["DocumentacionProveedor"];
+type Estado = components["schemas"]["EstadoDocumentacionProveedor"];
+type Tipo = components["schemas"]["TipoDocumentacionProveedor"];
+
+export const TITULO_SECCION = "Seguros y habilitaciones";
+export const AGREGAR = "Agregar un seguro o una habilitación";
+export const AVISO_VENCIDA = "Tiene documentación vencida. Se le puede seguir contratando y pagando; queda marcado.";
+export const SIN_DOCUMENTACION = "No tiene seguros ni habilitaciones cargados.";
+export const TEXTO_TIPO: Record<Tipo, string> = { seguro: "Seguro", habilitacion: "Habilitación" };
+/** Lo que cuenta para la marca y lo único que se reemplaza (`ESTADOS_QUE_VALEN` del contrato). */
+const VALEN: ReadonlySet<Estado> = new Set<Estado>(["vigente", "por_vencer", "vencida"]);
+const LARGO_DESCRIPCION = 120;
+const DEL_ARCHIVO = new Set([408, 413, 415, 503]);
+
+/** El estado en palabras, con la fecha cuando la tiene. */
+export function textoEstado(d: Pick<Documentacion, "estado" | "vence_el">): string {
+  const fecha = fechaLegible(d.vence_el);
+  switch (d.estado) {
+    case "vigente":
+      return `Vigente hasta el ${fecha}`;
+    case "por_vencer":
+      return `Vence pronto: el ${fecha}`;
+    case "vencida":
+      return `Vencido el ${fecha}`;
+    case "en_revision":
+      return "El antivirus está revisando el archivo";
+    case "rechazada":
+      return "El archivo no pasó el antivirus: no cuenta";
+    case "reemplazada":
+      return "Reemplazado";
+    case "sin_documento":
+      return "Sin el documento: no cuenta";
+  }
+}
+
+const TONO: Partial<Record<Estado, string>> = { vencida: "alerta", por_vencer: "alerta", vigente: "ok" };
+
+type Props = {
+  consorcio: string;
+  proveedor: { id: string; razon_social: string };
+  documentacion: Documentacion[];
+  puedeCargar: boolean;
+  aEntrar: () => void;
+  /** Se vuelve a leer la ficha: algo quedó cargado. */
+  alCambiar: () => void;
+};
+
+export function DocumentacionProveedor({ consorcio, proveedor, documentacion, puedeCargar, aEntrar, alCambiar }: Props) {
+  const id = useId();
+  const [hoja, setHoja] = useState<{ reemplaza: Documentacion | null } | null>(null);
+  // Las que valen y las que esperan, arriba; lo reemplazado y lo rechazado, como historia.
+  const actuales = documentacion.filter((d) => VALEN.has(d.estado) || d.estado === "en_revision");
+  const historia = documentacion.filter((d) => !actuales.includes(d));
+  const conReemplazoEnCurso = new Set(
+    documentacion.filter((d) => d.estado === "en_revision" && d.reemplaza_a !== null).map((d) => d.reemplaza_a),
+  );
+  const vencida = documentacion.some((d) => d.estado === "vencida");
+
+  return (
+    <section aria-labelledby={`${id}-titulo`}>
+      <h3 id={`${id}-titulo`}>{TITULO_SECCION}</h3>
+      {vencida && <p className="aviso-pendiente">{AVISO_VENCIDA}</p>}
+      {actuales.length === 0 ? (
+        <p>{SIN_DOCUMENTACION}</p>
+      ) : (
+        <ul className="lista-documentacion" aria-label={TITULO_SECCION}>
+          {actuales.map((d) => (
+            <li key={d.id}>
+              <strong>
+                {TEXTO_TIPO[d.tipo]}: {d.descripcion}
+              </strong>
+              <span className="etiqueta-situacion" data-tono={TONO[d.estado]}>
+                {textoEstado(d)}
+              </span>
+              {puedeCargar && VALEN.has(d.estado) && !conReemplazoEnCurso.has(d.id) && (
+                <button type="button" className="secundario" onClick={() => setHoja({ reemplaza: d })}>
+                  Reemplazar
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {historia.length > 0 && (
+        <details className="historial">
+          <summary>Anteriores</summary>
+          <ul className="versiones">
+            {historia.map((d) => (
+              <li key={d.id}>
+                {TEXTO_TIPO[d.tipo]}: {d.descripcion}. {textoEstado(d)}. Vencía el {fechaLegible(d.vence_el)}.
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {puedeCargar && (
+        <button type="button" className="secundario" onClick={() => setHoja({ reemplaza: null })}>
+          {AGREGAR}
+        </button>
+      )}
+      {hoja !== null && (
+        <SubirDocumentacion
+          consorcio={consorcio}
+          proveedor={proveedor}
+          reemplaza={hoja.reemplaza}
+          aEntrar={aEntrar}
+          alCerrar={(cambio) => {
+            setHoja(null);
+            if (cambio) alCambiar();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+type Fase = { tipo: "elegir" } | { tipo: "subiendo" } | { tipo: "revisando" } | { tipo: "aceptada" } | { tipo: "rechazada" };
+
+type PropsHoja = {
+  consorcio: string;
+  proveedor: { id: string; razon_social: string };
+  reemplaza: Documentacion | null;
+  aEntrar: () => void;
+  alCerrar: (cambio: boolean) => void;
+};
+
+export function SubirDocumentacion({ consorcio, proveedor, reemplaza, aEntrar, alCerrar }: PropsHoja) {
+  const id = useId();
+  const [tipo, setTipo] = useState<Tipo>(reemplaza?.tipo ?? "seguro");
+  const [descripcion, setDescripcion] = useState(reemplaza?.descripcion ?? "");
+  const [vence, setVence] = useState("");
+  const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
+  const [falla, setFalla] = useState<string | null>(null);
+  const clave = useRef<string | null>(null);
+  const cambio = useRef(false);
+  const enEspera = useRef<{ documento: string; version: string } | null>(null);
+
+  const mirar = useCallback(() => {
+    const cual = enEspera.current;
+    if (cual === null) return;
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
+        params: { path: { consorcio_id: consorcio, documento_id: cual.documento, version_id: cual.version } },
+      })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (enEspera.current !== cual || data === undefined || data.estado === "en_cuarentena") return;
+        enEspera.current = null;
+        setFase({ tipo: data.estado === "disponible" ? "aceptada" : "rechazada" });
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+      });
+  }, [consorcio, aEntrar]);
+  const tarda = useConsultaDelAntivirus(fase.tipo === "revisando", mirar);
+
+  async function subir(archivo: File) {
+    const sinDescripcion = descripcion.trim() === "";
+    if (sinDescripcion || vence === "") {
+      setFalla(sinDescripcion ? "Falta decir qué cubre." : "Falta la fecha de vencimiento.");
+      return;
+    }
+    setFase({ tipo: "subiendo" });
+    setFalla(null);
+    clave.current ??= crypto.randomUUID();
+    try {
+      const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/documentacion", {
+        headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
+        params: {
+          path: { consorcio_id: consorcio, proveedor_id: proveedor.id },
+          query: {
+            tipo,
+            descripcion: descripcion.trim(),
+            vence_el: vence,
+            titulo: tituloDeArchivo(archivo, TEXTO_TIPO[tipo], LARGO_TITULO),
+            ...(reemplaza === null ? {} : { reemplaza: reemplaza.id }),
+          },
+          header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current },
+        },
+        // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
+        body: archivo as unknown as string,
+        bodySerializer: (cuerpo) => cuerpo,
+      });
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) clave.current = null;
+        setFase({ tipo: "elegir" });
+        setFalla(
+          `No se cargó. ${
+            DEL_ARCHIVO.has(response.status)
+              ? mensajeDeCarga(response.status, codigo, "subir", [], response.headers.has("Retry-After"))
+              : mensajeDeActo(response.status, error)
+          }`,
+        );
+        return;
+      }
+      clave.current = null;
+      cambio.current = true;
+      enEspera.current = { documento: data.documento_id, version: data.archivo.id };
+      setFase({ tipo: "revisando" });
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else {
+        setFase({ tipo: "elegir" });
+        setFalla(`No se cargó. ${SIN_CONEXION}`);
+      }
+    }
+  }
+
+  const cerrar = () => alCerrar(cambio.current);
+  const enviando = fase.tipo === "subiendo";
+  useAvisoAlSalir(enviando);
+  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
+  const titulo = reemplaza === null ? AGREGAR : `Reemplazar: ${reemplaza.descripcion}`;
+
+  return (
+    <Hoja titulo={titulo} alEscapar={enviando ? undefined : cerrar}>
+      <p>{proveedor.razon_social}</p>
+      {fase.tipo === "revisando" && (
+        <p role="status" className="aviso-ok">
+          Listo: quedó cargado. El antivirus está revisando el archivo; cuenta cuando lo acepte.
+        </p>
+      )}
+      {fase.tipo === "revisando" && tarda && (
+        <p className="aviso-info">El antivirus está tardando. Se puede cerrar: la ficha lo muestra cuando termine.</p>
+      )}
+      {fase.tipo === "aceptada" && (
+        <p role="status" className="aviso-ok">
+          El antivirus aceptó el archivo: ya figura en la ficha con su vencimiento.
+        </p>
+      )}
+      {fase.tipo === "rechazada" && (
+        <p role="alert" className="aviso-error">
+          El archivo no pasó el antivirus y no cuenta. Hay que elegir otro.
+        </p>
+      )}
+      {ofreceElegir && (
+        <div className="formulario">
+          {reemplaza === null ? (
+            <fieldset>
+              <legend>Qué es</legend>
+              {(["seguro", "habilitacion"] as const).map((t) => (
+                <label key={t} className="opcion">
+                  <input type="radio" name={`${id}-tipo`} value={t} checked={tipo === t} disabled={enviando} onChange={() => setTipo(t)} />
+                  {TEXTO_TIPO[t]}
+                </label>
+              ))}
+            </fieldset>
+          ) : (
+            <p>
+              {TEXTO_TIPO[reemplaza.tipo]}. El anterior queda como reemplazado cuando el antivirus acepte el nuevo; mientras tanto sigue valiendo.
+            </p>
+          )}
+          <label htmlFor={`${id}-descripcion`}>Qué cubre</label>
+          <input
+            id={`${id}-descripcion`}
+            value={descripcion}
+            maxLength={LARGO_DESCRIPCION}
+            required
+            disabled={enviando}
+            placeholder="Por ejemplo: ART del personal, matrícula de gasista"
+            onChange={(e) => setDescripcion(e.target.value)}
+          />
+          <label htmlFor={`${id}-vence`}>Vence el</label>
+          <input id={`${id}-vence`} type="date" required value={vence} disabled={enviando} onChange={(e) => setVence(e.target.value)} />
+          <SubirArchivo de="del documento" tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} deshabilitada={enviando} alElegir={(a) => void subir(a)} />
+          {enviando && (
+            <p role="status" className="aviso-info">
+              {TEXTO_SUBIENDO}
+            </p>
+          )}
+          {falla !== null && (
+            <p role="alert" className="aviso-error">
+              {falla}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="acciones">
+        <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+          Cerrar
+        </button>
+      </div>
+    </Hoja>
+  );
+}

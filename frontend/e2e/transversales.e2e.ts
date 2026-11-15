@@ -58,6 +58,8 @@ async function simularApi(pagina: Page, baseURL: string, alta: Alta) {
         json: {
           proveedor,
           versiones: [{ ...proveedor, preparada_por: PERSONA, creada_en: proveedor.creado_en }],
+          documentacion: [],
+          puede_cargar_documentacion: true,
         },
       });
     return ruta.abort();
