@@ -25,7 +25,11 @@ type Autorizacion = components["schemas"]["AutorizacionVerProveedores"];
 export const RUTA_AUTORIZACIONES_PROVEEDORES = "/proveedores/quien-los-ve";
 export const TITULO_AUTORIZACIONES_PROVEEDORES = "Quién ve los proveedores";
 export const EXPLICACION =
-  "El Consejo y la administración ven los proveedores y sus seguros. Además, el Consejo puede autorizar a un habitante: cada autorización y cada retiro quedan con el motivo, quién lo hizo y cuándo.";
+  "El Consejo y la administración ven los proveedores y sus seguros. Además, el Consejo puede autorizar a un habitante: cada autorización y cada retiro quedan con el motivo, quién lo hizo y cuándo. Retirar la autorización no le quita a nadie lo que ve por su rol (por ejemplo, si además es del Consejo).";
+/** Lo que se dice al terminar: solo lo que cambió, la autorización. Quien además tiene un rol que
+ * ve los proveedores los sigue viendo, así que no se afirma que dejó de verlos (Codex en #250). */
+export const textoAutorizado = (nombre: string) => `Se autorizó a ${nombre} a ver los proveedores.`;
+export const textoRetirado = (nombre: string) => `Se retiró la autorización de ${nombre}.`;
 export const SIN_HABITANTES = "El edificio no tiene habitantes con un vínculo vigente.";
 export const AUTORIZAR = "Autorizar";
 export const RETIRAR = "Retirar la autorización";
@@ -93,7 +97,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
   function alCambiar(nueva: Autorizacion) {
     setLectura((l) => (l.tipo === "ok" ? { tipo: "ok", elementos: l.elementos.map((a) => (a.persona_id === nueva.persona_id ? nueva : a)) } : l));
-    setAviso({ texto: nueva.autorizada ? `${nueva.nombre} ya puede ver los proveedores.` : `${nueva.nombre} ya no ve los proveedores.`, ok: true });
+    setAviso({ texto: nueva.autorizada ? textoAutorizado(nueva.nombre) : textoRetirado(nueva.nombre), ok: true });
   }
 
   return (

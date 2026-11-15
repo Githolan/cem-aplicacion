@@ -34,6 +34,8 @@ import {
   MOTIVO,
   RETIRAR,
   RUTA_AUTORIZACIONES_PROVEEDORES,
+  textoAutorizado,
+  textoRetirado,
   TITULO_AUTORIZACIONES_PROVEEDORES,
 } from "./AutorizacionesProveedores";
 import { AGREGAR_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, SIN_RUBROS } from "./ExigenciaLegal";
@@ -1306,6 +1308,7 @@ describe("página /proveedores/quien-los-ve", () => {
     expect(await pedido.json()).toEqual({ autorizada: true, motivo: "SINTETICO: comisión de obras" });
     expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
     expect(screen.getByRole("button", { name: RETIRAR }).className).toBe("secundario peligro");
+    expect(screen.getByText(textoAutorizado("Habitante Ficticio"))).toBeTruthy();
     await sinFaltasDeAccesibilidad(container);
   });
 
@@ -1324,6 +1327,9 @@ describe("página /proveedores/quien-los-ve", () => {
     expect(await screen.findByText(/^Autorización retirada el .*: SINTETICO: se mudó$/)).toBeTruthy();
     expect(await unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`)).json()).toEqual({ autorizada: false, motivo: "SINTETICO: se mudó" });
     expect(screen.getByRole("button", { name: AUTORIZAR })).toBeTruthy(); // control: vuelve a ofrecer autorizar
+    // Solo dice lo que cambió: el rol puede seguir dándole acceso (Codex en #250).
+    expect(screen.getByText(textoRetirado("Habitante Ficticio"))).toBeTruthy();
+    expect(screen.queryByText(/ya no ve/)).toBeNull();
   });
 
   it("un rechazo se dice junto al formulario, que queda abierto con lo escrito", async () => {

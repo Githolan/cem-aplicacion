@@ -14,6 +14,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
 from tests.conftest import RAIZ, clave_idempotencia
+from tests.test_condicion_habilitante_consejo import unidad, vinculo
 from tests.test_mandatos import otra_persona
 from tests.test_orden_pago_neutra import llamar, niega, nueva_sesion
 from tests.test_rf50_configurable_0104 import correr  # noqa: F401  (es un fixture)
@@ -147,6 +148,23 @@ def test_solo_se_autoriza_a_un_habitante(motor_migrate, motor_app, h):
     sin_vinculo = otra_persona(motor_migrate, h.cons)  # verificada, sin unidad
     assert codigo(cambiar(h, sin_vinculo)) == (422, "persona_sin_vinculo")
     assert cambiar(h, h.prop).status_code == 200  # control
+
+
+def test_un_importado_que_espera_confirmacion_no_es_habitante(motor_migrate, motor_app, h):
+    """El vínculo importado sin confirmar es de otra persona que la de la sesión (Codex en #250):
+    la regla de `0024` se aplica a ella, no a quien autoriza."""
+    importada = otra_persona(motor_migrate, h.cons)
+    vinculo(motor_migrate, h.cons, unidad(motor_migrate, h.cons, "9° Z"), importada,
+            fuente="importacion")  # fmt: skip
+    assert codigo(cambiar(h, importada)) == (422, "persona_sin_vinculo")
+    lista = get(h, h.mc1, "autorizaciones-proveedores").json()["elementos"]
+    assert str(importada) not in {x["persona_id"] for x in lista}
+    # Control: con un vínculo que no es importado, la misma persona es habitante.
+    vinculo(motor_migrate, h.cons, unidad(motor_migrate, h.cons, "9° Y"), importada)
+    assert cambiar(h, importada).status_code == 200
+    lista = get(h, h.mc1, "autorizaciones-proveedores").json()["elementos"]
+    unidades = {x["persona_id"]: x["unidades"] for x in lista}[str(importada)]
+    assert unidades == ["9° Y"]  # la importada pendiente no se cuenta
 
 
 def test_el_motivo_es_obligatorio(motor_migrate, motor_app, h):
@@ -283,6 +301,7 @@ def test_el_script_del_equipo(motor_migrate, motor_app, e, correr):
 def test_cem_app_no_toca_la_tabla_ni_las_internas(motor_migrate):
     internas = (
         "autorizados_ver_proveedores",
+        "vinculo_importado_pendiente",
         "es_habitante",
         "puede_autorizar_proveedores",
         "exigir_autorizar_proveedores",

@@ -76,10 +76,11 @@ PUEDE_VER = "nucleo.puede_ver_proveedores(uuid, uuid)"
 EXPORTAR_PROVEEDORES = "nucleo.exportar_proveedores(uuid, uuid)"
 
 AUTORIZADOS = "nucleo.autorizados_ver_proveedores(uuid)"
+IMPORTADO_PENDIENTE = "nucleo.vinculo_importado_pendiente(uuid)"
 ES_HABITANTE = "nucleo.es_habitante(uuid, uuid)"
 PUEDE_AUTORIZAR = "nucleo.puede_autorizar_proveedores(uuid, uuid)"
 EXIGIR_AUTORIZAR = "nucleo.exigir_autorizar_proveedores(uuid, uuid, text, uuid)"
-INTERNAS = (AUTORIZADOS, ES_HABITANTE, PUEDE_AUTORIZAR, EXIGIR_AUTORIZAR)
+INTERNAS = (AUTORIZADOS, IMPORTADO_PENDIENTE, ES_HABITANTE, PUEDE_AUTORIZAR, EXIGIR_AUTORIZAR)
 
 ACCIONES_AUTORIZADAS = "nucleo.acciones_autorizadas(uuid)"
 AUTORIZAR = "nucleo.autorizar_ver_proveedores(uuid, boolean, text, uuid, text, uuid)"
@@ -133,6 +134,27 @@ create function {AUTORIZADOS}
      where u.cambio = 'autorizar'
   $$;
 
+-- Si el vínculo es uno importado que espera confirmación (la regla de `0024`), sea de quien sea:
+-- `vinculos_importados_pendientes()` solo mira los de la persona de la sesión, y acá se pregunta
+-- también por otra (a quién autoriza el Consejo, la lista de habitantes).
+create function {IMPORTADO_PENDIENTE}
+  returns boolean
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select exists (
+      select 1 from nucleo.vinculo v
+       where v.id = $1 and v.fuente = 'importacion' and v.confirmado_en is null
+         and not exists (
+           select 1 from auditoria.eventos e
+             join nucleo.invitacion i
+               on i.id = e.entidad_id and i.consorcio_id = e.consorcio_id
+            where e.consorcio_id = v.consorcio_id
+              and e.accion = 'identidad.invitacion.aceptar' and e.entidad = 'invitacion'
+              and e.despues ->> 'vinculo_id' = v.id::text
+              and i.aceptada_en is not null))
+  $$;
+
 -- Un habitante: un vínculo vigente hoy, que no sea uno importado que espera confirmación.
 create function {ES_HABITANTE}
   returns boolean
@@ -143,7 +165,7 @@ create function {ES_HABITANTE}
       select 1 from nucleo.vinculo v
        where v.consorcio_id = $1 and v.persona_id = $2
          and daterange(v.vigente_desde, v.vigente_hasta) @> nucleo.hoy_del_consorcio($1)
-         and v.id not in (select nucleo.vinculos_importados_pendientes()))
+         and not nucleo.vinculo_importado_pendiente(v.id))
   $$;
 
 -- Un mandato vigente de un tipo que la configuración lista en `roles_que_autorizan`.
@@ -275,7 +297,7 @@ create function nucleo.autorizaciones_ver_proveedores_lectura(actor uuid, origen
           join nucleo.unidad u on u.consorcio_id = v.consorcio_id and u.id = v.unidad_id
          where v.consorcio_id = c
            and daterange(v.vigente_desde, v.vigente_hasta) @> nucleo.hoy_del_consorcio(c)
-           and v.id not in (select nucleo.vinculos_importados_pendientes())
+           and not nucleo.vinculo_importado_pendiente(v.id)
          group by v.persona_id)
       select h.persona_id, p.nombre, h.unidades, coalesce(a.cambio = 'autorizar', false),
              a.motivo, a.registrado_en, q.nombre
