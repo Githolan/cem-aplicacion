@@ -40,12 +40,15 @@ DIAS_POR_VENCER = 30
 
 def subir(e, proveedor=None, vence: date | None = None, *, quien: UUID | None = None,
           tipo: str = "seguro", descripcion: str = DESCRIPCION, reemplaza: str | None = None,
-          archivo: bytes | None = None, clave: dict | None = None):  # fmt: skip
+          archivo: bytes | None = None, clave: dict | None = None,
+          requisito: str | None = None):  # fmt: skip
     quien = quien or e.adm
     params = {"tipo": tipo, "descripcion": descripcion, "titulo": TITULO,
               "vence_el": (vence or date(2099, 12, 31)).isoformat()}  # fmt: skip
     if reemplaza is not None:
         params["reemplaza"] = reemplaza
+    if requisito is not None:  # 0104
+        params["requisito"] = requisito
     with cliente(quien, e.sesion.get(quien)) as c:
         return c.post(
             f"/api/v1/consorcios/{e.cons}/proveedores/{proveedor or e.proveedor}/documentacion",
@@ -294,7 +297,7 @@ def test_el_documento_citado_ya_no_se_retira(motor_migrate, motor_app, e, bucket
 CARGAR = (
     "select nucleo.cargar_documentacion_proveedor(:proveedor, 'seguro', 'ART SINTETICA',"
     " current_date, null, 'Poliza SINTETICA', 'application/pdf', 1, repeat('a', 64), :actor,"
-    " :origen, :sesion)"
+    " :origen, :sesion, null, false)"
 )
 
 

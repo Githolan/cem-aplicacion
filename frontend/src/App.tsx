@@ -9,7 +9,7 @@ import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
 import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { api } from "./api/cliente";
-import { cumpleEnAlguno, Exige, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
+import { cumpleEnAlguno, Exige, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
 import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EntrarEncima } from "./EntrarEncima";
@@ -17,6 +17,7 @@ import { PuntoServicio, useFallaDelServicio } from "./EstadoServicio";
 import { ElegirConsorcio } from "./egresos/ElegirConsorcio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
+import { ConsultaProveedores, RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./egresos/ConsultaProveedores";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
 import { Icono, type NombreIcono } from "./Iconos";
 import { EnlaceInstalar, Instalar } from "./Instalar";
@@ -47,6 +48,8 @@ interface EnlaceDeInicio {
   detalle?: string;
   icono: NombreIcono;
   requisito: Requisito;
+  /** No se ofrece a quien ya cumple esto (tiene otra pantalla que lo cubre). */
+  salvo?: Requisito;
 }
 
 interface GrupoDeInicio {
@@ -99,6 +102,14 @@ const GRUPOS_DE_INICIO: readonly GrupoDeInicio[] = [
         detalle: "Cargar y consultar documentos",
         icono: "carpeta",
         requisito: REQUISITOS.documentos,
+      },
+      {
+        ruta: RUTA_CONSULTA_PROVEEDORES,
+        texto: TITULO_CONSULTA_PROVEEDORES,
+        detalle: "Seguros, habilitaciones y lo que exige la ley",
+        icono: "proveedor",
+        requisito: REQUISITOS.consultaProveedores,
+        salvo: REQUISITOS.proveedores,
       },
     ],
   },
@@ -205,7 +216,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
   const enlaces =
     porEdificio === null
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
-      : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
+      : ENLACES_DE_INICIO.filter((e) => ofreceEnAlguno(porEdificio, e.requisito, e.salvo));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
   // En el «Para hacer» de la computadora, el Padrón entra si hay vínculos esperando (G-26) o si no
   // se pudo saber: un número desconocido no es «nada pendiente» (Codex en #245).
@@ -385,6 +396,10 @@ export function App() {
           <Route path={RUTA_DOCUMENTOS} element={<Exige requisito={REQUISITOS.documentos}><Documentos /></Exige>} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path={RUTA_PROVEEDORES} element={<Exige requisito={REQUISITOS.proveedores}><Proveedores /></Exige>} />
+          <Route
+            path={RUTA_CONSULTA_PROVEEDORES}
+            element={<Exige requisito={REQUISITOS.consultaProveedores}><ConsultaProveedores /></Exige>}
+          />
           <Route path={RUTA_NUEVA} element={<Exige requisito={REQUISITOS.ordenes}><PrepararOrden /></Exige>} />
           <Route path={RUTA_CONSULTA} element={<Exige requisito={REQUISITOS.pagos}><ConsultaPagos /></Exige>} />
           <Route path={RUTA_COTEJO} element={<Exige requisito={REQUISITOS.cotejo}><Cotejo /></Exige>} />

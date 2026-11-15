@@ -30,6 +30,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from cem_contracts.egresos import ROLES_QUE_VEN_PROVEEDORES
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 from cem_contracts.politicas import DIRECTORIO, TipoRecurso
 
@@ -89,6 +90,8 @@ MODOS: dict[str, ModoOperacion | None] = {
 
 VINCULOS = {"P": TipoVinculo.PROPIETARIO, "I": TipoVinculo.INQUILINO, "O": TipoVinculo.OCUPANTE}
 FIGURAS_MANDATO = {"MC": "miembro_consejo", "AD": "administrador", "AE": "administrador_externo"}
+ROLES_CONFIGURADOS = {"proveedores.ver": frozenset(ROLES_QUE_VEN_PROVEEDORES)}
+"""La configuración por defecto de `0104`: la tabla de verdad corre con ella."""
 
 # Filas de `paquete_facultad` que agrega `0012` (tabla de verdad, §5.2: C2 y A2).
 ADICIONES_0012 = {
@@ -285,7 +288,7 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
     if fila.mandato not in SITUACIONES and fila.mandato != "sin_mandato":
         raise ValueError(f"situación de mandato desconocida: {fila.mandato!r}")
 
-    def mandato(codigos: list[tuple[str, str | None]]) -> None:
+    def mandato(codigos: list[tuple[str, str | None]], tipo: str | None = None) -> None:
         if fila.mandato == "sin_mandato":
             raise ValueError(f"{fila}: la figura tiene mandato y la situación dice sin_mandato")
         desde, hasta, causa, consorcio = SITUACIONES[fila.mandato]
@@ -295,6 +298,7 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
             vigente_desde=desde,
             vigente_hasta=hasta,
             causa_baja=causa,
+            tipo=tipo,
         )
         mandatos.append(m)
         for codigo, recurso in codigos:
@@ -319,7 +323,7 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
             elegidas = p.group(2).split("|") if p.group(2) is not None else paquete
             if not set(elegidas) <= set(paquete):
                 raise ValueError(f"{fila}: el acta achica el paquete, nunca lo amplía")
-            mandato([(c, None) for c in elegidas])
+            mandato([(c, None) for c in elegidas], FIGURAS_MANDATO[p.group(1)])
         elif f := _FAC.fullmatch(termino):
             recurso = simbolo(f.group(2)) if f.group(2) is not None else None
             mandato([(f.group(1), recurso)])
@@ -343,5 +347,6 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         hay_administrador_vigente=fila.hay_administrador == "si",
         identidades=_identidades(valores),
         segundo_factor_reciente=segundo_factor,
+        roles_configurados=ROLES_CONFIGURADOS,
     )
     return contexto, entidad

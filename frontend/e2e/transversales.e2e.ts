@@ -60,6 +60,10 @@ async function simularApi(pagina: Page, baseURL: string, alta: Alta) {
           versiones: [{ ...proveedor, preparada_por: PERSONA, creada_en: proveedor.creado_en }],
           documentacion: [],
           puede_cargar_documentacion: true,
+          rubros_legales: [],
+          faltantes: [],
+          requisitos: [],
+          configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true },
         },
       });
     return ruta.abort();

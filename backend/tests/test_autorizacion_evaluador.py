@@ -19,11 +19,13 @@ from cem_contracts.politicas import CodigoSeparacion, Politica, TipoRecurso
 from pydantic import ValidationError
 
 from app.autorizacion.evaluador import (
+    CAUSA_ERROR_CARGA,
     ContextoAutorizacion,
     Entidad,
     Facultad,
     Mandato,
     Vinculo,
+    alcanza,
     evaluar,
     por_otra_cuenta,
 )
@@ -330,7 +332,8 @@ def test_las_acciones_de_la_tabla():
     # (`documentos.ver_restringidos` y `documentos.cargar_operativos`) y la lectura de la revisión
     # de órdenes de pago (`egresos.revisar_orden`, H3) y la conciliación del pago manual
     # (`egresos.conciliar_pago`, 0055) y lo que muestra la interfaz (`consorcios.mis_acciones`)
-    assert len(POLITICAS) == 51
+    # y la consulta de proveedores (`proveedores.ver`, 0104)
+    assert len(POLITICAS) == 52
 
 
 def _archivo(tmp_path, nombre, politicas):
@@ -396,3 +399,55 @@ def test_cada_motivo_tiene_su_texto_para_otra_cuenta_de_la_misma_persona():
         YA_PARTICIPO_OTRA_CUENTA[("egresos.aprobar_orden", CodigoSeparacion.NO_ES_QUIEN_PREPARO)]
         == "La preparó otra cuenta de la misma persona: la aprueba otra persona del Consejo."
     )
+
+
+# --- Concesión por configuración (RF50 configurable, 0104) ----------------------------------
+
+VER = "proveedores.ver"
+ROLES = {VER: frozenset({"miembro_consejo", "administrador"})}
+
+
+def _con_tipo(tipo: str | None, consorcio: UUID = CONSORCIO, **cambios) -> ContextoAutorizacion:
+    m = replace(mandato(consorcio), tipo=tipo, **cambios)
+    return replace(contexto(facultades=()), mandatos=(m,), roles_configurados=ROLES)
+
+
+def test_por_configuracion_concede_al_rol_listado_y_control_sin_el_rol():
+    d = evaluar(VER, _con_tipo("miembro_consejo"), Entidad())
+    assert (d.permitido, d.motivo_interno) == (True, "concedido_por_configuracion")
+    assert alcanza(VER, _con_tipo("miembro_consejo"))
+    # Control: un tipo que la configuración no lista, o ningún rol configurado, no concede.
+    for ctx in (
+        _con_tipo("administrador_externo"),
+        replace(_con_tipo("miembro_consejo"), roles_configurados={}),
+        _con_tipo(None),
+    ):
+        assert evaluar(VER, ctx, Entidad()).motivo_interno == "sin_concesion"
+        assert not alcanza(VER, ctx)
+
+
+def test_por_configuracion_el_mandato_que_no_vale_no_cuenta():
+    con_vinculo = {"vinculos": (P(),)}  # para que el ámbito no tape lo que se prueba
+    for ctx in (
+        _con_tipo("miembro_consejo", OTRO_CONSORCIO),
+        _con_tipo("miembro_consejo", vigente_hasta=HOY),
+        _con_tipo("miembro_consejo", causa_baja=CAUSA_ERROR_CARGA),
+    ):
+        ctx = replace(ctx, **con_vinculo)
+        assert evaluar(VER, ctx, Entidad()).motivo_interno == "sin_concesion"
+    # Control: el mismo con el mandato vigente sí.
+    assert evaluar(VER, replace(_con_tipo("miembro_consejo"), **con_vinculo), Entidad()).permitido
+
+
+def test_por_configuracion_un_tipo_de_vinculo_listado_concede():
+    ctx = replace(contexto(vinculos=(P(),)), roles_configurados={VER: frozenset({"propietario"})})
+    assert evaluar(VER, ctx, Entidad()).motivo_interno == "concedido_por_configuracion"
+    # Control: el inquilino no está en la lista.
+    inquilino = replace(ctx, vinculos=(Vinculo(TipoVinculo.INQUILINO, U3A),))
+    assert evaluar(VER, inquilino, Entidad()).motivo_interno == "sin_concesion"
+
+
+def test_la_configuracion_no_concede_una_accion_que_no_la_declara():
+    roles = {"padron.ver": frozenset({"miembro_consejo"})}
+    ctx = replace(_con_tipo("miembro_consejo"), roles_configurados=roles)
+    assert evaluar("padron.ver", ctx, Entidad()).motivo_interno == "sin_concesion"

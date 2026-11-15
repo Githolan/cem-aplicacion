@@ -59,6 +59,7 @@ from cem_contracts.egresos import (
     ComprobantePagoNuevo,
     ComprobanteSubido,
     ConciliacionPagoManual,
+    ConfiguracionProveedores,
     Confirmacion,
     ConsultaPagos,
     Contrato,
@@ -88,6 +89,7 @@ from cem_contracts.egresos import (
     FacturaAdjunta,
     FacturaSubida,
     FichaPago,
+    FichaProveedorConsulta,
     FiltroConsultaPagos,
     GrupoPago,
     LecturaCarga,
@@ -98,6 +100,7 @@ from cem_contracts.egresos import (
     ListaPagosManuales,
     ListaPagosPorAclarar,
     ListaProveedores,
+    ListaProveedoresConsulta,
     ObservacionVigente,
     OrdenConPagoManual,
     OrdenPago,
@@ -116,6 +119,7 @@ from cem_contracts.egresos import (
     PasoPago,
     PedidoCuentaPagoManual,
     Proveedor,
+    ProveedorConsulta,
     ProveedorConVersiones,
     ProveedorCreado,
     ProveedorNuevo,
@@ -126,9 +130,12 @@ from cem_contracts.egresos import (
     RegistroDiferenciaPago,
     RegistroPagoManual,
     Renovacion,
+    RequisitoFaltante,
+    RequisitoLegal,
     ResolucionDiferenciaPago,
     Retiro,
     RetiroOrdenPago,
+    RubrosLegalesProveedor,
     SituacionPago,
     TipoCarga,
     TipoDiferencia,
@@ -143,7 +150,7 @@ from cem_contracts.egresos import (
     ultimos_digitos,
 )
 from cem_contracts.errores import CodigoError
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
@@ -189,8 +196,10 @@ ESPERAN_PAGO = {EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION}
 EN_CURSO = ESPERAN_PAGO | {EstadoOrdenPago.EN_REVISION, EstadoOrdenPago.APROBADA}
 """Las órdenes en las que haber aprobado todavía separa: quien aprobó no repite, ni emite, ni paga.
 Son pocas y no crecen con la historia del consorcio."""
-LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR}
-"""La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`)."""
+VER_PROVEEDORES = "proveedores.ver"
+LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR, VER_PROVEEDORES: VER_PROVEEDORES}
+"""La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`;
+`exigir_lectura_proveedores`, `0104`)."""
 
 NO_ADMITE = "La orden no admite eso en su estado."
 ERRORES = {
@@ -208,6 +217,30 @@ ERRORES = {
     "documentacion_en_revision": (
         409, CodigoError.DOCUMENTACION_EN_REVISION,
         "Ya hay un reemplazo de ese documento en el antivirus: hay que esperar a que termine.",
+    ),
+    "vencimiento_invalido": (
+        422, CodigoError.VENCIMIENTO_INVALIDO,
+        "Hace falta la fecha de vencimiento o marcar «No vence», no las dos.",
+    ),
+    "no_vence_no_admitido": (
+        422, CodigoError.NO_VENCE_NO_ADMITIDO,
+        "Este consorcio no admite documentos sin vencimiento: hace falta la fecha.",
+    ),
+    "requisito_invalido": (
+        422, CodigoError.REQUISITO_INVALIDO,
+        "Ese requisito legal no existe o no es de ese tipo de documento.",
+    ),
+    "rubro_legal_invalido": (
+        422, CodigoError.RUBRO_LEGAL_INVALIDO, "Ese rubro legal no existe.",
+    ),
+    "rubro_legal_sin_cambios": (
+        409, CodigoError.RUBRO_LEGAL_SIN_CAMBIOS,
+        "El proveedor ya estaba así: volver a abrir la ficha.",
+    ),
+    "documentacion_legal_faltante": (
+        422, CodigoError.DOCUMENTACION_LEGAL_FALTANTE,
+        "Al proveedor le falta documentación que exige la ley, o la tiene vencida: hay que"
+        " cargarla en su ficha antes de prepararle una orden.",
     ),
     "factura_no_vigente": (
         409, CodigoError.FACTURA_NO_VIGENTE,
@@ -412,6 +445,9 @@ CAMPO_DEL_MOTIVO = {
     "numero_operacion_invalido": "numero_operacion",
     "fecha_operacion_invalida": "fecha_operacion",
     "motivo_con_cuenta": "motivo",
+    "vencimiento_invalido": "vence_el",
+    "no_vence_no_admitido": "vence_el",
+    "requisito_invalido": "requisito",
 }
 """El campo del cuerpo que motiva cada error de negocio que tiene uno (`detalle.campos`): la
 pantalla lo marca junto al campo. Los nombres son los de los cuerpos de los contratos.
@@ -655,14 +691,57 @@ def listar_proveedores(
 ) -> ListaProveedores:
     with _lectura(permiso, _una_foto(motor)) as c:
         proveedores = _proveedores(c, permiso, None)
-        documentacion = _documentacion(c, permiso, None)
+        marcas = _marcas(c, permiso, [p.id for p in proveedores])
+    return ListaProveedores(elementos=proveedores, **marcas)
+
+
+def _marcas(c: Connection, lector: Permiso, ids: list[UUID]) -> dict:
+    """Las marcas de la lista, en el orden de la lista: vencida, por vencer y lo que falta."""
+    documentacion = _documentacion(c, lector, None)
+    faltan = {f.proveedor_id for f in _faltantes(c, lector, None)}
     vencida = {d.proveedor_id for d in documentacion if d.estado == VENCIDA}
     por_vencer = {d.proveedor_id for d in documentacion if d.estado == POR_VENCER} - vencida
-    return ListaProveedores(
-        elementos=proveedores,
-        documentacion_vencida=[p.id for p in proveedores if p.id in vencida],
-        documentacion_por_vencer=[p.id for p in proveedores if p.id in por_vencer],
-    )
+    return {
+        "documentacion_vencida": [p for p in ids if p in vencida],
+        "documentacion_por_vencer": [p for p in ids if p in por_vencer],
+        "documentacion_faltante": [p for p in ids if p in faltan],
+        "modo_exigencia": _configuracion(c, lector).modo_exigencia,
+    }
+
+
+def _faltantes(c: Connection, lector: Permiso, proveedor: UUID | None) -> list[RequisitoFaltante]:
+    filas = _ejecutar(
+        c, lector,
+        "select * from nucleo.requisitos_faltantes_lectura(:p, :f, :actor, 'api', :sesion)",
+        {"p": proveedor, "f": LEE_COMO[lector.accion]},
+    ).mappings()  # fmt: skip
+    return [RequisitoFaltante(**f) for f in filas]
+
+
+def _rubros(c: Connection, lector: Permiso, proveedor: UUID) -> list[str]:
+    return list(_ejecutar(
+        c, lector,
+        "select rubro_legal from nucleo.rubros_legales_lectura(:p, :f, :actor, 'api', :sesion)",
+        {"p": proveedor, "f": LEE_COMO[lector.accion]},
+    ).scalars())  # fmt: skip
+
+
+def _configuracion(c: Connection, lector: Permiso) -> ConfiguracionProveedores:
+    fila = _ejecutar(
+        c, lector,
+        "select * from nucleo.configuracion_proveedores_lectura(:f, :actor, 'api', :sesion)",
+        {"f": LEE_COMO[lector.accion]},
+    ).mappings().one()  # fmt: skip
+    return ConfiguracionProveedores(**fila)
+
+
+def _requisitos(c: Connection, lector: Permiso) -> list[RequisitoLegal]:
+    filas = _ejecutar(
+        c, lector,
+        "select * from nucleo.requisitos_legales_lectura(:f, :actor, 'api', :sesion)",
+        {"f": LEE_COMO[lector.accion]},
+    ).mappings()  # fmt: skip
+    return [RequisitoLegal(**f) for f in filas]
 
 
 VENCIDA = EstadoDocumentacionProveedor.VENCIDA
@@ -702,9 +781,15 @@ def ver_proveedor(
         filas = _ejecutar(c, permiso, sql, {"p": proveedor_id}).mappings()
         versiones = [VersionProveedor(**_recortada(f)) for f in filas]
         documentacion = _documentacion(c, permiso, proveedor_id)
+        rubros = _rubros(c, permiso, proveedor_id)
+        faltantes = _faltantes(c, permiso, proveedor_id)
+        requisitos = _requisitos(c, permiso)
+        configuracion = _configuracion(c, permiso)
     return ProveedorConVersiones(
         proveedor=proveedores[0], versiones=versiones, documentacion=documentacion,
         puede_cargar_documentacion=cargar.decidir(Entidad()).permitido,
+        rubros_legales=rubros, faltantes=faltantes, requisitos=requisitos,
+        configuracion=configuracion,
     )  # fmt: skip
 
 
@@ -833,7 +918,6 @@ async def subir_documentacion_proveedor(
     proveedor_id: UUID,
     tipo: Annotated[TipoDocumentacionProveedor, Query(description="Seguro o habilitación.")],
     descripcion: Annotated[DescripcionDocumentacion, Query(description="Qué cubre, en palabras.")],
-    vence_el: Annotated[date, Query(description="El último día en que vale.")],
     titulo: Annotated[Titulo, Query(min_length=1, description="El título del documento.")],
     request: Request,
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
@@ -846,6 +930,16 @@ async def subir_documentacion_proveedor(
             description="Para reemplazar uno que vale: su `id` (el de `documentacion` en la"
             " ficha). Sin él, se agrega."
         ),
+    ] = None,
+    vence_el: Annotated[
+        date | None, Query(description="El último día en que vale; sin él, `no_vence`.")
+    ] = None,
+    no_vence: Annotated[
+        bool, Query(description="«No vence»: la fecha va en blanco (si el consorcio lo admite).")
+    ] = False,
+    requisito: Annotated[
+        str | None,
+        Query(max_length=80, description="El requisito de la matriz legal que cubre (`codigo`)."),
     ] = None,
 ) -> Response:
     """RF50 (documento 14, §5.2): un documento vencido marca al proveedor y no lo excluye. Lo
@@ -863,10 +957,10 @@ async def subir_documentacion_proveedor(
             "select nueva_version_id as id, nueva_clave_objeto as clave_objeto,"
             " nuevo_documento_id as documento_id, nueva_constancia_id as constancia_id"
             " from nucleo.cargar_documentacion_proveedor(:p, :tipo, :descripcion, :vence,"
-            " :reemplaza, :titulo, :t, :n, :s, :actor, 'api', :sesion)",
+            " :reemplaza, :titulo, :t, :n, :s, :actor, 'api', :sesion, :requisito, :no_vence)",
             {"p": proveedor_id, "tipo": tipo.value, "descripcion": descripcion, "vence": vence_el,
              "reemplaza": reemplaza, "titulo": titulo, "t": tipo_archivo, "n": tamano,
-             "s": suma},
+             "s": suma, "requisito": requisito, "no_vence": no_vence},
             # El proveedor viene en la ruta: si no existe es 404, como al verlo.
             {"proveedor_inexistente": ERRORES["no_encontrado"]},
         ).one()  # fmt: skip
@@ -878,6 +972,125 @@ async def subir_documentacion_proveedor(
         )  # fmt: skip
 
     return await subir_archivo(request, permiso.ctx, clave, motor, nueva, respuesta)
+
+
+# --- Rubros legales del proveedor y consulta (RF50 configurable, `0104`) ------------------------
+
+
+def _cambiar_rubro(
+    proveedor_id: UUID, rubro: str, asignar: bool, permiso: Permiso, idempotencia, motor
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, RubrosLegalesProveedor]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.asignar_rubro_legal_proveedor(:p, :rubro, :asignar, :actor, 'api',"
+            " :sesion)",
+            {"p": proveedor_id, "rubro": rubro, "asignar": asignar},
+            {"proveedor_inexistente": ERRORES["no_encontrado"]},
+        ).scalar_one()  # fmt: skip
+        return 200, RubrosLegalesProveedor(
+            proveedor_id=proveedor_id,
+            rubros_legales=_rubros(conn, permiso, proveedor_id),
+            faltantes=_faltantes(conn, permiso, proveedor_id),
+        )
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+RubroLegal = Annotated[str, Path(pattern=r"^[a-z_]{1,40}$", description="El rubro legal.")]
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}",
+    response_model=RubrosLegalesProveedor,
+    summary="Asignarle al proveedor un rubro legal: desde ahí se le exige lo que pide la ley",
+    responses=RESPUESTAS_ESCRITURA | {
+        404: {"description": "El proveedor no existe en este consorcio."},
+        409: {"description": "Ya tenía ese rubro (`rubro_legal_sin_cambios`)."},
+        422: {"description": "El rubro no está en la matriz legal (`rubro_legal_invalido`)."},
+    },
+)  # fmt: skip
+def asignar_rubro_legal(
+    proveedor_id: UUID,
+    rubro: RubroLegal,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    return _cambiar_rubro(proveedor_id, rubro, True, permiso, idempotencia, motor)
+
+
+@router.delete(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}",
+    response_model=RubrosLegalesProveedor,
+    summary="Retirarle al proveedor un rubro legal: queda la constancia de quién y cuándo",
+    responses=RESPUESTAS_ESCRITURA | {
+        404: {"description": "El proveedor no existe en este consorcio."},
+        409: {"description": "No tenía ese rubro (`rubro_legal_sin_cambios`)."},
+        422: {"description": "El rubro no está en la matriz legal (`rubro_legal_invalido`)."},
+    },
+)  # fmt: skip
+def retirar_rubro_legal(
+    proveedor_id: UUID,
+    rubro: RubroLegal,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    return _cambiar_rubro(proveedor_id, rubro, False, permiso, idempotencia, motor)
+
+
+def _consulta(c: Connection, lector: Permiso, proveedor: UUID | None) -> list[ProveedorConsulta]:
+    filas = _ejecutar(
+        c, lector, "select * from nucleo.proveedores_consulta(:p, :actor, 'api', :sesion)",
+        {"p": proveedor},
+    ).mappings()  # fmt: skip
+    return [ProveedorConsulta(**f) for f in filas]
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/consulta-proveedores",
+    response_model=ListaProveedoresConsulta,
+    summary="Los proveedores para quien solo consulta (`proveedores.ver`): sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def consultar_proveedores(
+    permiso: Annotated[Permiso, Depends(requiere(VER_PROVEEDORES, al_entrar=True))],
+    motor: MotorDep,
+) -> ListaProveedoresConsulta:
+    """RF50 configurable (sí del propietario del 15-11-2026, P1 y P2): el Consejo y los roles que
+    lista la configuración del consorcio ven los proveedores y sus seguros, sin la cuenta."""
+    with _lectura(permiso, _una_foto(motor)) as c:
+        proveedores = _consulta(c, permiso, None)
+        marcas = _marcas(c, permiso, [p.id for p in proveedores])
+    return ListaProveedoresConsulta(elementos=proveedores, **marcas)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/consulta-proveedores/{proveedor_id}",
+    response_model=FichaProveedorConsulta,
+    summary="La ficha de un proveedor para quien solo consulta: datos, seguros, habilitaciones y"
+    " lo que le falta",
+    responses=RESPUESTAS_LECTURA | {404: {"description": "No existe en este consorcio."}},
+)
+def consultar_proveedor(
+    proveedor_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(VER_PROVEEDORES, al_entrar=True))],
+    motor: MotorDep,
+) -> FichaProveedorConsulta:
+    with _lectura(permiso, _una_foto(motor)) as c:
+        proveedores = _consulta(c, permiso, proveedor_id)
+        if not proveedores:
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        documentacion = _documentacion(c, permiso, proveedor_id)
+        rubros = _rubros(c, permiso, proveedor_id)
+        faltantes = _faltantes(c, permiso, proveedor_id)
+        requisitos = _requisitos(c, permiso)
+        configuracion = _configuracion(c, permiso)
+    return FichaProveedorConsulta(
+        proveedor=proveedores[0], documentacion=documentacion, rubros_legales=rubros,
+        faltantes=faltantes, requisitos=requisitos, configuracion=configuracion,
+    )  # fmt: skip
 
 
 # --- Documentos para carga: la IA propone, la persona confirma (`0088`) -------------------------

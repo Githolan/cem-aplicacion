@@ -281,6 +281,17 @@ class Proveedor(BaseModel):
     actualizado_en: datetime
 
 
+class ModoExigencia(StrEnum):
+    """Qué hace la documentación que exige la ley cuando falta o venció (`0104`, configurable por
+    consorcio)."""
+
+    AVISAR = "avisar"
+    """La marca y nada más."""
+    BLOQUEAR = "bloquear"
+    """Además niega preparar o modificar una orden nueva a ese proveedor; nunca toca una orden que
+    ya existe."""
+
+
 class ListaProveedores(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -291,8 +302,13 @@ class ListaProveedores(BaseModel):
     )
     documentacion_por_vencer: list[UUID] = Field(
         description="Los proveedores sin nada vencido y con algo que vence dentro de"
-        " `DIAS_POR_VENCER` días."
+        " los días de la configuración del consorcio."
     )
+    documentacion_faltante: list[UUID] = Field(
+        description="Los proveedores a los que les falta documentación que exige la ley para sus"
+        " rubros legales, o la tienen vencida (`0104`)."
+    )
+    modo_exigencia: ModoExigencia
 
 
 class VersionProveedor(BaseModel):
@@ -325,8 +341,14 @@ CATEGORIA_DOCUMENTACION_PROVEEDOR = CategoriaDocumento.CONTRATOS_PROVEEDORES
 (decisión 9 del 22-10-2026; pregunta P2 del diseño)."""
 LARGO_DESCRIPCION_DOCUMENTACION = 120
 DIAS_POR_VENCER = 30
-"""Cuántos días antes de vencer se avisa (pregunta P3 del diseño, por defecto); la base usa el
-mismo valor (`0103`)."""
+"""Cuántos días antes de vencer se avisa, por defecto (P3: 30, sí del propietario del
+15-11-2026). Cada consorcio lo puede cambiar (`0104`); la pantalla usa el que manda la API."""
+MODO_EXIGENCIA = ModoExigencia.BLOQUEAR
+"""Por defecto (P4, `0104`)."""
+ADMITE_NO_VENCE = True
+"""Por defecto (P5, `0104`): se puede cargar «No vence» con la fecha en blanco."""
+ROLES_QUE_VEN_PROVEEDORES = ("administrador", "administrador_externo", "miembro_consejo")
+"""Los roles que consultan la ficha del proveedor y sus seguros por defecto (P1, `0104`)."""
 
 
 class TipoDocumentacionProveedor(StrEnum):
@@ -385,7 +407,11 @@ class DocumentacionProveedor(BaseModel):
     proveedor_id: UUID
     tipo: TipoDocumentacionProveedor
     descripcion: str
-    vence_el: date = Field(description="El último día en que vale.")
+    vence_el: date | None = Field(description="El último día en que vale; nulo si no vence.")
+    no_vence: bool = Field(description="«No vence»: la fecha va en blanco y vale siempre.")
+    requisito_codigo: str | None = Field(
+        description="El requisito de la matriz legal que cubre (`RequisitoLegal.codigo`), o nulo."
+    )
     documento_id: UUID
     version_documento_id: UUID = Field(
         description="La versión exacta del archivo. Se abre con"
@@ -412,6 +438,94 @@ class DocumentacionSubida(BaseModel):
     archivo: VersionCargada
 
 
+class RequisitoLegal(BaseModel):
+    """Una fila de la matriz legal (`nucleo.requisito_legal`): lo que la ley pide a un rubro."""
+
+    model_config = ConfigDict(frozen=True)
+
+    codigo: str
+    rubro_legal: str
+    tipo: TipoDocumentacionProveedor
+    descripcion: str
+    fuente: str = Field(description="La norma y su enlace; «SIN VERIFICAR» si no se confirmó.")
+    verificado: bool
+    exigido: bool = Field(description="Si este consorcio lo exige (configuración).")
+
+
+class RequisitoFaltante(BaseModel):
+    """Un requisito exigido de los rubros legales del proveedor sin una constancia vigente o por
+    vencer que lo cubra."""
+
+    model_config = ConfigDict(frozen=True)
+
+    proveedor_id: UUID
+    codigo: str
+    rubro_legal: str
+    tipo: TipoDocumentacionProveedor
+    descripcion: str
+
+
+class ConfiguracionProveedores(BaseModel):
+    """Lo que la pantalla necesita de la configuración del consorcio (`0104`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    dias_por_vencer: int
+    modo_exigencia: ModoExigencia
+    admite_no_vence: bool
+
+
+class RubrosLegalesProveedor(BaseModel):
+    """`POST` y `DELETE …/proveedores/{p}/rubros-legales/{rubro}`: cómo quedó el proveedor."""
+
+    model_config = ConfigDict(frozen=True)
+
+    proveedor_id: UUID
+    rubros_legales: list[str]
+    faltantes: list[RequisitoFaltante]
+
+
+class ProveedorConsulta(BaseModel):
+    """El proveedor para quien solo consulta (`proveedores.ver`): sin la cuenta ni su huella."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    cuit: str | None
+    razon_social: str
+    rubro: str | None
+    contacto: str | None
+    telefono: str | None
+    whatsapp: str | None
+    correo: str | None
+    domicilio: str | None
+    atiende_emergencias: bool
+    estado: EstadoProveedor
+
+
+class ListaProveedoresConsulta(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[ProveedorConsulta]
+    documentacion_vencida: list[UUID]
+    documentacion_por_vencer: list[UUID]
+    documentacion_faltante: list[UUID]
+    modo_exigencia: ModoExigencia
+
+
+class FichaProveedorConsulta(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    proveedor: ProveedorConsulta
+    documentacion: list[DocumentacionProveedor]
+    rubros_legales: list[str]
+    faltantes: list[RequisitoFaltante]
+    requisitos: list[RequisitoLegal] = Field(
+        description="La matriz legal, para decirla en palabras."
+    )
+    configuracion: ConfiguracionProveedores
+
+
 class ProveedorConVersiones(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -425,6 +539,10 @@ class ProveedorConVersiones(BaseModel):
         description="Si puede agregar o reemplazar un seguro o una habilitación: prepara órdenes"
         " y carga documentos. Solo sirve para mostrar: la ruta y la base vuelven a decidir."
     )
+    rubros_legales: list[str] = Field(description="Los rubros legales asignados (`0104`).")
+    faltantes: list[RequisitoFaltante]
+    requisitos: list[RequisitoLegal] = Field(description="La matriz legal, para elegir.")
+    configuracion: ConfiguracionProveedores
 
 
 # --- Órdenes de pago ---------------------------------------------------------------------------

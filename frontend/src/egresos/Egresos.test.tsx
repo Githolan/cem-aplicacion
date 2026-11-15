@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { components } from "../api/tipos";
-import { alcanzaTodo } from "../accionesDePrueba";
+import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import {
@@ -24,8 +24,10 @@ import {
   VOLVIO_LA_RED,
   TEXTO_SESION_VENCIDA,
 } from "./comun";
-import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, MARCA_VENCIDA } from "./Proveedores";
-import { AVISO_VENCIDA, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO } from "./DocumentacionProveedor";
+import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, MARCA_FALTANTE, MARCA_VENCIDA } from "./Proveedores";
+import { AVISO_VENCIDA, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO, SIN_REQUISITO } from "./DocumentacionProveedor";
+import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
+import { AGREGAR_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, SIN_RUBROS } from "./ExigenciaLegal";
 import { CUIT_INVALIDO } from "../CampoCuit";
 import { CUENTA_INVALIDA } from "../cuentaBancaria";
 
@@ -51,7 +53,14 @@ type Proveedor = components["schemas"]["Proveedor"];
 type Orden = components["schemas"]["OrdenPago"];
 
 /** La ficha sin seguros ni habilitaciones (RF50, app 0103), de quien puede cargarlos. */
-const SIN_DOCUMENTACION = { documentacion: [], puede_cargar_documentacion: true };
+// RF50 configurable (app 0104): la ficha trae los rubros legales, lo que falta, la matriz y la configuración.
+const EXIGENCIA = {
+  rubros_legales: [] as string[],
+  faltantes: [] as components["schemas"]["RequisitoFaltante"][],
+  requisitos: [] as components["schemas"]["RequisitoLegal"][],
+  configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear" as const, admite_no_vence: true },
+};
+const SIN_DOCUMENTACION = { documentacion: [], puede_cargar_documentacion: true, ...EXIGENCIA };
 
 function proveedor(extra: Partial<Proveedor> = {}): Proveedor {
   return {
@@ -323,6 +332,8 @@ describe("página /egresos/proveedores", () => {
       cargada_en: "2026-10-20T15:00:00Z",
       reemplaza_a: null,
       documento_vigente: true,
+      no_vence: false,
+      requisito_codigo: null,
       ...extra,
     };
   }
@@ -343,6 +354,7 @@ describe("página /egresos/proveedores", () => {
               documentacion({ id: PERSONA, descripcion: "Poliza vieja SINTETICA", estado: "reemplazada" }),
             ],
             puede_cargar_documentacion: true,
+            ...EXIGENCIA,
           }),
       }),
     );
@@ -368,7 +380,7 @@ describe("página /egresos/proveedores", () => {
       "fetch",
       conLista({
         [`GET ${BASE}/proveedores/${P1}`]: () =>
-          Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: false }),
+          Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: false, ...EXIGENCIA }),
       }),
     );
     abrir("/egresos/proveedores");
@@ -391,7 +403,7 @@ describe("página /egresos/proveedores", () => {
   it("RF50: reemplazar manda el tipo, la descripción, el vencimiento y la constancia; sin vencimiento no manda nada", async () => {
     const api = conLista({
       [`GET ${BASE}/proveedores/${P1}`]: () =>
-        Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: true }),
+        Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: true, ...EXIGENCIA }),
       [`POST ${DOCUMENTACION}`]: () =>
         Response.json(
           {
@@ -430,6 +442,150 @@ describe("página /egresos/proveedores", () => {
     });
     expect(pedido.headers.get("Content-Type")).toBe("application/pdf");
     expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  // RF50 configurable (app 0104): rubros legales, lo que falta, «No vence» y el requisito.
+  const ASCENSOR_SEGURO = {
+    codigo: "ascensores.seguro_rc",
+    rubro_legal: "ascensores",
+    tipo: "seguro" as const,
+    descripcion: "Responsabilidad civil de la empresa conservadora SINTETICA",
+    fuente: "Fuente SINTETICA",
+    verificado: true,
+    exigido: true,
+  };
+  const ASCENSOR_PERMISO = { ...ASCENSOR_SEGURO, codigo: "ascensores.permiso_conservador", tipo: "habilitacion" as const,
+    descripcion: "Permiso de conservador SINTETICO" };  // prettier-ignore
+  const GAS = { ...ASCENSOR_SEGURO, codigo: "gas.matricula_gasista", rubro_legal: "gas", tipo: "habilitacion" as const,
+    descripcion: "Matrícula de gasista SINTETICA" };  // prettier-ignore
+  const REQUISITOS_DE_PRUEBA = [ASCENSOR_PERMISO, ASCENSOR_SEGURO, GAS];
+  const RUBROS = `${BASE}/proveedores/${P1}/rubros-legales`;
+  type Exigencia = Omit<components["schemas"]["ProveedorConVersiones"], "proveedor" | "versiones" | "configuracion">;
+  function fichaConExigencia(extra: Partial<Exigencia> = {}, configuracion: Partial<components["schemas"]["ConfiguracionProveedores"]> = {}) {
+    return () =>
+      Response.json({
+        proveedor: proveedor(),
+        versiones: [],
+        documentacion: [],
+        puede_cargar_documentacion: true,
+        ...EXIGENCIA,
+        requisitos: REQUISITOS_DE_PRUEBA,
+        ...extra,
+        configuracion: { ...EXIGENCIA.configuracion, ...configuracion },
+      });
+  }
+  const FALTA_SEGURO = { proveedor_id: P1, codigo: ASCENSOR_SEGURO.codigo, rubro_legal: "ascensores", tipo: "seguro" as const,
+    descripcion: ASCENSOR_SEGURO.descripcion };  // prettier-ignore
+
+  it("RF50c: la ficha dice los rubros legales y lo que falta; en «bloquear» avisa que no se preparan órdenes nuevas", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        [`GET ${BASE}/proveedores`]: () =>
+          Response.json({ elementos: [proveedor()], documentacion_vencida: [], documentacion_por_vencer: [],
+            documentacion_faltante: [P1], modo_exigencia: "bloquear" }),  // prettier-ignore
+        [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"], faltantes: [FALTA_SEGURO] }),
+      }),
+    );
+    const { container } = abrir("/egresos/proveedores");
+    const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
+    expect(fila.textContent).toContain(MARCA_FALTANTE);
+    fireEvent.click(fila);
+    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    expect(screen.queryByText(AVISO_FALTA_AVISA)).toBeNull();
+    const falta = screen.getByRole("list", { name: "Lo que falta" });
+    expect(within(falta).getByText(/Responsabilidad civil de la empresa conservadora SINTETICA/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Quitar Ascensores y montacargas" })).toBeTruthy();
+    // Solo se ofrecen los rubros que no tiene.
+    const opciones = within(screen.getByLabelText("Rubro legal")).getAllByRole("option").map((o) => o.textContent);
+    expect(opciones).toEqual(["Elegir un rubro", "Gas"]);
+    await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("RF50c: en «avisar» solo marca; sin rubros no avisa nada", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"],
+      faltantes: [FALTA_SEGURO] }, { modo_exigencia: "avisar" }) }));  // prettier-ignore
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    expect(await screen.findByText(AVISO_FALTA_AVISA)).toBeTruthy();
+    expect(screen.queryByText(AVISO_FALTA_BLOQUEA)).toBeNull();
+    cleanup();
+    // Control: sin rubros ni faltantes.
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia() }));
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    expect(await screen.findByText(SIN_RUBROS)).toBeTruthy();
+    expect(screen.queryByText(AVISO_FALTA_AVISA)).toBeNull();
+    expect(screen.queryByText(AVISO_FALTA_BLOQUEA)).toBeNull();
+  });
+
+  it("RF50c: agregar y quitar un rubro mandan el pedido con su clave y vuelven a leer la ficha", async () => {
+    const respuesta = () => Response.json({ proveedor_id: P1, rubros_legales: [], faltantes: [] });
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"] }),
+      [`POST ${RUBROS}/gas`]: respuesta,
+      [`DELETE ${RUBROS}/ascensores`]: respuesta,
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    const agregar = await screen.findByRole("button", { name: AGREGAR_RUBRO });
+    // Control: sin elegir un rubro no se manda nada.
+    expect((agregar as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Rubro legal"), { target: { value: "gas" } });
+    fireEvent.click(agregar);
+    await waitFor(() => expect(pedidos(api, "POST", `${RUBROS}/gas`)).toHaveLength(1));
+    expect(unico(pedidos(api, "POST", `${RUBROS}/gas`)).headers.get("Idempotency-Key")).toBeTruthy();
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`).length).toBeGreaterThan(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar Ascensores y montacargas" }));
+    await waitFor(() => expect(pedidos(api, "DELETE", `${RUBROS}/ascensores`)).toHaveLength(1));
+  });
+
+  it("RF50c: «No vence» deja la fecha en blanco y manda el requisito elegido del mismo tipo", async () => {
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia(),
+      [`POST ${BASE}/proveedores/${P1}/documentacion`]: () =>
+        Response.json({ proveedor_id: P1, constancia_id: O1, documento_id: DOC,
+          archivo: { id: DOC, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: H1 } }, { status: 201 }),  // prettier-ignore
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
+    const hoja = await screen.findByRole("dialog");
+    fireEvent.click(within(hoja).getByLabelText("Habilitación"));
+    // Solo los requisitos de habilitaciones.
+    const opciones = within(within(hoja).getByLabelText("Qué requisito de la ley cubre")).getAllByRole("option").map((o) => o.textContent);
+    expect(opciones).toEqual([SIN_REQUISITO, ASCENSOR_PERMISO.descripcion, GAS.descripcion]);
+    fireEvent.change(within(hoja).getByLabelText("Qué requisito de la ley cubre"), { target: { value: GAS.codigo } });
+    fireEvent.change(within(hoja).getByLabelText("Qué cubre"), { target: { value: "Matricula SINTETICA" } });
+    fireEvent.click(within(hoja).getByLabelText(/No vence/));
+    expect((within(hoja).getByLabelText("Vence el") as HTMLInputElement).disabled).toBe(true);
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "matricula.pdf", { type: "application/pdf" });
+    fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), { target: { files: [archivo] } });
+    expect(await within(hoja).findByText(/Listo: quedó cargado/)).toBeTruthy();
+    const url = new URL(unico(pedidos(api, "POST", `${BASE}/proveedores/${P1}/documentacion`)).url);
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ tipo: "habilitacion", no_vence: "true", requisito: GAS.codigo });
+    expect(url.searchParams.has("vence_el")).toBe(false);
+  });
+
+  it("RF50c: si el edificio no admite «No vence», no se ofrece", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({}, { admite_no_vence: false }) }));
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
+    const hoja = await screen.findByRole("dialog");
+    expect(within(hoja).getByLabelText("Vence el")).toBeTruthy();  // control: la hoja está
+    expect(within(hoja).queryByLabelText(/No vence/)).toBeNull();
+  });
+
+  it("RF50c: una constancia que no vence se dice así", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({
+      documentacion: [documentacion({ estado: "vigente", vence_el: null, no_vence: true, requisito_codigo: GAS.codigo })] }) }));  // prettier-ignore
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    expect(await screen.findByText("Vigente: no vence")).toBeTruthy();
+    expect(screen.getByText(`Cubre: ${GAS.descripcion}`)).toBeTruthy();
   });
 
   it("un proveedor sin CUIT lo carga por su ruta, con la versión que se vio", async () => {
@@ -1003,5 +1159,95 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     await screen.findByRole("button", { name: "Reintentar" });
     expect(screen.getByRole("heading", { name: "Proveedores" })).toBeTruthy();
     expect(screen.queryByText(TEXTO_SESION_VENCIDA)).toBeNull();
+  });
+});
+
+// RF50 configurable (app 0104): la consulta de proveedores para el Consejo, solo lectura.
+describe("página /proveedores (consulta)", () => {
+  const CONSULTA = `${BASE}/consulta-proveedores`;
+  const MIS_ACCIONES = `GET ${BASE}/mis-acciones`;
+  const enConsulta = {
+    id: P1,
+    cuit: "20000000001",
+    razon_social: "Ascensores Ficticios SA",
+    rubro: "ascensores",
+    contacto: null,
+    telefono: "SINTETICO",
+    whatsapp: null,
+    correo: null,
+    domicilio: null,
+    atiende_emergencias: false,
+    estado: "activo" as const,
+  };
+  const configuracion = { dias_por_vencer: 30, modo_exigencia: "bloquear" as const, admite_no_vence: true };
+  const consulta = (extra: Respuestas = {}) =>
+    backend({
+      ...INICIO,
+      [MIS_ACCIONES]: alcanza("proveedores.ver"),
+      [`GET ${CONSULTA}`]: () =>
+        Response.json({
+          elementos: [enConsulta],
+          documentacion_vencida: [P1],
+          documentacion_por_vencer: [],
+          documentacion_faltante: [P1],
+          modo_exigencia: "bloquear",
+        }),
+      [`GET ${CONSULTA}/${P1}`]: () =>
+        Response.json({
+          proveedor: enConsulta,
+          documentacion: [
+            {
+              id: O1, proveedor_id: P1, tipo: "seguro", descripcion: "Poliza SINTETICA", vence_el: "2026-11-01", no_vence: false,
+              requisito_codigo: "ascensores.seguro_rc", documento_id: DOC, version_documento_id: DOC, estado: "vencida",
+              cargada_por_nombre: "Persona Ficticia", cargada_en: "2026-10-20T15:00:00Z", reemplaza_a: null, documento_vigente: true,
+            },
+          ],
+          rubros_legales: ["ascensores"],
+          faltantes: [{ proveedor_id: P1, codigo: "ascensores.seguro_rc", rubro_legal: "ascensores", tipo: "seguro", descripcion: "RC SINTETICA" }],
+          requisitos: [{ codigo: "ascensores.seguro_rc", rubro_legal: "ascensores", tipo: "seguro", descripcion: "RC SINTETICA",
+            fuente: "Fuente SINTETICA", verificado: true, exigido: true }],
+          configuracion,
+        }),
+      ...extra,
+    });
+
+  it("lista sin la cuenta, con las marcas, y la ficha solo se lee", async () => {
+    vi.stubGlobal("fetch", consulta());
+    const { container } = abrir(RUTA_CONSULTA_PROVEEDORES);
+    const fila = await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
+    expect(fila.textContent).toContain(MARCA_VENCIDA);
+    expect(fila.textContent).toContain(MARCA_FALTANTE);
+    expect(fila.textContent).not.toContain("Cuenta");
+    fireEvent.click(fila);
+    expect(await screen.findByText("Vencido el 01/11/2026")).toBeTruthy();
+    expect(screen.getByText("Cubre: RC SINTETICA")).toBeTruthy();
+    expect(screen.getByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    // Solo lee: ni cargar, ni reemplazar, ni cambiar los rubros.
+    for (const nombre of [/Agregar/, /Reemplazar/, /Quitar/, /Cambiar los datos/])
+      expect(screen.queryByRole("button", { name: nombre })).toBeNull();
+    expect(screen.getByRole("button", { name: "Volver a la lista" })).toBeTruthy(); // control
+    await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("el menú la ofrece a quien solo consulta y no a quien ya gestiona proveedores", async () => {
+    vi.stubGlobal("fetch", consulta());
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    const menu = await screen.findByRole("navigation", { name: "Secciones" });
+    expect(await within(menu).findByRole("link", { name: TITULO_CONSULTA_PROVEEDORES })).toBeTruthy();
+    expect(within(menu).queryByRole("link", { name: "Proveedores" })).toBeNull();
+    cleanup();
+    // Control: con todas las acciones, la ficha completa y no la consulta.
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanzaTodo(MIS_ACCIONES) ?? (() => Response.json({})) }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    const otro = await screen.findByRole("navigation", { name: "Secciones" });
+    expect(await within(otro).findByRole("link", { name: "Proveedores" })).toBeTruthy();
+    expect(within(otro).queryByRole("link", { name: TITULO_CONSULTA_PROVEEDORES })).toBeNull();
+  });
+
+  it("sin proveedores.ver la dirección lleva al inicio", async () => {
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("contactos.ver") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: TITULO_CONSULTA_PROVEEDORES })).toBeNull());
+    expect(await screen.findByRole("link", { name: /Contactos de emergencia/ })).toBeTruthy();
   });
 });

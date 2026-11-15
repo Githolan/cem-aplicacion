@@ -29,7 +29,7 @@ def test_todos_los_archivos_validan_y_hay_uno_por_modulo():
     assert nombres == {
         "consorcios", "invitaciones", "padron", "mandatos", "fiscalizacion",
         "documentos", "liquidacion", "egresos", "fondo_reserva", "coeficientes", "auditoria",
-        "contactos",
+        "contactos", "proveedores",
     }  # fmt: skip
     for ruta in archivos():
         ArchivoPoliticas.model_validate(json.loads(ruta.read_text(encoding="utf-8")))
@@ -72,6 +72,7 @@ def test_politica_mal_formada_no_valida(cambio):
 
 BOOLEANOS = [
     ("concede_por_ambito", lambda v: {"concede_por_ambito": v}),
+    ("concede_por_configuracion", lambda v: {"concede_por_configuracion": v}),
     ("sin_modo", lambda v: {"sin_modo": v}),
     ("economica", lambda v: {"economica": v}),
     ("destinatario_unico", lambda v: {"destinatario_unico": v}),

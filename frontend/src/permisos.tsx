@@ -138,6 +138,20 @@ export function cumpleEnAlguno(porEdificio: ReadonlyMap<string, readonly string[
   return [...porEdificio.values()].some((alcanzadas) => cumple(alcanzadas, requisito));
 }
 
+/**
+ * Si se ofrece una pantalla que otra cubre (`salvo`): en algún edificio la persona cumple la
+ * pantalla y no la otra. Se decide edificio por edificio: quien gestiona proveedores en uno y solo
+ * los consulta en otro sigue viendo la consulta, porque la gestión no le ofrece ese edificio (Codex
+ * en #249).
+ */
+export function ofreceEnAlguno(
+  porEdificio: ReadonlyMap<string, readonly string[]>,
+  requisito: Requisito,
+  salvo?: Requisito,
+): boolean {
+  return [...porEdificio.values()].some((alcanzadas) => cumple(alcanzadas, requisito) && (salvo === undefined || !cumple(alcanzadas, salvo)));
+}
+
 /** Los edificios donde la pantalla sirve: el selector no ofrece otros. Mientras no se sabe, todos. */
 export function useEdificiosCon<T extends { id: string }>(consorcios: readonly T[], requisito: Requisito): readonly T[] {
   const porEdificio = useAccionesPorEdificio();
@@ -228,6 +242,9 @@ export const REQUISITOS = {
   contactosGestion: [["contactos.gestionar"]],
   documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
   proveedores: [["egresos.preparar_orden"]],
+  /** La consulta de proveedores y sus seguros (app 0104): los roles que la configuración del
+   * edificio lista. Quien ya gestiona proveedores no la ve en el menú: tiene la ficha completa. */
+  consultaProveedores: [["proveedores.ver"]],
   ordenes: [["egresos.preparar_orden"]],
   /** Subir la factura que falta a una orden aprobada (app 0099): lo mismo que cargarla al preparar. */
   subirFactura: [["egresos.preparar_orden", "documentos.cargar"]],

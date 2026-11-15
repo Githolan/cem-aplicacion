@@ -5,6 +5,7 @@ import { RUTA_CUENTA } from "./Cuenta";
 import { RUTA_DOCUMENTOS } from "./Documentos";
 import { RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
+import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./egresos/ConsultaProveedores";
 import { RUTA_PROVEEDORES } from "./egresos/Proveedores";
 import { RUTA_INICIO } from "./enlace";
 import { Icono, type NombreIcono } from "./Iconos";
@@ -13,7 +14,7 @@ import { RUTA_MANDATOS } from "./Mandatos";
 import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
-import { cumpleEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
+import { ofreceEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
 import { useSesionConNombre } from "./sesion";
 
 interface Destino {
@@ -25,6 +26,8 @@ interface Destino {
   icono: NombreIcono;
   /** Sin requisito: lo tiene toda persona con sesión. */
   requisito?: Requisito;
+  /** No se ofrece a quien ya cumple esto (tiene otra pantalla que lo cubre). */
+  salvo?: Requisito;
 }
 
 const PRINCIPALES: readonly Destino[] = [
@@ -41,6 +44,13 @@ const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_MANDATOS, texto: "Mandatos y decisiones", icono: "balanza", requisito: REQUISITOS.mandatos },
   { ruta: RUTA_PADRON, texto: "Padrón del edificio", icono: "personas", requisito: REQUISITOS.padron },
   { ruta: RUTA_PROVEEDORES, texto: "Proveedores", icono: "proveedor", requisito: REQUISITOS.proveedores },
+  {
+    ruta: RUTA_CONSULTA_PROVEEDORES,
+    texto: TITULO_CONSULTA_PROVEEDORES,
+    icono: "proveedor",
+    requisito: REQUISITOS.consultaProveedores,
+    salvo: REQUISITOS.proveedores,
+  },
   { ruta: RUTA_LIQUIDACION, texto: "Liquidación (borrador)", icono: "calculadora", requisito: REQUISITOS.liquidacion },
   // Con la navegación a la vista también en el Panel (informe de fricción, AC-09).
   { ruta: RUTA_PANEL, texto: TITULO_PANEL, icono: "grafico", requisito: REQUISITOS.panel },
@@ -78,8 +88,7 @@ function Item({ destino, secundario }: { destino: Destino; secundario?: boolean 
 
 export function Navegacion() {
   const porEdificio = useAccionesPorEdificio();
-  const ofrecido = (d: Destino) =>
-    d.requisito === undefined || (porEdificio !== null && cumpleEnAlguno(porEdificio, d.requisito));
+  const ofrecido = (d: Destino) => d.requisito === undefined || (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo));
   const administracion = DE_ADMINISTRACION.filter(ofrecido);
   return (
     <nav className="navegacion" aria-label="Secciones">

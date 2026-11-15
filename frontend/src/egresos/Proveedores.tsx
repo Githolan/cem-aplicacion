@@ -38,6 +38,7 @@ import {
   TEXTO_ESTADO_PROVEEDOR,
 } from "./comun";
 import { DocumentacionProveedor } from "./DocumentacionProveedor";
+import { ExigenciaLegal } from "./ExigenciaLegal";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
 import { REQUISITOS } from "../permisos";
@@ -59,6 +60,7 @@ type FichaProveedor = components["schemas"]["ProveedorConVersiones"];
 /** La marca de la lista (RF50, app 0103): vencido marca, no excluye. */
 export const MARCA_VENCIDA = "Documentación vencida";
 export const MARCA_POR_VENCER = "Documentación por vencer";
+export const MARCA_FALTANTE = "Le falta documentación legal";
 
 export const RUTA_PROVEEDORES = "/egresos/proveedores";
 const CBU = "[0-9]{22}";
@@ -66,7 +68,7 @@ const CBU = "[0-9]{22}";
 type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_servicio" }
-  | { tipo: "ok"; proveedores: Proveedor[]; vencida: ReadonlySet<string>; porVencer: ReadonlySet<string> };
+  | { tipo: "ok"; proveedores: Proveedor[]; vencida: ReadonlySet<string>; porVencer: ReadonlySet<string>; faltante: ReadonlySet<string> };
 
 type Datos = {
   cuit: string;
@@ -285,6 +287,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             proveedores: data.elementos,
             vencida: new Set(data.documentacion_vencida),
             porVencer: new Set(data.documentacion_por_vencer),
+            faltante: new Set(data.documentacion_faltante),
           });
         else if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver los proveedores", reintentar: () => setVuelta((v) => v + 1) });
@@ -574,6 +577,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                           TEXTO_ESTADO_PROVEEDOR[p.estado],
                           `Cuenta ${cuentaEnmascarada(p.cuenta_ultimos_digitos)}`,
                           lectura.vencida.has(p.id) ? MARCA_VENCIDA : lectura.porVencer.has(p.id) ? MARCA_POR_VENCER : null,
+                          lectura.faltante.has(p.id) ? MARCA_FALTANTE : null,
                         ]
                           .filter(Boolean)
                           .join(" · ")} />
@@ -613,11 +617,27 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   </ol>
                 </details>
               )}
+              <ExigenciaLegal
+                consorcio={consorcio}
+                proveedorId={ficha.proveedor.id}
+                rubros={ficha.rubros_legales}
+                faltantes={ficha.faltantes}
+                requisitos={ficha.requisitos}
+                modo={ficha.configuracion.modo_exigencia}
+                puedeCambiar
+                aEntrar={aEntrar}
+                alCambiar={() => {
+                  verFicha(ficha.proveedor);
+                  setVuelta((v) => v + 1);
+                }}
+              />
               <DocumentacionProveedor
                 consorcio={consorcio}
                 proveedor={ficha.proveedor}
                 documentacion={ficha.documentacion}
                 puedeCargar={ficha.puede_cargar_documentacion}
+                requisitos={ficha.requisitos}
+                admiteNoVence={ficha.configuracion.admite_no_vence}
                 aEntrar={aEntrar}
                 alCambiar={() => {
                   verFicha(ficha.proveedor);
