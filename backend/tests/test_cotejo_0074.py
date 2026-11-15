@@ -3,7 +3,8 @@ cuentas no son de un banco (prefijo 999), los extractos los arma esta prueba y n
 
 Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §10 y §14. La escena es la de
 `test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia. Por eso
-coteja mc1 o mc2, y la administración no.
+coteja mc2 (o una tercera persona del Consejo), y ni mc1 (`0102`: quien aprobó no concilia) ni
+la administración.
 """
 
 import importlib.util
@@ -37,6 +38,7 @@ from tests.test_pago_manual_0055 import (
     emitida,
     llamar,
     orden,
+    otro_consejero,
     registrada,
     segunda_apertura,
 )
@@ -153,7 +155,7 @@ def tildar(e, quien, *pagos):
 def test_lo_conciliado_aparece_y_lo_que_falta_conciliar_no(motor_migrate, e):
     o, p = pagado(motor_migrate, e)
     sin_conciliar = registrada(motor_migrate, e, emitida(motor_migrate, e))
-    respuesta = pendientes(e, e.mc1)
+    respuesta = pendientes(e, e.mc2)
     assert ids(respuesta) == [str(p)]
     assert str(sin_conciliar) not in ids(respuesta)
     assert respuesta["elementos"][0]["orden_id"] == str(o)
@@ -163,20 +165,21 @@ def test_lo_conciliado_aparece_y_lo_que_falta_conciliar_no(motor_migrate, e):
 def test_tildar_guarda_quien_y_cuando_y_no_cambia_la_orden(motor_migrate, e):
     o, p = pagado(motor_migrate, e)
     antes = orden(motor_migrate, o)
-    r = tildar(e, e.mc1, p)
+    r = tildar(e, e.mc2, p)
     assert r.status_code == 200 and r.json() == {"cotejados": 1}
     fila = cotejo(motor_migrate, p)
-    assert fila["cotejado_por"] == e.mc1 and fila["cotejado_en"] is not None
+    assert fila["cotejado_por"] == e.mc2 and fila["cotejado_en"] is not None
     assert fila["origen"] == "manual" and fila["movimiento_id"] is None
     assert orden(motor_migrate, o) == antes
-    assert pendientes(e, e.mc1)["elementos"] == []
+    assert pendientes(e, e.mc2)["elementos"] == []
 
 
-def test_tildar_dos_veces_deja_un_solo_cotejo(motor_migrate, e):
+def test_tildar_dos_veces_deja_un_solo_cotejo(motor_migrate, motor_app, e):
     _, p = pagado(motor_migrate, e)
-    assert tildar(e, e.mc1, p).json() == {"cotejados": 1}
-    assert tildar(e, e.mc2, p).json() == {"cotejados": 0}
-    assert cotejo(motor_migrate, p)["cotejado_por"] == e.mc1
+    y = otro_consejero(motor_migrate, motor_app, e)
+    assert tildar(e, e.mc2, p).json() == {"cotejados": 1}
+    assert tildar(e, y, p).json() == {"cotejados": 0}
+    assert cotejo(motor_migrate, p)["cotejado_por"] == e.mc2
     assert cuantos(motor_migrate, "nucleo.cotejo_pago", e.cons) == 1
 
 
@@ -188,43 +191,66 @@ def test_lo_que_falta_conciliar_no_se_tilda(motor_migrate, e):
 
 def test_un_pago_inventado_no_se_tilda_y_no_deja_nada_a_medias(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
-    assert codigo(tildar(e, e.mc1, p, uuid4())) == (404, "no_encontrado")
+    assert codigo(tildar(e, e.mc2, p, uuid4())) == (404, "no_encontrado")
     assert cotejo(motor_migrate, p) is None
-    assert tildar(e, e.mc1, p).status_code == 200  # control
+    assert tildar(e, e.mc2, p).status_code == 200  # control
 
 
 def test_la_pagina_sigue_igual_aunque_se_coteje_en_el_medio(motor_migrate, e):
     pagos = [pagado(motor_migrate, e)[1] for _ in range(3)]
-    primera = pendientes(e, e.mc1, "?limite=1")
+    primera = pendientes(e, e.mc2, "?limite=1")
     assert ids(primera) == [str(pagos[0])] and primera["siguiente"] == str(pagos[0])
-    assert tildar(e, e.mc1, pagos[0]).status_code == 200
-    segunda = pendientes(e, e.mc1, f"?limite=1&despues={primera['siguiente']}")
+    assert tildar(e, e.mc2, pagos[0]).status_code == 200
+    segunda = pendientes(e, e.mc2, f"?limite=1&despues={primera['siguiente']}")
     assert ids(segunda) == [str(pagos[1])]
-    tercera = pendientes(e, e.mc1, f"?limite=1&despues={segunda['siguiente']}")
+    tercera = pendientes(e, e.mc2, f"?limite=1&despues={segunda['siguiente']}")
     assert ids(tercera) == [str(pagos[2])] and tercera["siguiente"] is None
 
 
 # Quién -----------------------------------------------------------------------------------------
 
 
-def test_quien_vio_la_cuenta_no_coteja_y_otro_consejero_si(motor_migrate, e):
+def test_quien_vio_la_cuenta_no_coteja_y_otro_consejero_si(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
     p = registrada(motor_migrate, e, o)
     segunda_apertura(motor_migrate, e, e.mc2, o)
-    llamar(motor_migrate, e, e.mc1, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
+    y = otro_consejero(motor_migrate, motor_app, e)  # mc1 aprobó: no concilia (`0102`)
+    llamar(motor_migrate, e, y, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
     assert pendientes(e, e.mc2)["elementos"][0]["puede_cotejar"] is False
     assert codigo(tildar(e, e.mc2, p)) == (403, "no_es_quien_ejecuto")
     assert cotejo(motor_migrate, p) is None
-    assert pendientes(e, e.mc1)["elementos"][0]["puede_cotejar"] is True  # control
-    assert tildar(e, e.mc1, p).status_code == 200
+    assert pendientes(e, y)["elementos"][0]["puede_cotejar"] is True  # control
+    assert tildar(e, y, p).status_code == 200
 
 
-def test_quien_preparo_con_otra_cuenta_del_consejo_no_coteja(motor_migrate, motor_app, e):
+def test_quien_aprobo_no_coteja_ni_a_mano_ni_con_el_extracto(motor_migrate, motor_app, e):
+    """`0102`: quien aprobó la orden no coteja su pago, ni con otra cuenta suya, y la lista no se
+    lo ofrece. Si sube el extracto, ese pago queda para otra persona."""
+    _, p = pagado(motor_migrate, e)  # aprobada por mc1, conciliada por mc2
+    assert pendientes(e, e.mc1)["elementos"][0]["puede_cotejar"] is False
+    assert codigo(tildar(e, e.mc1, p)) == (403, "no_es_quien_aprobo")
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    assert codigo(tildar(e, otra, p)) == (403, "no_es_quien_aprobo")
+    cuerpo = extracto(linea_del_pago(motor_migrate, p))
+    resultado = subio(e, e.mc1, cuerpo)
+    assert resultado["para_otra_persona"] == 1 and resultado["cotejados"] == 0
+    assert cotejo(motor_migrate, p) is None
+    # Control: otro consejero lo ve ofrecido y sube lo mismo, y queda cotejado.
+    assert pendientes(e, e.mc2)["elementos"][0]["puede_cotejar"] is True
+    assert subio(e, e.mc2, cuerpo)["cotejados"] == 1
+    assert cotejo(motor_migrate, p)["cotejado_por"] == e.mc2
+
+
+def test_quien_preparo_y_registro_con_otra_cuenta_del_consejo_no_coteja(
+    motor_migrate, motor_app, e
+):
+    """En esta escena la administración también registró el pago: eso la deja afuera. Haber
+    preparado la orden, solo, ya no (`0102`)."""
     _, p = pagado(motor_migrate, e)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     assert pendientes(e, otra)["elementos"][0]["puede_cotejar"] is False
-    assert tildar(e, otra, p).status_code == 403
+    assert codigo(tildar(e, otra, p)) == (403, "no_es_quien_ejecuto")
     assert cotejo(motor_migrate, p) is None
 
 
@@ -254,19 +280,19 @@ def test_escribir_pide_el_gesto_y_leer_no(motor_migrate, e):
 def test_lo_que_coincide_por_numero_queda_cotejado_solo(motor_migrate, e):
     o, p = pagado(motor_migrate, e)
     antes = orden(motor_migrate, o)
-    resultado = subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)))
+    resultado = subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)))
     assert resultado["cotejados"] == 1 and resultado["movimientos_nuevos"] == 1
     assert resultado["aca_no_banco"] == [] and resultado["banco_no_aca"] == []
     fila = cotejo(motor_migrate, p)
-    assert fila["origen"] == "extracto" and fila["cotejado_por"] == e.mc1
+    assert fila["origen"] == "extracto" and fila["cotejado_por"] == e.mc2
     assert fila["movimiento_id"] is not None
     assert orden(motor_migrate, o) == antes
-    assert pendientes(e, e.mc1)["elementos"] == []
+    assert pendientes(e, e.mc2)["elementos"] == []
 
 
 def test_sin_numero_compara_por_importe_y_fecha(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
-    resultado = subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p, referencia="")))
+    resultado = subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p, referencia="")))
     assert resultado["cotejados"] == 1
     assert cotejo(motor_migrate, p)["origen"] == "extracto"
 
@@ -274,7 +300,7 @@ def test_sin_numero_compara_por_importe_y_fecha(motor_migrate, e):
 def test_sin_la_columna_del_numero_tambien_compara_por_importe_y_fecha(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     columnas = {k: v for k, v in COLUMNAS.items() if k != "numero_operacion"}
-    resultado = subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)), columnas)
+    resultado = subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)), columnas)
     assert resultado["cotejados"] == 1
 
 
@@ -289,12 +315,12 @@ def test_el_mismo_numero_con_otro_importe_no_coincide(motor_migrate, e):
 def test_dos_pagos_iguales_y_una_linea_sin_numero_se_miran(motor_migrate, e):
     pagos = [pagado(motor_migrate, e)[1] for _ in range(2)]
     linea_sola = linea_del_pago(motor_migrate, pagos[0], referencia="")
-    resultado = subio(e, e.mc1, extracto(linea_sola))
+    resultado = subio(e, e.mc2, extracto(linea_sola))
     assert resultado["cotejados"] == 0
     assert sorted(x["pago_id"] for x in resultado["aca_no_banco"]) == sorted(map(str, pagos))
     assert resultado["total_banco_no_aca"] == 1
     # Control: con las dos líneas no hay duda.
-    otra = subio(e, e.mc1, extracto(linea_sola, linea_sola))
+    otra = subio(e, e.mc2, extracto(linea_sola, linea_sola))
     assert otra["cotejados"] == 2 and otra["total_aca_no_banco"] == 0
 
 
@@ -302,7 +328,7 @@ def test_el_resultado_solo_trae_lo_que_hay_que_mirar_y_del_periodo(motor_migrate
     _, coincide = pagado(motor_migrate, e)
     _, falta_en_el_banco = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, coincide)["fecha_operacion"]
-    resultado = subio(e, e.mc1, extracto(
+    resultado = subio(e, e.mc2, extracto(
         linea_del_pago(motor_migrate, coincide),
         linea(fecha, "-12.400,00", "0048213999"),
     ))  # fmt: skip
@@ -314,7 +340,7 @@ def test_el_resultado_solo_trae_lo_que_hay_que_mirar_y_del_periodo(motor_migrate
     }]  # fmt: skip
     # Control: un extracto de otro período no dice nada de ese pago.
     viejo = fecha - timedelta(days=40)
-    otro = subio(e, e.mc1, extracto(linea(viejo, "-5,00", "0048210000")))
+    otro = subio(e, e.mc2, extracto(linea(viejo, "-5,00", "0048210000")))
     assert otro["aca_no_banco"] == [] and otro["total_banco_no_aca"] == 1
 
 
@@ -337,18 +363,21 @@ def test_lo_registrado_sin_conciliar_no_es_un_debito_sin_registrar_ni_se_coteja(
     assert cotejo(motor_migrate, p) is None
 
 
-def test_quien_vio_la_cuenta_sube_el_extracto_y_su_pago_queda_para_otro(motor_migrate, e):
+def test_quien_vio_la_cuenta_sube_el_extracto_y_su_pago_queda_para_otro(
+    motor_migrate, motor_app, e
+):
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
     p = registrada(motor_migrate, e, o)
     segunda_apertura(motor_migrate, e, e.mc2, o)
-    llamar(motor_migrate, e, e.mc1, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
+    y = otro_consejero(motor_migrate, motor_app, e)  # mc1 aprobó: no concilia (`0102`)
+    llamar(motor_migrate, e, y, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
     resultado = subio(e, e.mc2, cuerpo)
     assert resultado["para_otra_persona"] == 1 and resultado["cotejados"] == 0
     assert cotejo(motor_migrate, p) is None
     # Control: otro consejero sube lo mismo y queda cotejado.
-    assert subio(e, e.mc1, cuerpo)["cotejados"] == 1
+    assert subio(e, y, cuerpo)["cotejados"] == 1
 
 
 def test_la_base_no_acepta_un_par_que_no_coincide(motor_migrate, motor_app, e):
@@ -372,36 +401,38 @@ def test_la_base_no_acepta_un_par_que_no_coincide(motor_migrate, motor_app, e):
 # Reimportar ------------------------------------------------------------------------------------
 
 
-def test_reimportar_el_mismo_extracto_no_duplica(motor_migrate, e):
+def test_reimportar_el_mismo_extracto_no_duplica(motor_migrate, motor_app, e):
     _, p = pagado(motor_migrate, e)
     _, otro = pagado(motor_migrate, e)
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
     cuerpo = extracto(linea_del_pago(motor_migrate, p), linea(fecha, "-12,00", "0048213999"))
-    primero = subio(e, e.mc1, cuerpo)
+    primero = subio(e, e.mc2, cuerpo)
     assert primero["movimientos_nuevos"] == 2 and primero["cotejados"] == 1
     tablas = {t: cuantos(motor_migrate, t, e.cons) for t in TABLAS}
     assert tablas == {"nucleo.cotejo_pago": 1, "nucleo.importacion_extracto": 1,
                       "nucleo.movimiento_extracto": 2, "nucleo.columnas_extracto": 1}  # fmt: skip
 
-    segundo = subio(e, e.mc2, cuerpo)
+    segundo = subio(e, otro_consejero(motor_migrate, motor_app, e), cuerpo)
     assert {t: cuantos(motor_migrate, t, e.cons) for t in TABLAS} == tablas
     assert segundo["movimientos_nuevos"] == 0 and segundo["movimientos_repetidos"] == 2
     assert segundo["cotejados"] == 0 and segundo["ya_cotejados"] == 1
     # Lo que hay que mirar sigue igual.
     assert [x["pago_id"] for x in segundo["aca_no_banco"]] == [str(otro)]
     assert segundo["total_banco_no_aca"] == 1
-    assert cotejo(motor_migrate, p)["cotejado_por"] == e.mc1
+    assert cotejo(motor_migrate, p)["cotejado_por"] == e.mc2
 
 
-def test_el_mismo_extracto_con_otra_codificacion_y_otro_separador_no_duplica(motor_migrate, e):
+def test_el_mismo_extracto_con_otra_codificacion_y_otro_separador_no_duplica(
+    motor_migrate, motor_app, e
+):
     _, p = pagado(motor_migrate, e)
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p, descripcion="Débito")))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p, descripcion="Débito")))
     d = dato_pago(motor_migrate, p)
     otro = "\r\n".join((
         ENCABEZADO.replace(";", "\t"),
         f"{d['fecha_operacion'].isoformat()}\tDébito\t-{PESOS}\t{d['numero_operacion']}",
     )).encode("cp1252")  # fmt: skip
-    resultado = subio(e, e.mc2, otro)
+    resultado = subio(e, otro_consejero(motor_migrate, motor_app, e), otro)
     assert resultado["movimientos_nuevos"] == 0 and resultado["ya_cotejados"] == 1
     assert cuantos(motor_migrate, "nucleo.movimiento_extracto", e.cons) == 1
 
@@ -427,9 +458,9 @@ def test_reimportar_coteja_lo_que_mientras_tanto_se_concilio(motor_migrate, e):
     o = emitida(motor_migrate, e)
     p = registrada(motor_migrate, e, o)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    assert subio(e, e.mc1, cuerpo)["esperan_conciliar"] == 1
+    assert subio(e, e.mc2, cuerpo)["esperan_conciliar"] == 1
     llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
-    resultado = subio(e, e.mc1, cuerpo)
+    resultado = subio(e, e.mc2, cuerpo)
     assert resultado["cotejados"] == 1 and resultado["movimientos_nuevos"] == 0
 
 
@@ -437,26 +468,29 @@ def test_un_reintento_con_la_misma_clave_repite_la_respuesta(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
     clave = clave_idempotencia()
-    primero = subir(e, e.mc1, cuerpo, clave=clave)
-    segundo = subir(e, e.mc1, cuerpo, clave=clave)
+    primero = subir(e, e.mc2, cuerpo, clave=clave)
+    segundo = subir(e, e.mc2, cuerpo, clave=clave)
     assert primero.status_code == 200 and segundo.json() == primero.json()
     assert segundo.json()["cotejados"] == 1
 
 
-def test_un_reintento_repite_la_respuesta_aunque_las_columnas_hayan_cambiado(motor_migrate, e):
+def test_un_reintento_repite_la_respuesta_aunque_las_columnas_hayan_cambiado(
+    motor_migrate, motor_app, e
+):
     """Codex en #211: el reintento de lo que ya salió bien no depende de lo guardado después."""
     _, p = pagado(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    subio(e, e.mc1, extracto(linea(date.today(), "-1,00")))  # deja las columnas guardadas
+    subio(e, e.mc2, extracto(linea(date.today(), "-1,00")))  # deja las columnas guardadas
     clave = clave_idempotencia()
-    primero = subir(e, e.mc1, cuerpo, None, clave=clave)
+    primero = subir(e, e.mc2, cuerpo, None, clave=clave)
     assert primero.status_code == 200 and primero.json()["cotejados"] == 1
     otras = {"fecha": "Dia", "importe": "Debito", "signo": "sin_signo"}
-    subio(e, e.mc2, b"Dia;Debito;Comprobante\n05/11/2026;100,00;0048213377\n", otras)
-    segundo = subir(e, e.mc1, cuerpo, None, clave=clave)
+    y = otro_consejero(motor_migrate, motor_app, e)
+    subio(e, y, b"Dia;Debito;Comprobante\n05/11/2026;100,00;0048213377\n", otras)
+    segundo = subir(e, e.mc2, cuerpo, None, clave=clave)
     assert segundo.status_code == 200 and segundo.json() == primero.json()
     # Control: con otra clave es otro pedido, y ese sí mira las columnas de ahora.
-    assert codigo(subir(e, e.mc1, cuerpo, None)) == (422, "columnas_no_encontradas")
+    assert codigo(subir(e, e.mc2, cuerpo, None)) == (422, "columnas_no_encontradas")
 
 
 # Columnas --------------------------------------------------------------------------------------
@@ -465,12 +499,13 @@ def test_un_reintento_repite_la_respuesta_aunque_las_columnas_hayan_cambiado(mot
 def test_las_columnas_quedan_guardadas_por_edificio(motor_migrate, motor_app, e):
     _, p = pagado(motor_migrate, e)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
-    assert codigo(subir(e, e.mc1, cuerpo, None)) == (409, "columnas_sin_elegir")
-    assert vista(e, e.mc1, cuerpo).json()["columnas_guardadas"] is None
-    subio(e, e.mc1, cuerpo)
-    guardadas = vista(e, e.mc1, cuerpo).json()["columnas_guardadas"]
+    assert codigo(subir(e, e.mc2, cuerpo, None)) == (409, "columnas_sin_elegir")
+    assert vista(e, e.mc2, cuerpo).json()["columnas_guardadas"] is None
+    subio(e, e.mc2, cuerpo)
+    guardadas = vista(e, e.mc2, cuerpo).json()["columnas_guardadas"]
     assert guardadas == COLUMNAS | {"moneda": "ARS"}
-    assert subio(e, e.mc2, cuerpo, None)["ya_cotejados"] == 1  # sin elegir de nuevo
+    y = otro_consejero(motor_migrate, motor_app, e)
+    assert subio(e, y, cuerpo, None)["ya_cotejados"] == 1  # sin elegir de nuevo
     otro = escena_economica(motor_migrate, motor_app)
     assert vista(otro, otro.mc1, cuerpo).json()["columnas_guardadas"] is None
     assert codigo(subir(otro, otro.mc1, cuerpo, None)) == (409, "columnas_sin_elegir")
@@ -537,12 +572,12 @@ def test_demasiadas_lineas_se_dice_aparte(e):
 
 
 def test_la_lista_dice_cuantos_pagos_entran_en_un_pedido(motor_migrate, e):
-    maximo = pendientes(e, e.mc1)["maximo_pagos"]
+    maximo = pendientes(e, e.mc2)["maximo_pagos"]
     _, p = pagado(motor_migrate, e)
-    r = post(e, e.mc1, "pagos/cotejo", {"pagos": [str(p)] + [str(uuid4()) for _ in range(maximo)]})
+    r = post(e, e.mc2, "pagos/cotejo", {"pagos": [str(p)] + [str(uuid4()) for _ in range(maximo)]})
     assert r.status_code == 422
     assert cotejo(motor_migrate, p) is None
-    assert tildar(e, e.mc1, p).status_code == 200  # control
+    assert tildar(e, e.mc2, p).status_code == 200  # control
 
 
 def test_solo_se_acepta_un_csv(e):
@@ -612,7 +647,7 @@ def test_otro_consorcio_no_ve_las_filas(motor_migrate, motor_app, e, tabla):
     """La política sola, contra PostgreSQL real: `cem_app` no tiene permiso sobre estas tablas, y
     acá se le da mientras dura la prueba."""
     _, p = pagado(motor_migrate, e)
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)))
     otro = escena_economica(motor_migrate, motor_app)
     with pytest.raises(DBAPIError) as error:
         with transaccion(motor_app, persona_id=e.mc1, consorcio_id=e.cons) as c:
@@ -651,7 +686,7 @@ def test_el_mismo_extracto_en_otro_consorcio_es_otro(motor_migrate, motor_app, e
 
 def test_la_historia_no_se_borra(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
-    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p)))
+    subio(e, e.mc2, extracto(linea_del_pago(motor_migrate, p)))
     for tabla in ("nucleo.cotejo_pago", "nucleo.movimiento_extracto",
                   "nucleo.importacion_extracto"):  # fmt: skip
         with pytest.raises(DBAPIError):
@@ -662,8 +697,8 @@ def test_la_historia_no_se_borra(motor_migrate, e):
 
 def test_cotejar_deja_auditoria(motor_migrate, e):
     o, p = pagado(motor_migrate, e)
-    assert tildar(e, e.mc1, p).status_code == 200
-    subio(e, e.mc1, extracto(linea(date.today(), "-1,00")))
+    assert tildar(e, e.mc2, p).status_code == 200
+    subio(e, e.mc2, extracto(linea(date.today(), "-1,00")))
     with motor_migrate.connect() as c:
         acciones = set(c.execute(
             text("select accion from auditoria.eventos where consorcio_id = :c"), {"c": e.cons},
@@ -685,7 +720,7 @@ def _migracion_0074():
 def test_la_guarda_del_downgrade_se_niega_con_un_cotejo(motor_migrate, e):
     guarda = _migracion_0074().GUARDA_DOWNGRADE
     _, p = pagado(motor_migrate, e)
-    assert tildar(e, e.mc1, p).status_code == 200
+    assert tildar(e, e.mc2, p).status_code == 200
     with motor_migrate.connect() as c, c.begin() as tx:
         with pytest.raises(DBAPIError) as error, c.begin_nested():
             c.execute(text(guarda))

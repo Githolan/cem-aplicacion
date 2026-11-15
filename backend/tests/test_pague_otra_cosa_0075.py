@@ -3,7 +3,8 @@ Datos SINTETICOS / PRUEBA / NO REAL: ninguna cuenta es de un banco (prefijo 999)
 dinero.
 
 Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §7, §9, §14 y §17. La escena es la de
-`test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia.
+`test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia, resuelve
+y coteja (`0102`: quien aprobó no concilia).
 """
 
 import importlib.util
@@ -67,6 +68,7 @@ from tests.test_pago_manual_0055 import (
     con_ejecutar,
     emitida,
     evidencia,
+    otro_consejero,
     registrada,
     segunda_apertura,
     ver,
@@ -323,19 +325,19 @@ def test_el_extracto_reconoce_la_transferencia_de_una_diferencia(motor_migrate, 
     d = con_diferencia(motor_migrate, e, o)
     cuerpo = extracto(linea_de(motor_migrate, d))
     # Sin resolver espera, como un pago sin conciliar: tampoco es un débito sin registrar.
-    r = subio(e, e.mc1, cuerpo)
+    r = subio(e, e.mc2, cuerpo)
     assert (r["esperan_conciliar"], r["cotejados"], r["total_banco_no_aca"]) == (1, 0, 0)
     assert cotejo_de(motor_migrate, d) is None
     resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
     antes = orden(motor_migrate, o)
-    r = subio(e, e.mc1, cuerpo)
+    r = subio(e, e.mc2, cuerpo)
     assert (r["cotejados"], r["total_banco_no_aca"], r["aca_no_banco"]) == (1, 0, [])
     atado = cotejo_de(motor_migrate, d)
     assert (atado["origen"], atado["pago_id"]) == ("extracto", None)
-    assert atado["movimiento_id"] is not None and atado["cotejado_por"] == e.mc1
+    assert atado["movimiento_id"] is not None and atado["cotejado_por"] == e.mc2
     assert orden(motor_migrate, o) == antes
     # Reimportar no la vuelve a contar ni la devuelve como débito sin registrar.
-    r = subio(e, e.mc1, cuerpo)
+    r = subio(e, e.mc2, cuerpo)
     assert (r["cotejados"], r["ya_cotejados"], r["total_banco_no_aca"]) == (0, 1, 0)
 
 
@@ -361,35 +363,36 @@ def test_lo_reclamado_igual_salio_del_banco(motor_migrate, e, recuperada):
     if recuperada:
         llamar(motor_migrate, e, e.mc2, RECUPERAR, orden=o, diferencia=d)
         assert orden(motor_migrate, o)["estado"] == "fallida"
-    r = subio(e, e.mc1, extracto(linea_de(motor_migrate, d)))
+    r = subio(e, e.mc2, extracto(linea_de(motor_migrate, d)))
     assert (r["cotejados"], r["total_banco_no_aca"]) == (1, 0)
 
 
 def test_a_mano_se_tilda_una_sola_vez_y_con_lo_real(motor_migrate, e):
     o = emitida(motor_migrate, e)
     d = con_diferencia(motor_migrate, e, o)
-    assert pendientes(e, e.mc1)["elementos"] == []  # sin resolver, todavía no
+    assert pendientes(e, e.mc2)["elementos"] == []  # sin resolver, todavía no
     resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
-    [pendiente] = pendientes(e, e.mc1)["elementos"]
+    [pendiente] = pendientes(e, e.mc2)["elementos"]
     assert pendiente["pago_id"] == str(d)
     assert pendiente["importe_centavos"] == int(REAL_DE_MENOS * 100)
     assert pendiente["puede_cotejar"] is True
-    assert tildar(e, e.mc1, d).json() == {"cotejados": 1}
-    assert tildar(e, e.mc1, d).json() == {"cotejados": 0}
+    assert tildar(e, e.mc2, d).json() == {"cotejados": 1}
+    assert tildar(e, e.mc2, d).json() == {"cotejados": 0}
     assert cotejo_de(motor_migrate, d)["origen"] == "manual"
-    assert pendientes(e, e.mc1)["elementos"] == []
+    assert pendientes(e, e.mc2)["elementos"] == []
 
 
-def test_quien_registro_la_diferencia_no_la_coteja(motor_migrate, e):
+def test_quien_registro_la_diferencia_no_la_coteja(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
     d = con_diferencia(motor_migrate, e, o, quien=e.mc2)
-    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real", quien=e.mc1)
+    y = otro_consejero(motor_migrate, motor_app, e)  # mc1 aprobó: no resuelve (`0102`)
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real", quien=y)
     assert pendientes(e, e.mc2)["elementos"][0]["puede_cotejar"] is False
     assert codigo(tildar(e, e.mc2, d)) == (403, "no_es_quien_ejecuto")
     assert cotejo_de(motor_migrate, d) is None
-    assert pendientes(e, e.mc1)["elementos"][0]["puede_cotejar"] is True  # control
-    assert tildar(e, e.mc1, d).status_code == 200
+    assert pendientes(e, y)["elementos"][0]["puede_cotejar"] is True  # control
+    assert tildar(e, y, d).status_code == 200
 
 
 def test_quien_preparo_no_coteja_la_diferencia(motor_migrate, motor_app, e):
@@ -576,7 +579,7 @@ def test_quien_vio_la_cuenta_sin_registrar_no_ve_resolver_y_da_403(motor_migrate
     segunda_apertura(motor_migrate, e, x, o)
     f = ficha(e, x, o)
     assert (f["paso"], f["puede_resolver_diferencia"]) == ("espera_resolver", False)
-    assert ficha(e, e.mc1, o)["puede_resolver_diferencia"]  # control: mc1 no la vio
+    assert ficha(e, e.mc2, o)["puede_resolver_diferencia"]  # control: mc2 no la vio ni aprobó
     r = post(e, x, f"ordenes-pago/{o}/pago-manual/diferencia/{d}/resolucion",
              {"resolucion": "reclamo"})  # fmt: skip
     assert r.status_code == 403, r.text
@@ -584,18 +587,19 @@ def test_quien_vio_la_cuenta_sin_registrar_no_ve_resolver_y_da_403(motor_migrate
     assert fila_de(motor_migrate, d)["resolucion"] is None
 
 
-def test_quien_preparo_no_resuelve(motor_migrate, motor_app, e):
+def test_quien_aprobo_no_resuelve(motor_migrate, motor_app, e):
+    """`0102`: quien aprobó la orden no resuelve la diferencia de su pago."""
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     o = llamar(motor_migrate, e, x, PREPARAR)
     llamar(motor_migrate, e, x, ENVIAR, orden=o, version=1)
-    if orden(motor_migrate, o)["estado"] == "en_revision":
-        llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1,
-               huella=huella(motor_migrate, o, 1))  # fmt: skip
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1,
+           huella=huella(motor_migrate, o, 1))  # fmt: skip
     llamar(motor_migrate, e, e.adm, EMITIR, orden=o, version=1)
     d = con_diferencia(motor_migrate, e, o)
-    niega(motor_migrate, e, x, RESOLVER, "no_es_quien_preparo", orden=o, diferencia=d,
+    niega(motor_migrate, e, e.mc1, RESOLVER, "no_es_quien_aprobo", orden=o, diferencia=d,
           resolucion="reclamo")  # fmt: skip
-    assert not ficha(e, x, o)["puede_resolver_diferencia"]
+    assert not ficha(e, e.mc1, o)["puede_resolver_diferencia"]
     assert ficha(e, e.mc2, o)["puede_resolver_diferencia"]  # control
 
 

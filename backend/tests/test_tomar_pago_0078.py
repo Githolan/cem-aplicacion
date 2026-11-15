@@ -1,7 +1,9 @@
 """Un solo pagador y «Tomar el pago» contra PostgreSQL real (`0078`). Datos SINTETICOS / PRUEBA / NO
 REAL: ninguna cuenta es de un banco (prefijo 999) y no se mueve dinero.
 
-Decisión 1 del propietario, 07-11-2026. La escena es la de `test_pago_manual_0055`.
+Decisión 1 del propietario, 07-11-2026. La escena es la de `test_pago_manual_0055`. Los controles
+de lo que se concilia los hace una tercera persona del Consejo: mc1 aprobó y, desde `0102`, no
+concilia; mc2 tomó el pago.
 """
 
 from dataclasses import replace
@@ -35,6 +37,7 @@ from tests.test_pago_manual_0055 import (
     niega,
     otorgar,
     otra_cuenta_en_el_consejo,
+    otro_consejero,
     ver,
 )
 from tests.test_pague_otra_cosa_0075 import DIFERENCIA
@@ -301,7 +304,7 @@ def ofrece_conciliar(e, quien, o) -> bool:
     return elemento["puede_conciliar"]
 
 
-def test_quien_tomo_no_concilia_lo_que_registro_el_pagador(motor_migrate, e):
+def test_quien_tomo_no_concilia_lo_que_registro_el_pagador(motor_migrate, motor_app, e):
     o, p = por_conciliar(motor_migrate, e)
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
     niega(motor_migrate, e, e.mc2, CONCILIAR, "no_es_quien_ejecuto", **datos)  # la base
@@ -311,10 +314,11 @@ def test_quien_tomo_no_concilia_lo_que_registro_el_pagador(motor_migrate, e):
     )  # la API, antes, con el motivo
     assert ficha(e, e.mc2, o)["puede_conciliar"] is False
     assert ofrece_conciliar(e, e.mc2, o) is False
-    # Control: otro consejero que no tomó sí.
-    assert ficha(e, e.mc1, o)["puede_conciliar"] is True
-    assert ofrece_conciliar(e, e.mc1, o) is True
-    assert conciliacion(e, e.mc1, o, p).status_code == 200
+    # Control: otro consejero que no tomó ni aprobó sí.
+    y = otro_consejero(motor_migrate, motor_app, e)
+    assert ficha(e, y, o)["puede_conciliar"] is True
+    assert ofrece_conciliar(e, y, o) is True
+    assert conciliacion(e, y, o, p).status_code == 200
 
 
 def test_quien_tomo_tampoco_concilia_con_otra_cuenta(motor_migrate, motor_app, e):
@@ -328,31 +332,34 @@ def test_quien_tomo_tampoco_concilia_con_otra_cuenta(motor_migrate, motor_app, e
 
 def test_quien_tomo_no_coteja_ni_deshace_el_cotejo(motor_migrate, motor_app, e):
     o, p = por_conciliar(motor_migrate, e)
-    assert conciliacion(e, e.mc1, o, p).status_code == 200
+    y = otro_consejero(motor_migrate, motor_app, e)  # ni tomó ni aprobó
+    assert conciliacion(e, y, o, p).status_code == 200
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc2)
     for quien in (e.mc2, otra):
         assert codigo(tildar(e, quien, p)) == (403, "no_es_quien_ejecuto")
         [elemento] = get(e, quien, "pagos/cotejo").json()["elementos"]
         assert elemento["puede_cotejar"] is False  # la pantalla no lo ofrece
-    assert tildar(e, e.mc1, p).status_code == 200  # control
+    assert tildar(e, y, p).status_code == 200  # control
     motivo = {"motivo": "SINTETICO: era otro débito"}
     r = post(e, e.mc2, f"pagos/cotejo/{p}/anulacion", motivo)
     assert codigo(r) == (403, "no_es_quien_ejecuto")
-    assert post(e, e.mc1, f"pagos/cotejo/{p}/anulacion", motivo).status_code == 200  # control
+    assert post(e, y, f"pagos/cotejo/{p}/anulacion", motivo).status_code == 200  # control
 
 
-def test_quien_tomo_no_confirma_que_no_se_pago(motor_migrate, e):
+def test_quien_tomo_no_confirma_que_no_se_pago(motor_migrate, motor_app, e):
     o = tomada_por_un_consejero(motor_migrate, e)
+    y = otro_consejero(motor_migrate, motor_app, e)  # ni tomó ni aprobó
     d = declarada(motor_migrate, e, e.adm, o)
     camino = f"ordenes-pago/{o}/pago-manual/no-realizado/{d}/confirmacion"
     assert codigo(post(e, e.mc2, camino, {})) == (403, "ya_participo")
-    assert post(e, e.mc1, camino, {}).status_code == 200  # control
+    assert post(e, y, camino, {}).status_code == 200  # control
 
 
-def test_quien_tomo_no_resuelve_la_diferencia(motor_migrate, e):
+def test_quien_tomo_no_resuelve_la_diferencia(motor_migrate, motor_app, e):
     o = tomada_por_un_consejero(motor_migrate, e)
+    y = otro_consejero(motor_migrate, motor_app, e)  # ni tomó ni aprobó
     d = llamar(motor_migrate, e, e.adm, DIFERENCIA, **datos_diferencia(motor_migrate, e, o))
     camino = f"ordenes-pago/{o}/pago-manual/diferencia/{d}/resolucion"
     resolver = {"resolucion": "reclamo"}
     assert codigo(post(e, e.mc2, camino, resolver)) == (403, "ya_participo")
-    assert post(e, e.mc1, camino, resolver).status_code == 200  # control
+    assert post(e, y, camino, resolver).status_code == 200  # control

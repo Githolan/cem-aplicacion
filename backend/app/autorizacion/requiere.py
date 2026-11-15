@@ -69,8 +69,8 @@ YA_PARTICIPO: dict[tuple[str, CodigoSeparacion], str] = {
         "egresos.ejecutar_pago",
         _S.NO_ES_QUIEN_APROBO,
     ): "La aprobó esta cuenta: la paga otra persona.",
-    ("egresos.conciliar_pago", _S.NO_ES_QUIEN_PREPARO): (
-        "La orden la preparó esta cuenta: el pago lo concilia otra persona del Consejo."
+    ("egresos.conciliar_pago", _S.NO_ES_QUIEN_APROBO): (
+        "La orden la aprobó esta cuenta: el pago lo concilia otra persona del Consejo."
     ),
     ("egresos.conciliar_pago", _S.NO_ES_QUIEN_EJECUTO): (
         "Esta cuenta vio la cuenta bancaria o registró el pago: concilia otra persona del Consejo."

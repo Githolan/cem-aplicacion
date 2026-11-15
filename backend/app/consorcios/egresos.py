@@ -17,8 +17,9 @@ sigue el paquete vigente, y la franja de cada versión dice si pide aprobación 
 - **Pago manual** (`0055`, piloto sin riel): el acto de ejecución da la cuenta completa a quien va a
   transferir (`egresos.ejecutar_pago`, con la misma separación que emitir) y registra la evidencia;
   otro miembro del Consejo concilia (`egresos.conciliar_pago`, con `egresos.aprobar_orden`): nunca
-  quien registró el pago ni quien preparó la orden. «No se pagó» lo declara quien ejecuta y lo
-  confirma el Consejo, con la misma separación.
+  quien registró el pago ni quien aprobó la orden; quien la preparó sí puede (decisión del
+  propietario del 15-11-2026, `0102`). «No se pagó» lo declara quien ejecuta y lo confirma el
+  Consejo, con la misma separación.
 
 Toda acción es económica (R10): segundo factor de menos de 10 minutos e identidad humana
 verificada. Las funciones de la base vuelven a exigir todo eso con la
@@ -296,7 +297,8 @@ ERRORES = {
         409, CodigoError.PROVEEDOR_SIN_CUENTA, "El proveedor no tiene cuenta destino.",
     ),
     "no_es_quien_aprobo": (
-        403, CodigoError.NO_ES_QUIEN_APROBO, "Quien aprobó la orden no la emite.",
+        403, CodigoError.NO_ES_QUIEN_APROBO,
+        "Quien aprobó la orden no la paga ni concilia su pago.",
     ),
     "no_es_quien_registro": (
         403, CodigoError.NO_ES_QUIEN_REGISTRO, "Quien registró el contrato no lo confirma.",
@@ -522,6 +524,9 @@ def _recortada(fila) -> dict:
 
 
 PREPARO = "select nucleo.lee_quien_preparo_la_orden(:o, :actor)"
+APROBO = "select nucleo.lee_quien_aprobo_la_orden(:o, :actor)"
+"""Si quien lee aprobó alguna versión de la orden, por la identidad humana guardada en cada
+aprobación y por la misma persona con otra cuenta (`0102`). Falla cerrada como `PREPARO`."""
 REGISTRO = "select nucleo.lee_quien_registro_el_contrato(:k, :actor)"
 """Si quien lee es quien preparó la orden o registró el contrato, por la identidad humana guardada
 en el acto y no por los vínculos de hoy (P3 115, `0054`). Fallan cerradas: sin identidad vigente
@@ -1580,12 +1585,11 @@ def _puede_resolver(
     a quien la vio y no registró se lo niega la base (403, regla 2). Declarar no cuenta para
     conciliar porque se puede declarar sin haberla visto, y no se le esconde a nadie lo que sí
     puede hacer. No audita ni concede: las rutas vuelven a decidir."""
-    if _ejecutar(c, conciliar, PREPARO, {"o": o.id}).scalar_one():
+    if _ejecutar(c, conciliar, APROBO, {"o": o.id}).scalar_one():
         return False, False
+    # Quien aprobó ya quedó afuera por la base (`APROBO`); falta quien ejecutó.
     personas = list(registraron | declararon | tomaron)
-    decisiones = conciliar.decidir_en(
-        c, [Entidad(preparado_por=o.preparada_por, ejecutado_por=p) for p in personas]
-    )
+    decisiones = conciliar.decidir_en(c, [Entidad(ejecutado_por=p) for p in personas])
     negadas = {p for p, d in zip(personas, decisiones, strict=True) if not d.permitido}
     concilia = bool(registraron) and negadas.isdisjoint(registraron | tomaron)
     return concilia, bool(personas) and not negadas
@@ -1608,14 +1612,23 @@ def _quienes_tomaron(c: Connection, lector: Permiso, orden: UUID | None) -> dict
     return tomaron
 
 
+def _aprobaron(lector: Permiso, motor, orden_id: UUID) -> tuple[UUID, ...]:
+    """Quiénes aprobaron alguna versión de la orden: no concilian su pago ni confirman que no se
+    hizo (decisión del propietario del 15-11-2026). La base compara además por la identidad
+    guardada en cada aprobación (`nucleo.exigir_no_aprobo_la_orden`, `0102`)."""
+    with _lectura(lector, motor) as c:
+        filas = _ejecutar(c, lector, VERSIONES, {"o": orden_id, "f": LEE_COMO[lector.accion]})
+        return tuple(sorted({p for f in filas.mappings() for p in f["aprobada_por"]}))
+
+
 def _verificar_no_tomo(
-    lector: Permiso, permiso: Permiso, motor, orden_id: UUID, preparada_por: UUID
+    lector: Permiso, permiso: Permiso, motor, orden_id: UUID, aprobaron: tuple[UUID, ...]
 ) -> None:
     """La separación con quien tomó el pago, como con quien registró."""
     with _lectura(lector, motor) as c:
         tomaron = _quienes_tomaron(c, lector, orden_id).get(orden_id, set())
     for persona in tomaron:
-        permiso.verificar(Entidad(preparado_por=preparada_por, ejecutado_por=persona))
+        permiso.verificar(Entidad(aprobado_por=aprobaron, ejecutado_por=persona))
 
 
 def _leer_ejecuciones(c: Connection, permiso: Permiso, orden: UUID | None):
@@ -1892,17 +1905,16 @@ def conciliar_pago_manual(
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
-    """Lee la orden con la revisión ya verificada y evalúa la separación con quien la preparó y
-    con quien registró el pago. La base compara además con quien preparó cada versión, por la
-    identidad guardada en cada acto."""
+    """Lee la orden con la revisión ya verificada y evalúa la separación con quienes aprobaron
+    alguna versión y con quien registró el pago. La base compara además por la identidad
+    guardada en cada acto."""
     actual = _orden_con_pago(revision, permiso, motor, orden_id)
     pago = next((p for p in actual.ejecucion.pagos if p.id == pago_id), None)
     if pago is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-    permiso.verificar(Entidad(
-        preparado_por=actual.orden.preparada_por, ejecutado_por=pago.registrado_por
-    ))  # fmt: skip
-    _verificar_no_tomo(revision, permiso, motor, orden_id, actual.orden.preparada_por)
+    aprobaron = _aprobaron(revision, motor, orden_id)
+    permiso.verificar(Entidad(aprobado_por=aprobaron, ejecutado_por=pago.registrado_por))
+    _verificar_no_tomo(revision, permiso, motor, orden_id, aprobaron)
 
     def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
         estado = _ejecutar(
@@ -1966,10 +1978,9 @@ def confirmar_pago_no_realizado(
     declarada = next((d for d in actual.ejecucion.declaraciones if d.id == declaracion_id), None)
     if declarada is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-    permiso.verificar(Entidad(
-        preparado_por=actual.orden.preparada_por, ejecutado_por=declarada.declarado_por
-    ))  # fmt: skip
-    _verificar_no_tomo(revision, permiso, motor, orden_id, actual.orden.preparada_por)
+    aprobaron = _aprobaron(revision, motor, orden_id)
+    permiso.verificar(Entidad(aprobado_por=aprobaron, ejecutado_por=declarada.declarado_por))
+    _verificar_no_tomo(revision, permiso, motor, orden_id, aprobaron)
 
     def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
         _ejecutar(
@@ -2099,18 +2110,18 @@ def corregir_diferencia_pago(
 def _verificar_quien_resuelve(
     revision: Permiso, permiso: Permiso, motor, orden_id: UUID, diferencia_id: UUID
 ) -> None:
-    """La separación de `conciliar_pago_manual`: con quien preparó la orden y con quien registró.
-    La base compara además con quien vio la cuenta y con quien preparó cada versión."""
+    """La separación de `conciliar_pago_manual`: con quienes aprobaron la orden y con quien
+    registró. La base compara además con quien vio la cuenta y por la identidad guardada en cada
+    aprobación."""
     with _lectura(revision, motor) as c:
         ordenes = _ordenes(c, revision, orden_id)
         diferencias = _diferencias(c, revision, orden_id).values()
     diferencia = next((d[-1] for d in diferencias if d[-1].id == diferencia_id), None)
     if not ordenes or diferencia is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-    permiso.verificar(Entidad(
-        preparado_por=ordenes[0].preparada_por, ejecutado_por=diferencia.registrada_por
-    ))  # fmt: skip
-    _verificar_no_tomo(revision, permiso, motor, orden_id, ordenes[0].preparada_por)
+    aprobaron = _aprobaron(revision, motor, orden_id)
+    permiso.verificar(Entidad(aprobado_por=aprobaron, ejecutado_por=diferencia.registrada_por))
+    _verificar_no_tomo(revision, permiso, motor, orden_id, aprobaron)
 
 
 @router.post(

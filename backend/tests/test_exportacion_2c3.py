@@ -1452,7 +1452,8 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     ver(motor_migrate, s, s.adm, no_pagada)
     declaracion = llamar(motor_migrate, s, s.adm, DECLARAR, orden=no_pagada, version=1,
                          motivo="SINTETICO: el banco la rechazó")  # fmt: skip
-    llamar(motor_migrate, s, s.mc1, CONFIRMAR, orden=no_pagada, declaracion=declaracion)
+    # Confirma mc2: mc1 aprobó la orden y, desde `0102`, no confirma.
+    llamar(motor_migrate, s, s.mc2, CONFIRMAR, orden=no_pagada, declaracion=declaracion)
     a_otra_cuenta = emitida(motor_migrate, s)
     diferencia = con_diferencia(motor_migrate, s, a_otra_cuenta, cuenta=cbu_sintetico(50))
     resuelta(motor_migrate, s, a_otra_cuenta, diferencia, "reclamo")

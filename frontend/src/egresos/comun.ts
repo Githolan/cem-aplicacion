@@ -226,7 +226,7 @@ const MENSAJES: Record<string, string> = {
   retirar_solo_quien_preparo: "La orden la retira solo quien la preparó.",
   orden_con_aprobaciones: "Alguien ya aprobó esta versión: la orden ya no se retira.",
   no_es_quien_cargo_la_cuenta: "Quien cargó la cuenta del proveedor no aprueba un pago a esa cuenta.",
-  no_es_quien_aprobo: "Quien aprobó la orden no la emite.",
+  no_es_quien_aprobo: "Quien aprobó la orden no la paga ni concilia su pago.",
   proveedor_inexistente: "Ese proveedor no existe en este edificio.",
   proveedor_inactivo: "El proveedor está suspendido o de baja: no recibe órdenes nuevas.",
   proveedor_cambiado: "El proveedor cambió después de preparar la orden: hay que modificarla para que el Consejo la apruebe de nuevo.",

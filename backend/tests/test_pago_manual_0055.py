@@ -4,7 +4,8 @@ REAL: ninguna cuenta es de un banco (prefijo 999) y no se mueve dinero.
 La privacidad depende del acto, no de una etiqueta sobre la persona (propietario, 31-10-2026):
 quien prepara no recibe la cuenta completa mientras prepara, y si después ejecuta legítimamente
 una orden ya aprobada que no aprobó, la recibe solo en el acto de ejecución, con todas las
-barreras. Separación: preparar ≠ aprobar, aprobar ≠ ejecutar, ejecutar ≠ conciliar.
+barreras. Separación: preparar ≠ aprobar, aprobar ≠ ejecutar, ejecutar ≠ conciliar y, desde
+`0102`, aprobar ≠ conciliar (quien preparó sí puede conciliar).
 """
 
 import importlib.util
@@ -161,6 +162,16 @@ def otro_ejecutor(motor_migrate, motor_app, e) -> UUID:
     return x
 
 
+def otro_consejero(motor_migrate, motor_app, e) -> UUID:
+    """Una tercera persona del Consejo (con `egresos.aprobar_orden` por su mandato) que no
+    preparó, no aprobó ni ejecutó: concilia lo que aprobó mc1 cuando mc2 ya tiene otro papel en
+    la prueba (`0102`: quien aprobó no concilia)."""
+    x = otra_persona(motor_migrate, e.cons)
+    alta(motor_app, e.cons, e.prop, acta(motor_migrate, e), tipo="miembro_consejo", persona=x)
+    e.sesion[x] = nueva_sesion(motor_migrate, x)
+    return x
+
+
 def con_ejecutar(motor_migrate, e, persona) -> None:
     with motor_migrate.connect() as c:
         m = c.execute(
@@ -238,10 +249,15 @@ def test_puede_conciliar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
     # Quien registró: el dato dice que no y la ruta niega.
     assert en_revision(e, x, o)["puede_conciliar"] is False
     assert codigo(post(e, x, conciliacion, {"resultado": "conforme"})) == (403, "ya_participo")
-    # Quien preparó, con otra cuenta del Consejo: lo mismo, por ser humano.
+    # Quien aprobó (mc1): lo mismo (`0102`).
+    assert en_revision(e, e.mc1, o)["puede_conciliar"] is False
+    assert codigo(post(e, e.mc1, conciliacion, {"resultado": "conforme"})) == (
+        403, "ya_participo",
+    )  # fmt: skip
+    # Quien preparó, con otra cuenta del Consejo: desde `0102` el dato dice que sí (la ruta lo
+    # concede en `test_quien_preparo_si_concilia_si_otro_ejecuto`).
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
-    assert en_revision(e, otra, o)["puede_conciliar"] is False
-    assert codigo(post(e, otra, conciliacion, {"resultado": "conforme"})) == (403, "ya_participo")
+    assert en_revision(e, otra, o)["puede_conciliar"] is True
 
     # Control: otro consejero. El dato dice que sí y la ruta concede.
     assert en_revision(e, e.mc2, o)["puede_conciliar"] is True
@@ -249,6 +265,15 @@ def test_puede_conciliar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
     assert r.status_code == 200, r.json()
     # Pagada, ya no queda nada por conciliar.
     assert en_revision(e, e.mc1, o)["puede_conciliar"] is False
+
+
+def test_la_revision_no_ofrece_conciliar_a_quien_aprobo(motor_migrate, e):
+    """`0102`: a quien aprobó la orden la revisión no le ofrece conciliar su pago; a otro
+    consejero, con el mismo pago, sí."""
+    o = emitida(motor_migrate, e)  # aprobada por mc1
+    registrada(motor_migrate, e, o)
+    assert en_revision(e, e.mc1, o)["puede_conciliar"] is False
+    assert en_revision(e, e.mc2, o)["puede_conciliar"] is True  # control
 
 
 def test_declarar_sin_haber_visto_la_cuenta_no_quita_conciliar(motor_migrate, e):
@@ -282,9 +307,10 @@ def test_puede_confirmar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, e.mc2, o)
     segunda_apertura(motor_migrate, e, x, o)
+    y = otro_consejero(motor_migrate, motor_app, e)
     dm = str(llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO"))
     # Falta que declare x: todavía no es confirmable, para nadie.
-    assert puede_confirmar(e, e.mc1, o) == {dm: False}
+    assert puede_confirmar(e, y, o) == {dm: False}
     dx = str(llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO"))
     confirmar = f"ordenes-pago/{o}/pago-manual/no-realizado/{{}}/confirmacion"
 
@@ -294,14 +320,16 @@ def test_puede_confirmar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
     assert puede_confirmar(e, x, o) == {dm: False, dx: False}
     r = post(e, e.mc2, confirmar.format(dx), {})
     assert codigo(r) == (403, "no_es_quien_ejecuto")
-    # Quien preparó, con otra cuenta del Consejo: tampoco.
+    # Quien aprobó (mc1): tampoco (`0102`).
+    assert puede_confirmar(e, e.mc1, o) == {dm: False, dx: False}
+    assert codigo(post(e, e.mc1, confirmar.format(dm), {})) == (403, "ya_participo")
+    # Quien preparó, con otra cuenta del Consejo: desde `0102` el dato dice que sí.
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
-    assert puede_confirmar(e, otra, o) == {dm: False, dx: False}
-    assert codigo(post(e, otra, confirmar.format(dm), {})) == (403, "ya_participo")
+    assert puede_confirmar(e, otra, o) == {dm: True, dx: True}
 
-    # Control: quien no ejecutó ni preparó. El dato dice que sí y la ruta concede.
-    assert puede_confirmar(e, e.mc1, o) == {dm: True, dx: True}
-    r = post(e, e.mc1, confirmar.format(dm), {})
+    # Control: quien no ejecutó ni aprobó. El dato dice que sí y la ruta concede.
+    assert puede_confirmar(e, y, o) == {dm: True, dx: True}
+    r = post(e, y, confirmar.format(dm), {})
     assert r.status_code == 200, r.json()
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
@@ -717,7 +745,8 @@ def test_dos_conciliaciones_a_la_vez_una_sola_gana(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     p = registrada(motor_migrate, e, o)
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
-    r = _en_paralelo(motor_migrate, e, (e.mc1, CONCILIAR, datos), (e.mc2, CONCILIAR, datos))
+    y = otro_consejero(motor_migrate, motor_app, e)  # mc1 aprobó: no concilia (`0102`)
+    r = _en_paralelo(motor_migrate, e, (y, CONCILIAR, datos), (e.mc2, CONCILIAR, datos))
     # El segundo espera el bloqueo de la orden y la encuentra Pagada.
     assert r == {"esperaba": True, "motivo": "estado_invalido"}
     assert resultados(motor_migrate, o) == [("pagada", "manual")]
@@ -801,24 +830,35 @@ def test_quien_registro_no_concilia_ni_con_otra_cuenta_ni_desvinculado(motor_mig
     assert orden(motor_migrate, o)["estado"] == "en_verificacion"
 
 
-def test_quien_aprobo_si_concilia_lo_que_registro_otro(motor_migrate, e):
-    o = emitida(motor_migrate, e)
+def test_quien_aprobo_no_concilia(motor_migrate, motor_app, e):
+    """Decisión del propietario del 15-11-2026 (`0102`): quien aprobó la orden no concilia su
+    pago, ni con otra cuenta suya; la ruta lo dice antes que la base."""
+    o = emitida(motor_migrate, e)  # aprobada por mc1
     p = registrada(motor_migrate, e, o)
-    llamar(motor_migrate, e, e.mc1, CONCILIAR, orden=o, pago=p, resultado="conforme",
-           motivo=None)  # fmt: skip
+    datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
+    niega(motor_migrate, e, e.mc1, CONCILIAR, "no_es_quien_aprobo", **datos)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_aprobo", **datos)
+    r = post(e, e.mc1, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
+    assert r.json()["mensaje"] == (
+        "La orden la aprobó esta cuenta: el pago lo concilia otra persona del Consejo."
+    )
+    assert orden(motor_migrate, o)["estado"] == "en_verificacion"
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, **datos)  # control: otra persona sí
     assert orden(motor_migrate, o)["estado"] == "pagada"
 
 
-def test_quien_preparo_no_concilia_aunque_otro_haya_ejecutado(motor_migrate, motor_app, e):
+def test_quien_preparo_si_concilia_si_otro_ejecuto(motor_migrate, motor_app, e):
+    """Decisión del propietario del 15-11-2026 (`0102`): quien preparó la orden puede conciliar
+    el pago que registró otra persona."""
     o = emitida(motor_migrate, e)
     x = otro_ejecutor(motor_migrate, motor_app, e)
     p = registrada(motor_migrate, e, o, quien=x)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
-    datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
-    niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_preparo", **datos)
     r = post(e, otra, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
-    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
-    llamar(motor_migrate, e, e.mc2, CONCILIAR, **datos)  # control
+    assert r.status_code == 200, r.text
+    assert orden(motor_migrate, o)["estado"] == "pagada"
 
 
 def test_observado_no_paga_y_deja_la_historia(motor_migrate, e):
@@ -870,7 +910,7 @@ def test_registra_solo_quien_vio_la_cuenta_de_esa_ejecucion(motor_migrate, motor
     llamar(motor_migrate, e, x, REGISTRAR, **evidencia(motor_migrate, e, o))
 
 
-def test_quien_vio_la_cuenta_no_concilia_aunque_registre_otro(motor_migrate, e):
+def test_quien_vio_la_cuenta_no_concilia_aunque_registre_otro(motor_migrate, motor_app, e):
     """mc2 (con `aprobar_orden` y además `ejecutar_pago`, sin haber aprobado) abre el acto y
     transfiere; la administración también lo abre y registra. mc2 no concilia ese pago."""
     o = emitida(motor_migrate, e)
@@ -879,7 +919,8 @@ def test_quien_vio_la_cuenta_no_concilia_aunque_registre_otro(motor_migrate, e):
     segunda_apertura(motor_migrate, e, e.mc2, o)
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
     niega(motor_migrate, e, e.mc2, CONCILIAR, "no_es_quien_ejecuto", **datos)
-    llamar(motor_migrate, e, e.mc1, CONCILIAR, **datos)  # control: no vio la cuenta
+    y = otro_consejero(motor_migrate, motor_app, e)
+    llamar(motor_migrate, e, y, CONCILIAR, **datos)  # control: no vio la cuenta ni aprobó
     assert orden(motor_migrate, o)["estado"] == "pagada"
 
 
@@ -894,7 +935,7 @@ def test_fallida_manual_la_declara_uno_y_la_confirma_otro(motor_migrate, motor_a
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     niega(motor_migrate, e, otra, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=d)
     niega(motor_migrate, e, e.adm, CONFIRMAR, "42501", orden=o, declaracion=d)
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)
     assert orden(motor_migrate, o)["estado"] == "fallida"
     assert resultados(motor_migrate, o) == [("fallida", "manual")]
 
@@ -916,12 +957,12 @@ def test_la_declaracion_queda_superada_por_un_pago_registrado_despues(motor_migr
     p = registrada(motor_migrate, e, o)
     llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="observado",
            motivo="SINTETICO: falta el comprobante correcto")  # fmt: skip
-    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
     assert confirmables(e, o) == {str(d): False}
     assert orden(motor_migrate, o)["estado"] == "en_verificacion"
     d2 = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1,
                 motivo="SINTETICO: el banco devolvió la transferencia")  # fmt: skip
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d2)  # control
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d2)  # control
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -948,13 +989,13 @@ def test_la_declaracion_queda_superada_si_despues_alguien_vio_la_cuenta(
     d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, x, o)
-    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
     assert confirmables(e, o) == {str(d): False}
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
     # Aunque x declare después, la vieja sigue superada: se confirma la nueva.
     d2 = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
-    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d2)  # control
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d2)  # control
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -967,7 +1008,8 @@ def test_quien_vio_la_cuenta_no_confirma_que_no_se_pago(motor_migrate, motor_app
     dm = llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc2, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=dx)
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=dm)  # control
+    y = otro_consejero(motor_migrate, motor_app, e)
+    llamar(motor_migrate, e, y, CONFIRMAR, orden=o, declaracion=dm)  # control
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -979,7 +1021,7 @@ def test_si_alguien_vio_la_cuenta_declara_quien_la_vio(motor_migrate, motor_app,
     niega(motor_migrate, e, e.adm, DECLARAR, "no_es_quien_ejecuto", orden=o, version=1,
           motivo="SINTETICO")  # fmt: skip
     d = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")  # control
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -995,11 +1037,11 @@ def test_cada_quien_vio_la_cuenta_declara_despues_de_su_ultima_apertura(
     ver(motor_migrate, e, e.adm, o)
     segunda_apertura(motor_migrate, e, x, o)
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
-    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=dx)
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "estado_invalido", orden=o, declaracion=dx)
     assert confirmables(e, o)[str(dx)] is False  # la lectura dice lo mismo que la confirmación
     da = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     assert confirmables(e, o)[str(dx)] is True and confirmables(e, o)[str(da)] is True
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=dx)  # control
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=dx)  # control
     assert set(confirmables(e, o).values()) == {False}  # confirmada: ninguna más
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
@@ -1054,11 +1096,11 @@ def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
     ver(motor_migrate, e, e.adm, o)
     segunda_apertura(motor_migrate, e, x, o)
     d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
-    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
     assert confirmables(e, o) == {str(d): False}  # la pantalla del Consejo no la ofrece
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     assert confirmables(e, o) == {str(d): True, str(dx): True}
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)  # control
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)  # control
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -1069,6 +1111,24 @@ def test_quien_aprobo_no_declara_que_no_se_pago(motor_migrate, e):
     niega(motor_migrate, e, e.mc1, DECLARAR, "no_es_quien_aprobo", orden=o, version=1,
           motivo="SINTETICO")  # fmt: skip
     llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")  # control
+
+
+def test_quien_aprobo_no_confirma_que_no_se_pago(motor_migrate, motor_app, e):
+    """`0102`: quien aprobó la orden no confirma «no se pagó», ni con otra cuenta suya; la ruta
+    lo dice antes que la base."""
+    o = emitida(motor_migrate, e)  # aprobada por mc1
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "no_es_quien_aprobo", orden=o, declaracion=d)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    niega(motor_migrate, e, otra, CONFIRMAR, "no_es_quien_aprobo", orden=o, declaracion=d)
+    assert puede_confirmar(e, e.mc1, o) == {str(d): False}
+    r = post(e, e.mc1, f"ordenes-pago/{o}/pago-manual/no-realizado/{d}/confirmacion", {})
+    assert codigo(r) == (403, "ya_participo")
+    assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
+    # Control: otro consejero, con la misma declaración.
+    assert puede_confirmar(e, e.mc2, o) == {str(d): True}
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)
+    assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
 # Riel y manual, nunca las dos ----------------------------------------------------------------
@@ -1182,7 +1242,7 @@ def test_cem_app_solo_ejecuta_las_rutas_del_pago_manual(motor_migrate):
              "ejecuciones_manuales_lectura", "pagos_manuales_lectura",
              "declaraciones_pago_no_realizado_lectura"}  # fmt: skip
     internas = {"ejecucion_manual_abierta", "ultimo_pago_manual", "pago_manual_observado",
-                "exigir_sin_pago_vigente", "exigir_no_aprobo", "exigir_no_preparo",
+                "exigir_sin_pago_vigente", "exigir_no_aprobo", "exigir_no_aprobo_la_orden",
                 "orden_para_pago_manual", "exigir_no_ejecuto"}  # fmt: skip
     with motor_migrate.connect() as c:
         privilegios = [
