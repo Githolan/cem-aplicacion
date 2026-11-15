@@ -22,7 +22,7 @@ import {
 } from "../egresos/comun";
 import { FallaDeLectura } from "../egresos/EstadoPantalla";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
-import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
+import { exigirSesion, type MonedasDelEdificio, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { rutaFicha } from "./rutas";
@@ -75,10 +75,16 @@ export function contratosAplicables(contratos: Contrato[], proveedor: string, mo
   return contratos.filter((k) => k.estado === "vigente" && k.proveedor_id === proveedor && k.moneda === moneda);
 }
 
-const datosVacios = (proveedor: string): Datos => ({
+/** Las monedas del edificio que el formulario ofrece, en el orden de `MONEDAS` (P-14). */
+const monedasOfrecidas = (monedas: readonly string[]) => MONEDAS.filter((m) => monedas.includes(m));
+/** Si se pregunta la moneda: solo cuando el edificio opera en más de una. */
+const conCampoMoneda = (monedas: readonly string[]) => monedasOfrecidas(monedas).length > 1;
+
+/** Una orden nueva va en la primera moneda del edificio: el peso, que el servidor pone siempre primero. */
+const datosVacios = (proveedor: string, moneda: string): Datos => ({
   proveedor,
   importe: "",
-  moneda: "ARS",
+  moneda,
   concepto: "",
   comprobante: "",
   reserva: false,
@@ -122,12 +128,15 @@ export type AltaDesdeLaFactura = {
 
 type Campo = keyof Datos;
 
-/** Los campos que la lectura de la factura completa, con su valor en el formulario. */
-function camposLeidos(l: LecturaCarga, proveedores: Proveedor[]): Partial<Datos> {
+/** Los campos que la lectura de la factura completa, con su valor en el formulario. La moneda leída,
+ * solo si el edificio opera en ella: en uno que opera solo en pesos el campo no se muestra. */
+function camposLeidos(l: LecturaCarga, proveedores: Proveedor[], monedas: readonly string[]): Partial<Datos> {
   const sugerido = proveedores.find((p) => p.id === l.proveedor_sugerido?.id && p.estado === "activo");
   return {
     ...(l.importe_centavos === null ? {} : { importe: aTexto(l.importe_centavos) }),
-    ...(l.moneda !== null && (MONEDAS as readonly string[]).includes(l.moneda) ? { moneda: l.moneda } : {}),
+    ...(l.moneda !== null && conCampoMoneda(monedas) && (monedasOfrecidas(monedas) as readonly string[]).includes(l.moneda)
+      ? { moneda: l.moneda }
+      : {}),
     ...(l.numero_comprobante === null ? {} : { comprobante: l.numero_comprobante.slice(0, 200) }),
     ...(l.concepto === null ? {} : { concepto: l.concepto }),
     ...(sugerido === undefined ? {} : { proveedor: sugerido.id }),
@@ -143,6 +152,8 @@ type Modificar = {
 
 type Props = {
   consorcio: string;
+  /** Las monedas en que opera el edificio (`ConsorcioResumen.monedas`): con una sola no se pregunta. */
+  monedas: MonedasDelEdificio;
   acto: ActoEnCurso;
   aEntrar: () => void;
   aInicio: () => void;
@@ -163,7 +174,7 @@ type Props = {
 export const noSeEnvio = (motivo: string) =>
   `La orden quedó guardada como borrador, pero no se envió a aprobar. ${motivo} Para enviarla, usar «Enviar a aprobar».`;
 
-export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, inicial, alGuardar, alCrear, alCancelar, alCambiarLaOrden }: Props) {
+export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, modificar, inicial, alGuardar, alCrear, alCancelar, alCambiarLaOrden }: Props) {
   const id = useId();
   /** Qué botón se tocó: una orden nueva se envía a aprobar salvo que se pida guardarla como borrador. */
   const destino = useRef<"enviar" | "borrador">("enviar");
@@ -179,6 +190,8 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   /** Los datos de la versión que se abrió, para saber qué cambió la persona. */
   const vistos = useRef<Datos | null>(null);
   const versionVista = modificar?.version;
+  /** La moneda de una orden nueva: la primera del edificio, el peso. Va como texto en las dependencias. */
+  const monedaBase = monedas[0];
   /** La versión del archivo de la factura que se manda al guardar: la de la versión abierta, la que
    * vuelve del alta o la subida acá. */
   const [factura, setFactura] = useState<string | null>(
@@ -245,7 +258,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
         const elegido = lectura.proveedores.find((p) => p.id === inicial?.proveedor && p.estado === "activo");
         const { importe: importeInicial, moneda, concepto, comprobante } = inicial ?? {};
         return {
-          ...datosVacios(elegido?.id ?? ""),
+          ...datosVacios(elegido?.id ?? "", monedaBase),
           ...(importeInicial === undefined ? {} : { importe: importeInicial }),
           ...(moneda === undefined ? {} : { moneda }),
           ...(concepto === undefined ? {} : { concepto }),
@@ -262,7 +275,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     if (!facturaTocada.current) setFactura(versionVista.factura_version_id ?? null);
     if (antes === null && versionVista.contrato_id !== null && nuevos.contrato === "")
       setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Al guardar, pide aprobación.", ok: false });
-  }, [lectura, versionVista, inicial, setAviso]);
+  }, [lectura, versionVista, inicial, monedaBase, setAviso]);
 
   function revisado(campo: Campo) {
     setDeLaLectura((marcados) => {
@@ -281,7 +294,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
 
   function leerFactura(l: LecturaCarga) {
     if (lectura.tipo !== "ok") return;
-    const leidos = camposLeidos(l, lectura.proveedores);
+    const leidos = camposLeidos(l, lectura.proveedores, monedas);
     setDatos((d) => {
       if (d === null) return d;
       const nuevo = { ...d, ...leidos };
@@ -447,6 +460,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   if (datos === null) return null;
 
   const aplicables = contratosAplicables(lectura.contratos, datos.proveedor, datos.moneda);
+  const ofrecidas = monedasOfrecidas(monedas);
   const marca = (campo: Campo) => (deLaLectura.has(campo) ? <MarcaDeLectura alRevisar={() => revisado(campo)} /> : null);
   const facturaVisible: Cargado | undefined = subida ?? inicial?.factura ?? facturaDeLaVersion ?? undefined;
   const alAlta = sinProveedor === null ? null : {
@@ -500,15 +514,20 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       <CampoImporte id={`${id}-importe`} valor={datos.importe} deshabilitado={enviando}
         alCambiar={(texto) => cambiar("importe", texto)} />
       {marca("importe")}
-      <label htmlFor={`${id}-moneda`}>Moneda</label>
-      <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
-        {MONEDAS.map((m) => (
-          <option key={m} value={m}>
-            {NOMBRE_MONEDA[m]}
-          </option>
-        ))}
-      </select>
-      {marca("moneda")}
+      {/* Solo en un edificio que opera en más de una moneda (P-14); si no, la orden va en pesos. */}
+      {conCampoMoneda(monedas) && (
+        <>
+          <label htmlFor={`${id}-moneda`}>Moneda</label>
+          <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
+            {ofrecidas.map((m) => (
+              <option key={m} value={m}>
+                {NOMBRE_MONEDA[m]}
+              </option>
+            ))}
+          </select>
+          {marca("moneda")}
+        </>
+      )}
       {/* Solo si el proveedor elegido tiene un contrato vigente en esa moneda (P-14). */}
       {aplicables.length > 0 && (
         <>

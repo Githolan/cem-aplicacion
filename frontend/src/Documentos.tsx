@@ -111,7 +111,7 @@ const TEXTO_CAMPO: Record<string, string> = {
 };
 /** El largo y el blanco los frena el propio campo: lo único que la API puede rechazar del título
  *  son los teléfonos y correos (G-08). */
-const MENSAJES_PROPIOS: Record<string, string> = { titulo: "El título no puede llevar teléfonos ni correos." };
+export const MENSAJES_PROPIOS: Record<string, string> = { titulo: "El título no puede llevar teléfonos ni correos." };
 const FALTA_ARCHIVO = "Falta elegir el archivo.";
 
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
@@ -184,7 +184,7 @@ function accionesDeCarga(categoria: Categoria): string[] {
     : ["documentos.cargar"];
 }
 
-/** Si el intento terminó y el próximo lleva otra clave (igual que en /contactos/gestion). */
+/** Si el intento terminó y el próximo lleva otra clave (igual que en la gestión de /contactos). */
 function renovarClave(estado: number, codigo: string | undefined): boolean {
   if (codigo === "idempotencia_reutilizada") return true;
   return estado < ESTADO.errorDelServidor && codigo !== "idempotencia_en_curso";

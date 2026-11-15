@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes } from "react-router";
 
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
-import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
@@ -40,6 +39,7 @@ import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { CONSULTA_AL_LADO, useAncho } from "./pagos/useAncho";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
+import { DETALLE_VINCULOS_SIN_LECTURA, textoVinculosPorConfirmar, useVinculosPorConfirmar } from "./VinculosPorConfirmar";
 
 interface EnlaceDeInicio {
   ruta: string;
@@ -166,13 +166,15 @@ function FilaDeInicio({ enlace }: { enlace: Pick<EnlaceDeInicio, "ruta" | "texto
   );
 }
 
-/** Las pantallas que reemplazó el circuito de pagos: un enlace viejo sigue llegando. */
+/** Las pantallas que reemplazó otra (el circuito de pagos; los contactos en una sola, G-52 y G-53):
+ * un enlace viejo o un marcador siguen llegando. */
 const RUTAS_VIEJAS: readonly (readonly [string, string])[] = [
   ["/egresos/ordenes", RUTA_PAGOS],
   ["/egresos/revision", RUTA_PAGOS],
   ["/egresos/pagos", RUTA_PAGOS],
   ["/egresos/conciliacion", RUTA_PAGOS],
   ["/egresos/por-aclarar", RUTA_POR_ACLARAR],
+  ["/contactos/gestion", RUTA_CONTACTOS],
 ];
 
 async function hayPagosPorAclarar(): Promise<boolean> {
@@ -194,6 +196,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     retry: false,
   });
   const pagos = useResumenPagos(porEdificio);
+  const vinculos = useVinculosPorConfirmar(porEdificio);
   const servicio = useFallaDelServicio(sesion === "con_sesion");
   const alLado = useAncho(CONSULTA_AL_LADO);
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
@@ -204,7 +207,20 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
-  const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [PARA_HACER] : GRUPOS_DE_INICIO;
+  // En el «Para hacer» de la computadora, el Padrón entra si hay vínculos esperando (G-26) o si no
+  // se pudo saber: un número desconocido no es «nada pendiente» (Codex en #245).
+  const paraHacer: GrupoDeInicio =
+    vinculos.falla !== null || (vinculos.cantidad !== null && vinculos.cantidad > 0)
+      ? { ...PARA_HACER, enlaces: [...PARA_HACER.enlaces, ...ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_PADRON)] }
+      : PARA_HACER;
+  const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [paraHacer] : GRUPOS_DE_INICIO;
+  const detalleDe = (e: EnlaceDeInicio): EnlaceDeInicio => {
+    if (e.ruta === RUTA_PAGOS) return { ...e, detalle: pagos.detalle };
+    if (e.ruta !== RUTA_PADRON) return e;
+    if (vinculos.falla !== null) return { ...e, detalle: DETALLE_VINCULOS_SIN_LECTURA };
+    if (vinculos.cantidad !== null && vinculos.cantidad > 0) return { ...e, detalle: textoVinculosPorConfirmar(vinculos.cantidad) };
+    return e;
+  };
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y la
   // tarjeta de Pagos. Vuelve a pedir solo lo que falló.
   const fallaDePagos = pagos.enTarjeta && pagos.falla !== null;
@@ -212,6 +228,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     ...(servicio.falla === null ? [] : [servicio]),
     ...(falla === null ? [] : [{ reintentar, reintentando }]),
     ...(fallaDePagos ? [pagos] : []),
+    ...(vinculos.falla === null ? [] : [vinculos]),
   ];
   const reintentarTodo = () => reintentables.forEach((r) => r.reintentar());
   const botonReintentar = (
@@ -219,7 +236,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       Reintentar
     </button>
   );
-  const enLaTarjeta = servicio.falla === null && falla === null;
+  const enLaTarjeta = servicio.falla === null && falla === null && vinculos.falla === null;
   return (
     <>
       {barra !== null && createPortal(<PuntoServicio />, barra)}
@@ -247,6 +264,11 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
           {falla !== null && (
             <p className="aviso-error" role="alert">
               Puede que falten secciones. {falla}
+            </p>
+          )}
+          {vinculos.falla !== null && (
+            <p className="aviso-error" role="alert">
+              {DETALLE_VINCULOS_SIN_LECTURA}. {vinculos.falla}
             </p>
           )}
           {botonReintentar}
@@ -277,7 +299,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
               <h2 className="titulo-seccion">{g.titulo}</h2>
               <ul className="filas-inicio">
                 {propios.map((e) => (
-                  <FilaDeInicio key={e.ruta} enlace={e.ruta === RUTA_PAGOS ? { ...e, detalle: pagos.detalle } : e} />
+                  <FilaDeInicio key={e.ruta} enlace={detalleDe(e)} />
                 ))}
                 {aclarar && (
                   <FilaDeInicio
@@ -360,7 +382,6 @@ export function App() {
           <Route path={RUTA_MANDATOS} element={<Exige requisito={REQUISITOS.mandatos}><Mandatos /></Exige>} />
           <Route path={RUTA_PADRON} element={<Exige requisito={REQUISITOS.padron}><Padron /></Exige>} />
           <Route path={RUTA_CONTACTOS} element={<Exige requisito={REQUISITOS.contactos}><Contactos /></Exige>} />
-          <Route path={RUTA_CONTACTOS_GESTION} element={<Exige requisito={REQUISITOS.contactosGestion}><ContactosGestion /></Exige>} />
           <Route path={RUTA_DOCUMENTOS} element={<Exige requisito={REQUISITOS.documentos}><Documentos /></Exige>} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path={RUTA_PROVEEDORES} element={<Exige requisito={REQUISITOS.proveedores}><Proveedores /></Exige>} />

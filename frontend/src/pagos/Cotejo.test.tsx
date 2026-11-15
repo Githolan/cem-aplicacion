@@ -67,7 +67,7 @@ function error(codigo: string, status: number) {
 
 function backend(respuestas: Respuestas) {
   const base: Respuestas = {
-    "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+    "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]),
     "GET /api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
     [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 1, sin_explicar: 0 }),
     [LISTA]: lista([]),
@@ -335,7 +335,7 @@ describe("a mano", () => {
       const url = new URL(pedido.url);
       const clave = `${pedido.method} ${url.pathname}`;
       if (clave === LISTA) return url.searchParams.get("despues") === P1 ? lista([elemento(P2)])() : lista([elemento(P1)], P1)();
-      if (clave === "GET /api/v1/me/consorcios") return Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
+      if (clave === "GET /api/v1/me/consorcios") return Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
       const respuesta = alcanzaTodo(clave);
       if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
       return respuesta();
@@ -360,7 +360,7 @@ describe("a mano", () => {
         if (falla) return error("servicio_no_disponible", 503);
         return lista([elemento(P2)])();
       }
-      if (clave === "GET /api/v1/me/consorcios") return Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
+      if (clave === "GET /api/v1/me/consorcios") return Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
       const respuesta = alcanzaTodo(clave);
       if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
       return respuesta();
@@ -395,7 +395,7 @@ describe("a mano", () => {
         cotejado = true;
         return Response.json({ cotejados: 1 });
       }
-      if (clave === "GET /api/v1/me/consorcios") return Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
+      if (clave === "GET /api/v1/me/consorcios") return Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
       const respuesta = alcanzaTodo(clave);
       if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
       return respuesta();
@@ -708,7 +708,7 @@ describe("con el extracto", () => {
   it("al cambiar de edificio no queda nada del anterior", async () => {
     const simulado = backend({
       "GET /api/v1/me/consorcios": () =>
-        Response.json([{ id: C1, nombre: "Edificio Uno", vinculos: [] }, { id: C2, nombre: "Edificio Dos", vinculos: [] }]),
+        Response.json([{ id: C1, nombre: "Edificio Uno", vinculos: [], monedas: ["ARS"] }, { id: C2, nombre: "Edificio Dos", vinculos: [], monedas: ["ARS"] }]),
       [LISTA]: lista([elemento(P1)]),
       [`GET /api/v1/consorcios/${C2}/pagos/cotejo`]: lista([elemento(P2)]),
       [VISTA]: () => Response.json(VISTA_NUEVA),

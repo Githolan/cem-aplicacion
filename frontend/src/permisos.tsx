@@ -221,7 +221,10 @@ export const REQUISITOS = {
   invitaciones: [["invitaciones.crear"]],
   mandatos: [["mandatos.ver"], ["decisiones.ver"], ["decisiones.registrar"]],
   padron: [["padron.ver"]],
+  /** Quien ve el Padrón y confirma vínculos: el inicio le cuenta los que esperan (G-26). */
+  confirmarVinculos: [["padron.ver", "padron.confirmar_vinculo"]],
   contactos: [["contactos.ver"]],
+  /** Suma la gestión a /contactos, la misma pantalla (G-52). */
   contactosGestion: [["contactos.gestionar"]],
   documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
   proveedores: [["egresos.preparar_orden"]],

@@ -142,6 +142,8 @@ const INICIO: Respuestas = {
   "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
   "GET /api/v1/me/invitaciones": () => Response.json({ elementos: [] }),
   "GET /api/v1/me/consorcios": CONSORCIOS,
+  // Con todas las acciones, el inicio cuenta los vínculos sin confirmar (G-26).
+  [`GET /api/v1/consorcios/${C1}/padron`]: () => Response.json({ elementos: [] }),
 };
 
 function abrir(ruta: string) {

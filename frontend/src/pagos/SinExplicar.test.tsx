@@ -50,7 +50,7 @@ const bandeja =
 
 function backend(respuestas: Respuestas) {
   const base: Respuestas = {
-    "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+    "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]),
     "GET /api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
     [LISTA]: () => Response.json({ elementos: [MOVIMIENTO], siguiente: null, total: 1 }),
     [MARCAS]: () => Response.json({ elementos: [], siguiente: null, total: 0 }),

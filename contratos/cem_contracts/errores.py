@@ -221,6 +221,9 @@ class CodigoError(StrEnum):
     CONTRATO_NO_APLICA = "contrato_no_aplica"
     """El contrato declarado no respalda la orden: otro proveedor, otra moneda, un importe mayor al
     máximo, o no está confirmado y vigente."""
+    MONEDA_NO_HABILITADA = "moneda_no_habilitada"
+    """La orden está en una moneda en que el edificio no opera: otra moneda la habilita el equipo
+    (P-14, `0100`)."""
     CONTRATO_YA_CONFIRMADO = "contrato_ya_confirmado"
     """El contrato ya tiene su confirmación."""
     CONTRATO_DADO_DE_BAJA = "contrato_dado_de_baja"

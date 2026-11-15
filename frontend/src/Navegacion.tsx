@@ -1,7 +1,6 @@
 import { matchPath, NavLink, useLocation } from "react-router";
 
 import { RUTA_CONTACTOS } from "./Contactos";
-import { RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { RUTA_CUENTA } from "./Cuenta";
 import { RUTA_DOCUMENTOS } from "./Documentos";
 import { RUTA_LIQUIDACION } from "./egresos/Liquidacion";
@@ -52,7 +51,6 @@ const DE_ADMINISTRACION: readonly Destino[] = [
 const RUTAS_CON_NAVEGACION: readonly string[] = [
   ...PRINCIPALES.map((d) => d.ruta),
   ...DE_ADMINISTRACION.map((d) => d.ruta),
-  RUTA_CONTACTOS_GESTION,
   RUTA_NUEVA,
   RUTA_CONSULTA,
   RUTA_COTEJO,

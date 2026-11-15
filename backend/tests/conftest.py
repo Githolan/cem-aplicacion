@@ -147,7 +147,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran. Y
     con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos. Y con 0063, cuyos
     comprobantes citan su orden: se les quita antes de borrar las órdenes. Y con 0099, cuya
-    constancia de la factura adjunta cita la versión de la orden y el documento: se borra antes.
+    constancia de la factura adjunta cita la versión de la orden y el documento: se borra antes. Y
+    con 0100, que se niega a bajar si el equipo habilitó una moneda: se borran las monedas.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -270,6 +271,13 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     alter table nucleo.factura_adjunta_orden_pago disable trigger user;"
                 "     delete from nucleo.factura_adjunta_orden_pago;"
                 "     alter table nucleo.factura_adjunta_orden_pago enable trigger user;"
+                "   end if;"
+                # Las monedas que habilitó el equipo (0100) niegan su downgrade: se borran. Las
+                # de la migración se recalculan al volver a subir.
+                "   if to_regclass('nucleo.moneda_consorcio') is not null then"
+                "     alter table nucleo.moneda_consorcio disable trigger user;"
+                "     delete from nucleo.moneda_consorcio;"
+                "     alter table nucleo.moneda_consorcio enable trigger user;"
                 "   end if;"
                 "   delete from nucleo.orden_pago_aprobacion;"
                 "   delete from nucleo.orden_pago_version;"

@@ -22,6 +22,20 @@ const SIN_EDIFICIOS: readonly Consorcio[] = [];
 
 export class SinSesion extends Error {}
 
+/** Las monedas de un edificio: al menos una, la primera es el peso. */
+export type MonedasDelEdificio = readonly [string, ...string[]];
+
+/** Las monedas en que opera el edificio elegido (P-14): el peso primero y las que habilitó el equipo.
+ * El elegido sale siempre de la lista (`useEdificioElegido`) y el contrato exige al menos una moneda:
+ * si falta alguna de las dos cosas, es un defecto. */
+export function monedasDe(pantalla: PantallaConsorcio, consorcio: string): MonedasDelEdificio {
+  const elegido = pantalla.tipo === "lista" ? pantalla.consorcios.find((c) => c.id === consorcio) : undefined;
+  if (elegido === undefined) throw new Error(`el edificio ${consorcio} no está en la lista de la pantalla`);
+  const [primera, ...otras] = elegido.monedas;
+  if (primera === undefined) throw new Error(`el edificio ${consorcio} no tiene monedas`);
+  return [primera, ...otras];
+}
+
 /** Cada cuánto se mira si el antivirus terminó y cuántas veces, antes de dejarlo a mano. */
 const ESPERA_ANTIVIRUS_MS = 3000;
 const VUELTAS_ANTIVIRUS = 20;

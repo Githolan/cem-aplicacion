@@ -28,7 +28,7 @@ import {
 } from "../egresos/comun";
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
-import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
+import { exigirSesion, type MonedasDelEdificio, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { VisorDocumento } from "../VisorDocumento";
@@ -213,6 +213,8 @@ export type Seguir = { paso: Paso; abierta: RefObject<boolean> };
 
 type Props = {
   consorcio: string;
+  /** Las monedas en que opera el edificio, para modificar la orden (P-14). */
+  monedas: MonedasDelEdificio;
   orden: string;
   aEntrar: () => void;
   aInicio: () => void;
@@ -223,7 +225,7 @@ type Props = {
   alCambiar: () => void;
 };
 
-export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarActo, alCambiar }: Props) {
+export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: terminarActo, alCambiar }: Props) {
   const id = useId();
   const acto = useActo(aEntrar, alCambiar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
@@ -1289,7 +1291,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           )}
 
           {estaModificando && (
-            <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio}
+            <FormularioOrden consorcio={consorcio} monedas={monedas} acto={acto} aEntrar={aEntrar} aInicio={aInicio}
               modificar={{ orden, version: vigenteLeida ?? v, pierdeAprobaciones: situacion === "en_revision" || situacion === "para_pagar" }}
               alGuardar={(_, texto) => {
                 setModificando(false);

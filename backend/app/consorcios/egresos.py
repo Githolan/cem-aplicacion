@@ -278,6 +278,9 @@ ERRORES = {
         "el importe"
         " máximo y que esté confirmado y vigente.",
     ),
+    "moneda_no_habilitada": (
+        422, CodigoError.MONEDA_NO_HABILITADA, "Este edificio opera solo en pesos.",
+    ),
     "contrato_ya_confirmado": (
         409, CodigoError.CONTRATO_YA_CONFIRMADO, "El contrato ya está confirmado.",
     ),
@@ -415,7 +418,8 @@ RESPUESTAS_LECTURA = {
 DESCRIPCION_422_ORDEN = (
     "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo"
     " `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y"
-    " comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+    " comprobantes», y que no sea el comprobante de un pago (`documento_invalido`), o la moneda"
+    " no es una en que opera el edificio (`moneda_no_habilitada`, `0100`)."
 )
 RESPUESTAS_ESCRITURA = RESPUESTAS_LECTURA | {
     404: {"description": "No existe en este consorcio."},

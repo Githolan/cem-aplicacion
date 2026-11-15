@@ -75,9 +75,11 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
     const permisos = simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
+      // El inicio de quien confirma vínculos los cuenta (G-26).
+      if (camino === `/api/v1/consorcios/${C1}/padron`) return ruta.fulfill({ json: { elementos: [] } });
       if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });
       if (camino === "/api/v1/me/consorcios")
-        return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: quien === "propietaria" ? ["propietario"] : [] }] });
+        return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: quien === "propietaria" ? ["propietario"] : [], monedas: ["ARS"] }] });
       if (camino === `/api/v1/consorcios/${C1}/unidades`) return ruta.fulfill({ json: UNIDADES });
       if (camino === `/api/v1/consorcios/${C1}/invitaciones`) return ruta.fulfill({ json: { elementos: lista } });
       return ruta.abort();

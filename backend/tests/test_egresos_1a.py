@@ -30,6 +30,7 @@ from tests.test_orden_pago_neutra import (
     cbu_sintetico,
     escena_economica,
     exigir,
+    habilitar_moneda,
     huella,
     llamar,
     niega,
@@ -200,6 +201,7 @@ def test_sin_umbral_todo_lo_no_rutinario_pide_aprobacion(motor_migrate, e):
 
 def test_un_umbral_por_moneda(motor_migrate, motor_app, e):
     conocido(motor_migrate, e)
+    habilitar_moneda(motor_app, e.cons)  # opera también en dólares (`0100`)
     umbral(motor_app, e.cons, IMPORTE * 10, moneda="USD")
     assert franja(motor_migrate, enviada(motor_migrate, e)) == "sin_umbral"
     # El de pesos, registrado el mismo día, rige para las órdenes en pesos sin apagar el otro.

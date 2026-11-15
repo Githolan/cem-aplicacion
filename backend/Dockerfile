@@ -42,7 +42,8 @@ COPY --chown=cem backend/alembic.ini backend/arranque.sh ./
 # (D3), asociación por soporte de la cuenta de un administrador externo (A7, P1-e), carga de un
 # esquema de coeficientes (D4), anulación por soporte de un vínculo confirmado no iniciado
 # (RF02), identidad humana (A13-C), borrado y recategorización de documentos (2c-2), exportación
-# de un consorcio (2c-3, RF36) y cantidad de aprobaciones de las órdenes de pago (H3). Las demás
+# de un consorcio (2c-3, RF36), cantidad de aprobaciones de las órdenes de pago (H3) y monedas
+# del edificio (P-14). Las demás
 # (roles, OpenAPI, cobertura de PA) y el smoke de staging (`backend/pruebas/`) corren fuera de la
 # imagen. `tests/test_scripts_en_la_imagen.py` falla si un script que dice correr dentro del
 # contenedor no está en esta lista.
@@ -52,7 +53,7 @@ COPY --chown=cem backend/scripts/__init__.py backend/scripts/alta_consorcio.py \
      backend/scripts/anular_vinculo.py backend/scripts/identidad_humana.py \
      backend/scripts/documento_soporte.py backend/scripts/exportar_consorcio.py \
      backend/scripts/privacidad.py backend/scripts/aprobaciones_orden_pago.py \
-     backend/scripts/umbral_orden_pago.py scripts/
+     backend/scripts/umbral_orden_pago.py backend/scripts/moneda_consorcio.py scripts/
 USER cem
 EXPOSE 8000
 # La misma imagen corre cem-backend, cem-trabajos, cem-planificador o cem-copia-continua según

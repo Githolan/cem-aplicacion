@@ -491,6 +491,28 @@
         "title": "Id",
         "type": "string"
       },
+      "monedas": {
+        "description": "Monedas en que opera el edificio: el peso primero, siempre, y las que habilitó el equipo (P-14, `0100`). Con una sola, el formulario de la orden no pregunta la moneda.",
+        "examples": [
+          [
+            "ARS"
+          ],
+          [
+            "ARS",
+            "USD"
+          ]
+        ],
+        "items": {
+          "examples": [
+            "ARS"
+          ],
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Monedas",
+        "type": "array"
+      },
       "nombre": {
         "title": "Nombre",
         "type": "string"
@@ -507,7 +529,8 @@
     "required": [
       "id",
       "nombre",
-      "vinculos"
+      "vinculos",
+      "monedas"
     ],
     "title": "ConsorcioResumen",
     "type": "object"
@@ -963,6 +986,7 @@
           "aprobaciones_insuficientes",
           "contrato_no_vigente",
           "contrato_no_aplica",
+          "moneda_no_habilitada",
           "contrato_ya_confirmado",
           "contrato_dado_de_baja",
           "proveedor_cambiado",
