@@ -53,7 +53,8 @@ COPY --chown=cem backend/scripts/__init__.py backend/scripts/alta_consorcio.py \
      backend/scripts/anular_vinculo.py backend/scripts/identidad_humana.py \
      backend/scripts/documento_soporte.py backend/scripts/exportar_consorcio.py \
      backend/scripts/privacidad.py backend/scripts/aprobaciones_orden_pago.py \
-     backend/scripts/umbral_orden_pago.py backend/scripts/moneda_consorcio.py \n     backend/scripts/configurar_proveedores.py scripts/
+     backend/scripts/umbral_orden_pago.py backend/scripts/moneda_consorcio.py \
+     backend/scripts/configurar_proveedores.py scripts/
 USER cem
 EXPOSE 8000
 # La misma imagen corre cem-backend, cem-trabajos, cem-planificador o cem-copia-continua según

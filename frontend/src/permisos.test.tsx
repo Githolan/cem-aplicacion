@@ -10,7 +10,7 @@ import { accionesDeLasPoliticas } from "./accionesDePrueba";
 import { App } from "./App";
 import { CATEGORIAS_OPERATIVAS } from "./Documentos";
 import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
-import { cumple, cumpleEnAlguno, Exige, REQUISITOS, type Requisito } from "./permisos";
+import { cumple, cumpleEnAlguno, Exige, ofreceEnAlguno, REQUISITOS, type Requisito } from "./permisos";
 import { ContextoVersion } from "./version";
 
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -135,6 +135,22 @@ describe("cumple", () => {
     expect(cumpleEnAlguno(new Map([[C1, []], [C2, ["a"]]]), requisito)).toBe(true);
     expect(cumpleEnAlguno(new Map([[C1, ["b"]], [C2, []]]), requisito)).toBe(false);
     expect(cumpleEnAlguno(new Map(), requisito)).toBe(false);
+  });
+
+  it("una pantalla que otra cubre se decide edificio por edificio (Codex en #249)", () => {
+    const consulta = [["proveedores.ver"]];
+    const gestion = [["egresos.preparar_orden"]];
+    // Gestiona en C1 y solo consulta en C2: la consulta se ofrece, por C2.
+    const mixto = new Map([
+      [C1, ["proveedores.ver", "egresos.preparar_orden"]],
+      [C2, ["proveedores.ver"]],
+    ]);
+    expect(ofreceEnAlguno(mixto, consulta, gestion)).toBe(true);
+    // Control: si gestiona en todos los edificios donde consulta, no se ofrece.
+    expect(ofreceEnAlguno(new Map([[C1, ["proveedores.ver", "egresos.preparar_orden"]]]), consulta, gestion)).toBe(false);
+    // Sin `salvo` es lo mismo que `cumpleEnAlguno`.
+    expect(ofreceEnAlguno(mixto, gestion)).toBe(true);
+    expect(ofreceEnAlguno(new Map([[C2, ["proveedores.ver"]]]), gestion)).toBe(false);
   });
 });
 

@@ -14,7 +14,7 @@ import { RUTA_MANDATOS } from "./Mandatos";
 import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
-import { cumpleEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
+import { ofreceEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
 import { useSesionConNombre } from "./sesion";
 
 interface Destino {
@@ -88,9 +88,7 @@ function Item({ destino, secundario }: { destino: Destino; secundario?: boolean 
 
 export function Navegacion() {
   const porEdificio = useAccionesPorEdificio();
-  const ofrecido = (d: Destino) =>
-    (d.requisito === undefined || (porEdificio !== null && cumpleEnAlguno(porEdificio, d.requisito))) &&
-    (d.salvo === undefined || porEdificio === null || !cumpleEnAlguno(porEdificio, d.salvo));
+  const ofrecido = (d: Destino) => d.requisito === undefined || (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo));
   const administracion = DE_ADMINISTRACION.filter(ofrecido);
   return (
     <nav className="navegacion" aria-label="Secciones">

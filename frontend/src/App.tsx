@@ -9,7 +9,7 @@ import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
 import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { api } from "./api/cliente";
-import { cumpleEnAlguno, Exige, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
+import { cumpleEnAlguno, Exige, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
 import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EntrarEncima } from "./EntrarEncima";
@@ -216,9 +216,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
   const enlaces =
     porEdificio === null
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
-      : ENLACES_DE_INICIO.filter(
-          (e) => cumpleEnAlguno(porEdificio, e.requisito) && (e.salvo === undefined || !cumpleEnAlguno(porEdificio, e.salvo)),
-        );
+      : ENLACES_DE_INICIO.filter((e) => ofreceEnAlguno(porEdificio, e.requisito, e.salvo));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
   // En el «Para hacer» de la computadora, el Padrón entra si hay vínculos esperando (G-26) o si no
   // se pudo saber: un número desconocido no es «nada pendiente» (Codex en #245).
