@@ -127,14 +127,18 @@ create function nucleo.exigir_no_preparo(c uuid, orden uuid, actor uuid, identid
 def _llaman(llamada: str) -> dict[str, str]:
     """Las funciones de `nucleo` cuyo cuerpo contiene `llamada`, por firma; falla si no son
     exactamente `QUIENES_LLAMAN`."""
-    filas = op.get_bind().execute(
-        text(
-            "select p.proname, cast(cast(p.oid as regprocedure) as text) from pg_proc p"
-            " join pg_namespace n on n.oid = p.pronamespace"
-            " where n.nspname = 'nucleo' and strpos(p.prosrc, :llamada) > 0"
-        ),
-        {"llamada": llamada},
-    ).all()
+    filas = (
+        op.get_bind()
+        .execute(
+            text(
+                "select p.proname, cast(cast(p.oid as regprocedure) as text) from pg_proc p"
+                " join pg_namespace n on n.oid = p.pronamespace"
+                " where n.nspname = 'nucleo' and strpos(p.prosrc, :llamada) > 0"
+            ),
+            {"llamada": llamada},
+        )
+        .all()
+    )
     nombres = frozenset(nombre for nombre, _ in filas)
     if nombres != QUIENES_LLAMAN or len(filas) != len(QUIENES_LLAMAN):
         raise RuntimeError(
