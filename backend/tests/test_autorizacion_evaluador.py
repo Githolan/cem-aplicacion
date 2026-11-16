@@ -40,8 +40,8 @@ MANDATO = UUID(int=1)
 IDENTIDADES = {YO: UUID(int=101), OTRO: UUID(int=102)}
 
 
-def mandato(consorcio: UUID = CONSORCIO) -> Mandato:
-    return Mandato(id=MANDATO, consorcio_id=consorcio, vigente_desde=date(2026, 1, 1))
+def mandato(consorcio: UUID = CONSORCIO, tipo: str | None = None) -> Mandato:
+    return Mandato(id=MANDATO, consorcio_id=consorcio, vigente_desde=date(2026, 1, 1), tipo=tipo)
 
 
 def contexto(
@@ -54,9 +54,11 @@ def contexto(
     persona: UUID | None = YO,
     identidades: dict[UUID, UUID] = IDENTIDADES,
     segundo_factor_reciente: bool = True,
+    tipo_mandato: str | None = None,
+    roles_configurados: dict[str, frozenset[str]] | None = None,
 ) -> ContextoAutorizacion:
     """`facultades=None`: sin mandato; `()`: un mandato vigente sin ninguna facultad."""
-    mandatos = () if facultades is None else (mandato(consorcio_mandato),)
+    mandatos = () if facultades is None else (mandato(consorcio_mandato, tipo_mandato),)
     return ContextoAutorizacion(
         persona_id=persona,
         consorcio_id=CONSORCIO,
@@ -68,6 +70,7 @@ def contexto(
         hay_administrador_vigente=administrador,
         identidades=identidades,
         segundo_factor_reciente=segundo_factor_reciente,
+        roles_configurados=roles_configurados or {},
     )
 
 
@@ -134,20 +137,30 @@ def test_control_con_su_facultad_la_concesion_pasa(accion):
 def test_toda_economica_exige_identidad_y_los_controles_de_r10(accion):
     todas = tuple(CATALOGO)
     modo = ModoOperacion.AUTOGESTION
+    # La que se concede por configuración (`egresos.saltear_documentacion`, 0106): un mandato del
+    # Consejo, con la configuración que lo lista.
+    por_configuracion = POLITICAS[accion].concede_por_configuracion
+    extra = (
+        {"tipo_mandato": "miembro_consejo",
+         "roles_configurados": {accion: frozenset({"miembro_consejo"})}}
+        if por_configuracion
+        else {}
+    )  # fmt: skip
     casos = {
         "identidad_no_verificada": contexto(
-            facultades=todas, modo=modo, identidades={OTRO: IDENTIDADES[OTRO]}
+            facultades=todas, modo=modo, identidades={OTRO: IDENTIDADES[OTRO]}, **extra
         ),
         "requiere_segundo_factor_reciente": contexto(
-            facultades=todas, modo=modo, segundo_factor_reciente=False
+            facultades=todas, modo=modo, segundo_factor_reciente=False, **extra
         ),
     }
     for motivo, ctx in casos.items():
         d = evaluar(accion, ctx, TODO_PASA)
         assert (d.estado, d.motivo_interno) == (403, motivo)
     # Control: con todo, pasa.
-    d = evaluar(accion, contexto(facultades=todas, modo=modo), TODO_PASA)
-    assert (d.estado, d.motivo_interno) == (200, "concedido_por_facultad")
+    d = evaluar(accion, contexto(facultades=todas, modo=modo, **extra), TODO_PASA)
+    concedido = "concedido_por_configuracion" if por_configuracion else "concedido_por_facultad"
+    assert (d.estado, d.motivo_interno) == (200, concedido)
 
 
 def test_r10_no_alcanza_a_las_que_no_son_economicas():
@@ -333,8 +346,9 @@ def test_las_acciones_de_la_tabla():
     # de órdenes de pago (`egresos.revisar_orden`, H3) y la conciliación del pago manual
     # (`egresos.conciliar_pago`, 0055) y lo que muestra la interfaz (`consorcios.mis_acciones`)
     # y la consulta de proveedores (`proveedores.ver`, 0104) y quién autoriza a un habitante a
-    # verlos (`proveedores.autorizar`, 0105)
-    assert len(POLITICAS) == 53
+    # verlos (`proveedores.autorizar`, 0105) y el salteo con motivo del bloqueo por documentación
+    # legal (`egresos.saltear_documentacion`, 0106)
+    assert len(POLITICAS) == 54
 
 
 def _archivo(tmp_path, nombre, politicas):

@@ -12,9 +12,12 @@ origen `soporte` y la fecha, que nadie puede reescribir. Corre dentro del conten
         [--roles-que-ven miembro_consejo,administrador,...]
         [--requisitos-agregados codigo,...] [--requisitos-omitidos codigo,...]
         [--roles-que-autorizan miembro_consejo,...] [--autoriza-por-persona si|no]
+        [--roles-que-saltean miembro_consejo,...] [--horas-salteo 24]
 
 `--roles-que-autorizan` y `--autoriza-por-persona` (`0105`) deciden quién autoriza a un habitante
-a ver los proveedores y si esas autorizaciones cuentan.
+a ver los proveedores y si esas autorizaciones cuentan. `--roles-que-saltean` y `--horas-salteo`
+(`0106`) deciden quién saltea, con motivo, el bloqueo por documentación legal y cuántas horas
+espera ese salteo a su orden.
 
 Una lista vacía se pasa como `--roles-que-ven ""`. Sin ningún valor, solo imprime la configuración
 que vale. Imprime en JSON la configuración que queda.
@@ -49,6 +52,8 @@ def main(argumentos: list[str] | None = None) -> int:
     p.add_argument("--requisitos-omitidos", type=_lista)
     p.add_argument("--roles-que-autorizan", type=_lista)
     p.add_argument("--autoriza-por-persona", choices=tuple(SI_NO))
+    p.add_argument("--roles-que-saltean", type=_lista)
+    p.add_argument("--horas-salteo", type=int)
     a = p.parse_args(argumentos)
     config = cargar()
     if not config.database_url:
@@ -77,6 +82,10 @@ def main(argumentos: list[str] | None = None) -> int:
             "select nucleo.configurar_autorizacion_proveedores(:roles, :por_persona, null,"
             " 'soporte')",
             autorizacion,
+        ),
+        (
+            "select nucleo.configurar_salteo_documentacion(:roles, :horas, null, 'soporte')",
+            {"roles": a.roles_que_saltean, "horas": a.horas_salteo},
         ),
     ]
     motor = crear_motor(config.database_url)

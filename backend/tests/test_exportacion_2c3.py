@@ -125,9 +125,13 @@ CLAVES_POR_ENTIDAD = {
     "configuracion_proveedores": {"numero", "dias_por_vencer", "modo_exigencia",
                                   "admite_no_vence", "roles_que_ven", "requisitos_agregados",
                                   "requisitos_omitidos", "roles_que_autorizan",
-                                  "autoriza_por_persona", "origen", "registrada_en"},
+                                  "autoriza_por_persona", "roles_que_saltean", "horas_salteo",
+                                  "origen", "registrada_en"},
     "autorizacion_ver_proveedores": {"numero", "persona_nombre", "cambio", "motivo",
                                      "registrado_por_nombre", "registrado_en"},
+    "salteo_documentacion_proveedor": {"numero", "proveedor_id", "motivo",
+                                       "registrado_por_nombre", "registrado_en", "vence_en"},
+    "salteo_documentacion_uso": {"salteo_numero", "orden_id", "version", "usado_en"},
     "orden": {"id", "estado", "version_vigente", "preparada_por_nombre", "creada_en",
               "actualizada_en", "aprobada_en", "motivo_rechazo"},
     "orden_version": {"orden_id", "numero", "importe_centavos", "moneda", "concepto",
@@ -1294,6 +1298,8 @@ TABLA_DE_LA_ENTIDAD = {
     "rubro_legal_proveedor": "nucleo.rubro_legal_proveedor",
     "configuracion_proveedores": "nucleo.configuracion_proveedores",
     "autorizacion_ver_proveedores": "nucleo.autorizacion_ver_proveedores",
+    "salteo_documentacion_proveedor": "nucleo.salteo_documentacion_proveedor",
+    "salteo_documentacion_uso": "nucleo.salteo_documentacion_uso",
     "orden": "nucleo.orden_pago",
     "orden_version": "nucleo.orden_pago_version",
     "orden_aprobacion": "nucleo.orden_pago_aprobacion",
@@ -1342,6 +1348,10 @@ ADJUNTAR_FACTURA = (
 AUTORIZAR_VER = (
     "select nucleo.autorizar_ver_proveedores(:persona, true,"
     " 'SINTETICO: integra la comisión de obras', :actor, :origen, :sesion)"
+)
+SALTEAR = (
+    "select numero from nucleo.saltear_documentacion_legal(:proveedor, 'SINTETICO: urgencia de"
+    " gas', :actor, :origen, :sesion)"
 )
 ASIGNAR_RUBRO = (
     "select nucleo.asignar_rubro_legal_proveedor(:proveedor, 'general', true, :actor, :origen,"
@@ -1483,6 +1493,17 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     llamar(motor_migrate, s, s.adm, ASIGNAR_RUBRO)
     # El Consejo autoriza a un habitante a ver los proveedores (0105).
     llamar(motor_migrate, s, s.mc1, AUTORIZAR_VER, persona=s.prop)
+    # Un salteo con motivo del bloqueo y la orden que lo usa (0106): el rubro ascensores deja al
+    # proveedor sin lo que exige la ley, y en «bloquear» solo pasa la orden con el salteo.
+    llamar(motor_migrate, s, s.adm, ASIGNAR_RUBRO.replace("'general'", "'ascensores'"))
+    with transaccion(motor_app, persona_id=None, consorcio_id=s.cons) as c:
+        c.execute(text("select nucleo.configurar_proveedores(null, 'bloquear', null, null, null,"
+                       " null, null, 'soporte')"))  # fmt: skip
+    llamar(motor_migrate, s, s.mc1, SALTEAR)
+    llamar(motor_migrate, s, s.adm, PREPARAR)
+    with transaccion(motor_app, persona_id=None, consorcio_id=s.cons) as c:
+        c.execute(text("select nucleo.configurar_proveedores(null, 'avisar', null, null, null,"
+                       " null, null, 'soporte')"))  # fmt: skip
     cotejadas(motor_migrate, s, pagadas)
     leida(motor_migrate, motor_app, s, pagadas[0])
     leida_para_carga(motor_migrate, motor_app, s)
@@ -1548,7 +1569,8 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
         for fila in datos[entidad]:
             assert set(fila) == CLAVES_POR_ENTIDAD[entidad], entidad
     # La historia va entera, no solo lo vigente.
-    assert len(datos["orden"]) == 6
+    # Siete: la séptima es la que usó el salteo con motivo (0106).
+    assert len(datos["orden"]) == 7
     assert str(e["en_borrador"]) in {o["id"] for o in datos["orden"]}
     assert {v["version"] for v in datos["proveedor_version"]
             if v["proveedor_id"] == str(e["s"].proveedor)} == {1, 2}  # fmt: skip

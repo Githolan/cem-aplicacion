@@ -104,6 +104,7 @@ from cem_contracts.egresos import (
     ListaPagosPorAclarar,
     ListaProveedores,
     ListaProveedoresConsulta,
+    NuevoSalteoDocumentacion,
     ObservacionVigente,
     OrdenConPagoManual,
     OrdenPago,
@@ -139,6 +140,7 @@ from cem_contracts.egresos import (
     Retiro,
     RetiroOrdenPago,
     RubrosLegalesProveedor,
+    SalteoDocumentacion,
     SituacionPago,
     TipoCarga,
     TipoDiferencia,
@@ -201,6 +203,7 @@ EN_CURSO = ESPERAN_PAGO | {EstadoOrdenPago.EN_REVISION, EstadoOrdenPago.APROBADA
 Son pocas y no crecen con la historia del consorcio."""
 VER_PROVEEDORES = "proveedores.ver"
 AUTORIZAR_PROVEEDORES = "proveedores.autorizar"
+SALTEAR_DOCUMENTACION = "egresos.saltear_documentacion"
 LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR, VER_PROVEEDORES: VER_PROVEEDORES}
 """La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`;
 `exigir_lectura_proveedores`, `0104`)."""
@@ -260,7 +263,24 @@ ERRORES = {
     "documentacion_legal_faltante": (
         422, CodigoError.DOCUMENTACION_LEGAL_FALTANTE,
         "Al proveedor le falta documentación que exige la ley, o la tiene vencida: hay que"
-        " cargarla en su ficha antes de prepararle una orden.",
+        " cargarla en su ficha antes de prepararle una orden. En una urgencia, un miembro del"
+        " Consejo puede saltear el bloqueo para una orden, con el motivo, desde la ficha del"
+        " proveedor.",
+    ),
+    "salteo_de_quien_prepara": (
+        422, CodigoError.SALTEO_DE_QUIEN_PREPARA,
+        "El salteo del bloqueo lo registró quien prepara la orden: nadie saltea su propio"
+        " bloqueo. La orden la prepara otra persona, o el salteo lo registra otro miembro del"
+        " Consejo.",
+    ),
+    "salteo_innecesario": (
+        409, CodigoError.SALTEO_INNECESARIO,
+        "Nada bloquea las órdenes a este proveedor: no hace falta saltear. Volver a abrir la"
+        " ficha.",
+    ),
+    "salteo_vigente": (
+        409, CodigoError.SALTEO_VIGENTE,
+        "Ya registró un salteo de este proveedor que espera su orden: volver a abrir la ficha.",
     ),
     "factura_no_vigente": (
         409, CodigoError.FACTURA_NO_VIGENTE,
@@ -666,6 +686,9 @@ def _leer_orden_con_versiones(
         _ejecutar(c, permiso, VERSIONES, {"o": orden_id, "f": LEE_COMO[permiso.accion]}).mappings()
     )
     evaluaciones = _evaluaciones(c, permiso, orden_id)
+    # 0106: el salteo con motivo que dejó preparar cada versión, si hubo. Se lee después de las
+    # versiones: el salteo se usa en la misma transacción que escribe la versión.
+    salteos = {s.version: s for s in _salteos(c, permiso, orden=orden_id)}
     # Por la identidad humana guardada en cada versión, no por cuenta ni por los vínculos de
     # hoy: quien preparó y revisa con otra cuenta suya tampoco recibe la cuenta completa,
     # aunque la cuenta con la que preparó ya no esté vinculada (#175; P3 115).
@@ -682,6 +705,7 @@ def _leer_orden_con_versiones(
             **datos, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
             umbral_importe_centavos=ev["umbral_importe_centavos"],
             umbral_moneda=ev["umbral_moneda"], contrato_id=ev["contrato_id"],
+            salteo_documentacion=salteos.get(f["numero"]),
         ))  # fmt: skip
     if revision:
         return OrdenPagoConVersionesRevision(
@@ -769,6 +793,19 @@ VENCIDA = EstadoDocumentacionProveedor.VENCIDA
 POR_VENCER = EstadoDocumentacionProveedor.POR_VENCER
 
 
+def _salteos(
+    c: Connection, lector: Permiso, *, proveedor: UUID | None = None, orden: UUID | None = None
+) -> list[SalteoDocumentacion]:
+    """Los salteos con motivo del bloqueo por documentación legal (`0106`), de un proveedor o de
+    una orden, con el estado que calcula la base."""
+    filas = _ejecutar(
+        c, lector,
+        "select * from nucleo.salteos_documentacion_lectura(:p, :o, :f, :actor, 'api', :sesion)",
+        {"p": proveedor, "o": orden, "f": LEE_COMO[lector.accion]},
+    ).mappings()  # fmt: skip
+    return [SalteoDocumentacion(**f) for f in filas]
+
+
 def _documentacion(
     c: Connection, lector: Permiso, proveedor: UUID | None
 ) -> list[DocumentacionProveedor]:
@@ -806,11 +843,12 @@ def ver_proveedor(
         faltantes = _faltantes(c, permiso, proveedor_id)
         requisitos = _requisitos(c, permiso)
         configuracion = _configuracion(c, permiso)
+        salteos = _salteos(c, permiso, proveedor=proveedor_id)
     return ProveedorConVersiones(
         proveedor=proveedores[0], versiones=versiones, documentacion=documentacion,
         puede_cargar_documentacion=cargar.decidir(Entidad()).permitido,
         rubros_legales=rubros, faltantes=faltantes, requisitos=requisitos,
-        configuracion=configuracion,
+        configuracion=configuracion, salteos=salteos,
     )  # fmt: skip
 
 
@@ -1108,10 +1146,57 @@ def consultar_proveedor(
         faltantes = _faltantes(c, permiso, proveedor_id)
         requisitos = _requisitos(c, permiso)
         configuracion = _configuracion(c, permiso)
+        salteos = _salteos(c, permiso, proveedor=proveedor_id)
     return FichaProveedorConsulta(
         proveedor=proveedores[0], documentacion=documentacion, rubros_legales=rubros,
         faltantes=faltantes, requisitos=requisitos, configuracion=configuracion,
+        salteos=salteos,
     )  # fmt: skip
+
+
+# --- Salteo con motivo del bloqueo por documentación legal (`0106`) -----------------------------
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/salteos-documentacion",
+    response_model=SalteoDocumentacion,
+    status_code=201,
+    summary="En una urgencia, saltear con el motivo el bloqueo por documentación legal: sirve para"
+    " la próxima orden a ese proveedor que prepare otra persona",
+    responses=RESPUESTAS_ESCRITURA | {
+        404: {"description": "El proveedor no existe en este consorcio."},
+        409: {"description": "Nada bloquea las órdenes a ese proveedor (`salteo_innecesario`) o"
+                             " quien saltea ya registró uno que espera su orden"
+                             " (`salteo_vigente`)."},
+        422: {"description": "Falta el motivo (`motivo_invalido`)."},
+    },
+)  # fmt: skip
+def saltear_documentacion(
+    proveedor_id: UUID,
+    cuerpo: NuevoSalteoDocumentacion,
+    permiso: Annotated[
+        Permiso, Depends(requiere(SALTEAR_DOCUMENTACION, al_entrar=True, sin_gesto=True))
+    ],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Respuesta del propietario del 16-11-2026 a la pregunta 3 del diseño (una urgencia, como una
+    pérdida de gas): «si con motivo». El salteo no se le da al proveedor en general: lo usa una
+    sola orden, la próxima que se prepare a ese proveedor, y queda escrito en su ficha y en la de
+    la orden. Quien prepara esa orden no puede ser quien registró el salteo (lo comprueba la base
+    al preparar)."""
+
+    def efecto(conn: Connection) -> tuple[int, SalteoDocumentacion]:
+        fila = _ejecutar(
+            conn, permiso,
+            "select * from nucleo.saltear_documentacion_legal(:p, :motivo, :actor, 'api',"
+            " :sesion)",
+            {"p": proveedor_id, "motivo": cuerpo.motivo},
+            {"proveedor_inexistente": ERRORES["no_encontrado"]},
+        ).mappings().one()  # fmt: skip
+        return 201, SalteoDocumentacion(**fila)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
 # --- Quién ve los proveedores: el Consejo autoriza a un habitante (`0105`) ----------------------
