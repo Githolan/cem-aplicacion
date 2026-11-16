@@ -219,11 +219,51 @@ def test_la_lectura_del_trabajo_no_trae_cuentas_ni_proveedores(motor_migrate, mo
 
 
 def test_el_texto_en_singular_y_en_plural():
-    aviso = avisos_pagos.Aviso("x@ejemplo.com", sin_explicar={"Prueba": 1, "Otra": 3})
+    prueba, otra = UUID(int=1), UUID(int=2)
+    aviso = avisos_pagos.Aviso("x@ejemplo.com", sin_explicar={prueba: 1, otra: 3},
+                               nombres={prueba: "Prueba", otra: "Otra"})  # fmt: skip
     cuerpo = avisos_pagos.texto(aviso, "https://cem.ejemplo.com/pagos", 1)
     assert "- Otra: hay 3 movimientos del extracto sin explicar para revisar." in cuerpo
     assert UN_MOVIMIENTO in cuerpo
     assert cuerpo.index("- Otra:") < cuerpo.index("- Prueba:")
+
+
+def _fila(consorcio: UUID, nombre: str, debitos: int) -> dict:
+    """Una fila como las de `extracto_sin_explicar_para_avisar`: débitos sin ningún pago."""
+    return {
+        "consorcio_id": consorcio, "consorcio": nombre,
+        "lectores": [{"persona_id": str(UUID(int=99)), "correo": "x@ejemplo.com"}],
+        "movimientos": [
+            {"movimiento_id": str(UUID(int=consorcio.int * 100 + i)), "fecha": "2026-11-13",
+             "importe_centavos": 750 + i, "moneda": "ARS", "numero_operacion": None}
+            for i in range(debitos)
+        ],
+        "pagos": [],
+    }  # fmt: skip
+
+
+def test_dos_edificios_con_el_mismo_nombre_tienen_cada_uno_su_renglon():
+    """Codex P2 en #253: con la cuenta por nombre, el segundo edificio pisaba al primero (2 + 3
+    salía como 3). Contra c6c75cd falla: queda un solo renglón, con 3."""
+    uno, dos = UUID(int=1), UUID(int=2)
+    avisos: dict = {}
+    avisos_pagos.sumar_sin_explicar(
+        avisos, [_fila(uno, "Torre  Sur", 2), _fila(dos, "Torre Sur", 3)]
+    )
+    [aviso] = avisos.values()
+    cuerpo = avisos_pagos.texto(aviso, "https://cem.ejemplo.com/pagos", 1)
+    renglones = [r for r in cuerpo.splitlines() if r.startswith("- Torre Sur:")]
+    assert renglones == [
+        "- Torre Sur: hay 2 movimientos del extracto sin explicar para revisar.",
+        "- Torre Sur: hay 3 movimientos del extracto sin explicar para revisar.",
+    ]
+    # Control: un solo edificio da un solo renglón, con su cuenta.
+    solo: dict = {}
+    avisos_pagos.sumar_sin_explicar(solo, [_fila(uno, "Torre Sur", 2)])
+    cuerpo = avisos_pagos.texto(next(iter(solo.values())), "https://cem.ejemplo.com/pagos", 1)
+    assert [r for r in cuerpo.splitlines() if r.startswith("- Torre Sur:")] == [
+        "- Torre Sur: hay 2 movimientos del extracto sin explicar para revisar."
+    ]
 
 
 def _definiciones(motor) -> dict:

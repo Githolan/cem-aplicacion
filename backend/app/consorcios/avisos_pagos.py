@@ -91,10 +91,13 @@ class ErrorConfigAvisos(RuntimeError):
 @dataclass
 class Aviso:
     correo: str
-    pendientes: dict[str, Counter[str]] = field(default_factory=lambda: defaultdict(Counter))
-    """Edificio → qué hay que hacer → cuántas órdenes."""
-    sin_explicar: dict[str, int] = field(default_factory=dict)
-    """Edificio → cuántos movimientos del extracto no explica ningún pago."""
+    pendientes: dict[UUID, Counter[str]] = field(default_factory=lambda: defaultdict(Counter))
+    """Edificio (por su id) → qué hay que hacer → cuántas órdenes."""
+    sin_explicar: dict[UUID, int] = field(default_factory=dict)
+    """Edificio (por su id) → cuántos movimientos del extracto no explica ningún pago."""
+    nombres: dict[UUID, str] = field(default_factory=dict)
+    """Edificio → su nombre, para el renglón. Dos edificios pueden llamarse igual (Codex en
+    #253): cada uno tiene su renglón y su cuenta."""
 
 
 def agrupar(filas: list[dict[str, Any]]) -> dict[UUID, Aviso]:
@@ -103,6 +106,7 @@ def agrupar(filas: list[dict[str, Any]]) -> dict[UUID, Aviso]:
     for fila in filas:
         datos = dict(fila)
         persona, nombre, direccion = datos["persona_id"], datos["consorcio"], datos["correo"]
+        consorcio = datos["consorcio_id"]
         estado, prepara = EstadoOrdenPago(datos["estado"]), datos["quien_prepara"]
         for clave in DATOS_DE_LA_ORDEN + ("orden_id",):
             datos.pop(clave)
@@ -110,7 +114,8 @@ def agrupar(filas: list[dict[str, Any]]) -> dict[UUID, Aviso]:
         if que is None:
             continue
         aviso = avisos.setdefault(persona, Aviso(direccion))
-        aviso.pendientes[_edificio(nombre)][que] += 1
+        aviso.pendientes[consorcio][que] += 1
+        aviso.nombres[consorcio] = _edificio(nombre)
     return avisos
 
 
@@ -137,7 +142,8 @@ def sumar_sin_explicar(avisos: dict[UUID, Aviso], filas: list[dict[str, Any]]) -
             continue
         for lector in fila["lectores"]:
             aviso = avisos.setdefault(UUID(lector["persona_id"]), Aviso(lector["correo"]))
-            aviso.sin_explicar[_edificio(fila["consorcio"])] = n
+            aviso.sin_explicar[fila["consorcio_id"]] = n
+            aviso.nombres[fila["consorcio_id"]] = _edificio(fila["consorcio"])
 
 
 def _cuantas(que: str, n: int) -> str:
@@ -154,20 +160,22 @@ def _enumerar(partes: list[str]) -> str:
     return partes[0] if len(partes) == 1 else ", ".join(partes[:-1]) + " y " + partes[-1]
 
 
-def _renglones(aviso: Aviso, edificio: str) -> list[str]:
+def _renglones(aviso: Aviso, consorcio: UUID) -> list[str]:
     """Las órdenes del edificio en un renglón y lo que el extracto no explica en otro."""
     renglones = []
-    cuantas = aviso.pendientes.get(edificio, Counter())
+    nombre = aviso.nombres[consorcio]
+    cuantas = aviso.pendientes.get(consorcio, Counter())
     partes = [_cuantas(q, cuantas[q]) for q in QUE_HACER if cuantas[q] > 0]
     if partes:
-        renglones.append(f"- {edificio}: {_enumerar(partes)}.")
-    if edificio in aviso.sin_explicar:
-        renglones.append(f"- {edificio}: {_sin_explicar(aviso.sin_explicar[edificio])}.")
+        renglones.append(f"- {nombre}: {_enumerar(partes)}.")
+    if consorcio in aviso.sin_explicar:
+        renglones.append(f"- {nombre}: {_sin_explicar(aviso.sin_explicar[consorcio])}.")
     return renglones
 
 
 def texto(aviso: Aviso, enlace: str, tope: int) -> str:
-    edificios = sorted(set(aviso.pendientes) | set(aviso.sin_explicar))
+    edificios = sorted(set(aviso.pendientes) | set(aviso.sin_explicar),
+                       key=lambda c: (aviso.nombres[c], c))  # fmt: skip
     renglones = "\n".join(r for edificio in edificios for r in _renglones(aviso, edificio))
     veces = "una vez" if tope == 1 else f"{tope} veces"
     return TEXTO.format(renglones=renglones, enlace=enlace, veces=veces)
