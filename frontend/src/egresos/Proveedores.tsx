@@ -41,9 +41,10 @@ import { DocumentacionProveedor } from "./DocumentacionProveedor";
 import { ExigenciaLegal } from "./ExigenciaLegal";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
-import { REQUISITOS } from "../permisos";
+import { REQUISITOS, usePuede } from "../permisos";
 import { RUTA_NUEVA, RUTA_PAGOS } from "../pagos/rutas";
 import { PedirCodigo } from "./PedirCodigo";
+import { SalteoDocumentacion } from "./SalteoDocumentacion";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /egresos/proveedores (pantalla 1, aprobada el 30-10-2026; app 0048 y 0049): la lista con
@@ -266,6 +267,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [confirmarCuenta, setConfirmarCuenta] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const puede = usePuede(consorcio);
   /** Los campos que la API rechazó, con qué hacer en cada uno (tanda 3, P-26). */
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -322,8 +324,9 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     volverAPedir();
   }
 
-  function verFicha(p: Proveedor) {
-    setAviso(null);
+  /** `aviso`: lo que se dice al volver a leer la ficha después de un acto (el salteo). */
+  function verFicha(p: Proveedor, aviso: Aviso | null = null) {
+    setAviso(aviso);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}", {
         params: { path: { consorcio_id: consorcio, proveedor_id: p.id } },
@@ -630,6 +633,16 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   verFicha(ficha.proveedor);
                   setVuelta((v) => v + 1);
                 }}
+              />
+              <SalteoDocumentacion
+                consorcio={consorcio}
+                proveedorId={ficha.proveedor.id}
+                salteos={ficha.salteos}
+                modo={ficha.configuracion.modo_exigencia}
+                hayFaltantes={ficha.faltantes.length > 0}
+                puedeSaltear={puede("egresos.saltear_documentacion")}
+                aEntrar={aEntrar}
+                alCambiar={(texto, ok) => verFicha(ficha.proveedor, { texto, ok })}
               />
               <DocumentacionProveedor
                 consorcio={consorcio}

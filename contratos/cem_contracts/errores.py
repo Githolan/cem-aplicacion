@@ -231,6 +231,13 @@ class CodigoError(StrEnum):
     """La configuración del consorcio no autoriza por persona (`0105`)."""
     MOTIVO_INVALIDO = "motivo_invalido"
     """El motivo falta o es demasiado largo (`0105`)."""
+    SALTEO_INNECESARIO = "salteo_innecesario"
+    """Nada bloquea las órdenes a ese proveedor: no hace falta saltear (`0106`)."""
+    SALTEO_VIGENTE = "salteo_vigente"
+    """Quien saltea ya registró un salteo de ese proveedor que espera su orden (`0106`)."""
+    SALTEO_DE_QUIEN_PREPARA = "salteo_de_quien_prepara"
+    """El único salteo vigente lo registró quien prepara la orden: no saltea su propio bloqueo
+    (`0106`)."""
     DOCUMENTACION_LEGAL_FALTANTE = "documentacion_legal_faltante"
     """Al proveedor le falta documentación que exige la ley y el consorcio está en modo
     «bloquear»: no se prepara ni se modifica una orden nueva a ese proveedor (`0104`)."""

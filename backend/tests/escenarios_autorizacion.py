@@ -31,7 +31,11 @@ from datetime import date, timedelta
 from pathlib import Path
 from uuid import UUID
 
-from cem_contracts.egresos import ROLES_QUE_AUTORIZAN_PROVEEDORES, ROLES_QUE_VEN_PROVEEDORES
+from cem_contracts.egresos import (
+    ROLES_QUE_AUTORIZAN_PROVEEDORES,
+    ROLES_QUE_SALTEAN_DOCUMENTACION,
+    ROLES_QUE_VEN_PROVEEDORES,
+)
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 from cem_contracts.politicas import DIRECTORIO, TipoRecurso
 
@@ -94,8 +98,9 @@ FIGURAS_MANDATO = {"MC": "miembro_consejo", "AD": "administrador", "AE": "admini
 ROLES_CONFIGURADOS = {
     "proveedores.ver": frozenset(ROLES_QUE_VEN_PROVEEDORES),
     "proveedores.autorizar": frozenset(ROLES_QUE_AUTORIZAN_PROVEEDORES),
+    "egresos.saltear_documentacion": frozenset(ROLES_QUE_SALTEAN_DOCUMENTACION),
 }
-"""La configuración por defecto de `0104`: la tabla de verdad corre con ella."""
+"""La configuración por defecto de `0104` a `0106`: la tabla de verdad corre con ella."""
 
 # Filas de `paquete_facultad` que agrega `0012` (tabla de verdad, §5.2: C2 y A2).
 ADICIONES_0012 = {

@@ -39,6 +39,16 @@ import {
   TITULO_AUTORIZACIONES_PROVEEDORES,
 } from "./AutorizacionesProveedores";
 import { AGREGAR_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, SIN_RUBROS } from "./ExigenciaLegal";
+import {
+  CONFIRMAR_SALTEO,
+  EXPLICACION_SALTEO,
+  MOTIVO_SALTEO,
+  SALTEAR,
+  SALTEO_REGISTRADO,
+  textoSalteo,
+  textoSalteoDeLaVersion,
+  TITULO_SALTEO,
+} from "./SalteoDocumentacion";
 import { CUIT_INVALIDO } from "../CampoCuit";
 import { CUENTA_INVALIDA } from "../cuentaBancaria";
 
@@ -70,6 +80,8 @@ const EXIGENCIA = {
   faltantes: [] as components["schemas"]["RequisitoFaltante"][],
   requisitos: [] as components["schemas"]["RequisitoLegal"][],
   configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear" as const, admite_no_vence: true },
+  // Salteo por urgencia (app 0106).
+  salteos: [] as components["schemas"]["SalteoDocumentacion"][],
 };
 const SIN_DOCUMENTACION = { documentacion: [], puede_cargar_documentacion: true, ...EXIGENCIA };
 
@@ -1191,6 +1203,23 @@ describe("página /proveedores (consulta)", () => {
     estado: "activo" as const,
   };
   const configuracion = { dias_por_vencer: 30, modo_exigencia: "bloquear" as const, admite_no_vence: true };
+  const fichaConsulta = (salteos: components["schemas"]["SalteoDocumentacion"][] = []) =>
+    Response.json({
+      proveedor: enConsulta,
+      documentacion: [
+        {
+          id: O1, proveedor_id: P1, tipo: "seguro", descripcion: "Poliza SINTETICA", vence_el: "2026-11-01", no_vence: false,
+          requisito_codigo: "ascensores.seguro_rc", documento_id: DOC, version_documento_id: DOC, estado: "vencida",
+          cargada_por_nombre: "Persona Ficticia", cargada_en: "2026-10-20T15:00:00Z", reemplaza_a: null, documento_vigente: true,
+        },
+      ],
+      rubros_legales: ["ascensores"],
+      faltantes: [{ proveedor_id: P1, codigo: "ascensores.seguro_rc", rubro_legal: "ascensores", tipo: "seguro", descripcion: "RC SINTETICA" }],
+      requisitos: [{ codigo: "ascensores.seguro_rc", rubro_legal: "ascensores", tipo: "seguro", descripcion: "RC SINTETICA",
+        fuente: "Fuente SINTETICA", verificado: true, exigido: true }],
+      configuracion,
+      salteos,
+    });
   const consulta = (extra: Respuestas = {}) =>
     backend({
       ...INICIO,
@@ -1203,22 +1232,7 @@ describe("página /proveedores (consulta)", () => {
           documentacion_faltante: [P1],
           modo_exigencia: "bloquear",
         }),
-      [`GET ${CONSULTA}/${P1}`]: () =>
-        Response.json({
-          proveedor: enConsulta,
-          documentacion: [
-            {
-              id: O1, proveedor_id: P1, tipo: "seguro", descripcion: "Poliza SINTETICA", vence_el: "2026-11-01", no_vence: false,
-              requisito_codigo: "ascensores.seguro_rc", documento_id: DOC, version_documento_id: DOC, estado: "vencida",
-              cargada_por_nombre: "Persona Ficticia", cargada_en: "2026-10-20T15:00:00Z", reemplaza_a: null, documento_vigente: true,
-            },
-          ],
-          rubros_legales: ["ascensores"],
-          faltantes: [{ proveedor_id: P1, codigo: "ascensores.seguro_rc", rubro_legal: "ascensores", tipo: "seguro", descripcion: "RC SINTETICA" }],
-          requisitos: [{ codigo: "ascensores.seguro_rc", rubro_legal: "ascensores", tipo: "seguro", descripcion: "RC SINTETICA",
-            fuente: "Fuente SINTETICA", verificado: true, exigido: true }],
-          configuracion,
-        }),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta(),
       ...extra,
     });
 
@@ -1253,6 +1267,63 @@ describe("página /proveedores (consulta)", () => {
     const otro = await screen.findByRole("navigation", { name: "Secciones" });
     expect(await within(otro).findByRole("link", { name: "Proveedores" })).toBeTruthy();
     expect(within(otro).queryByRole("link", { name: TITULO_CONSULTA_PROVEEDORES })).toBeNull();
+  });
+
+  // Salteo por urgencia (app 0106; propietario, 16-11-2026: «si con motivo»).
+  const SALTEO = {
+    numero: 7,
+    proveedor_id: P1,
+    motivo: "SINTETICO: pérdida de gas",
+    registrado_en: "2026-11-16T15:00:00Z",
+    registrado_por_nombre: "Consejera Ficticia",
+    vence_en: "2026-11-17T15:00:00Z",
+    estado: "vigente" as const,
+    orden_id: null,
+    version: null,
+    usado_en: null,
+  };
+  const SALTEOS = `${BASE}/proveedores/${P1}/salteos-documentacion`;
+
+  it("en una urgencia, el Consejo saltea el bloqueo con el motivo, para una orden", async () => {
+    const api = consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`POST ${SALTEOS}`]: () => Response.json(SALTEO, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByRole("heading", { name: TITULO_SALTEO })).toBeTruthy();
+    expect(screen.getByText(EXPLICACION_SALTEO)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: SALTEAR }));
+    const confirmar = screen.getByRole("button", { name: CONFIRMAR_SALTEO });
+    expect((confirmar as HTMLButtonElement).disabled).toBe(true); // sin motivo no se manda
+    fireEvent.change(screen.getByLabelText(MOTIVO_SALTEO), { target: { value: "  SINTETICO: pérdida de gas  " } });
+    fireEvent.click(confirmar);
+    expect(await screen.findByText(SALTEO_REGISTRADO)).toBeTruthy();
+    const pedido = unico(pedidos(api, "POST", SALTEOS));
+    expect(await pedido.json()).toEqual({ motivo: "SINTETICO: pérdida de gas" });
+    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+    await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("sin la acción no se ofrece saltear, y la ficha muestra los salteos que hubo", async () => {
+    const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
+    vi.stubGlobal("fetch", consulta());
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
+    expect(screen.queryByRole("heading", { name: TITULO_SALTEO })).toBeNull();
+    cleanup();
+    // Control: con un salteo ya usado, se ve aunque no se pueda saltear.
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([usado]) }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    // El momento lleva espacios finos (Intl): se compara el texto entero de la fila.
+    expect((await screen.findByRole("list", { name: "Salteos" })).textContent).toBe(textoSalteo(usado));
+    expect(textoSalteo(usado)).toMatch(/^Usado por una orden \(versión 1\)\. Registrado el .*Consejera Ficticia: SINTETICO: pérdida de gas$/);
+    expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
+    expect(textoSalteoDeLaVersion(usado)).toContain("SINTETICO: pérdida de gas");
   });
 
   it("sin proveedores.ver la dirección lleva al inicio", async () => {

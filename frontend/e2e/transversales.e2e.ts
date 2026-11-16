@@ -64,6 +64,7 @@ async function simularApi(pagina: Page, baseURL: string, alta: Alta) {
           faltantes: [],
           requisitos: [],
           configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true },
+          salteos: [],
         },
       });
     return ruta.abort();

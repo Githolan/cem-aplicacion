@@ -163,6 +163,16 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if;"
                 # Los contratos (0050) citan documentos, y las versiones de la orden citan
                 # contratos y umbrales: van antes que los documentos, con las órdenes.
+                # Los salteos del bloqueo por documentación legal (0106) y sus usos citan las
+                # versiones de las órdenes, los proveedores y las identidades: van primero.
+                " if to_regclass('nucleo.salteo_documentacion_uso') is not null then"
+                "   alter table nucleo.salteo_documentacion_uso disable trigger user;"
+                "   alter table nucleo.salteo_documentacion_proveedor disable trigger user;"
+                "   delete from nucleo.salteo_documentacion_uso;"
+                "   delete from nucleo.salteo_documentacion_proveedor;"
+                "   alter table nucleo.salteo_documentacion_uso enable trigger user;"
+                "   alter table nucleo.salteo_documentacion_proveedor enable trigger user;"
+                " end if;"
                 " if to_regclass('nucleo.contrato_proveedor') is not null then"
                 "   alter table nucleo.orden_pago_aprobacion disable trigger user;"
                 "   alter table nucleo.orden_pago_version disable trigger user;"

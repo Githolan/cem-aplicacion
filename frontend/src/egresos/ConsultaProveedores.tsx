@@ -6,13 +6,14 @@ import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { RUTA_INICIO } from "../enlace";
-import { REQUISITOS } from "../permisos";
+import { REQUISITOS, usePuede } from "../permisos";
 import { type Aviso, ESTADO, mensajeDeError, sinLaFalla, sinPisarLoHecho, TEXTO_ESTADO_PROVEEDOR } from "./comun";
 import { DocumentacionProveedor } from "./DocumentacionProveedor";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
 import { ExigenciaLegal } from "./ExigenciaLegal";
 import { MARCA_FALTANTE, MARCA_POR_VENCER, MARCA_VENCIDA } from "./Proveedores";
+import { SalteoDocumentacion } from "./SalteoDocumentacion";
 import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 
 // Página /proveedores: la consulta de los proveedores y sus seguros para quien no los gestiona
@@ -20,7 +21,9 @@ import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 // todo el Consejo y la administración; la ven también los habitantes que autorice el Consejo
 // (app 0105, «Quién ve los proveedores») y, si el equipo los suma en la configuración del edificio,
 // todos los de un tipo de vínculo. Solo lee: sin la cuenta del proveedor, sin cargar ni
-// cambiar nada. Lo decide la API con `proveedores.ver`, y la base repite la regla.
+// cambiar nada. Lo decide la API con `proveedores.ver`, y la base repite la regla. La excepción
+// es el salteo por urgencia del bloqueo por documentación legal (app 0106), para quien la
+// configuración del edificio deja saltear (por defecto, el Consejo).
 
 type ProveedorConsulta = components["schemas"]["ProveedorConsulta"];
 type Ficha = components["schemas"]["FichaProveedorConsulta"];
@@ -51,6 +54,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const { abrir: abrirFila, cerrar: cerrarFila, refFila } = useFichas<string>();
+  const puede = usePuede(consorcio);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -88,8 +92,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
 
-  function verFicha(p: ProveedorConsulta) {
-    setAviso(null);
+  /** `aviso`: lo que se dice al volver a leer la ficha después de un acto (el salteo). */
+  function verFicha(p: ProveedorConsulta, aviso: Aviso | null = null) {
+    setAviso(aviso);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/consulta-proveedores/{proveedor_id}", {
         params: { path: { consorcio_id: consorcio, proveedor_id: p.id } },
@@ -186,6 +191,16 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                 puedeCambiar={false}
                 aEntrar={aEntrar}
                 alCambiar={() => undefined}
+              />
+              <SalteoDocumentacion
+                consorcio={consorcio}
+                proveedorId={ficha.proveedor.id}
+                salteos={ficha.salteos}
+                modo={ficha.configuracion.modo_exigencia}
+                hayFaltantes={ficha.faltantes.length > 0}
+                puedeSaltear={puede("egresos.saltear_documentacion")}
+                aEntrar={aEntrar}
+                alCambiar={(texto, ok) => verFicha(ficha.proveedor, { texto, ok })}
               />
               <DocumentacionProveedor
                 consorcio={consorcio}
