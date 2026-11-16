@@ -224,6 +224,15 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     modificar?.version.factura_version_id ?? inicial?.factura?.version ?? null,
   );
   const facturaTocada = useRef(false);
+  /** Los campos que la persona eligió o escribió, o que trajo la llegada (`inicial`): en una orden
+   * nueva, solo lo que nadie tocó (la moneda base por omisión) no cuenta como escrito. */
+  const elegidos = useRef<Set<Campo>>(
+    new Set(
+      (Object.entries(inicial ?? {}) as [keyof OrdenInicial, unknown][])
+        .filter(([k, v]) => k !== "factura" && v !== undefined)
+        .map(([k]) => k as Campo),
+    ),
+  );
   const facturaDeLaVersion = useVersionVisible(
     consorcio,
     inicial?.factura === undefined ? (modificar?.version.documento_id ?? null) : null,
@@ -334,13 +343,14 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     if (lectura.tipo !== "ok") return;
     const leidos = camposLeidos(l, lectura.proveedores, monedas);
     // Lo que ya estaba escrito y lo leído dice otra cosa. En una orden nueva, lo que sigue como al
-    // abrir vacía (la moneda base, por ejemplo) no es algo escrito; en una versión, todo lo es.
+    // abrir vacía sin que nadie lo eligiera (la moneda base por omisión) no es algo escrito; elegido a
+    // propósito, aunque sea el mismo valor, sí. En una versión, todo lo es.
     const base = modificar === undefined ? datosVacios("", monedaBase) : null;
     const nuevas = new Map<Campo, string>();
     if (datos !== null) {
       for (const [campo, leido] of Object.entries(leidos) as [Campo, string][]) {
         const antes = datos[campo];
-        if (typeof antes !== "string" || antes.trim() === "" || (base !== null && antes === base[campo])) continue;
+        if (typeof antes !== "string" || antes.trim() === "" || (base !== null && antes === base[campo] && !elegidos.current.has(campo))) continue;
         if (!dicenLoMismo(campo, antes, leido)) nuevas.set(campo, mostrable(campo, antes));
       }
     }
@@ -363,6 +373,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     revisado(campo);
+    elegidos.current.add(campo);
     setParecida(null);
     setDatos((d) => {
       if (d === null) return d;

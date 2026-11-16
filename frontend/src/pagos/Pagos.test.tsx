@@ -3443,6 +3443,31 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(await guardar(api)).toMatchObject({ concepto: "Limpieza de noviembre", importe_centavos: 2_345_600 });
   });
 
+  it("comentario 32: Pesos elegido a propósito y una factura en dólares marca la moneda", async () => {
+    conEsperaManual();
+    conFactura([lectura({ moneda: "USD" })]);
+    fireEvent.change(await screen.findByLabelText("Moneda"), { target: { value: "USD" } });
+    fireEvent.change(screen.getByLabelText("Moneda"), { target: { value: "ARS" } });
+    await subirFactura();
+    await vuelta();
+    expect(await screen.findByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
+    expect(screen.getByText(textoNoCoincide("Pesos"))).toBeTruthy();
+    expect(screen.getAllByText(/no coincide con lo que estaba/)).toHaveLength(1);
+    expect((screen.getByLabelText("Moneda") as HTMLSelectElement).value).toBe("USD");
+  });
+
+  it("control: la moneda por omisión, sin tocar, y una factura en dólares no se marca", async () => {
+    conEsperaManual();
+    conFactura([lectura({ moneda: "USD" })]);
+    expect(((await screen.findByLabelText("Moneda")) as HTMLSelectElement).value).toBe("ARS");
+    await subirFactura();
+    await vuelta();
+    expect(await screen.findByText(TEXTO_LEIDA_SIN_DIFERENCIAS)).toBeTruthy();
+    expect(screen.queryByText(textoNoCoincide("Pesos"))).toBeNull();
+    expect(screen.queryByText(/no coincide con lo que estaba/)).toBeNull();
+    expect((screen.getByLabelText("Moneda") as HTMLSelectElement).value).toBe("USD");
+  });
+
   it("un CUIT que no cierra avisa que hay que revisar el del proveedor", async () => {
     conEsperaManual();
     conFactura([lectura({ cuit: null, cuit_invalido: true, proveedor_sugerido: null })]);
