@@ -619,9 +619,14 @@ function FormularioRetiro({ consorcio, s, aEntrar, alCerrar, alCambiarLoVisto, a
 function useAdjunto(consorcio: string, s: Solicitud, para: "envio" | "respuesta", aEntrar: () => void) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const clave = useRef<string | null>(null);
+  // El archivo ya subido y su `adjunto_id`: si el acto que lo cita se hizo pero su respuesta se
+  // perdió, el reintento lo vuelve a citar sin subirlo otra vez. Subirlo de nuevo pasaría por el
+  // permiso del estado actual, que ya no es el de antes del acto (Codex en app #255).
+  const subido = useRef<{ archivo: File; adjunto_id: string } | null>(null);
 
   async function subir(setFalla: (t: string) => void): Promise<string | null> {
     if (archivo === null) return null;
+    if (subido.current?.archivo === archivo) return subido.current.adjunto_id;
     clave.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/adjuntos", {
@@ -642,6 +647,8 @@ function useAdjunto(consorcio: string, s: Solicitud, para: "envio" | "respuesta"
         setFalla(`No se cargó el archivo. ${DEL_ARCHIVO.has(response.status) ? mensajeDeCarga(response.status, codigo, "subir", [], response.headers.has("Retry-After")) : mensajeDeActo(response.status, error)}`);
         return null;
       }
+      subido.current = { archivo, adjunto_id: data.adjunto_id };
+      clave.current = null;
       return data.adjunto_id;
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();

@@ -271,6 +271,44 @@ describe("solicitudes formales", () => {
     expect(envio).toEqual({ medio: "carta_documento", fecha_envio: "2026-11-10", adjunto_id: adjunto });
   });
 
+  it("si el envío se hizo y su respuesta se perdió, el reintento cita el mismo comprobante sin subirlo de nuevo", async () => {
+    const adjunto = "66666666-6666-4666-8666-666666666666";
+    let subidas = 0;
+    const claves: (string | null)[] = [];
+    let intentos = 0;
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: () => Response.json(LLENA),
+      [`POST ${BASE}/${S2}/adjuntos`]: () => {
+        subidas += 1;
+        return Response.json({ adjunto_id: adjunto, documento_id: "77777777-7777-4777-8777-777777777777",
+          archivo: { id: "88888888-8888-4888-8888-888888888888", estado: "en_cuarentena", tipo: "application/pdf", tamano: 4, sha256: "b".repeat(64) } },
+          { status: 201 });
+      },
+      [`POST ${BASE}/${S2}/envio`]: (p) => {
+        claves.push(p.headers.get("Idempotency-Key"));
+        intentos += 1;
+        if (intentos === 1) throw new TypeError("Failed to fetch"); // se hizo, pero no llegó la respuesta
+        return Response.json({ ...PENDIENTE, estado: "enviada", acciones: [], envio: { ...ENVIADA.envio, medio: "carta_documento" } });
+      },
+    }));  // prettier-ignore
+    abrir();
+    const pendiente = await ficha(2);
+    fireEvent.click(pendiente.getByRole("button", { name: REGISTRAR_ENVIO }));
+    const boton = pendiente.getByRole("button", { name: "Registrar el envío" }) as HTMLButtonElement;
+    const campo = pendiente.getByLabelText("Archivo del comprobante del envío", { selector: "input" });
+    fireEvent.change(campo, { target: { files: [new File(["%PDF"], "carta.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(pendiente.getByLabelText("Fecha del envío"), { target: { value: "2026-11-10" } });
+    await waitFor(() => expect(boton.disabled).toBe(false));
+    fireEvent.click(boton);
+    await waitFor(() => expect(intentos).toBe(1));
+    await waitFor(() => expect(boton.disabled).toBe(false));
+    fireEvent.click(boton);
+    expect(await screen.findByText(/Quedó registrado el envío de la solicitud N\.º 2/)).toBeTruthy();
+    expect(subidas).toBe(1);
+    expect(claves).toHaveLength(2);
+    expect(claves[1]).toBe(claves[0]); // el mismo intento lógico: la API devuelve lo guardado
+  });
+
   it("el destinatario responde en la aplicación", async () => {
     let cuerpo: unknown = null;
     vi.stubGlobal("fetch", backend({
