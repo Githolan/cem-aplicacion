@@ -262,12 +262,14 @@ create function nucleo.autorizar_ver_proveedores(persona uuid, autorizar boolean
     values (c, persona, case when autorizar then 'autorizar' else 'retirar' end, btrim(motivo),
             actor)
     returning numero into numero_nuevo;
+    -- El motivo queda en la tabla y no en la auditoría (E31: la auditoría no guarda textos
+    -- libres como el motivo).
     insert into auditoria.eventos
       (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, antes, despues,
        hash_previo, hash)
     values (c, actor, 'api', '{ACCION_AUDITADA}', 'persona', persona,
-            jsonb_build_object('autorizada', tiene),
-            jsonb_build_object('autorizada', autorizar, 'motivo', btrim(motivo)), '', '');
+            jsonb_build_object('autorizada', tiene), jsonb_build_object('autorizada', autorizar),
+            '', '');
     return numero_nuevo;
   end
   $$;

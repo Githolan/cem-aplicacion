@@ -110,7 +110,7 @@ def test_cada_cambio_queda_en_la_auditoria(motor_migrate, motor_app, h):
             " where accion = 'consorcio.proveedor.autorizacion_ver' and entidad_id = :p"),
             {"p": h.prop}).all()  # fmt: skip
     assert [tuple(f) for f in filas] == [
-        (h.mc1, {"autorizada": False}, {"autorizada": True, "motivo": MOTIVO})
+        (h.mc1, {"autorizada": False}, {"autorizada": True})  # sin el motivo (E31)
     ]
 
 
