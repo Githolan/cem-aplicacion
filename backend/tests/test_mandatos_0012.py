@@ -411,9 +411,17 @@ def test_mutacion_sin_las_exclusiones_se_aceptarian_los_casos_1_y_7(escena, moto
     # Sin el predicado de error_carga, el correcto en las mismas fechas se rechazaría.
     with motor_migrate.connect() as c:
         t = c.begin()
-        # Sin otras filas de la sesión, que también chocarían; la transacción se deshace.
-        c.execute(text("delete from nucleo.facultad_otorgada"))
-        c.execute(text("delete from nucleo.mandato"))
+        # Volver a crear la restricción sin el predicado la valida contra toda la tabla: se sacan
+        # solo las filas que el predicado dejaba pasar (administración con baja por error de
+        # carga, de esta y de otras pruebas). Borrar todos los mandatos chocaba con los documentos
+        # que otras pruebas de la misma parte dejan citando uno (`borrado_mandato`). La
+        # transacción se deshace.
+        DE_ERROR = (
+            "select id from nucleo.mandato where tipo in ('administrador', 'administrador_externo')"
+            " and causa_baja = 'error_carga'"
+        )
+        c.execute(text(f"delete from nucleo.facultad_otorgada where mandato_id in ({DE_ERROR})"))
+        c.execute(text(f"delete from nucleo.mandato where id in ({DE_ERROR})"))
         c.execute(
             text(
                 "alter table nucleo.mandato drop constraint mandato_administracion_unica,"
