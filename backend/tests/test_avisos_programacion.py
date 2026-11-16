@@ -3,6 +3,7 @@ el tope salen de la configuración. Contra `3c2d638` no existen `CEM_AVISOS_*` n
 
 from collections import Counter
 from datetime import UTC, datetime, time, timedelta
+from uuid import UUID
 
 import pytest
 
@@ -61,9 +62,10 @@ def test_con_tope_cero_no_se_programa(monkeypatch):
 
 
 def test_el_texto_no_tutea_y_dice_cada_edificio():
-    aviso = avisos_pagos.Aviso("x@ejemplo.com")
-    aviso.pendientes["Torre Norte"] = Counter({"aprobar": 2, "conciliar": 1})
-    aviso.pendientes["Prueba"] = Counter({"pagar": 1})
+    torre, prueba = UUID(int=1), UUID(int=2)
+    aviso = avisos_pagos.Aviso("x@ejemplo.com", nombres={torre: "Torre Norte", prueba: "Prueba"})
+    aviso.pendientes[torre] = Counter({"aprobar": 2, "conciliar": 1})
+    aviso.pendientes[prueba] = Counter({"pagar": 1})
     texto = avisos_pagos.texto(aviso, "https://cem.ejemplo.com/pagos", 1)
     assert "- Prueba: un pago para hacer.\n" in texto
     assert "- Torre Norte: 2 órdenes esperan su aprobación y un pago para conciliar." in texto

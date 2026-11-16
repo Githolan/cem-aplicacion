@@ -3009,25 +3009,13 @@ def sin_explicar(c: Connection, lector: Permiso) -> list[MovimientoSinExplicar]:
     if not filas:
         return []
     vistos = {f["movimiento_id"]: f["visto_en"] for f in filas}
-    movimientos = [
-        extracto.MovimientoGuardado(
-            id=f["movimiento_id"],
-            fecha=f["fecha"],
-            importe_centavos=f["importe_centavos"],
-            moneda=f["moneda"],
-            numero_operacion=f["numero_operacion"],
-            pago_id=None,
-        )  # fmt: skip
-        for f in filas
-    ]
+    movimientos = extracto.movimientos_guardados(filas)
     desde, hasta = min(m.fecha for m in movimientos), max(m.fecha for m in movimientos)
     numeros = sorted({m.numero_operacion for m in movimientos if m.numero_operacion is not None})
     pagos = _ejecutar(
         c, lector, PAGOS_PARA_EXPLICAR, {"n": numeros, "d": desde, "h": hasta}
     ).mappings().all()  # fmt: skip
-    # Nadie coteja desde acá: quién podría hacerlo no cambia lo que el extracto explica.
-    comparables = [extracto.PagoComparable(**f, puede_cotejar=False) for f in pagos]
-    sueltos = extracto.comparar(movimientos, comparables, desde, hasta).sin_pago
+    sueltos = extracto.movimientos_sin_pago(movimientos, pagos)
     return [
         MovimientoSinExplicar(
             movimiento_id=m.id,
