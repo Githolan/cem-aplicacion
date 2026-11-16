@@ -34,9 +34,11 @@ import io
 import re
 import unicodedata
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from cem_contracts.cotejo import (
@@ -516,3 +518,30 @@ def comparar(
         and desde <= p.fecha_operacion <= hasta
     ]  # fmt: skip
     return Comparacion(pares, sin_pago, sin_movimiento, ya_atados)
+
+
+def movimientos_guardados(filas: Sequence[Mapping[str, Any]]) -> list[MovimientoGuardado]:
+    """Los débitos sin cotejo de `movimientos_sin_cotejo_de` (`0106`), para comparar."""
+    return [
+        MovimientoGuardado(
+            id=f["movimiento_id"],
+            fecha=f["fecha"],
+            importe_centavos=f["importe_centavos"],
+            moneda=f["moneda"],
+            numero_operacion=f["numero_operacion"],
+            pago_id=None,
+        )  # fmt: skip
+        for f in filas
+    ]
+
+
+def movimientos_sin_pago(
+    movimientos: list[MovimientoGuardado], pagos: Sequence[Mapping[str, Any]]
+) -> list[MovimientoGuardado]:
+    """De los débitos sin cotejo, los que la comparación de subir un extracto
+    (`comparar`) deja sin pago, contra los de `pagos_para_explicar_de` (`0106`). La
+    bandeja y el aviso por correo cuentan con esta misma función. Hay al menos un débito."""
+    desde, hasta = min(m.fecha for m in movimientos), max(m.fecha for m in movimientos)
+    # Nadie coteja desde acá: quién podría hacerlo no cambia lo que el extracto explica.
+    comparables = [PagoComparable(**f, puede_cotejar=False) for f in pagos]
+    return comparar(movimientos, comparables, desde, hasta).sin_pago

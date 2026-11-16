@@ -1,5 +1,6 @@
 """Aviso diario por correo a quien tiene algo para aprobar, pagar o conciliar (informe de fricción,
-P-17; pregunta 7 del propietario, 13-11-2026).
+P-17; pregunta 7 del propietario, 13-11-2026), y a quien tiene que revisar lo que el extracto no
+explica (comentario 29 del propietario, 09-11-2026; el correo lo confirmó el 16-11-2026).
 
 **Qué dice.** Que hay algo para hacer, en qué edificio y cuántas órdenes o pagos, con el enlace a la
 bandeja. **Nunca** un importe, una cuenta, un CBU, un proveedor ni un concepto: la carga de
@@ -11,6 +12,13 @@ puede hacer cada una con la misma función que la bandeja (`acciones_de_ordenes_
 el paso con la misma regla (`circuito_pagos.para_avisar`). Quien preparó una orden no recibe el
 aviso de aprobarla, porque no puede. Una persona con pendientes en varios edificios recibe un
 solo correo.
+
+**Lo que el extracto no explica** va en un renglón aparte, solo con cuántos movimientos son: sin
+fecha, importe, número de operación ni cuenta. Lo recibe quien lo ve en la bandeja: quien concilia
+y la administración (pregunta 8, opción c), con la regla de `exigir_lectura_extracto` que repite
+`nucleo.extracto_sin_explicar_para_avisar` (`0106`). La cuenta sale de la misma comparación que la
+bandeja (`extracto.movimientos_sin_pago`). Va en el mismo correo y con el mismo tope: nadie recibe
+un correo de más por esto.
 
 **Cuándo y cuántos.** Una corrida del planificador por día a `CEM_AVISOS_HORA_UTC`; con
 `CEM_AVISOS_TOPE_DIARIO` = N, N corridas por día repartidas desde esa hora, y la base
@@ -25,7 +33,7 @@ misma transacción que registra el aviso: o quedan los dos o ninguno.
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -33,7 +41,7 @@ from cem_contracts.egresos import EstadoOrdenPago
 from sqlalchemy import Connection, text
 
 from app.config import Config, cargar
-from app.consorcios import circuito_pagos
+from app.consorcios import circuito_pagos, extracto
 from app.plataforma import cola, correo
 from app.plataforma.planificador import periodica
 
@@ -70,6 +78,10 @@ QUE_HACER = {
     "conciliar": ("un pago para conciliar", "{n} pagos para conciliar"),
 }
 """El orden de los renglones es el del circuito."""
+SIN_EXPLICAR = (
+    "hay un movimiento del extracto sin explicar para revisar",
+    "hay {n} movimientos del extracto sin explicar para revisar",
+)
 
 
 class ErrorConfigAvisos(RuntimeError):
@@ -81,6 +93,8 @@ class Aviso:
     correo: str
     pendientes: dict[str, Counter[str]] = field(default_factory=lambda: defaultdict(Counter))
     """Edificio → qué hay que hacer → cuántas órdenes."""
+    sin_explicar: dict[str, int] = field(default_factory=dict)
+    """Edificio → cuántos movimientos del extracto no explica ningún pago."""
 
 
 def agrupar(filas: list[dict[str, Any]]) -> dict[UUID, Aviso]:
@@ -96,8 +110,34 @@ def agrupar(filas: list[dict[str, Any]]) -> dict[UUID, Aviso]:
         if que is None:
             continue
         aviso = avisos.setdefault(persona, Aviso(direccion))
-        aviso.pendientes[" ".join(nombre.split())][que] += 1
+        aviso.pendientes[_edificio(nombre)][que] += 1
     return avisos
+
+
+def _edificio(nombre: str) -> str:
+    return " ".join(nombre.split())
+
+
+def sumar_sin_explicar(avisos: dict[UUID, Aviso], filas: list[dict[str, Any]]) -> None:
+    """Suma a cada lector del extracto cuántos movimientos no explica ningún pago en cada
+    edificio. Un edificio donde la comparación los explica todos no suma nada."""
+    for fila in filas:
+        movimientos = extracto.movimientos_guardados([
+            {**m, "movimiento_id": UUID(m["movimiento_id"]),
+             "fecha": date.fromisoformat(m["fecha"])}
+            for m in fila["movimientos"]
+        ])  # fmt: skip
+        pagos = [
+            {**f, "pago_id": UUID(f["pago_id"]),
+             "fecha_operacion": date.fromisoformat(f["fecha_operacion"])}
+            for f in fila["pagos"]
+        ]  # fmt: skip
+        n = len(extracto.movimientos_sin_pago(movimientos, pagos))
+        if n == 0:
+            continue
+        for lector in fila["lectores"]:
+            aviso = avisos.setdefault(UUID(lector["persona_id"]), Aviso(lector["correo"]))
+            aviso.sin_explicar[_edificio(fila["consorcio"])] = n
 
 
 def _cuantas(que: str, n: int) -> str:
@@ -105,17 +145,30 @@ def _cuantas(que: str, n: int) -> str:
     return una if n == 1 else varias.format(n=n)
 
 
+def _sin_explicar(n: int) -> str:
+    uno, varios = SIN_EXPLICAR
+    return uno if n == 1 else varios.format(n=n)
+
+
 def _enumerar(partes: list[str]) -> str:
     return partes[0] if len(partes) == 1 else ", ".join(partes[:-1]) + " y " + partes[-1]
 
 
+def _renglones(aviso: Aviso, edificio: str) -> list[str]:
+    """Las órdenes del edificio en un renglón y lo que el extracto no explica en otro."""
+    renglones = []
+    cuantas = aviso.pendientes.get(edificio, Counter())
+    partes = [_cuantas(q, cuantas[q]) for q in QUE_HACER if cuantas[q] > 0]
+    if partes:
+        renglones.append(f"- {edificio}: {_enumerar(partes)}.")
+    if edificio in aviso.sin_explicar:
+        renglones.append(f"- {edificio}: {_sin_explicar(aviso.sin_explicar[edificio])}.")
+    return renglones
+
+
 def texto(aviso: Aviso, enlace: str, tope: int) -> str:
-    renglones = "\n".join(
-        f"- {edificio}: "
-        + _enumerar([_cuantas(q, cuantas[q]) for q in QUE_HACER if cuantas[q] > 0])
-        + "."
-        for edificio, cuantas in sorted(aviso.pendientes.items())
-    )
+    edificios = sorted(set(aviso.pendientes) | set(aviso.sin_explicar))
+    renglones = "\n".join(r for edificio in edificios for r in _renglones(aviso, edificio))
     veces = "una vez" if tope == 1 else f"{tope} veces"
     return TEXTO.format(renglones=renglones, enlace=enlace, veces=veces)
 
@@ -139,6 +192,10 @@ def avisar(conn: Connection, ventana: datetime, config: Config) -> dict[str, int
         text("select * from nucleo.pendientes_para_avisar(:plazo)"), {"plazo": plazo}
     ).mappings().all()  # fmt: skip
     avisos = agrupar(list(filas))
+    extractos = conn.execute(
+        text("select * from nucleo.extracto_sin_explicar_para_avisar()")
+    ).mappings().all()  # fmt: skip
+    sumar_sin_explicar(avisos, [dict(f) for f in extractos])
     enlace = f"{config.origen_publico}{RUTA_BANDEJA}"
     margen = min(MARGEN, periodo(config.avisos_tope_diario) / 2)
     enviados = 0
