@@ -83,6 +83,11 @@ ENTIDADES_ECONOMICAS = {
     entidad for parte in PARTES_ECONOMICAS for entidad in exportar_consorcio.PARTES[parte]
 }
 EGRESOS_DEL_CONSEJO = ["egresos.aprobar_orden"]
+SOLICITUDES_FORMALES = {
+    e for e in exportar_consorcio.PARTES["mandatos"] if e.startswith("solicitud_")
+}
+"""RF49 (`0108`): el edificio de estas pruebas no tiene solicitudes; su contenido lo prueba
+`test_solicitud_formal_0108.py`. Sus claves sí están decididas acá."""
 
 # Las claves de cada fila del paquete, una por una. Una clave que no está acá es un dato que
 # alguien agregó sin decidir que va (H2c §5, «Nunca van»).
@@ -100,6 +105,18 @@ CLAVES_POR_ENTIDAD = {
                 "instrumento_referencia", "motivo_fin", "finalizado_en"},
     "facultad": {"mandato_id", "facultad", "recurso"},
     "revision": {"id", "mandato_id", "decision_id", "eficaz_desde"},
+    "solicitud_formal": {"id", "numero", "objeto", "referencia", "documentacion", "plazo_dias",
+                         "preparada_por_nombre", "preparada_en"},
+    "solicitud_formal_firma": {"solicitud_id", "firmada_por_nombre", "firmada_en"},
+    "solicitud_formal_emision": {"solicitud_id", "mandato_id", "emitida_en", "emitida_el", "texto",
+                                 "huella"},
+    "solicitud_formal_adjunto": {"id", "solicitud_id", "para", "documento_id",
+                                 "version_documento_id", "subido_por_nombre", "subido_en"},
+    "solicitud_formal_envio": {"solicitud_id", "medio", "detalle", "fecha_envio", "vence_el",
+                               "registrado_por_nombre", "registrado_en", "adjunto_id"},
+    "solicitud_formal_respuesta": {"solicitud_id", "texto", "medio", "respondida_el",
+                                   "registrada_por_nombre", "registrada_en", "adjunto_id"},
+    "solicitud_formal_retiro": {"solicitud_id", "motivo", "retirada_por_nombre", "retirada_en"},
     "modo": {"modo", "vigente_desde", "vigente_hasta", "decision_id"},
     "coeficiente": {"esquema_id", "grupo", "version", "vigente_desde", "vigente_hasta",
                     "unidad_id", "designacion", "porcentaje"},
@@ -442,7 +459,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         for fila in filas:
             assert set(fila) == CLAVES_POR_ENTIDAD[entidad], entidad
     assert {k for k, v in datos.items() if v} == (
-        set(CLAVES_POR_ENTIDAD) - {"revision"} - ENTIDADES_ECONOMICAS
+        set(CLAVES_POR_ENTIDAD) - {"revision"} - ENTIDADES_ECONOMICAS - SOLICITUDES_FORMALES
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}

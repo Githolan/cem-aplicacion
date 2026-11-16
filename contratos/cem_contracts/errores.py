@@ -334,6 +334,22 @@ class CodigoError(StrEnum):
     DOCUMENTO_REFERENCIADO = "documento_referenciado"
     """El documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta
     de una decisión): no se quita ni se retira (`0089`)."""
+    SOLICITUD_NO_ADMITE = "solicitud_no_admite"
+    """La solicitud formal no admite ese acto en su estado (p. ej. retirar una ya emitida, o
+    registrar el envío de una ya enviada) (`0108`)."""
+    SIN_ADMINISTRADOR_VIGENTE = "sin_administrador_vigente"
+    """La segunda firma emite y necesita el único administrador vigente (A14): sin él, la solicitud
+    queda en borrador (`0108`)."""
+    FECHA_ENVIO_INVALIDA = "fecha_envio_invalida"
+    """La fecha del envío es anterior a la emisión o posterior al día del consorcio (`0108`)."""
+    FECHA_RESPUESTA_INVALIDA = "fecha_respuesta_invalida"
+    """La respuesta llegó antes del envío o después del día del consorcio (`0108`)."""
+    ADJUNTO_INVALIDO = "adjunto_invalido"
+    """El archivo citado no es uno subido por esta cuenta para ese acto de esa solicitud, ya se
+    usó o el antivirus lo rechazó; o falta el comprobante del envío (`0108`)."""
+    DESTINATARIO_CON_CUENTA = "destinatario_con_cuenta"
+    """La respuesta de un destinatario con cuenta la da él en la aplicación; el Consejo registra
+    solo la que llegó por otro medio de un destinatario sin cuenta (P2, `0108`)."""
 
 
 class Error(BaseModel):

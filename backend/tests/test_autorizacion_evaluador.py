@@ -235,9 +235,11 @@ def test_solo_unidades_listar_los_eventos_propios_y_los_contactos_conceden_por_a
     # RF35-B (2b-6c): cada persona lee sus propios eventos en el consorcio. 2b-7: los contactos
     # de emergencia publicados, que no son personales (decisión del propietario del 25-10).
     # §10.5: lo que la interfaz muestra a cada persona, que no concede nada (05-11-2026).
+    # RF49 (0108): responder una solicitud formal lo concede ser la persona del mandato
+    # destinatario, que comprueba la base; la política solo deja pasar el ámbito.
     assert sorted(a for a, p in POLITICAS.items() if p.concede_por_ambito) == [
         "auditoria.mis_eventos", "consorcios.mis_acciones", "contactos.ver",
-        "unidades.listar"]  # fmt: skip
+        "solicitud_formal.responder", "unidades.listar"]  # fmt: skip
 
 
 # --- Una acción, una vista; A6 --------------------------------------------------------------
@@ -347,8 +349,10 @@ def test_las_acciones_de_la_tabla():
     # (`egresos.conciliar_pago`, 0055) y lo que muestra la interfaz (`consorcios.mis_acciones`)
     # y la consulta de proveedores (`proveedores.ver`, 0104) y quién autoriza a un habitante a
     # verlos (`proveedores.autorizar`, 0105) y el salteo con motivo del bloqueo por documentación
-    # legal (`egresos.saltear_documentacion`, 0106)
-    assert len(POLITICAS) == 54
+    # legal (`egresos.saltear_documentacion`, 0106) y los cuatro actos nuevos de la solicitud
+    # formal (`solicitud_formal.retirar`, `.registrar_envio`, `.registrar_respuesta` y
+    # `.responder`, 0108)
+    assert len(POLITICAS) == 58
 
 
 def _archivo(tmp_path, nombre, politicas):

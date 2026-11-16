@@ -110,7 +110,8 @@ def test_consejo_y_administracion_ven_el_panel(e):
     for quien in (e.mc1, e.adm):
         r = panel(e, quien)
         assert r.status_code == 200, r.text
-        assert set(r.json()) == {"ordenes_por_estado", "gasto_pagado", "comprobantes_faltantes"}
+        assert set(r.json()) == {"ordenes_por_estado", "gasto_pagado", "comprobantes_faltantes",
+                                 "solicitudes_abiertas"}  # fmt: skip
 
 
 def test_la_propietaria_y_el_inquilino_no_y_queda_el_motivo(motor_migrate, e):

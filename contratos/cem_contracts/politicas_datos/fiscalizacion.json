@@ -55,6 +55,62 @@
       "economica": false,
       "destinatario_unico": true,
       "fuente_normativa": "D2 (solicitud_formal.firmar); PA36; CU12; A3; A5; A14"
+    },
+    {
+      "accion": "solicitud_formal.retirar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "solicitud_formal.firmar",
+      "modos": ["consejo", "administrador_aumentado"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF49; diseño RF49 §3.2 y P4 (solo el borrador, con motivo); A3"
+    },
+    {
+      "accion": "solicitud_formal.registrar_envio",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "solicitud_formal.firmar",
+      "modos": ["consejo", "administrador_aumentado"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF49; PG08; CU12 (texto para enviar por el medio formal); diseño RF49 §2 y §3.2 (Codex en CEM #194); A3"
+    },
+    {
+      "accion": "solicitud_formal.registrar_respuesta",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "solicitud_formal.firmar",
+      "modos": ["consejo", "administrador_aumentado"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF49; CU12; diseño RF49 §3.2 y P2 (destinatario sin cuenta); A3"
+    },
+    {
+      "accion": "solicitud_formal.responder",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": true,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF49; CU12; diseño RF49 §3.2: la concede ser la persona del mandato destinatario, que comprueba la base (0108), no una facultad"
     }
   ]
 }

@@ -15,6 +15,7 @@ import { RUTA_MANDATOS } from "./Mandatos";
 import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
+import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
 import { ofreceEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
 import { useSesionConNombre } from "./sesion";
 
@@ -61,6 +62,7 @@ const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_LIQUIDACION, texto: "Liquidación (borrador)", icono: "calculadora", requisito: REQUISITOS.liquidacion },
   // Con la navegación a la vista también en el Panel (informe de fricción, AC-09).
   { ruta: RUTA_PANEL, texto: TITULO_PANEL, icono: "grafico", requisito: REQUISITOS.panel },
+  { ruta: RUTA_SOLICITUDES, texto: TITULO_SOLICITUDES, icono: "documento", requisito: REQUISITOS.panel },
 ];
 
 // Las pantallas de la aplicación. Las demás (entrar, instalar, invitaciones, el alta del segundo

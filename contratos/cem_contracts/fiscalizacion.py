@@ -7,14 +7,22 @@ Diseño: `doc/diseno/H4a_1_Panel_del_Consejo.md` del repositorio CEM.
   (`fiscalizacion.ver_resumen`) no está en este corte.
 - **Señales con su base de cálculo, no conclusiones** (RN33): cada fila dice de dónde sale.
 - Todo sale de las órdenes de pago. Sin cuenta, CUIT, contacto, personas ni motivos.
+
+**Solicitud formal de documentación (RF49, CU12, PA36; `0108`).** Diseño:
+`doc/diseno/RF49_Solicitud_Formal.md` del repositorio CEM. El Consejo prepara una solicitud, dos
+personas distintas la firman y la segunda firma la emite dirigida al único administrador vigente
+(A14). El plazo corre desde el envío: si el destinatario tiene cuenta, el envío ocurre al emitir;
+si no, lo registra el Consejo con el comprobante del medio externo. Tono informativo (RN33).
 """
 
 from datetime import date, datetime
+from enum import StrEnum
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from cem_contracts.documentos import EstadoVersion
+from cem_contracts.documentos import EstadoVersion, VersionCargada
 from cem_contracts.egresos import EstadoOrdenPago, Version
 
 
@@ -84,3 +92,260 @@ class PanelFiscalizacion(BaseModel):
     comprobantes_faltantes: list[ComprobanteFaltante] = Field(
         description="De lo último que cambió a lo más viejo."
     )
+    solicitudes_abiertas: int = Field(
+        ge=0,
+        description="Solicitudes formales en borrador, con el envío pendiente, enviadas o"
+        " vencidas: las que no se respondieron ni se retiraron (RF49).",
+    )
+
+
+# --- Solicitud formal de documentación (RF49; `0108`) -------------------------------------------
+
+PLAZO_POR_DEFECTO_DIAS = 15
+"""Días corridos desde el envío (pregunta P1 del diseño, por defecto)."""
+PLAZO_MINIMO_DIAS = 5
+PLAZO_MAXIMO_DIAS = 60
+"""El rango que se puede elegir (P1). La base tiene el mismo control (`0108`)."""
+LARGO_REFERENCIA = 200
+LARGO_DOCUMENTACION_PEDIDA = 2000
+LARGO_RESPUESTA = 4000
+LARGO_MOTIVO_RETIRO = 500
+LARGO_DETALLE_ENVIO = 300
+UN_RENGLON = r"^[^\x00-\x1f\x7f]*$"
+"""Ningún carácter de control."""
+CON_RENGLONES = r"^[^\x00-\x09\x0b-\x1f\x7f]*$"
+"""Ningún carácter de control salvo el salto de renglón."""
+
+
+def _texto(maximo: int, patron: str = UN_RENGLON):
+    """Se recorta antes de validar: la base guarda `btrim` y lo controla con su largo."""
+    return Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=maximo, pattern=patron),
+    ]
+
+
+Referencia = _texto(LARGO_REFERENCIA)
+DocumentacionPedida = _texto(LARGO_DOCUMENTACION_PEDIDA, CON_RENGLONES)
+TextoRespuesta = _texto(LARGO_RESPUESTA, CON_RENGLONES)
+MotivoRetiro = _texto(LARGO_MOTIVO_RETIRO)
+DetalleEnvio = _texto(LARGO_DETALLE_ENVIO)
+PlazoDias = Annotated[int, Field(ge=PLAZO_MINIMO_DIAS, le=PLAZO_MAXIMO_DIAS)]
+
+
+class ObjetoSolicitud(StrEnum):
+    """Sobre qué se pide documentación o una aclaración."""
+
+    PERIODO = "periodo"
+    ORDEN_PAGO = "orden_pago"
+    CONTRATO = "contrato"
+    MOVIMIENTO = "movimiento"
+    OTRO = "otro"
+
+
+class EstadoSolicitudFormal(StrEnum):
+    """Lo calcula la base con el día del consorcio; `vencida` no es una transición guardada."""
+
+    BORRADOR = "borrador"
+    ENVIO_PENDIENTE = "envio_pendiente"
+    """Emitida a un destinatario sin cuenta: falta registrar el envío. Mientras tanto no vence."""
+    ENVIADA = "enviada"
+    VENCIDA = "vencida"
+    RESPONDIDA = "respondida"
+    RETIRADA = "retirada"
+
+
+ABIERTAS = frozenset({
+    EstadoSolicitudFormal.BORRADOR, EstadoSolicitudFormal.ENVIO_PENDIENTE,
+    EstadoSolicitudFormal.ENVIADA, EstadoSolicitudFormal.VENCIDA,
+})  # fmt: skip
+"""Las que cuenta el panel: ni respondidas ni retiradas."""
+
+
+class MedioEnvio(StrEnum):
+    APLICACION = "aplicacion"
+    """El destinatario tiene cuenta: el envío ocurre al emitir."""
+    CARTA_DOCUMENTO = "carta_documento"
+    CORREO_ELECTRONICO = "correo_electronico"
+    ENTREGA_EN_MANO = "entrega_en_mano"
+    OTRO = "otro"
+
+
+class MedioRespuesta(StrEnum):
+    APLICACION = "aplicacion"
+    """La respondió el destinatario en la aplicación."""
+    MEDIO_FORMAL = "medio_formal"
+    """Llegó por otro medio y la registró el Consejo (destinatario sin cuenta, P2)."""
+
+
+class AccionSolicitud(StrEnum):
+    """Lo que la cuenta que pide puede hacer con la solicitud ahora. Solo para mostrar: cada acto
+    lo vuelven a decidir la ruta y la base."""
+
+    FIRMAR = "firmar"
+    RETIRAR = "retirar"
+    REGISTRAR_ENVIO = "registrar_envio"
+    RESPONDER = "responder"
+    REGISTRAR_RESPUESTA = "registrar_respuesta"
+
+
+class SolicitudFormalNueva(BaseModel):
+    """`POST …/solicitudes-formales`: preparar no cuenta como firma (A5)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    objeto: ObjetoSolicitud
+    referencia: Referencia = Field(
+        description="Qué período, orden, contrato o movimiento, en palabras."
+    )
+    documentacion: DocumentacionPedida = Field(
+        description="La documentación o la aclaración que se pide."
+    )
+    plazo_dias: PlazoDias = Field(
+        default=PLAZO_POR_DEFECTO_DIAS, description="Días corridos desde el envío."
+    )
+
+
+class ParaAdjunto(StrEnum):
+    """El acto que va a citar el archivo que se sube antes de hacerlo."""
+
+    ENVIO = "envio"
+    RESPUESTA = "respuesta"
+
+
+class EnvioNuevo(BaseModel):
+    """`POST …/solicitudes-formales/{s}/envio`: el destinatario no tiene cuenta y el Consejo
+    registra el envío por el medio externo, con el comprobante ya subido (`adjunto_id`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    medio: MedioEnvio = Field(description="Uno externo: `aplicacion` se registra al emitir.")
+    detalle: DetalleEnvio | None = Field(
+        default=None, description="P. ej. el número de la carta documento."
+    )
+    fecha_envio: date = Field(description="Entre el día de la emisión y hoy.")
+    adjunto_id: UUID = Field(description="El comprobante, subido para el envío.")
+
+
+class RespuestaNueva(BaseModel):
+    """`POST …/solicitudes-formales/{s}/respuesta`: la del destinatario en la aplicación."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    texto: TextoRespuesta
+    adjunto_id: UUID | None = Field(
+        default=None, description="Un archivo subido para la respuesta, si lo hay."
+    )
+
+
+class RespuestaRecibida(BaseModel):
+    """`POST …/solicitudes-formales/{s}/respuesta-recibida`: la que llegó por otro medio de un
+    destinatario sin cuenta, que registra el Consejo (P2)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    texto: TextoRespuesta
+    recibida_el: date = Field(description="Entre el día del envío y hoy.")
+    adjunto_id: UUID | None = Field(
+        default=None, description="Un archivo subido para la respuesta, si lo hay."
+    )
+
+
+class AdjuntoSubido(BaseModel):
+    """`POST …/solicitudes-formales/{s}/adjuntos`: el archivo, en cuarentena hasta que el
+    antivirus lo acepta. El acto lo cita por `adjunto_id`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    adjunto_id: UUID
+    documento_id: UUID
+    archivo: VersionCargada
+
+
+class RetiroSolicitud(BaseModel):
+    """Solo un borrador se retira, con el motivo (P4)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: MotivoRetiro
+
+
+class FirmaSolicitud(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    nombre: str | None
+    firmada_en: datetime
+    propia: bool = Field(description="La puso la cuenta que pide.")
+
+
+class EnvioSolicitud(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    medio: MedioEnvio
+    detalle: str | None
+    fecha_envio: date
+    vence_el: date = Field(description="La fecha del envío más el plazo, en días corridos.")
+    registrado_por_nombre: str | None
+    registrado_en: datetime
+    documento_id: UUID | None = Field(description="El comprobante; nulo en `aplicacion`.")
+    version_documento_id: UUID | None
+
+
+class RespuestaSolicitud(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    texto: str
+    medio: MedioRespuesta
+    respondida_el: date = Field(description="El día en que llegó la respuesta.")
+    fuera_de_plazo: bool = Field(description="Llegó después del vencimiento (P5).")
+    registrada_por_nombre: str | None
+    registrada_en: datetime
+    documento_id: UUID | None
+    version_documento_id: UUID | None
+
+
+class RetiroRegistrado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    motivo: str
+    retirada_por_nombre: str | None
+    retirada_en: datetime
+
+
+class SolicitudFormal(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    numero: int = Field(ge=1, description="Correlativo por consorcio.")
+    objeto: ObjetoSolicitud
+    referencia: str
+    documentacion: str
+    plazo_dias: int
+    estado: EstadoSolicitudFormal
+    preparada_por_nombre: str | None
+    preparada_en: datetime
+    firmas: list[FirmaSolicitud]
+    destinatario_nombre: str | None = Field(description="Desde la emisión.")
+    destinatario_con_cuenta: bool | None = Field(description="Desde la emisión.")
+    emitida_en: datetime | None
+    texto_emitido: str | None = Field(
+        description="El texto de la solicitud (plantilla PG08), para enviarlo por el medio formal."
+    )
+    huella_texto: str | None = Field(description="SHA-256 del texto emitido, en hexadecimal.")
+    envio: EnvioSolicitud | None
+    respuesta: RespuestaSolicitud | None
+    retiro: RetiroRegistrado | None
+    acciones: list[AccionSolicitud]
+
+
+class ListaSolicitudesFormales(BaseModel):
+    """`GET …/solicitudes-formales`: el Consejo y la administración (`fiscalizacion.ver_panel`)
+    ven todas; el destinatario, las dirigidas a su cuenta."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[SolicitudFormal] = Field(description="De la más nueva a la más vieja.")
+    puede_preparar: bool
+    plazo_por_defecto_dias: int
+    plazo_minimo_dias: int
+    plazo_maximo_dias: int

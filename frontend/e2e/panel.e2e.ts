@@ -34,6 +34,7 @@ const PANEL = {
       factura_subida: null,
     },
   ],
+  solicitudes_abiertas: 1,
 };
 const D1 = "55555555-5555-4555-8555-555555555555";
 const V1 = "66666666-6666-4666-8666-666666666666";

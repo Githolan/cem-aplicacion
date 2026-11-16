@@ -261,4 +261,9 @@ export const REQUISITOS = {
   liquidacion: [["liquidacion.preparar"]],
   /** El panel completo del Consejo y la administración (RF48). */
   panel: [["fiscalizacion.ver_panel"]],
+  /** La pantalla de solicitudes formales (RF49, app 0108): quien ve el panel las ve todas; el
+   * destinatario, las suyas. `solicitud_formal.responder` la alcanza todo el que está en el edificio
+   * (la concede ser el destinatario, que decide la base): la pantalla se abre y la lista llega vacía
+   * para quien no tiene ninguna. En el menú va solo para quien ve el panel. */
+  solicitudes: [["fiscalizacion.ver_panel"], ["solicitud_formal.responder"]],
 } as const satisfies Record<string, Requisito>;

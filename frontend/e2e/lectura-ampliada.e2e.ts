@@ -452,6 +452,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
             actualizada_en: "2026-11-05T12:00:00Z",
           },
         ],
+        solicitudes_abiertas: 0,
       },
     },
   },

@@ -58,6 +58,18 @@
         "title": "AccionPago",
         "type": "string"
       },
+      "AccionSolicitud": {
+        "description": "Lo que la cuenta que pide puede hacer con la solicitud ahora. Solo para mostrar: cada acto\nlo vuelven a decidir la ruta y la base.",
+        "enum": [
+          "firmar",
+          "retirar",
+          "registrar_envio",
+          "responder",
+          "registrar_respuesta"
+        ],
+        "title": "AccionSolicitud",
+        "type": "string"
+      },
       "AccionUnidad": {
         "enum": [
           "crear",
@@ -155,6 +167,31 @@
           "nombre"
         ],
         "title": "ActorEvento",
+        "type": "object"
+      },
+      "AdjuntoSubido": {
+        "description": "`POST …/solicitudes-formales/{s}/adjuntos`: el archivo, en cuarentena hasta que el\nantivirus lo acepta. El acto lo cita por `adjunto_id`.",
+        "properties": {
+          "adjunto_id": {
+            "format": "uuid",
+            "title": "Adjunto Id",
+            "type": "string"
+          },
+          "archivo": {
+            "$ref": "#/components/schemas/VersionCargada"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adjunto_id",
+          "documento_id",
+          "archivo"
+        ],
+        "title": "AdjuntoSubido",
         "type": "object"
       },
       "AltaTotp": {
@@ -1040,7 +1077,13 @@
           "movimiento_ya_explicado",
           "sin_marca_vigente",
           "no_es_quien_lo_subio",
-          "documento_referenciado"
+          "documento_referenciado",
+          "solicitud_no_admite",
+          "sin_administrador_vigente",
+          "fecha_envio_invalida",
+          "fecha_respuesta_invalida",
+          "adjunto_invalido",
+          "destinatario_con_cuenta"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -3748,6 +3791,132 @@
         "title": "EnvioARevision",
         "type": "object"
       },
+      "EnvioNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/solicitudes-formales/{s}/envio`: el destinatario no tiene cuenta y el Consejo\nregistra el envío por el medio externo, con el comprobante ya subido (`adjunto_id`).",
+        "properties": {
+          "adjunto_id": {
+            "description": "El comprobante, subido para el envío.",
+            "format": "uuid",
+            "title": "Adjunto Id",
+            "type": "string"
+          },
+          "detalle": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "P. ej. el número de la carta documento.",
+            "title": "Detalle"
+          },
+          "fecha_envio": {
+            "description": "Entre el día de la emisión y hoy.",
+            "format": "date",
+            "title": "Fecha Envio",
+            "type": "string"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioEnvio",
+            "description": "Uno externo: `aplicacion` se registra al emitir."
+          }
+        },
+        "required": [
+          "medio",
+          "fecha_envio",
+          "adjunto_id"
+        ],
+        "title": "EnvioNuevo",
+        "type": "object"
+      },
+      "EnvioSolicitud": {
+        "properties": {
+          "detalle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detalle"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El comprobante; nulo en `aplicacion`.",
+            "title": "Documento Id"
+          },
+          "fecha_envio": {
+            "format": "date",
+            "title": "Fecha Envio",
+            "type": "string"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioEnvio"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registrado Por Nombre"
+          },
+          "vence_el": {
+            "description": "La fecha del envío más el plazo, en días corridos.",
+            "format": "date",
+            "title": "Vence El",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Documento Id"
+          }
+        },
+        "required": [
+          "medio",
+          "detalle",
+          "fecha_envio",
+          "vence_el",
+          "registrado_por_nombre",
+          "registrado_en",
+          "documento_id",
+          "version_documento_id"
+        ],
+        "title": "EnvioSolicitud",
+        "type": "object"
+      },
       "Error": {
         "properties": {
           "codigo": {
@@ -4122,6 +4291,19 @@
         ],
         "title": "EstadoSegundoFactor",
         "type": "object"
+      },
+      "EstadoSolicitudFormal": {
+        "description": "Lo calcula la base con el día del consorcio; `vencida` no es una transición guardada.",
+        "enum": [
+          "borrador",
+          "envio_pendiente",
+          "enviada",
+          "vencida",
+          "respondida",
+          "retirada"
+        ],
+        "title": "EstadoSolicitudFormal",
+        "type": "string"
       },
       "EstadoVersion": {
         "enum": [
@@ -5064,6 +5246,38 @@
           "motivo"
         ],
         "title": "FinVinculo",
+        "type": "object"
+      },
+      "FirmaSolicitud": {
+        "properties": {
+          "firmada_en": {
+            "format": "date-time",
+            "title": "Firmada En",
+            "type": "string"
+          },
+          "nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nombre"
+          },
+          "propia": {
+            "description": "La puso la cuenta que pide.",
+            "title": "Propia",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "nombre",
+          "firmada_en",
+          "propia"
+        ],
+        "title": "FirmaSolicitud",
         "type": "object"
       },
       "Franja": {
@@ -7167,6 +7381,44 @@
         "title": "ListaSinExplicar",
         "type": "object"
       },
+      "ListaSolicitudesFormales": {
+        "description": "`GET …/solicitudes-formales`: el Consejo y la administración (`fiscalizacion.ver_panel`)\nven todas; el destinatario, las dirigidas a su cuenta.",
+        "properties": {
+          "elementos": {
+            "description": "De la más nueva a la más vieja.",
+            "items": {
+              "$ref": "#/components/schemas/SolicitudFormal"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "plazo_maximo_dias": {
+            "title": "Plazo Maximo Dias",
+            "type": "integer"
+          },
+          "plazo_minimo_dias": {
+            "title": "Plazo Minimo Dias",
+            "type": "integer"
+          },
+          "plazo_por_defecto_dias": {
+            "title": "Plazo Por Defecto Dias",
+            "type": "integer"
+          },
+          "puede_preparar": {
+            "title": "Puede Preparar",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "elementos",
+          "puede_preparar",
+          "plazo_por_defecto_dias",
+          "plazo_minimo_dias",
+          "plazo_maximo_dias"
+        ],
+        "title": "ListaSolicitudesFormales",
+        "type": "object"
+      },
       "ListaUnidades": {
         "properties": {
           "elementos": {
@@ -7761,6 +8013,25 @@
         "title": "MarcaNoEsPago",
         "type": "object"
       },
+      "MedioEnvio": {
+        "enum": [
+          "aplicacion",
+          "carta_documento",
+          "correo_electronico",
+          "entrega_en_mano",
+          "otro"
+        ],
+        "title": "MedioEnvio",
+        "type": "string"
+      },
+      "MedioRespuesta": {
+        "enum": [
+          "aplicacion",
+          "medio_formal"
+        ],
+        "title": "MedioRespuesta",
+        "type": "string"
+      },
       "MetodoReparto": {
         "description": "`nucleo.metodo_reparto` (0021).",
         "enum": [
@@ -7999,6 +8270,18 @@
         ],
         "title": "NuevoSalteoDocumentacion",
         "type": "object"
+      },
+      "ObjetoSolicitud": {
+        "description": "Sobre qué se pide documentación o una aclaración.",
+        "enum": [
+          "periodo",
+          "orden_pago",
+          "contrato",
+          "movimiento",
+          "otro"
+        ],
+        "title": "ObjetoSolicitud",
+        "type": "string"
       },
       "ObservacionVigente": {
         "description": "Por qué el Consejo observó el último registro.",
@@ -9119,15 +9402,31 @@
             },
             "title": "Ordenes Por Estado",
             "type": "array"
+          },
+          "solicitudes_abiertas": {
+            "description": "Solicitudes formales en borrador, con el envío pendiente, enviadas o vencidas: las que no se respondieron ni se retiraron (RF49).",
+            "minimum": 0.0,
+            "title": "Solicitudes Abiertas",
+            "type": "integer"
           }
         },
         "required": [
           "ordenes_por_estado",
           "gasto_pagado",
-          "comprobantes_faltantes"
+          "comprobantes_faltantes",
+          "solicitudes_abiertas"
         ],
         "title": "PanelFiscalizacion",
         "type": "object"
+      },
+      "ParaAdjunto": {
+        "description": "El acto que va a citar el archivo que se sube antes de hacerlo.",
+        "enum": [
+          "envio",
+          "respuesta"
+        ],
+        "title": "ParaAdjunto",
+        "type": "string"
       },
       "ParecidaAntesDeGuardar": {
         "description": "Antes de guardar una orden: si hay otra parecida (decisión 4 del propietario, 13-11-2026).\nMismo proveedor, importe y moneda, a menos de `CEM_PAGOS_DIAS_REPETIDA` días. Una orden\nrutinaria (con contrato o abono) no se compara. Es un aviso: guardar igual se puede.",
@@ -10360,6 +10659,149 @@
         "title": "RespuestaLlave",
         "type": "object"
       },
+      "RespuestaNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/solicitudes-formales/{s}/respuesta`: la del destinatario en la aplicación.",
+        "properties": {
+          "adjunto_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Un archivo subido para la respuesta, si lo hay.",
+            "title": "Adjunto Id"
+          },
+          "texto": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Texto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "title": "RespuestaNueva",
+        "type": "object"
+      },
+      "RespuestaRecibida": {
+        "additionalProperties": false,
+        "description": "`POST …/solicitudes-formales/{s}/respuesta-recibida`: la que llegó por otro medio de un\ndestinatario sin cuenta, que registra el Consejo (P2).",
+        "properties": {
+          "adjunto_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Un archivo subido para la respuesta, si lo hay.",
+            "title": "Adjunto Id"
+          },
+          "recibida_el": {
+            "description": "Entre el día del envío y hoy.",
+            "format": "date",
+            "title": "Recibida El",
+            "type": "string"
+          },
+          "texto": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Texto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "texto",
+          "recibida_el"
+        ],
+        "title": "RespuestaRecibida",
+        "type": "object"
+      },
+      "RespuestaSolicitud": {
+        "properties": {
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documento Id"
+          },
+          "fuera_de_plazo": {
+            "description": "Llegó después del vencimiento (P5).",
+            "title": "Fuera De Plazo",
+            "type": "boolean"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioRespuesta"
+          },
+          "registrada_en": {
+            "format": "date-time",
+            "title": "Registrada En",
+            "type": "string"
+          },
+          "registrada_por_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registrada Por Nombre"
+          },
+          "respondida_el": {
+            "description": "El día en que llegó la respuesta.",
+            "format": "date",
+            "title": "Respondida El",
+            "type": "string"
+          },
+          "texto": {
+            "title": "Texto",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Documento Id"
+          }
+        },
+        "required": [
+          "texto",
+          "medio",
+          "respondida_el",
+          "fuera_de_plazo",
+          "registrada_por_nombre",
+          "registrada_en",
+          "documento_id",
+          "version_documento_id"
+        ],
+        "title": "RespuestaSolicitud",
+        "type": "object"
+      },
       "ResultadoConciliacion": {
         "enum": [
           "conforme",
@@ -10527,6 +10969,55 @@
           "retirada_en"
         ],
         "title": "RetiroOrdenPago",
+        "type": "object"
+      },
+      "RetiroRegistrado": {
+        "properties": {
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "retirada_en": {
+            "format": "date-time",
+            "title": "Retirada En",
+            "type": "string"
+          },
+          "retirada_por_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retirada Por Nombre"
+          }
+        },
+        "required": [
+          "motivo",
+          "retirada_por_nombre",
+          "retirada_en"
+        ],
+        "title": "RetiroRegistrado",
+        "type": "object"
+      },
+      "RetiroSolicitud": {
+        "additionalProperties": false,
+        "description": "Solo un borrador se retira, con el motivo (P4).",
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "RetiroSolicitud",
         "type": "object"
       },
       "RevisionMandato": {
@@ -10993,6 +11484,222 @@
         ],
         "title": "SituacionPago",
         "type": "string"
+      },
+      "SolicitudFormal": {
+        "properties": {
+          "acciones": {
+            "items": {
+              "$ref": "#/components/schemas/AccionSolicitud"
+            },
+            "title": "Acciones",
+            "type": "array"
+          },
+          "destinatario_con_cuenta": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Desde la emisión.",
+            "title": "Destinatario Con Cuenta"
+          },
+          "destinatario_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Desde la emisión.",
+            "title": "Destinatario Nombre"
+          },
+          "documentacion": {
+            "title": "Documentacion",
+            "type": "string"
+          },
+          "emitida_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emitida En"
+          },
+          "envio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnvioSolicitud"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoSolicitudFormal"
+          },
+          "firmas": {
+            "items": {
+              "$ref": "#/components/schemas/FirmaSolicitud"
+            },
+            "title": "Firmas",
+            "type": "array"
+          },
+          "huella_texto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 del texto emitido, en hexadecimal.",
+            "title": "Huella Texto"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "numero": {
+            "description": "Correlativo por consorcio.",
+            "minimum": 1.0,
+            "title": "Numero",
+            "type": "integer"
+          },
+          "objeto": {
+            "$ref": "#/components/schemas/ObjetoSolicitud"
+          },
+          "plazo_dias": {
+            "title": "Plazo Dias",
+            "type": "integer"
+          },
+          "preparada_en": {
+            "format": "date-time",
+            "title": "Preparada En",
+            "type": "string"
+          },
+          "preparada_por_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preparada Por Nombre"
+          },
+          "referencia": {
+            "title": "Referencia",
+            "type": "string"
+          },
+          "respuesta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RespuestaSolicitud"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retiro": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetiroRegistrado"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "texto_emitido": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El texto de la solicitud (plantilla PG08), para enviarlo por el medio formal.",
+            "title": "Texto Emitido"
+          }
+        },
+        "required": [
+          "id",
+          "numero",
+          "objeto",
+          "referencia",
+          "documentacion",
+          "plazo_dias",
+          "estado",
+          "preparada_por_nombre",
+          "preparada_en",
+          "firmas",
+          "destinatario_nombre",
+          "destinatario_con_cuenta",
+          "emitida_en",
+          "texto_emitido",
+          "huella_texto",
+          "envio",
+          "respuesta",
+          "retiro",
+          "acciones"
+        ],
+        "title": "SolicitudFormal",
+        "type": "object"
+      },
+      "SolicitudFormalNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/solicitudes-formales`: preparar no cuenta como firma (A5).",
+        "properties": {
+          "documentacion": {
+            "description": "La documentación o la aclaración que se pide.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Documentacion",
+            "type": "string"
+          },
+          "objeto": {
+            "$ref": "#/components/schemas/ObjetoSolicitud"
+          },
+          "plazo_dias": {
+            "default": 15,
+            "description": "Días corridos desde el envío.",
+            "maximum": 60.0,
+            "minimum": 5.0,
+            "title": "Plazo Dias",
+            "type": "integer"
+          },
+          "referencia": {
+            "description": "Qué período, orden, contrato o movimiento, en palabras.",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Referencia",
+            "type": "string"
+          }
+        },
+        "required": [
+          "objeto",
+          "referencia",
+          "documentacion"
+        ],
+        "title": "SolicitudFormalNueva",
+        "type": "object"
       },
       "TipoAccion": {
         "description": "Cómo se dibuja una acción ofrecida: una sola principal por pantalla (§4.2).",
@@ -20945,7 +21652,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Panel del Consejo: órdenes por estado, gasto pagado y comprobantes faltantes",
+        "summary": "Panel del Consejo: órdenes por estado, gasto pagado, comprobantes faltantes y solicitudes formales abiertas",
         "tags": [
           "consorcios"
         ]
@@ -21722,6 +22429,644 @@
         "summary": "Cambiar los datos de un proveedor: crea una versión nueva, nunca en silencio",
         "tags": [
           "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales": {
+      "get": {
+        "operationId": "listar_solicitudes_api_v1_consorcios__consorcio_id__solicitudes_formales_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaSolicitudesFormales"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Solicitudes formales de documentación: todas, para quien ve el panel; las dirigidas a su cuenta, para el destinatario",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "preparar_solicitud_api_v1_consorcios__consorcio_id__solicitudes_formales_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolicitudFormalNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preparar una solicitud formal: queda en borrador; preparar no cuenta como firma",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/adjuntos": {
+      "post": {
+        "description": "Lo sube quien puede hacer ese acto ahora: el documento queda en «Otros», que ve quien\ntiene `documentos.ver`, y cuenta recién cuando el antivirus lo acepta.",
+        "operationId": "subir_adjunto_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__adjuntos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El acto que lo va a citar.",
+            "in": "query",
+            "name": "para",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ParaAdjunto",
+              "description": "El acto que lo va a citar."
+            }
+          },
+          {
+            "description": "El título del documento.",
+            "in": "query",
+            "name": "titulo",
+            "required": true,
+            "schema": {
+              "description": "El título del documento.",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Titulo",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjuntoSubido"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "El documento no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
+          }
+        },
+        "summary": "Subir el comprobante del envío o un archivo de la respuesta, antes de registrarlos: entra en cuarentena hasta que el antivirus lo acepta",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/envio": {
+      "post": {
+        "operationId": "registrar_envio_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__envio_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvioNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "description": "Fecha, medio o comprobante inválidos."
+          }
+        },
+        "summary": "Registrar el envío por un medio externo (destinatario sin cuenta): desde esa fecha corre el plazo",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/firma": {
+      "post": {
+        "description": "PA36: dos firmas de personas y de seres humanos distintos (A5, A13-C). La segunda firma\nemite: fija el destinatario (A14), el texto PG08 y su huella. Si el destinatario tiene\ncuenta, el envío ocurre en el mismo acto y se le encola un aviso por correo, sin el\ncontenido (P3); si no, queda con el envío pendiente.",
+        "operationId": "firmar_solicitud_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__firma_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Firmar una solicitud: la segunda firma, de otra persona, la emite dirigida al administrador vigente",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/respuesta": {
+      "post": {
+        "operationId": "responder_solicitud_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__respuesta_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespuestaNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "description": "Adjunto inválido."
+          }
+        },
+        "summary": "Responder la solicitud en la aplicación: solo la persona del mandato destinatario; después del vencimiento se acepta y queda fuera de plazo (P5)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/respuesta-recibida": {
+      "post": {
+        "operationId": "registrar_respuesta_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__respuesta_recibida_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespuestaRecibida"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "description": "Fecha o adjunto inválidos."
+          }
+        },
+        "summary": "Registrar la respuesta que llegó por otro medio de un destinatario sin cuenta (P2)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/retiro": {
+      "post": {
+        "operationId": "retirar_solicitud_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__retiro_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetiroSolicitud"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retirar un borrador, con el motivo: una solicitud emitida no se retira (P4)",
+        "tags": [
+          "consorcios"
         ]
       }
     },

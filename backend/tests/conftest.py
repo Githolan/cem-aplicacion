@@ -145,6 +145,7 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     niega a bajar si hay documentos: se borran con sus versiones. Y con 0038, que se niega a bajar
     si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran. Y con
     0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran. Y
+    con 0108, que se niega a bajar si hay solicitudes formales: se borran primero. Y
     con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos. Y con 0063, cuyos
     comprobantes citan su orden: se les quita antes de borrar las órdenes. Y con 0099, cuya
     constancia de la factura adjunta cita la versión de la orden y el documento: se borra antes. Y
@@ -160,6 +161,31 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if;"
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
+                " end if;"
+                # Las solicitudes formales (0108) citan mandatos, personas, identidades y
+                # documentos, y niegan su downgrade: van primero, de la última tabla a la primera.
+                " if to_regclass('nucleo.solicitud_formal') is not null then"
+                "   alter table nucleo.solicitud_formal_retiro disable trigger user;"
+                "   alter table nucleo.solicitud_formal_respuesta disable trigger user;"
+                "   alter table nucleo.solicitud_formal_envio disable trigger user;"
+                "   alter table nucleo.solicitud_formal_adjunto disable trigger user;"
+                "   alter table nucleo.solicitud_formal_emision disable trigger user;"
+                "   alter table nucleo.solicitud_formal_firma disable trigger user;"
+                "   alter table nucleo.solicitud_formal disable trigger user;"
+                "   delete from nucleo.solicitud_formal_retiro;"
+                "   delete from nucleo.solicitud_formal_respuesta;"
+                "   delete from nucleo.solicitud_formal_envio;"
+                "   delete from nucleo.solicitud_formal_adjunto;"
+                "   delete from nucleo.solicitud_formal_emision;"
+                "   delete from nucleo.solicitud_formal_firma;"
+                "   delete from nucleo.solicitud_formal;"
+                "   alter table nucleo.solicitud_formal_retiro enable trigger user;"
+                "   alter table nucleo.solicitud_formal_respuesta enable trigger user;"
+                "   alter table nucleo.solicitud_formal_envio enable trigger user;"
+                "   alter table nucleo.solicitud_formal_adjunto enable trigger user;"
+                "   alter table nucleo.solicitud_formal_emision enable trigger user;"
+                "   alter table nucleo.solicitud_formal_firma enable trigger user;"
+                "   alter table nucleo.solicitud_formal enable trigger user;"
                 " end if;"
                 # Los contratos (0050) citan documentos, y las versiones de la orden citan
                 # contratos y umbrales: van antes que los documentos, con las órdenes.

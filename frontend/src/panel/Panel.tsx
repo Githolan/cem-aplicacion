@@ -10,6 +10,7 @@ import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/
 import { periodo } from "../egresos/Liquidacion";
 import { exigirSesion, SinSesion, useConsorcio, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { RUTA_SOLICITUDES } from "../fiscalizacion/Solicitudes";
 import { cumple, REQUISITOS, useAcciones } from "../permisos";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
 import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
@@ -111,6 +112,7 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
               avisar={setAviso}
             />
           )}
+          {lectura.tipo === "ok" && <LineaSolicitudes consorcio={consorcio} abiertas={lectura.panel.solicitudes_abiertas} />}
           {lectura.tipo === "ok" &&
             (estaVacio(lectura.panel) ? (
               <p className="tarjeta">Todavía no hay órdenes de pago en este edificio. El resumen se arma con ellas.</p>
@@ -121,6 +123,20 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
         </>
       )}
     </>
+  );
+}
+
+/** RF49 (app 0108): las solicitudes formales que no se respondieron ni se retiraron, con el enlace a
+ * la pantalla. Quien ve el panel ve también las solicitudes. */
+export const textoSolicitudesAbiertas = (n: number) => `Solicitudes abiertas: ${n}`;
+
+function LineaSolicitudes({ consorcio, abiertas }: { consorcio: string; abiertas: number }) {
+  return (
+    <p>
+      <Link to={RUTA_SOLICITUDES} state={{ consorcio }} className="enlace-suelto">
+        {textoSolicitudesAbiertas(abiertas)}
+      </Link>
+    </p>
   );
 }
 
