@@ -3,7 +3,15 @@ import { Link } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
-import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, TEXTO_ESPERA_PARA_GUARDAR, useVersionVisible } from "../CargaConLectura";
+import {
+  type Cargado,
+  CargaConLectura,
+  type LecturaCarga,
+  MarcaDeDiferencia,
+  MarcaDeFalta,
+  TEXTO_ESPERA_PARA_GUARDAR,
+  useVersionVisible,
+} from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
 import { CampoImporte } from "../egresos/CampoImporte";
 import {
@@ -34,8 +42,12 @@ import type { ActoEnCurso } from "./useActo";
 // la ficha: si otra persona la cambió, lo que se escribió queda sobre la versión nueva.
 //
 // Arriba, la factura (0088): elegir el archivo la sube, el antivirus la revisa y la IA lee importe,
-// moneda, número, concepto y el CUIT del proveedor. Lo que completa la lectura queda marcado hasta que
-// la persona lo cambia o lo da por revisado; guardar manda la versión exacta del archivo que se vio
+// moneda, número, concepto y el CUIT del proveedor. Lo leído llena el formulario y se avisa solo lo
+// que no coincide o falta (comentario 32 del propietario, 12-11-2026; como D-25 en el registro del
+// pago): un campo que ya decía otra cosa queda marcado con lo que decía, hasta que la persona lo
+// cambia o lo da por revisado, y un obligatorio que la lectura no completó, hasta que se escribe. Lo
+// que coincide o llena un campo vacío no se marca: la IA propone y guardar es confirmar. Guardar
+// manda la versión exacta del archivo que se vio
 // (`factura_version_id`): otro archivo subido después al mismo documento no cambia lo aprobado.
 //
 // Una orden nueva se guarda y se envía a aprobar en un solo acto (decisión del propietario del
@@ -128,6 +140,20 @@ export type AltaDesdeLaFactura = {
 
 type Campo = keyof Datos;
 
+/** Los obligatorios que la lectura puede completar: si quedan vacíos después de leer, se marcan. */
+const OBLIGATORIOS_LEIDOS = ["proveedor", "importe", "concepto"] as const satisfies readonly Campo[];
+
+/** Texto comparable: sin espacios de más y sin distinguir mayúsculas. */
+const comparable = (texto: string) => texto.trim().replace(/\s+/g, " ").toLocaleLowerCase("es-AR");
+
+/** Si lo leído dice lo mismo que lo que ya estaba: el importe por su valor, los textos sin espacios
+ * de más ni mayúsculas, el proveedor y la moneda tal cual. */
+function dicenLoMismo(campo: Campo, antes: string, leido: string): boolean {
+  if (campo === "importe") return aCentavos(antes) === aCentavos(leido);
+  if (campo === "concepto" || campo === "comprobante") return comparable(antes) === comparable(leido);
+  return antes === leido;
+}
+
 /** Los campos que la lectura de la factura completa, con su valor en el formulario. La moneda leída,
  * solo si el edificio opera en ella: en uno que opera solo en pesos el campo no se muestra. */
 function camposLeidos(l: LecturaCarga, proveedores: Proveedor[], monedas: readonly string[]): Partial<Datos> {
@@ -204,8 +230,13 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     inicial?.factura === undefined ? (modificar?.version.factura_version_id ?? null) : null,
     aEntrar,
   );
-  /** Los campos que completó la lectura y la persona todavía no revisó. */
-  const [deLaLectura, setDeLaLectura] = useState<ReadonlySet<Campo>>(new Set());
+  /** Los campos en que la lectura cambió lo que ya estaba, con lo que estaba, mientras la persona no
+   * los revisa. */
+  const [diferencias, setDiferencias] = useState<ReadonlyMap<Campo, string>>(new Map());
+  /** Ya terminó una lectura con datos: desde ahí se marcan los obligatorios vacíos. */
+  const [leida, setLeida] = useState(false);
+  /** La lectura encontró un CUIT que no cierra (el aviso lo da la carga). */
+  const [cuitInvalido, setCuitInvalido] = useState(false);
   /** La lectura con un proveedor que no está cargado: se ofrece darlo de alta. */
   const [sinProveedor, setSinProveedor] = useState<AltaDesdeLaFactura | null>(null);
   /** Un archivo de factura subiéndose, en el antivirus o leyéndose: hasta que termine no se guarda. */
@@ -278,9 +309,9 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   }, [lectura, versionVista, inicial, monedaBase, setAviso]);
 
   function revisado(campo: Campo) {
-    setDeLaLectura((marcados) => {
+    setDiferencias((marcados) => {
       if (!marcados.has(campo)) return marcados;
-      const otros = new Set(marcados);
+      const otros = new Map(marcados);
       otros.delete(campo);
       return otros;
     });
@@ -292,9 +323,30 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     setFactura(cargada?.version ?? null);
   }
 
+  /** Lo que estaba en un campo, como lo ve la persona: el proveedor por su nombre, la moneda por el suyo. */
+  function mostrable(campo: Campo, valor: string): string {
+    if (campo === "proveedor" && lectura.tipo === "ok") return lectura.proveedores.find((p) => p.id === valor)?.razon_social ?? valor;
+    if (campo === "moneda") return (MONEDAS as readonly string[]).includes(valor) ? NOMBRE_MONEDA[valor as (typeof MONEDAS)[number]] : valor;
+    return valor;
+  }
+
   function leerFactura(l: LecturaCarga) {
     if (lectura.tipo !== "ok") return;
     const leidos = camposLeidos(l, lectura.proveedores, monedas);
+    // Lo que ya estaba escrito y lo leído dice otra cosa. En una orden nueva, lo que sigue como al
+    // abrir vacía (la moneda base, por ejemplo) no es algo escrito; en una versión, todo lo es.
+    const base = modificar === undefined ? datosVacios("", monedaBase) : null;
+    const nuevas = new Map<Campo, string>();
+    if (datos !== null) {
+      for (const [campo, leido] of Object.entries(leidos) as [Campo, string][]) {
+        const antes = datos[campo];
+        if (typeof antes !== "string" || antes.trim() === "" || (base !== null && antes === base[campo])) continue;
+        if (!dicenLoMismo(campo, antes, leido)) nuevas.set(campo, mostrable(campo, antes));
+      }
+    }
+    setDiferencias(nuevas);
+    setLeida(true);
+    setCuitInvalido(l.cuit_invalido);
     setDatos((d) => {
       if (d === null) return d;
       const nuevo = { ...d, ...leidos };
@@ -302,7 +354,6 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
       if (leidos.moneda !== undefined && leidos.moneda !== d.moneda) nuevo.contrato = "";
       return nuevo;
     });
-    setDeLaLectura(new Set(Object.keys(leidos) as Campo[]));
     setSinProveedor(
       l.proveedor_sugerido === null && (l.cuit !== null || l.razon_social !== null)
         ? { cuit: l.cuit, razon_social: l.razon_social, domicilio: l.domicilio, telefono: l.telefono, correo: l.correo }
@@ -461,7 +512,16 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
 
   const aplicables = contratosAplicables(lectura.contratos, datos.proveedor, datos.moneda);
   const ofrecidas = monedasOfrecidas(monedas);
-  const marca = (campo: Campo) => (deLaLectura.has(campo) ? <MarcaDeLectura alRevisar={() => revisado(campo)} /> : null);
+  /** Los obligatorios vacíos después de leer. El proveedor no cargado ya tiene su aviso con el alta. */
+  const faltan = leida
+    ? OBLIGATORIOS_LEIDOS.filter((c) => datos[c].trim() === "" && !(c === "proveedor" && sinProveedor !== null))
+    : [];
+  const quedaPorRevisar = diferencias.size > 0 || faltan.length > 0 || sinProveedor !== null || cuitInvalido;
+  const marca = (campo: Campo) => {
+    const antes = diferencias.get(campo);
+    if (antes !== undefined) return <MarcaDeDiferencia antes={antes} alRevisar={() => revisado(campo)} />;
+    return (faltan as readonly Campo[]).includes(campo) ? <MarcaDeFalta /> : null;
+  };
   const facturaVisible: Cargado | undefined = subida ?? inicial?.factura ?? facturaDeLaVersion ?? undefined;
   const alAlta = sinProveedor === null ? null : {
     consorcio,
@@ -483,7 +543,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
           setSubida(c);
           cargarFactura(c);
         }}
-        alLeer={leerFactura} alEsperar={setFacturaEnEspera} />
+        alLeer={leerFactura} alEsperar={setFacturaEnEspera} quedaPorRevisar={quedaPorRevisar} />
       {alAlta !== null && (
         <div className="aviso-info" role="note">
           <p>

@@ -10,7 +10,8 @@ import type { components } from "../api/tipos";
 import { App } from "../App";
 import {
   CONFIRMAR_QUITAR, MARCA_LECTURA, NO_QUITAR, preguntaQuitar, QUITAR_ARCHIVO, SEGUIR_SIN_ESPERAR, TEXTO_QUITADO, SEGUIR_SIN_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_DEJADO_SIN_ARCHIVO, TEXTO_DEJADO_SIN_LECTURA,
-  TEXTO_ESPERA_PARA_GUARDAR, TEXTO_LEIDA, TEXTO_LEYENDO, TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR,
+  TEXTO_ESPERA_PARA_GUARDAR, TEXTO_FALTA_OBLIGATORIO, TEXTO_LEIDA, TEXTO_LEIDA_CON_DIFERENCIAS, TEXTO_LEIDA_SIN_DIFERENCIAS, TEXTO_LEYENDO,
+  TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR, textoNoCoincide,
 } from "../CargaConLectura";
 import { TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
 import { SIN_CONEXION } from "../fallas";
@@ -3306,7 +3307,7 @@ describe("la factura arriba de la orden (0088)", () => {
     return cuerpo(pedidos(api, "POST", ORDENES)[0]);
   }
 
-  it("elegir la factura la sube, espera el antivirus y la lectura, completa y marca los campos; guardar manda la factura", async () => {
+  it("elegir la factura la sube, espera el antivirus y la lectura y completa los campos sin marcar lo que coincide; guardar manda la factura", async () => {
     conEsperaManual();
     const api = conFactura([EN_CUARENTENA, LEYENDO, lectura()]);
     await subirFactura();
@@ -3320,17 +3321,19 @@ describe("la factura arriba de la orden (0088)", () => {
     await vuelta();
     expect(await screen.findByText(TEXTO_LEYENDO)).toBeTruthy();
     await vuelta();
-    expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+    // Comentario 32: el formulario estaba vacío y la lectura completó todo: nada que avisar.
+    expect(await screen.findByText(TEXTO_LEIDA_SIN_DIFERENCIAS)).toBeTruthy();
+    expect(screen.queryByText(TEXTO_LEIDA)).toBeNull();
+    expect(screen.queryByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeNull();
     expect(valor("Concepto")).toBe("Limpieza de noviembre");
     expect(valor("Número de la factura (opcional)")).toBe("B 0001-00000077");
     expect(valor("Importe")).toMatch(/23\.?456/);
     expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1);
-    // Proveedor, importe, moneda, concepto y comprobante: cada uno marcado hasta revisarlo.
-    expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(5);
+    expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
+    expect(screen.queryByText(/no coincide con lo que estaba/)).toBeNull();
+    expect(screen.queryByText(TEXTO_FALTA_OBLIGATORIO)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Está bien" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza de noviembre, torre A" } });
-    expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(4);
-    fireEvent.click(screen.getAllByRole("button", { name: "Está bien" })[0] as HTMLElement);
-    expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(3);
     expect(await boton("Ver la factura")).toBeTruthy();
     expect(await guardar(api)).toMatchObject({
       factura_version_id: VF, proveedor_id: P1, importe_centavos: 2_345_600, moneda: "ARS", concepto: "Limpieza de noviembre, torre A",
@@ -3345,10 +3348,11 @@ describe("la factura arriba de la orden (0088)", () => {
     });
     await subirFactura();
     await vuelta();
-    expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+    expect(await screen.findByText(TEXTO_LEIDA_SIN_DIFERENCIAS)).toBeTruthy();
     expect(screen.queryByLabelText("Moneda")).toBeNull();
-    // Proveedor, importe, concepto y comprobante; la moneda no, que no se pregunta.
-    expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(4);
+    // La moneda no se pregunta en este edificio: no es una diferencia que marcar.
+    expect(screen.queryByText(/no coincide con lo que estaba/)).toBeNull();
+    expect(screen.queryByText(TEXTO_FALTA_OBLIGATORIO)).toBeNull();
     expect(await guardar(api)).toMatchObject({ moneda: "ARS", importe_centavos: 2_345_600 });
   });
 
@@ -3365,11 +3369,15 @@ describe("la factura arriba de la orden (0088)", () => {
     });
     await subirFactura();
     await vuelta();
-    expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
-    // Sin el proveedor sugerido, el proveedor sigue en blanco y no se marca (comentario 26, 09-11-2026).
+    // El proveedor no reconocido es lo que queda por revisar (comentario 32).
+    expect(await screen.findByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
+    // Sin el proveedor sugerido, el proveedor sigue en blanco (comentario 26, 09-11-2026); lo dice el
+    // aviso del alta, sin otra marca en el campo. Lo demás coincide: sin marcas.
     expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe("");
-    expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(4);
     expect(screen.getByText(/no está cargado en este edificio/)).toBeTruthy();
+    expect(screen.queryByText(TEXTO_FALTA_OBLIGATORIO)).toBeNull();
+    expect(screen.queryByText(/no coincide con lo que estaba/)).toBeNull();
+    expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Dar de alta el proveedor" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Proveedores" })).toBeTruthy();
     expect(((await screen.findByLabelText(/CUIT/)) as HTMLInputElement).value.replace(/\D/g, "")).toBe("20000000001");
@@ -3394,12 +3402,54 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(await guardar(api)).toMatchObject({ factura_version_id: VF, proveedor_id: P1, importe_centavos: 2_345_600 });
   });
 
+  it("comentario 32: un obligatorio que la lectura no completó se marca hasta escribirlo; lo leído no se marca", async () => {
+    conEsperaManual();
+    const api = conFactura([lectura({ importe_centavos: null, concepto: null })]);
+    await subirFactura();
+    await vuelta();
+    expect(await screen.findByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
+    // Importe y concepto faltan; el proveedor y el número se leyeron y no se marcan.
+    expect(screen.getAllByText(TEXTO_FALTA_OBLIGATORIO)).toHaveLength(2);
+    expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1);
+    expect(screen.queryByText(/no coincide con lo que estaba/)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+    expect(screen.getAllByText(TEXTO_FALTA_OBLIGATORIO)).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    // Control: completo lo obligatorio, ya no queda nada por revisar.
+    expect(screen.queryByText(TEXTO_FALTA_OBLIGATORIO)).toBeNull();
+    expect(screen.getByText(TEXTO_LEIDA_SIN_DIFERENCIAS)).toBeTruthy();
+    expect(await guardar(api)).toMatchObject({ factura_version_id: VF, importe_centavos: 1_500_000, concepto: "Limpieza" });
+  });
+
+  it("comentario 32: lo que no coincide se marca con lo que estaba; «Está bien» o corregirlo quita la marca", async () => {
+    conEsperaManual();
+    const api = conFactura([lectura()]);
+    fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Limpieza de octubre" } });
+    // Lo mismo que dice la factura, con otras mayúsculas y espacios: coincide.
+    fireEvent.change(screen.getByLabelText("Número de la factura (opcional)"), { target: { value: "  b 0001-00000077 " } });
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "23456" } });
+    await subirFactura();
+    await vuelta();
+    expect(await screen.findByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
+    expect(screen.getByText(textoNoCoincide("Limpieza de octubre"))).toBeTruthy();
+    expect(screen.getAllByText(/no coincide con lo que estaba/)).toHaveLength(1);
+    expect(screen.queryByText(textoNoCoincide("23456"))).toBeNull();
+    expect(screen.queryByText(textoNoCoincide("  b 0001-00000077 "))).toBeNull();
+    // La lectura propone: el campo queda con lo leído y la persona decide.
+    expect(valor("Concepto")).toBe("Limpieza de noviembre");
+    fireEvent.click(screen.getByRole("button", { name: "Está bien" }));
+    expect(screen.queryByText(/no coincide con lo que estaba/)).toBeNull();
+    expect(screen.getByText(TEXTO_LEIDA_SIN_DIFERENCIAS)).toBeTruthy();
+    expect(await guardar(api)).toMatchObject({ concepto: "Limpieza de noviembre", importe_centavos: 2_345_600 });
+  });
+
   it("un CUIT que no cierra avisa que hay que revisar el del proveedor", async () => {
     conEsperaManual();
     conFactura([lectura({ cuit: null, cuit_invalido: true, proveedor_sugerido: null })]);
     await subirFactura();
     await vuelta();
     expect(await screen.findByText(TEXTO_CUIT_INVALIDO)).toBeTruthy();
+    expect(screen.getByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
   });
 
   it("control: con un CUIT válido y el proveedor cargado no hay aviso ni alta", async () => {
@@ -3407,7 +3457,7 @@ describe("la factura arriba de la orden (0088)", () => {
     conFactura([lectura()]);
     await subirFactura();
     await vuelta();
-    expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+    expect(await screen.findByText(TEXTO_LEIDA_SIN_DIFERENCIAS)).toBeTruthy();
     expect(screen.queryByText(TEXTO_CUIT_INVALIDO)).toBeNull();
     expect(screen.queryByText(/no está cargado en este edificio/)).toBeNull();
   });
@@ -3419,6 +3469,8 @@ describe("la factura arriba de la orden (0088)", () => {
     await vuelta();
     expect(await screen.findByText(TEXTO_A_MANO)).toBeTruthy();
     expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
+    // Sin lectura, los obligatorios vacíos no se marcan: el aviso ya dice que se completa a mano.
+    expect(screen.queryByText(TEXTO_FALTA_OBLIGATORIO)).toBeNull();
     expect(valor("Concepto")).toBe("");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
@@ -3619,7 +3671,12 @@ describe("la factura arriba de la orden (0088)", () => {
       await vuelta();
       expect(screen.getByText(TEXTO_REVISANDO)).toBeTruthy();
       await vuelta();
-      expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+      // Lo escrito antes de leer: el importe y el concepto no coinciden con la factura; el proveedor sí.
+      expect(await screen.findByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
+      expect(screen.getByText(textoNoCoincide("15000"))).toBeTruthy();
+      expect(screen.getByText(textoNoCoincide("Limpieza"))).toBeTruthy();
+      expect(screen.queryByText(textoNoCoincide("Limpieza Ficticia SRL"))).toBeNull();
+      expect(screen.getAllByText(/no coincide con lo que estaba/)).toHaveLength(2);
       // Control: terminado, se guarda y lleva el archivo.
       expect(screen.queryByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeNull();
       expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
@@ -3716,7 +3773,15 @@ describe("la factura arriba de la orden (0088)", () => {
         const api = modificarCon("disponible");
         await reemplazar();
         await vuelta();
-        expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+        // En una versión, todo lo que estaba es escrito: concepto, importe y número difieren de la
+        // factura nueva; el proveedor y la moneda coinciden y no se marcan.
+        expect(await screen.findByText(TEXTO_LEIDA_CON_DIFERENCIAS)).toBeTruthy();
+        expect(screen.getByText(textoNoCoincide("Otro concepto"))).toBeTruthy();
+        expect(screen.getByText(textoNoCoincide("15000"))).toBeTruthy();
+        expect(screen.getByText(textoNoCoincide("Factura B 0001-00000001"))).toBeTruthy();
+        expect(screen.getAllByText(/no coincide con lo que estaba/)).toHaveLength(3);
+        expect(screen.queryByText(textoNoCoincide("Limpieza Ficticia SRL"))).toBeNull();
+        expect(screen.queryByText(textoNoCoincide("Pesos"))).toBeNull();
         expect(screen.queryByText(TEXTO_SIGUE_ANTERIOR)).toBeNull();
         expect(await guardarVersion(api)).toMatchObject({ factura_version_id: VF2 });
       });

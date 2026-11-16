@@ -58,6 +58,16 @@ export const TEXTO_ANTIVIRUS_TARDA = "El antivirus está tardando. Se puede comp
 export const TEXTO_CUIT_INVALIDO =
   "El CUIT que figura en el documento no es válido: hay que revisar el CUIT del proveedor antes de seguir.";
 export const MARCA_LECTURA = "Lo completó la lectura: revisar";
+// Solo lo que no coincide o falta (comentario 32 del propietario, 12-11-2026; como D-25 en el
+// registro del pago): lo leído que coincide no se avisa. Lo usa quien pasa `quedaPorRevisar`.
+export const TEXTO_LEIDA_SIN_DIFERENCIAS = "Listo: se leyeron los datos del documento.";
+export const TEXTO_LEIDA_CON_DIFERENCIAS =
+  "Se leyeron los datos del documento. Hay que revisar lo marcado antes de guardar: no coincide o falta.";
+export const NOTA_SOLO_DIFERENCIAS = "Los datos que se lean completan el formulario. Se marca solo lo que no coincide o lo que falta.";
+const NOTA_TODO = "Los datos que se lean completan el formulario: hay que revisarlos antes de guardar.";
+/** Lo que decía el campo antes de que la lectura lo cambiara por otra cosa. */
+export const textoNoCoincide = (antes: string) => `Lo leído no coincide con lo que estaba («${antes}»): revisar.`;
+export const TEXTO_FALTA_OBLIGATORIO = "No se leyó del documento y es obligatorio: hay que completarlo.";
 export const TEXTO_SIGUE_ANTERIOR = "Sigue adjunto el archivo anterior.";
 export const TEXTO_DEJADO_SIN_ARCHIVO = "Se dejó de esperar ese archivo: no queda adjunto.";
 export const TEXTO_DEJADO_SIN_LECTURA = "Se dejó de esperar la lectura: el archivo queda adjunto y los datos se completan a mano.";
@@ -98,9 +108,14 @@ type Props = {
   alLeer: (lectura: LecturaCarga) => void;
   /** Si hay un archivo subiéndose, en el antivirus o leyéndose: mientras tanto no se guarda. */
   alEsperar: (esperando: boolean) => void;
+  /** Con esto, al terminar la lectura se avisa solo si queda algo por revisar (lo dice quien llena
+   * el formulario: qué no coincide o qué obligatorio falta), y los campos se marcan con
+   * `MarcaDeDiferencia` y `MarcaDeFalta`. Sin esto, como siempre: «revisar cada campo marcado». */
+  quedaPorRevisar?: boolean;
 };
 
-export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabilitada = false, inicial = null, aEntrar, alCargar, alLeer, alEsperar }: Props) {
+export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabilitada = false, inicial = null, aEntrar, alCargar, alLeer, alEsperar, quedaPorRevisar }: Props) {
+  const soloDiferencias = quedaPorRevisar !== undefined;
   const [fase, setFase] = useState<Fase>({ tipo: "nada" });
   const [texto, setTexto] = useState<string | null>(null);
   /** El subido acá; mientras no se subió nada, vale el inicial (que puede llegar después). */
@@ -296,7 +311,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   }
   const progreso = fase.tipo === "subiendo" ? TEXTO_SUBIENDO : fase.tipo === "revisando" ? TEXTO_REVISANDO : fase.tipo === "leyendo" ? TEXTO_LEYENDO : null;
   const resultado =
-    fase.tipo === "leida" ? TEXTO_LEIDA
+    fase.tipo === "leida" ? (!soloDiferencias ? TEXTO_LEIDA : quedaPorRevisar ? TEXTO_LEIDA_CON_DIFERENCIAS : TEXTO_LEIDA_SIN_DIFERENCIAS)
     : fase.tipo === "no_leida" ? TEXTO_A_MANO
     : fase.tipo === "sin_lectura" ? TEXTO_SIN_LECTURA
     : null;
@@ -305,7 +320,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     <section className="carga-con-lectura" aria-label={titulo}>
       <SubirArchivo titulo={titulo} de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={cargado !== null}
         deshabilitada={deshabilitada || ocupada || quitar !== "nada"}
-        nota="Los datos que se lean completan el formulario: hay que revisarlos antes de guardar." alElegir={elegir} />
+        nota={soloDiferencias ? NOTA_SOLO_DIFERENCIAS : NOTA_TODO} alElegir={elegir} />
       {progreso !== null && (
         <p role="status" className="aviso-info">
           {progreso}
@@ -325,7 +340,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
         </p>
       )}
       {resultado !== null && (
-        <p role="status" className={fase.tipo === "leida" ? "aviso-info" : "aviso-error"}>
+        <p role="status" className={fase.tipo !== "leida" ? "aviso-error" : soloDiferencias && quedaPorRevisar ? "aviso-pendiente" : "aviso-info"}>
           {resultado}
         </p>
       )}
@@ -405,6 +420,24 @@ export function MarcaDeLectura({ alRevisar }: { alRevisar: () => void }) {
       </button>
     </p>
   );
+}
+
+/** Un campo que la lectura cambió por otra cosa de lo que ya estaba: se dice qué estaba, y la
+ * persona lo da por revisado o lo corrige. */
+export function MarcaDeDiferencia({ antes, alRevisar }: { antes: string; alRevisar: () => void }) {
+  return (
+    <p className="marca-lectura">
+      {textoNoCoincide(antes)}{" "}
+      <button type="button" className="sutil" onClick={alRevisar}>
+        Está bien
+      </button>
+    </p>
+  );
+}
+
+/** Un campo obligatorio que la lectura no completó: la marca se va al escribirlo. */
+export function MarcaDeFalta() {
+  return <p className="marca-lectura">{TEXTO_FALTA_OBLIGATORIO}</p>;
 }
 
 /** Esa versión exacta del archivo, si quien mira puede abrirla, para «Ver la factura»: la que se
