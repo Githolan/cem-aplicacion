@@ -41,6 +41,7 @@ import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS, RUTA_SIN_EXPLICAR }
 import { SinExplicar } from "./pagos/SinExplicar";
 import { Padron, RUTA_PADRON } from "./Padron";
 import { Panel, RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
+import { RUTA_SOLICITUDES, Solicitudes, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
 import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { CONSULTA_AL_LADO, useAncho } from "./pagos/useAncho";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
@@ -142,6 +143,13 @@ const GRUPOS_DE_INICIO: readonly GrupoDeInicio[] = [
         texto: TITULO_PANEL,
         detalle: "Órdenes por estado, lo pagado y las facturas que faltan",
         icono: "grafico",
+        requisito: REQUISITOS.panel,
+      },
+      {
+        ruta: RUTA_SOLICITUDES,
+        texto: TITULO_SOLICITUDES,
+        detalle: "Pedir documentación a la administración, con plazo",
+        icono: "documento",
         requisito: REQUISITOS.panel,
       },
     ],
@@ -430,6 +438,7 @@ export function App() {
           ))}
           <Route path={RUTA_LIQUIDACION} element={<Exige requisito={REQUISITOS.liquidacion}><Liquidacion /></Exige>} />
           <Route path={RUTA_PANEL} element={<Exige requisito={REQUISITOS.panel}><Panel /></Exige>} />
+          <Route path={RUTA_SOLICITUDES} element={<Exige requisito={REQUISITOS.solicitudes}><Solicitudes /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

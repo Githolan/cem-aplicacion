@@ -1037,7 +1037,13 @@
           "movimiento_ya_explicado",
           "sin_marca_vigente",
           "no_es_quien_lo_subio",
-          "documento_referenciado"
+          "documento_referenciado",
+          "solicitud_no_admite",
+          "sin_administrador_vigente",
+          "fecha_envio_invalida",
+          "fecha_respuesta_invalida",
+          "adjunto_invalido",
+          "destinatario_con_cuenta"
         ],
         "title": "CodigoError",
         "type": "string"

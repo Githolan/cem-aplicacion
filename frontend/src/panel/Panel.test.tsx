@@ -40,8 +40,9 @@ const DATOS: Panel = {
     { orden_id: O2, estado: "aprobada", proveedor: "Ascensores Ficticios SA", concepto: "Abono de noviembre",
       importe_centavos: 80000, moneda: "ARS", actualizada_en: "2026-11-05T12:00:00Z", version: 2, factura_subida: null },
   ],
+  solicitudes_abiertas: 2,
 };
-const VACIO: Panel = { ordenes_por_estado: [], gasto_pagado: [], comprobantes_faltantes: [] };
+const VACIO: Panel = { ordenes_por_estado: [], gasto_pagado: [], comprobantes_faltantes: [], solicitudes_abiertas: 0 };
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 

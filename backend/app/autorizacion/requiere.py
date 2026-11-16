@@ -54,6 +54,15 @@ RENOVAR = {
 """Las negaciones de R10 que la persona resuelve renovando la sesión. Se dicen tal cual porque el
 evaluador las mira al final (`_filtrar`): solo llegan acá si todo lo demás ya concedía."""
 VOLVER_A_ENTRAR = (CodigoError.SESION_RECIENTE_REQUERIDA, "Para esto hay que volver a entrar.")
+SIN_ADMINISTRADOR = (
+    CodigoError.SIN_ADMINISTRADOR_VIGENTE,
+    "El consorcio no tiene un administrador vigente: la solicitud queda en borrador, con una"
+    " firma, hasta que lo tenga.",
+)
+EXPLICADOS = {Motivo.SIN_ADMINISTRADOR_VIGENTE: (409, *SIN_ADMINISTRADOR)}
+"""Negaciones que se dicen tal cual (RF49, `0108`): la segunda firma de una solicitud formal sin
+administrador vigente (A14). El evaluador mira el destinatario único después de la concesión, así
+que solo llega acá quien ya puede firmar, y no se revela nada que no pueda ver en el panel."""
 """La sesión de la petición ya no sirve (vencida o revocada): se resuelve entrando de nuevo."""
 
 _S = CodigoSeparacion
@@ -218,6 +227,8 @@ class Permiso:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
         if decision.motivo_interno in RENOVAR:
             raise ErrorApi(403, *RENOVAR[decision.motivo_interno])
+        if decision.motivo_interno in EXPLICADOS:
+            raise ErrorApi(*EXPLICADOS[decision.motivo_interno])
         if (self.accion, decision.motivo_interno) in YA_PARTICIPO:
             codigo = CodigoSeparacion(decision.motivo_interno)
             otra = por_otra_cuenta(codigo, self.ctx.autorizacion, entidad or Entidad())

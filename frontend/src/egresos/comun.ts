@@ -296,6 +296,14 @@ const MENSAJES: Record<string, string> = {
   documento_referenciado:
     "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede quitar ni retirar.",
   no_es_quien_lo_subio: "Solo quien subió el archivo lo puede quitar.",
+  // Solicitud formal de documentación (RF49, app 0108).
+  solicitud_no_admite: "La solicitud ya no admite eso en su estado. La lista ya está actualizada.",
+  sin_administrador_vigente:
+    "El consorcio no tiene un administrador vigente: la solicitud queda en borrador, con una firma, hasta que lo tenga.",
+  fecha_envio_invalida: "La fecha del envío va entre el día en que se emitió la solicitud y hoy.",
+  fecha_respuesta_invalida: "La fecha en que llegó la respuesta va entre el día del envío y hoy.",
+  adjunto_invalido: "El archivo no se pudo usar: hay que subirlo de nuevo desde esta solicitud.",
+  destinatario_con_cuenta: "El destinatario tiene cuenta: la respuesta la da en la aplicación.",
   idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
   idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
 };

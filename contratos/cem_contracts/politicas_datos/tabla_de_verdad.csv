@@ -501,3 +501,25 @@ RF50e,egresos.saltear_documentacion,P+MC,AA,,vencido,si,,403,sin_concesion,un ma
 RF50e,egresos.saltear_documentacion,MC,C,,vigente,si,,403,modo_no_admitido,en Consejo la plataforma no tiene egresos
 RF50e,egresos.saltear_documentacion,MC,AA,,vigente,si,sin_identidad=yo,403,identidad_no_verificada,sin la identidad humana verificada no saltea
 RF50e,egresos.saltear_documentacion,ninguna,AA,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF49,solicitud_formal.retirar,MC,C,,vigente,si,,200,concedido_por_facultad,MC con solicitud_formal.firmar retira un borrador (P4)
+RF49,solicitud_formal.retirar,MC,AA,,vigente,si,,200,concedido_por_facultad,también en Administrador Aumentado
+RF49,solicitud_formal.retirar,MC,AG,,vigente,si,,403,modo_no_admitido,en Autogestión no (A3)
+RF49,solicitud_formal.retirar,MC,—,,vigente,si,,403,sin_modo_registrado,sin modo no (A3)
+RF49,solicitud_formal.retirar,AD,C,,vigente,si,,403,sin_concesion,la administración no retira lo que le piden
+RF49,solicitud_formal.retirar,P,C,,sin_mandato,si,,403,sin_concesion,P no retira
+RF49,solicitud_formal.retirar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF49,solicitud_formal.registrar_envio,MC,C,,vigente,si,,200,concedido_por_facultad,MC registra el envío por medio externo (destinatario sin cuenta)
+RF49,solicitud_formal.registrar_envio,MC,AA,,vigente,no,,200,concedido_por_facultad,el envío no depende de que hoy haya administrador: la solicitud ya tiene destinatario
+RF49,solicitud_formal.registrar_envio,MC,AG,,vigente,si,,403,modo_no_admitido,en Autogestión no (A3)
+RF49,solicitud_formal.registrar_envio,AD,C,,vigente,si,,403,sin_concesion,la administración no registra su propio envío
+RF49,solicitud_formal.registrar_envio,AE,C,,vigente,si,,403,sin_concesion,AE no registra el envío
+RF49,solicitud_formal.registrar_envio,P,C,,sin_mandato,si,,403,sin_concesion,P no registra el envío
+RF49,solicitud_formal.registrar_respuesta,MC,C,,vigente,si,,200,concedido_por_facultad,MC registra la respuesta que llegó por otro medio (P2)
+RF49,solicitud_formal.registrar_respuesta,MC,AG,,vigente,si,,403,modo_no_admitido,en Autogestión no (A3)
+RF49,solicitud_formal.registrar_respuesta,AD,C,,vigente,si,,403,sin_concesion,la administración responde en la aplicación: no registra
+RF49,solicitud_formal.registrar_respuesta,P,C,,sin_mandato,si,,403,sin_concesion,P no registra la respuesta
+RF49,solicitud_formal.responder,AD,C,,vigente,si,,200,concedido_por_ambito,la política deja pasar el ámbito; la base exige ser la persona del mandato destinatario
+RF49,solicitud_formal.responder,AE,AG,,vigente,si,,200,concedido_por_ambito,en cualquier modo: la solicitud ya se envió
+RF49,solicitud_formal.responder,AD,—,,vigente,si,,200,concedido_por_ambito,también sin modo registrado
+RF49,solicitud_formal.responder,P,C,,sin_mandato,si,,200,concedido_por_ambito,P pasa el ámbito y la base lo niega: no es el destinatario
+RF49,solicitud_formal.responder,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato

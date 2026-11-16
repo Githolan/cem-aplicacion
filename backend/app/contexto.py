@@ -184,9 +184,8 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         )
         hay_administrador = conn.execute(
             text(
-                "select exists (select 1 from nucleo.mandato where consorcio_id = :c"
-                " and tipo in ('administrador', 'administrador_externo')"
-                " and nucleo.mandato_vigente(id, :hoy))"
+                # A14: el único mandato vigente de administración (`0108`).
+                "select nucleo.mandato_administracion_vigente(:c, :hoy) is not null"
             ),
             {"c": consorcio_id, "hoy": hoy},
         ).scalar_one()
