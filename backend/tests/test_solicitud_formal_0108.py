@@ -263,6 +263,11 @@ def test_preparar_no_cuenta_como_firma_y_dos_personas_emiten(e, motor_migrate):
     for parte in ("N.º 1", "2064", SOLICITUD["referencia"], "Extractos bancarios",
                   f"{contrato.PLAZO_POR_DEFECTO_DIAS} días corridos", "Firmantes:"):  # fmt: skip
         assert parte in texto, parte
+    # Renglones reales, sin la secuencia de escape literal (Codex en app #255): se copia y se
+    # imprime como texto para el envío por medio externo.
+    assert "\\n" not in texto
+    renglones = texto.split("\n")
+    assert renglones[0] == "Solicitud formal de documentación N.º 1" and len(renglones) > 10
     assert hecho["huella_texto"] == hashlib.sha256(texto.encode()).hexdigest()
     # Una tercera firma ya no se ofrece ni se acepta.
     assert "firmar" not in hecho["acciones"]
