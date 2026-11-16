@@ -59,8 +59,8 @@ export const TEXTO_CUIT_INVALIDO =
   "El CUIT que figura en el documento no es válido: hay que revisar el CUIT del proveedor antes de seguir.";
 export const MARCA_LECTURA = "Lo completó la lectura: revisar";
 // Solo lo que no coincide o falta (comentario 32 del propietario, 12-11-2026; como D-25 en el
-// registro del pago): lo leído que coincide no se avisa. Lo usa quien pasa `quedaPorRevisar`.
-export const TEXTO_LEIDA_SIN_DIFERENCIAS = "Listo: se leyeron los datos del documento.";
+// registro del pago): lo leído que coincide no se avisa. Lo usa quien pasa `quedaPorRevisar`. Sin
+// nada que revisar no se dice nada (propietario, 16-11-2026): los campos llenos ya lo muestran.
 export const TEXTO_LEIDA_CON_DIFERENCIAS =
   "Se leyeron los datos del documento. Hay que revisar lo marcado antes de guardar: no coincide o falta.";
 export const NOTA_SOLO_DIFERENCIAS = "Los datos que se lean completan el formulario. Se marca solo lo que no coincide o lo que falta.";
@@ -108,7 +108,7 @@ type Props = {
   alLeer: (lectura: LecturaCarga) => void;
   /** Si hay un archivo subiéndose, en el antivirus o leyéndose: mientras tanto no se guarda. */
   alEsperar: (esperando: boolean) => void;
-  /** Con esto, al terminar la lectura se avisa solo si queda algo por revisar (lo dice quien llena
+  /** Con esto, al terminar la lectura se avisa solo si queda algo por revisar (si no, nada) (lo dice quien llena
    * el formulario: qué no coincide o qué obligatorio falta), y los campos se marcan con
    * `MarcaDeDiferencia` y `MarcaDeFalta`. Sin esto, como siempre: «revisar cada campo marcado». */
   quedaPorRevisar?: boolean;
@@ -311,7 +311,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   }
   const progreso = fase.tipo === "subiendo" ? TEXTO_SUBIENDO : fase.tipo === "revisando" ? TEXTO_REVISANDO : fase.tipo === "leyendo" ? TEXTO_LEYENDO : null;
   const resultado =
-    fase.tipo === "leida" ? (!soloDiferencias ? TEXTO_LEIDA : quedaPorRevisar ? TEXTO_LEIDA_CON_DIFERENCIAS : TEXTO_LEIDA_SIN_DIFERENCIAS)
+    fase.tipo === "leida" ? (!soloDiferencias ? TEXTO_LEIDA : quedaPorRevisar ? TEXTO_LEIDA_CON_DIFERENCIAS : null)
     : fase.tipo === "no_leida" ? TEXTO_A_MANO
     : fase.tipo === "sin_lectura" ? TEXTO_SIN_LECTURA
     : null;
