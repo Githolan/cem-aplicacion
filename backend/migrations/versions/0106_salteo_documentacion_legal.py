@@ -126,8 +126,9 @@ create table {TABLA} (
 create index salteo_documentacion_proveedor_proveedor
   on {TABLA} (consorcio_id, proveedor_id, numero);
 
--- La versión se escribe después del disparador que escribe el uso: la referencia se comprueba al
--- confirmar la transacción.
+-- La referencia es a la orden, que ya existe cuando el disparador escribe el uso: la versión se
+-- escribe después, en la misma sentencia, y si falla se deshace todo. Una referencia diferida a la
+-- versión dejaría eventos pendientes que traban los `alter table` de la misma transacción.
 create table {TABLA_USO} (
   consorcio_id    uuid not null references nucleo.consorcio (id),
   salteo_numero   bigint primary key references {TABLA} (numero),
@@ -135,8 +136,7 @@ create table {TABLA_USO} (
   version         integer not null,
   usado_en        timestamptz not null default now(),
   unique (orden_id, version),
-  foreign key (orden_id, version) references nucleo.orden_pago_version (orden_id, numero)
-    deferrable initially deferred
+  foreign key (consorcio_id, orden_id) references nucleo.orden_pago (consorcio_id, id)
 );
 """
 
