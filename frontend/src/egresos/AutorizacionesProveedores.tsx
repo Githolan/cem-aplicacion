@@ -8,7 +8,17 @@ import { RUTA_INICIO } from "../enlace";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { fechaCorta } from "../pagos/textos";
 import { REQUISITOS } from "../permisos";
-import { type Aviso, ENCABEZADO_IDEMPOTENCIA, ESTADO, mensajeDeActo, mensajeDeError, renovarClave, sinLaFalla, sinPisarLoHecho } from "./comun";
+import {
+  type Aviso,
+  cambioLoVisto,
+  ENCABEZADO_IDEMPOTENCIA,
+  ESTADO,
+  mensajeDeActo,
+  mensajeDeError,
+  renovarClave,
+  sinLaFalla,
+  sinPisarLoHecho,
+} from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
 import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
@@ -95,6 +105,13 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     setVuelta((v) => v + 1);
   }
 
+  /** Lo visto ya no es lo registrado (otra persona del Consejo cambió la autorización, o el
+   * habitante dejó de serlo): el aviso queda y la lista se vuelve a leer (Codex en #250). */
+  function alCambiarLoVisto(texto: string) {
+    setAviso({ texto, ok: false });
+    setVuelta((v) => v + 1);
+  }
+
   function alCambiar(nueva: Autorizacion) {
     setLectura((l) => (l.tipo === "ok" ? { tipo: "ok", elementos: l.elementos.map((a) => (a.persona_id === nueva.persona_id ? nueva : a)) } : l));
     setAviso({ texto: nueva.autorizada ? textoAutorizado(nueva.nombre) : textoRetirado(nueva.nombre), ok: true });
@@ -122,7 +139,13 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               <ul className="filas-registro" aria-label="Habitantes">
                 {lectura.elementos.map((a) => (
                   <li key={a.persona_id}>
-                    <Habitante consorcio={consorcio} autorizacion={a} aEntrar={aEntrar} alCambiar={alCambiar} />
+                    <Habitante
+                      consorcio={consorcio}
+                      autorizacion={a}
+                      aEntrar={aEntrar}
+                      alCambiar={alCambiar}
+                      alCambiarLoVisto={alCambiarLoVisto}
+                    />
                   </li>
                 ))}
               </ul>
@@ -138,9 +161,10 @@ type PropsHabitante = {
   autorizacion: Autorizacion;
   aEntrar: () => void;
   alCambiar: (nueva: Autorizacion) => void;
+  alCambiarLoVisto: (texto: string) => void;
 };
 
-function Habitante({ consorcio, autorizacion: a, aEntrar, alCambiar }: PropsHabitante) {
+function Habitante({ consorcio, autorizacion: a, aEntrar, alCambiar, alCambiarLoVisto }: PropsHabitante) {
   const id = useId();
   const [abierto, setAbierto] = useState(false);
   const [motivo, setMotivo] = useState("");
@@ -171,7 +195,13 @@ function Habitante({ consorcio, autorizacion: a, aEntrar, alCambiar }: PropsHabi
       });
       exigirSesion(response);
       if (data === undefined) {
-        if (renovarClave(response.status, codigoDe(error))) clave.current = null;
+        const codigo = codigoDe(error);
+        if (cambioLoVisto(response.status, codigo) || codigo === "persona_sin_vinculo") {
+          cerrar();
+          alCambiarLoVisto(mensajeDeActo(response.status, error));
+          return;
+        }
+        if (renovarClave(response.status, codigo)) clave.current = null;
         setFalla(mensajeDeActo(response.status, error));
         return;
       }

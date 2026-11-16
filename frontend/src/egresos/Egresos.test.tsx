@@ -1333,13 +1333,36 @@ describe("página /proveedores/quien-los-ve", () => {
   });
 
   it("un rechazo se dice junto al formulario, que queda abierto con lo escrito", async () => {
-    vi.stubGlobal("fetch", pantalla({ [`POST ${LISTA}/${PERSONA}`]: () => error("persona_sin_vinculo", 422) }));
+    vi.stubGlobal("fetch", pantalla({ [`POST ${LISTA}/${PERSONA}`]: () => error("motivo_invalido", 422) }));
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: AUTORIZAR }));
     fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
     fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
-    expect((await screen.findByRole("alert")).textContent).toBe(mensajeDeError(422, "persona_sin_vinculo"));
+    expect((await screen.findByRole("alert")).textContent).toBe(mensajeDeError(422, "motivo_invalido"));
     expect((screen.getByLabelText(MOTIVO) as HTMLTextAreaElement).value).toBe("SINTETICO");
+  });
+
+  it("si otro miembro del Consejo ya la cambió, cierra el formulario y vuelve a leer la lista (Codex en #250)", async () => {
+    // Lo registrado cambió en el medio: la base ya la tiene autorizada.
+    let rechazado = false;
+    const api = pantalla({
+      [`GET ${LISTA}`]: () => Response.json({ elementos: [rechazado ? autorizado : sinAutorizar] }),
+      [`POST ${LISTA}/${PERSONA}`]: () => {
+        rechazado = true;
+        return error("autorizacion_sin_cambios", 409);
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: AUTORIZAR }));
+    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
+    fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
+    // La fila muestra lo registrado y ofrece lo que corresponde; el aviso queda.
+    expect(await screen.findByRole("button", { name: RETIRAR })).toBeTruthy();
+    expect(screen.getByText(mensajeDeError(409, "autorizacion_sin_cambios"))).toBeTruthy();
+    expect(screen.queryByLabelText(MOTIVO)).toBeNull();
+    const antes = pedidos(api, "GET", LISTA).length;
+    expect(antes).toBeGreaterThanOrEqual(2); // control: se volvió a leer después del rechazo
   });
 
   it("con la autorización por persona apagada lo dice y no lista", async () => {
