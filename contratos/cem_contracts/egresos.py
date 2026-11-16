@@ -355,6 +355,22 @@ Consejo», propietario, 15-11-2026). Cada consorcio lo puede cambiar."""
 AUTORIZA_POR_PERSONA = True
 """Por defecto las autorizaciones por persona cuentan (`0105`)."""
 LARGO_MOTIVO_AUTORIZACION = 500
+ROLES_QUE_SALTEAN_DOCUMENTACION = ("miembro_consejo",)
+"""Quién saltea, en una urgencia y con motivo, el bloqueo por documentación legal, por defecto
+(`0106`; respuesta del propietario del 16-11-2026 a la pregunta 3: «si con motivo»). Cada consorcio
+lo puede cambiar."""
+HORAS_SALTEO = 24
+"""Cuánto espera un salteo a su orden, por defecto (`0106`). Cada consorcio lo puede cambiar."""
+LARGO_MOTIVO_SALTEO = 500
+
+
+class EstadoSalteo(StrEnum):
+    """El salteo del bloqueo por documentación legal (`0106`): espera su orden, ya la tuvo, o
+    pasaron las horas sin que nadie preparara una."""
+
+    VIGENTE = "vigente"
+    USADO = "usado"
+    VENCIDO = "vencido"
 
 
 class TipoDocumentacionProveedor(StrEnum):
@@ -553,6 +569,35 @@ class CambioAutorizacionVerProveedores(BaseModel):
     ]
 
 
+class SalteoDocumentacion(BaseModel):
+    """Un salteo con motivo del bloqueo por documentación legal (`0106`): quién, cuándo, hasta
+    cuándo espera su orden y, si ya la tuvo, la orden y la versión que lo usaron."""
+
+    model_config = ConfigDict(frozen=True)
+
+    numero: int
+    proveedor_id: UUID
+    motivo: str
+    registrado_en: datetime
+    registrado_por_nombre: str
+    vence_en: datetime
+    estado: EstadoSalteo
+    orden_id: UUID | None
+    version: int | None
+    usado_en: datetime | None
+
+
+class NuevoSalteoDocumentacion(BaseModel):
+    """`POST …/proveedores/{p}/salteos-documentacion`: el motivo de la urgencia."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MOTIVO_SALTEO),
+    ]
+
+
 class FichaProveedorConsulta(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -564,6 +609,9 @@ class FichaProveedorConsulta(BaseModel):
         description="La matriz legal, para decirla en palabras."
     )
     configuracion: ConfiguracionProveedores
+    salteos: list[SalteoDocumentacion] = Field(
+        description="Los salteos con motivo del bloqueo por documentación legal (`0106`)."
+    )
 
 
 class ProveedorConVersiones(BaseModel):
@@ -583,6 +631,9 @@ class ProveedorConVersiones(BaseModel):
     faltantes: list[RequisitoFaltante]
     requisitos: list[RequisitoLegal] = Field(description="La matriz legal, para elegir.")
     configuracion: ConfiguracionProveedores
+    salteos: list[SalteoDocumentacion] = Field(
+        description="Los salteos con motivo del bloqueo por documentación legal (`0106`)."
+    )
 
 
 # --- Órdenes de pago ---------------------------------------------------------------------------
@@ -840,6 +891,11 @@ class VersionOrdenPago(BaseModel):
         default=None,
         description="La versión exacta del archivo de la factura que se aprobó con esta versión."
         " Se abre con `…/documentos/{documento_id}/versiones/{factura_version_id}/contenido`.",
+    )
+    salteo_documentacion: SalteoDocumentacion | None = Field(
+        default=None,
+        description="El salteo con motivo que dejó preparar esta versión aunque al proveedor le"
+        " faltara documentación que exige la ley (`0106`).",
     )
 
 

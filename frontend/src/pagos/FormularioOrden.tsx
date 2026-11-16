@@ -89,6 +89,17 @@ export function contratosAplicables(contratos: Contrato[], proveedor: string, mo
 
 /** Las monedas del edificio que el formulario ofrece, en el orden de `MONEDAS` (P-14). */
 const monedasOfrecidas = (monedas: readonly string[]) => MONEDAS.filter((m) => monedas.includes(m));
+/** La factura leída en una moneda que el edificio no tiene habilitada (propietario, 16-11-2026): el
+ * importe leído no es en esa moneda, y en un edificio solo en pesos no hay campo para cambiarla. */
+export const textoMonedaAjena = (moneda: string, soloPesos: boolean) => {
+  const nombre = (MONEDAS as readonly string[]).includes(moneda)
+    ? NOMBRE_MONEDA[moneda as (typeof MONEDAS)[number]].toLocaleLowerCase("es-AR")
+    : moneda;
+  return soloPesos
+    ? `La factura está en ${nombre} y este edificio opera solo en pesos: el importe leído no está en pesos. Revisar antes de guardar.`
+    : `La factura está en ${nombre} y este edificio no opera en esa moneda: revisar antes de guardar.`;
+};
+
 /** Si se pregunta la moneda: solo cuando el edificio opera en más de una. */
 const conCampoMoneda = (monedas: readonly string[]) => monedasOfrecidas(monedas).length > 1;
 
@@ -246,6 +257,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const [leida, setLeida] = useState(false);
   /** La lectura encontró un CUIT que no cierra (el aviso lo da la carga). */
   const [cuitInvalido, setCuitInvalido] = useState(false);
+  /** La moneda leída, si el edificio no opera en ella, mientras la persona no la da por revisada. */
+  const [monedaAjena, setMonedaAjena] = useState<string | null>(null);
   /** La lectura con un proveedor que no está cargado: se ofrece darlo de alta. */
   const [sinProveedor, setSinProveedor] = useState<AltaDesdeLaFactura | null>(null);
   /** Un archivo de factura subiéndose, en el antivirus o leyéndose: hasta que termine no se guarda. */
@@ -357,6 +370,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     setDiferencias(nuevas);
     setLeida(true);
     setCuitInvalido(l.cuit_invalido);
+    setMonedaAjena(l.moneda !== null && !(monedasOfrecidas(monedas) as readonly string[]).includes(l.moneda) ? l.moneda : null);
     setDatos((d) => {
       if (d === null) return d;
       const nuevo = { ...d, ...leidos };
@@ -527,7 +541,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const faltan = leida
     ? OBLIGATORIOS_LEIDOS.filter((c) => datos[c].trim() === "" && !(c === "proveedor" && sinProveedor !== null))
     : [];
-  const quedaPorRevisar = diferencias.size > 0 || faltan.length > 0 || sinProveedor !== null || cuitInvalido;
+  const quedaPorRevisar = diferencias.size > 0 || faltan.length > 0 || sinProveedor !== null || cuitInvalido || monedaAjena !== null;
   const marca = (campo: Campo) => {
     const antes = diferencias.get(campo);
     if (antes !== undefined) return <MarcaDeDiferencia antes={antes} alRevisar={() => revisado(campo)} />;
@@ -585,6 +599,14 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
       <CampoImporte id={`${id}-importe`} valor={datos.importe} deshabilitado={enviando}
         alCambiar={(texto) => cambiar("importe", texto)} />
       {marca("importe")}
+      {monedaAjena !== null && (
+        <p className="marca-lectura" role="alert">
+          {textoMonedaAjena(monedaAjena, !conCampoMoneda(monedas))}{" "}
+          <button type="button" className="sutil" onClick={() => setMonedaAjena(null)}>
+            Está bien
+          </button>
+        </p>
+      )}
       {/* Solo en un edificio que opera en más de una moneda (P-14); si no, la orden va en pesos. */}
       {conCampoMoneda(monedas) && (
         <>

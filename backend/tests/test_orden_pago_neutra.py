@@ -957,9 +957,12 @@ RUTAS = {
     # 0105: el Consejo autoriza a un habitante a ver los proveedores, y su configuración.
     "autorizar_ver_proveedores", "autorizaciones_ver_proveedores_lectura",
     "configurar_autorizacion_proveedores",
+    # 0106: el salteo con motivo del bloqueo por documentación legal, su lectura y su configuración.
+    "saltear_documentacion_legal", "salteos_documentacion_lectura",
+    "configurar_salteo_documentacion",
 }  # fmt: skip
 """Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093`, `0099`,
-`0103`, `0104` y `0105`)."""
+`0103`, `0104`, `0105` y `0106`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
@@ -984,6 +987,8 @@ def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
                 " where n.nspname = 'nucleo' and (p.proname like '%orden_pago%'"
                 " or p.proname like '%ordenes_pago%' or p.proname like '%proveedor%'"
                 " or p.proname like '%egresos%'"
+                # 0106: el salteo del bloqueo por documentación legal.
+                " or p.proname like '%saltea%' or p.proname like '%salteo%'"
                 " or p.proname in ('exigir_acto_economico', 'enviar_orden_a_revision',"
                 " 'exigir_decision_sobre_orden', 'renovar_orden_vencida', 'aprobar_por_franja',"
                 " 'exigir_orden_emitible'))"
@@ -1004,7 +1009,8 @@ def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
     # Controles: las demás existen y no se ejecutan, entre ellas las barreras y las internas de
     # la franja.
     assert {"exigir_lectura_egresos", "exigir_acto_economico", "evaluar_orden_pago",
-            "aprobar_por_franja", "exigir_orden_emitible"} <= nombres  # fmt: skip
+            "aprobar_por_franja", "exigir_orden_emitible",
+            "puede_saltear_documentacion"} <= nombres  # fmt: skip
     assert len(filas) >= 26
     assert fijar
 

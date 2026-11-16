@@ -994,6 +994,9 @@
           "autorizacion_sin_cambios",
           "autorizacion_por_persona_apagada",
           "motivo_invalido",
+          "salteo_innecesario",
+          "salteo_vigente",
+          "salteo_de_quien_prepara",
           "documentacion_legal_faltante",
           "aprobacion_vencida",
           "aprobacion_vigente",
@@ -4056,6 +4059,16 @@
         "title": "EstadoProveedor",
         "type": "string"
       },
+      "EstadoSalteo": {
+        "description": "El salteo del bloqueo por documentación legal (`0106`): espera su orden, ya la tuvo, o\npasaron las horas sin que nadie preparara una.",
+        "enum": [
+          "vigente",
+          "usado",
+          "vencido"
+        ],
+        "title": "EstadoSalteo",
+        "type": "string"
+      },
       "EstadoSegundoFactor": {
         "description": "`GET /api/v1/auth/totp`.",
         "properties": {
@@ -4813,6 +4826,14 @@
             },
             "title": "Rubros Legales",
             "type": "array"
+          },
+          "salteos": {
+            "description": "Los salteos con motivo del bloqueo por documentación legal (`0106`).",
+            "items": {
+              "$ref": "#/components/schemas/SalteoDocumentacion"
+            },
+            "title": "Salteos",
+            "type": "array"
           }
         },
         "required": [
@@ -4821,7 +4842,8 @@
           "rubros_legales",
           "faltantes",
           "requisitos",
-          "configuracion"
+          "configuracion",
+          "salteos"
         ],
         "title": "FichaProveedorConsulta",
         "type": "object"
@@ -7961,6 +7983,23 @@
         "title": "NuevaContrasena",
         "type": "object"
       },
+      "NuevoSalteoDocumentacion": {
+        "additionalProperties": false,
+        "description": "`POST …/proveedores/{p}/salteos-documentacion`: el motivo de la urgencia.",
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "NuevoSalteoDocumentacion",
+        "type": "object"
+      },
       "ObservacionVigente": {
         "description": "Por qué el Consejo observó el último registro.",
         "properties": {
@@ -9489,6 +9528,14 @@
             "title": "Rubros Legales",
             "type": "array"
           },
+          "salteos": {
+            "description": "Los salteos con motivo del bloqueo por documentación legal (`0106`).",
+            "items": {
+              "$ref": "#/components/schemas/SalteoDocumentacion"
+            },
+            "title": "Salteos",
+            "type": "array"
+          },
           "versiones": {
             "items": {
               "$ref": "#/components/schemas/VersionProveedor"
@@ -9505,7 +9552,8 @@
           "rubros_legales",
           "faltantes",
           "requisitos",
-          "configuracion"
+          "configuracion",
+          "salteos"
         ],
         "title": "ProveedorConVersiones",
         "type": "object"
@@ -10535,6 +10583,90 @@
         "title": "RubrosLegalesProveedor",
         "type": "object"
       },
+      "SalteoDocumentacion": {
+        "description": "Un salteo con motivo del bloqueo por documentación legal (`0106`): quién, cuándo, hasta\ncuándo espera su orden y, si ya la tuvo, la orden y la versión que lo usaron.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoSalteo"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "numero": {
+            "title": "Numero",
+            "type": "integer"
+          },
+          "orden_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orden Id"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por_nombre": {
+            "title": "Registrado Por Nombre",
+            "type": "string"
+          },
+          "usado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usado En"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "numero",
+          "proveedor_id",
+          "motivo",
+          "registrado_en",
+          "registrado_por_nombre",
+          "vence_en",
+          "estado",
+          "orden_id",
+          "version",
+          "usado_en"
+        ],
+        "title": "SalteoDocumentacion",
+        "type": "object"
+      },
       "Salud": {
         "description": "`GET /health`: el proceso vive. No consulta ninguna dependencia.",
         "properties": {
@@ -11415,6 +11547,17 @@
             "title": "Razon Social",
             "type": "string"
           },
+          "salteo_documentacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SalteoDocumentacion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El salteo con motivo que dejó preparar esta versión aunque al proveedor le faltara documentación que exige la ley (`0106`)."
+          },
           "umbral_importe_centavos": {
             "anyOf": [
               {
@@ -11626,6 +11769,17 @@
           "razon_social": {
             "title": "Razon Social",
             "type": "string"
+          },
+          "salteo_documentacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SalteoDocumentacion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El salteo con motivo que dejó preparar esta versión aunque al proveedor le faltara documentación que exige la ley (`0106`)."
           },
           "umbral_importe_centavos": {
             "anyOf": [
@@ -21411,6 +21565,84 @@
           }
         },
         "summary": "Asignarle al proveedor un rubro legal: desde ahí se le exige lo que pide la ley",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/salteos-documentacion": {
+      "post": {
+        "description": "Respuesta del propietario del 16-11-2026 a la pregunta 3 del diseño (una urgencia, como una\npérdida de gas): «si con motivo». El salteo no se le da al proveedor en general: lo usa una\nsola orden, la próxima que se prepare a ese proveedor, y queda escrito en su ficha y en la de\nla orden. Quien prepara esa orden no puede ser quien registró el salteo (lo comprueba la base\nal preparar).",
+        "operationId": "saltear_documentacion_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__salteos_documentacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NuevoSalteoDocumentacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalteoDocumentacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "El proveedor no existe en este consorcio."
+          },
+          "409": {
+            "description": "Nada bloquea las órdenes a ese proveedor (`salteo_innecesario`) o quien saltea ya registró uno que espera su orden (`salteo_vigente`)."
+          },
+          "422": {
+            "description": "Falta el motivo (`motivo_invalido`)."
+          }
+        },
+        "summary": "En una urgencia, saltear con el motivo el bloqueo por documentación legal: sirve para la próxima orden a ese proveedor que prepare otra persona",
         "tags": [
           "egresos"
         ]

@@ -29,6 +29,7 @@ import {
 import { TEXTO_TIPO, textoEstado } from "../egresos/DocumentacionProveedor";
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
+import { textoSalteoDeLaVersion } from "../egresos/SalteoDocumentacion";
 import { exigirSesion, type MonedasDelEdificio, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
@@ -888,6 +889,16 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
               {ficha.documentacion_proveedor.map((d) => `${TEXTO_TIPO[d.tipo]} ${d.descripcion}: ${textoEstado(d).toLowerCase()}`).join("; ")}.
               No impide aprobar ni pagar.
             </p>
+          )}
+          {/* RF50 (app 0106): la versión que se preparó con un salteo por urgencia lo dice siempre. */}
+          {ficha.versiones.map(
+            (x) =>
+              x.salteo_documentacion != null && (
+                <p key={`salteo-${x.numero}`} className="aviso-pendiente" role="note">
+                  {textoSalteoDeLaVersion(x.salteo_documentacion)}
+                  {ficha.versiones.length > 1 ? ` (versión ${x.numero})` : ""}
+                </p>
+              ),
           )}
           {enDecision && v.alerta_fraccionamiento && (
             <p className="aviso-info" role="note">

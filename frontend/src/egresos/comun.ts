@@ -243,7 +243,7 @@ const MENSAJES: Record<string, string> = {
   moneda_no_habilitada: "Este edificio opera solo en pesos.",
   // RF50 configurable (app 0104).
   documentacion_legal_faltante:
-    "Al proveedor le falta documentación que exige la ley, o la tiene vencida: hay que cargarla en su ficha antes de prepararle una orden.",
+    "Al proveedor le falta documentación que exige la ley, o la tiene vencida: hay que cargarla en su ficha antes de prepararle una orden. En una urgencia, un miembro del Consejo puede saltear el bloqueo para una orden, con el motivo, desde la ficha del proveedor.",
   vencimiento_invalido: "Hace falta la fecha de vencimiento o marcar «No vence», no las dos.",
   no_vence_no_admitido: "Este edificio no admite documentos sin vencimiento: hace falta la fecha.",
   requisito_invalido: "Ese requisito legal no corresponde a ese tipo de documento.",
@@ -255,6 +255,11 @@ const MENSAJES: Record<string, string> = {
     "En este edificio no se autoriza a personas: ven los proveedores los roles que fija la configuración. La cambia el equipo de soporte.",
   motivo_invalido: "Hace falta el motivo, de hasta 500 caracteres.",
   persona_sin_vinculo: "Esa persona ya no tiene un vínculo con el edificio: solo se autoriza a habitantes.",
+  // Salteo por urgencia del bloqueo por documentación legal (app 0106).
+  salteo_innecesario: "Nada bloquea las órdenes a este proveedor: no hace falta saltear. La ficha ya está actualizada.",
+  salteo_vigente: "Ya registró un salteo de este proveedor que espera su orden. La ficha ya está actualizada.",
+  salteo_de_quien_prepara:
+    "El salteo del bloqueo lo registró quien prepara la orden: nadie saltea su propio bloqueo. La orden la prepara otra persona, o el salteo lo registra otro miembro del Consejo.",
   contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Hay que elegir otro o ninguno.",
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",

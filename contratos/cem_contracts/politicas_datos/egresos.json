@@ -69,6 +69,21 @@
       "economica": true,
       "destinatario_unico": false,
       "fuente_normativa": "Pago manual del piloto (propietario, 31-10-2026; diseño CEM #122): otro miembro del Consejo concilia el pago que registró quien ejecutó, y confirma que no se hizo el que declaró otro. Quien aprobó la orden no concilia; quien la preparó sí puede (propietario, 15-11-2026). R10"
+    },
+    {
+      "accion": "egresos.saltear_documentacion",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "concede_por_configuracion": true,
+      "facultad": null,
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF50; respuesta del propietario del 16-11-2026 a la pregunta 3 del diseño (una urgencia, como una pérdida de gas): «si con motivo». Saltear, con el motivo, el bloqueo por documentación legal faltante o vencida para la próxima orden a ese proveedor; lo concede la configuración del consorcio (0106, nucleo.configuracion_proveedores.roles_que_saltean), por defecto miembro_consejo; económica sin gesto (identidad humana y sesión operativa); quien prepara la orden no saltea su propio bloqueo (lo comprueba la base al preparar)"
     }
   ]
 }
