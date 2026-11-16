@@ -277,6 +277,25 @@ def test_dos_firmas_de_la_misma_persona_se_niegan(e):
     assert firmar(e, e.mc2, s).status_code == 200  # control: otra persona emite
 
 
+def test_reintentar_una_firma_hecha_devuelve_la_respuesta_guardada(e):
+    """Una firma que se hizo y cuya respuesta se perdió se reintenta con la misma clave: recibe la
+    respuesta guardada, no `ya_participo` ni «ya emitida» (Codex en app #255)."""
+    s = preparar(e)
+    clave = clave_idempotencia()
+    primera = post(e, e.mc1, f"solicitudes-formales/{s['id']}/firma", {}, clave)
+    assert primera.status_code == 200, primera.text
+    otra = post(e, e.mc1, f"solicitudes-formales/{s['id']}/firma", {}, clave)
+    assert (otra.status_code, otra.json()) == (200, primera.json())
+    assert codigo(firmar(e, e.mc1, s)) == (403, "ya_participo")  # control: clave nueva, se niega
+    clave2 = clave_idempotencia()
+    segunda = post(e, e.mc2, f"solicitudes-formales/{s['id']}/firma", {}, clave2)
+    assert segunda.status_code == 200, segunda.text
+    assert segunda.json()["estado"] == "enviada"
+    otra = post(e, e.mc2, f"solicitudes-formales/{s['id']}/firma", {}, clave2)
+    assert (otra.status_code, otra.json()) == (200, segunda.json())
+    assert len(una(e, e.mc1, s)["firmas"]) == 2
+
+
 def test_otra_cuenta_del_mismo_ser_humano_no_pone_la_segunda_firma(e, motor_migrate, motor_app):
     s = preparar(e)
     assert firmar(e, e.mc1, s).status_code == 200

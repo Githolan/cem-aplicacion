@@ -392,15 +392,19 @@ def firmar_solicitud(
     emite: fija el destinatario (A14), el texto PG08 y su huella. Si el destinatario tiene
     cuenta, el envío ocurre en el mismo acto y se le encola un aviso por correo, sin el
     contenido (P3); si no, queda con el envío pendiente."""
-    vista, firmas = _vista_y_firmas(permisos, motor, solicitud_id)
-    permisos.firmar.verificar(Entidad(firmas=firmas))
     enlace = f"{origen_publico(request)}{RUTA_SOLICITUDES}"
 
     def efecto(conn: Connection) -> tuple[int, SolicitudFormal]:
+        # Las firmas se leen y se controlan dentro del turno de la clave: un reintento de una
+        # firma que ya se hizo recibe la respuesta guardada en vez de `ya_participo` (Codex).
+        filas = _filas(conn, permisos, solicitud_id)
+        if not filas:
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        permisos.firmar.verificar(Entidad(firmas=_firmantes(filas[0])))
         fila = _ejecutar(
             conn, permisos.firmar,
             "select * from nucleo.firmar_solicitud_formal(:s, :actor, 'api', :sesion)",
-            {"s": vista.id},
+            {"s": solicitud_id},
         ).mappings().one()  # fmt: skip
         if fila["correo_destinatario"] is not None:
             correo.solicitar(
@@ -409,7 +413,7 @@ def firmar_solicitud(
                                          enlace=enlace),
                 consorcio_id=permisos.firmar.ctx.consorcio_id,
             )  # fmt: skip
-        return 200, _una(conn, permisos, vista.id)
+        return 200, _una(conn, permisos, solicitud_id)
 
     return responder_una_vez(motor, permisos.firmar.ctx, idempotencia, efecto)
 

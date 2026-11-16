@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 16-11-2026 (RF49, solicitud formal de documentación con su envío, rama `solicitud/rf49-solicitud-formal` desde `main` = `6dfec59`; migración `0108`, contrato `0.75.0`). Staging en `c4d024a`; la versión que se despliega al fusionar queda en `doc/deploys/` del repositorio CEM. Producción sigue en `1535bd7`.
+**Actualizado:** 16-11-2026 (RF49, solicitud formal de documentación con su envío, rama `solicitud/rf49-solicitud-formal` desde `main` = `6dfec59`; migración `0108`, contrato `0.75.0`). Staging en `6dfec59`; la versión que se despliega al fusionar queda en `doc/deploys/` del repositorio CEM. Producción sigue en `1535bd7`.
 
 ## Qué existe
 
