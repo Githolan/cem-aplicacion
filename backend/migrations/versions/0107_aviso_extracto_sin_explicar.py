@@ -24,8 +24,8 @@ funciones ni la regla de la cuenta: nada de esto devuelve una cuenta, un proveed
 Downgrade: los cuerpos vuelven adentro de las funciones de la API y se borra lo demás. No hay datos
 que perder.
 
-Revisión: 0106
-Anterior: 0105
+Revisión: 0107
+Anterior: 0106
 """
 
 import re
@@ -33,8 +33,8 @@ import re
 from alembic import op
 from sqlalchemy import text
 
-revision = "0106"
-down_revision = "0105"
+revision = "0107"
+down_revision = "0106"
 branch_labels = None
 depends_on = None
 
@@ -140,7 +140,7 @@ def _definicion(funcion: str) -> str:
 
 def _una_vez(definicion: str, parte: str, funcion: str) -> None:
     if definicion.count(parte) != 1:
-        raise RuntimeError(f"0106: {funcion} no tiene exactamente una vez {parte!r}")
+        raise RuntimeError(f"0107: {funcion} no tiene exactamente una vez {parte!r}")
 
 
 def _cuerpo(definicion: str, funcion: str) -> str:
@@ -149,14 +149,14 @@ def _cuerpo(definicion: str, funcion: str) -> str:
     inicio = definicion.index(INICIO_CUERPO)
     fin = definicion.rindex(FIN_CUERPO)
     if fin < inicio:
-        raise RuntimeError(f"0106: {funcion} no termina después de su return query")
+        raise RuntimeError(f"0107: {funcion} no termina después de su return query")
     return definicion[inicio:fin]
 
 
 def _columnas(definicion: str, funcion: str) -> str:
     encontradas = DEVUELVE.findall(definicion)
     if len(encontradas) != 1:
-        raise RuntimeError(f"0106: no se encontró una sola lista de columnas en {funcion}")
+        raise RuntimeError(f"0107: no se encontró una sola lista de columnas en {funcion}")
     return encontradas[0]
 
 

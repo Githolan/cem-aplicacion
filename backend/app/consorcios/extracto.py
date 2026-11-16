@@ -521,7 +521,7 @@ def comparar(
 
 
 def movimientos_guardados(filas: Sequence[Mapping[str, Any]]) -> list[MovimientoGuardado]:
-    """Los débitos sin cotejo de `movimientos_sin_cotejo_de` (`0106`), para comparar."""
+    """Los débitos sin cotejo de `movimientos_sin_cotejo_de` (`0107`), para comparar."""
     return [
         MovimientoGuardado(
             id=f["movimiento_id"],
@@ -539,7 +539,7 @@ def movimientos_sin_pago(
     movimientos: list[MovimientoGuardado], pagos: Sequence[Mapping[str, Any]]
 ) -> list[MovimientoGuardado]:
     """De los débitos sin cotejo, los que la comparación de subir un extracto
-    (`comparar`) deja sin pago, contra los de `pagos_para_explicar_de` (`0106`). La
+    (`comparar`) deja sin pago, contra los de `pagos_para_explicar_de` (`0107`). La
     bandeja y el aviso por correo cuentan con esta misma función. Hay al menos un débito."""
     desde, hasta = min(m.fecha for m in movimientos), max(m.fecha for m in movimientos)
     # Nadie coteja desde acá: quién podría hacerlo no cambia lo que el extracto explica.

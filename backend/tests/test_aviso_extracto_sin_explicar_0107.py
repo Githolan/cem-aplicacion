@@ -1,4 +1,4 @@
-"""El aviso diario cuenta lo que el extracto no explica (`0106`; comentario 29 del propietario,
+"""El aviso diario cuenta lo que el extracto no explica (`0107`; comentario 29 del propietario,
 09-11-2026, y su «si» del 16-11-2026). Contra PostgreSQL real. Datos SINTETICOS / PRUEBA / NO REAL:
 ninguna cuenta es de un banco (prefijo 999), ningún correo sale (se lee lo que queda en el outbox) y
 no se mueve dinero.
@@ -284,19 +284,19 @@ def _definiciones(motor) -> dict:
         }  # fmt: skip
 
 
-def test_0106_ida_y_vuelta_deja_todo_como_estaba(base_aparte):  # noqa: F811
+def test_0107_ida_y_vuelta_deja_todo_como_estaba(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
-    command.upgrade(cfg, "0105")
-    antes = _definiciones(motor)
     command.upgrade(cfg, "0106")
+    antes = _definiciones(motor)
+    command.upgrade(cfg, "0107")
     con = _definiciones(motor)
     api, nuevas = list(antes)[:2], list(antes)[2:]
-    # Control: la 0106 cambió las dos de la API y creó las tres nuevas.
+    # Control: la 0107 cambió las dos de la API y creó las tres nuevas.
     assert all(antes[f] is not None and con[f][0] != antes[f][0] for f in api)
     assert all(antes[f] is None and con[f] is not None for f in nuevas)
     assert "cem_app" in con["nucleo.extracto_sin_explicar_para_avisar()"][1]
     assert all("cem_app" not in con[f][1] for f in nuevas[:2])
-    command.downgrade(cfg, "0105")
+    command.downgrade(cfg, "0106")
     assert _definiciones(motor) == antes
-    command.upgrade(cfg, "0106")
+    command.upgrade(cfg, "0107")
     assert _definiciones(motor) == con

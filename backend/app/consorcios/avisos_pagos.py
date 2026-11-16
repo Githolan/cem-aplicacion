@@ -16,7 +16,7 @@ solo correo.
 **Lo que el extracto no explica** va en un renglón aparte, solo con cuántos movimientos son: sin
 fecha, importe, número de operación ni cuenta. Lo recibe quien lo ve en la bandeja: quien concilia
 y la administración (pregunta 8, opción c), con la regla de `exigir_lectura_extracto` que repite
-`nucleo.extracto_sin_explicar_para_avisar` (`0106`). La cuenta sale de la misma comparación que la
+`nucleo.extracto_sin_explicar_para_avisar` (`0107`). La cuenta sale de la misma comparación que la
 bandeja (`extracto.movimientos_sin_pago`). Va en el mismo correo y con el mismo tope: nadie recibe
 un correo de más por esto.
 
