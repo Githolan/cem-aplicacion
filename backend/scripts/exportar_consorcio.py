@@ -67,7 +67,7 @@ PARTES: dict[str, tuple[str, ...]] = {
     "auditoria": ("evento",),
     "proveedores": ("proveedor", "proveedor_version", "contrato", "contrato_confirmacion",
                     "contrato_baja", "documentacion_proveedor", "rubro_legal_proveedor",
-                    "configuracion_proveedores"),
+                    "configuracion_proveedores", "autorizacion_ver_proveedores"),
     "ordenes_pago": ("orden", "orden_version", "orden_aprobacion", "factura_adjunta",
                      "orden_transicion", "umbral", "aprobaciones_configuradas", "moneda_habilitada",
                      "lectura_carga"),

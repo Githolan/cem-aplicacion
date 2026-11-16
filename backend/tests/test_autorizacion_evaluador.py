@@ -332,8 +332,9 @@ def test_las_acciones_de_la_tabla():
     # (`documentos.ver_restringidos` y `documentos.cargar_operativos`) y la lectura de la revisión
     # de órdenes de pago (`egresos.revisar_orden`, H3) y la conciliación del pago manual
     # (`egresos.conciliar_pago`, 0055) y lo que muestra la interfaz (`consorcios.mis_acciones`)
-    # y la consulta de proveedores (`proveedores.ver`, 0104)
-    assert len(POLITICAS) == 52
+    # y la consulta de proveedores (`proveedores.ver`, 0104) y quién autoriza a un habitante a
+    # verlos (`proveedores.autorizar`, 0105)
+    assert len(POLITICAS) == 53
 
 
 def _archivo(tmp_path, nombre, politicas):

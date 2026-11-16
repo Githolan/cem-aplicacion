@@ -249,6 +249,12 @@ const MENSAJES: Record<string, string> = {
   requisito_invalido: "Ese requisito legal no corresponde a ese tipo de documento.",
   rubro_legal_invalido: "Ese rubro legal no existe.",
   rubro_legal_sin_cambios: "El proveedor ya estaba así. La ficha ya está actualizada.",
+  // Quién ve los proveedores: el Consejo autoriza a un habitante (app 0105).
+  autorizacion_sin_cambios: "Esa persona ya estaba así. La lista ya está actualizada.",
+  autorizacion_por_persona_apagada:
+    "En este edificio no se autoriza a personas: ven los proveedores los roles que fija la configuración. La cambia el equipo de soporte.",
+  motivo_invalido: "Hace falta el motivo, de hasta 500 caracteres.",
+  persona_sin_vinculo: "Esa persona ya no tiene un vínculo con el edificio: solo se autoriza a habitantes.",
   contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Hay que elegir otro o ninguno.",
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",

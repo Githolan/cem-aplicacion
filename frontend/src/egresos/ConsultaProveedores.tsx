@@ -17,8 +17,9 @@ import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 
 // Página /proveedores: la consulta de los proveedores y sus seguros para quien no los gestiona
 // (RF50 configurable; app 0104; sí del propietario del 15-11-2026, P1 y P2). Por defecto la ve
-// todo el Consejo y la administración; el equipo puede sumar «habitantes autorizados» por tipo de
-// vínculo en la configuración del edificio. Solo lee: sin la cuenta del proveedor, sin cargar ni
+// todo el Consejo y la administración; la ven también los habitantes que autorice el Consejo
+// (app 0105, «Quién ve los proveedores») y, si el equipo los suma en la configuración del edificio,
+// todos los de un tipo de vínculo. Solo lee: sin la cuenta del proveedor, sin cargar ni
 // cambiar nada. Lo decide la API con `proveedores.ver`, y la base repite la regla.
 
 type ProveedorConsulta = components["schemas"]["ProveedorConsulta"];

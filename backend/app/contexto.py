@@ -63,6 +63,8 @@ class Contexto:
     """Las identidades de otras personas que necesita la acción; las agrega `Permiso`."""
     roles_configurados: Mapping[str, frozenset[str]] = field(default_factory=dict)
     """Acción → roles que la configuración del consorcio lista para ella (`0104`)."""
+    autorizaciones: frozenset[str] = frozenset()
+    """Las acciones que el Consejo le autorizó a esta persona y que cuentan hoy (`0105`)."""
     sesion_id: UUID | None = None
     """La sesión de la petición: las funciones económicas de la base la vuelven a comprobar
     (`exigir_acto_economico`). None solo en las pruebas que reemplazan la identidad."""
@@ -84,6 +86,7 @@ class Contexto:
             identidades=identidades,
             segundo_factor_reciente=self.segundo_factor_reciente,
             roles_configurados=self.roles_configurados,
+            autorizaciones=self.autorizaciones,
         )
 
 
@@ -194,6 +197,12 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
                 text("select accion, roles from nucleo.roles_configurados(:c)"), {"c": consorcio_id}
             )
         }
+        # 0105: lo que el Consejo le autorizó a esta persona (p. ej. ver los proveedores).
+        autorizaciones = frozenset(
+            conn.execute(
+                text("select a from nucleo.acciones_autorizadas(:c) a"), {"c": consorcio_id}
+            ).scalars()
+        )
         modo = conn.execute(
             text(
                 "select modo from nucleo.modo_operacion where consorcio_id = :c"
@@ -233,6 +242,7 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         identidad_humana=identidad_humana,
         segundo_factor_reciente=controles is not None and controles.segundo_factor,
         roles_configurados=roles_configurados,
+        autorizaciones=autorizaciones,
         sesion_id=identidad.sesion_id,
     )
 

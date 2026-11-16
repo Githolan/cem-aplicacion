@@ -49,7 +49,9 @@ from cem_contracts.egresos import (
     AccionPago,
     Aprobacion,
     AprobacionRegistrada,
+    AutorizacionVerProveedores,
     BandejaPagos,
+    CambioAutorizacionVerProveedores,
     CampoComprobante,
     CargaCuitProveedor,
     CierreReclamo,
@@ -94,6 +96,7 @@ from cem_contracts.egresos import (
     GrupoPago,
     LecturaCarga,
     LecturaComprobante,
+    ListaAutorizacionesVerProveedores,
     ListaContratos,
     ListaContratosRevision,
     ListaOrdenesPago,
@@ -197,6 +200,7 @@ EN_CURSO = ESPERAN_PAGO | {EstadoOrdenPago.EN_REVISION, EstadoOrdenPago.APROBADA
 """Las órdenes en las que haber aprobado todavía separa: quien aprobó no repite, ni emite, ni paga.
 Son pocas y no crecen con la historia del consorcio."""
 VER_PROVEEDORES = "proveedores.ver"
+AUTORIZAR_PROVEEDORES = "proveedores.autorizar"
 LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR, VER_PROVEEDORES: VER_PROVEEDORES}
 """La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`;
 `exigir_lectura_proveedores`, `0104`)."""
@@ -236,6 +240,22 @@ ERRORES = {
     "rubro_legal_sin_cambios": (
         409, CodigoError.RUBRO_LEGAL_SIN_CAMBIOS,
         "El proveedor ya estaba así: volver a abrir la ficha.",
+    ),
+    "autorizacion_sin_cambios": (
+        409, CodigoError.AUTORIZACION_SIN_CAMBIOS,
+        "La persona ya estaba así: volver a abrir la lista.",
+    ),
+    "autorizacion_por_persona_apagada": (
+        409, CodigoError.AUTORIZACION_POR_PERSONA_APAGADA,
+        "En este consorcio no se autoriza a personas: ven los proveedores los roles que fija la"
+        " configuración. La cambia el equipo de soporte.",
+    ),
+    "motivo_invalido": (
+        422, CodigoError.MOTIVO_INVALIDO, "Hace falta el motivo, de hasta 500 caracteres.",
+    ),
+    "persona_sin_vinculo": (
+        422, CodigoError.PERSONA_SIN_VINCULO,
+        "Esa persona no tiene hoy un vínculo con el consorcio: solo se autoriza a habitantes.",
     ),
     "documentacion_legal_faltante": (
         422, CodigoError.DOCUMENTACION_LEGAL_FALTANTE,
@@ -448,6 +468,7 @@ CAMPO_DEL_MOTIVO = {
     "vencimiento_invalido": "vence_el",
     "no_vence_no_admitido": "vence_el",
     "requisito_invalido": "requisito",
+    "motivo_invalido": "motivo",
 }
 """El campo del cuerpo que motiva cada error de negocio que tiene uno (`detalle.campos`): la
 pantalla lo marca junto al campo. Los nombres son los de los cuerpos de los contratos.
@@ -1091,6 +1112,73 @@ def consultar_proveedor(
         proveedor=proveedores[0], documentacion=documentacion, rubros_legales=rubros,
         faltantes=faltantes, requisitos=requisitos, configuracion=configuracion,
     )  # fmt: skip
+
+
+# --- Quién ve los proveedores: el Consejo autoriza a un habitante (`0105`) ----------------------
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/autorizaciones-proveedores",
+    response_model=ListaAutorizacionesVerProveedores,
+    summary="Los habitantes y si el Consejo los autorizó a ver los proveedores y sus seguros",
+    responses=RESPUESTAS_LECTURA | {
+        409: {"description": "El consorcio no autoriza por persona"
+                             " (`autorizacion_por_persona_apagada`)."},
+    },
+)  # fmt: skip
+def autorizaciones_proveedores(
+    permiso: Annotated[Permiso, Depends(requiere(AUTORIZAR_PROVEEDORES, al_entrar=True))],
+    motor: MotorDep,
+) -> ListaAutorizacionesVerProveedores:
+    """Respuesta del propietario del 15-11-2026: los habitantes autorizados son «los que autorice
+    el Consejo». Quien autoriza (por defecto, el Consejo) ve a cada habitante y la última
+    autorización: si está autorizado, el motivo, quién y cuándo."""
+    with _lectura(permiso, motor) as c:
+        filas = _ejecutar(
+            c, permiso,
+            "select * from nucleo.autorizaciones_ver_proveedores_lectura(:actor, 'api', :sesion)",
+            {},
+        ).mappings()  # fmt: skip
+        return ListaAutorizacionesVerProveedores(
+            elementos=[AutorizacionVerProveedores(**f) for f in filas]
+        )
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/autorizaciones-proveedores/{persona_id}",
+    response_model=AutorizacionVerProveedores,
+    summary="Autorizar a un habitante a ver los proveedores, o retirarle la autorización, con el"
+    " motivo: queda quién y cuándo, y nada se borra",
+    responses=RESPUESTAS_ESCRITURA | {
+        409: {"description": "Ya estaba así (`autorizacion_sin_cambios`) o el consorcio no"
+                             " autoriza por persona (`autorizacion_por_persona_apagada`)."},
+        422: {"description": "La persona no es habitante (`persona_sin_vinculo`) o falta el"
+                             " motivo."},
+    },
+)  # fmt: skip
+def cambiar_autorizacion_proveedores(
+    persona_id: UUID,
+    cuerpo: CambioAutorizacionVerProveedores,
+    permiso: Annotated[Permiso, Depends(requiere(AUTORIZAR_PROVEEDORES, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, AutorizacionVerProveedores]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.autorizar_ver_proveedores(:persona, :autorizada, :motivo, :actor,"
+            " 'api', :sesion)",
+            {"persona": persona_id, "autorizada": cuerpo.autorizada, "motivo": cuerpo.motivo},
+        ).scalar_one()  # fmt: skip
+        filas = _ejecutar(
+            conn, permiso,
+            "select * from nucleo.autorizaciones_ver_proveedores_lectura(:actor, 'api', :sesion)"
+            " where persona_id = :persona",
+            {"persona": persona_id},
+        ).mappings().all()  # fmt: skip
+        return 200, AutorizacionVerProveedores(**filas[0])
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
 # --- Documentos para carga: la IA propone, la persona confirma (`0088`) -------------------------

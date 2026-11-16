@@ -17,7 +17,26 @@
       "respaldo": null,
       "economica": false,
       "destinatario_unico": false,
-      "fuente_normativa": "RF50; decisión del propietario del 15-11-2026 (respuestas a P1 y P2 del diseño de RF50): todo el Consejo y los habitantes autorizados ven la ficha del proveedor y sus seguros; los roles que la ven los fija la configuración de cada consorcio (0104, nucleo.configuracion_proveedores.roles_que_ven), por defecto miembro_consejo, administrador y administrador_externo; sin la cuenta destino"
+      "fuente_normativa": "RF50; decisión del propietario del 15-11-2026 (respuestas a P1 y P2 del diseño de RF50): todo el Consejo y los habitantes autorizados ven la ficha del proveedor y sus seguros; los roles que la ven los fija la configuración de cada consorcio (0104, nucleo.configuracion_proveedores.roles_que_ven), por defecto miembro_consejo, administrador y administrador_externo; además, los habitantes que autorice el Consejo (respuesta del propietario del 15-11-2026, 0105, nucleo.autorizacion_ver_proveedores; ContextoAutorizacion.autorizaciones); sin la cuenta destino"
+    },
+    {
+      "accion": "proveedores.autorizar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "concede_por_configuracion": true,
+      "facultad": null,
+      "modos": [
+        "consejo",
+        "administrador_aumentado",
+        "autogestion"
+      ],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF50; respuesta del propietario del 15-11-2026 a «¿quiénes son los habitantes autorizados?»: «Los que autorice el Consejo». Autorizar a un habitante a ver los proveedores, o retirarle la autorización, con el motivo; lo concede la configuración del consorcio (0105, nucleo.configuracion_proveedores.roles_que_autorizan), por defecto miembro_consejo; acto sin dinero, sin gesto"
     }
   ]
 }

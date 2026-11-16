@@ -349,6 +349,12 @@ ADMITE_NO_VENCE = True
 """Por defecto (P5, `0104`): se puede cargar «No vence» con la fecha en blanco."""
 ROLES_QUE_VEN_PROVEEDORES = ("administrador", "administrador_externo", "miembro_consejo")
 """Los roles que consultan la ficha del proveedor y sus seguros por defecto (P1, `0104`)."""
+ROLES_QUE_AUTORIZAN_PROVEEDORES = ("miembro_consejo",)
+"""Quién autoriza a un habitante a ver los proveedores, por defecto (`0105`; «Los que autorice el
+Consejo», propietario, 15-11-2026). Cada consorcio lo puede cambiar."""
+AUTORIZA_POR_PERSONA = True
+"""Por defecto las autorizaciones por persona cuentan (`0105`)."""
+LARGO_MOTIVO_AUTORIZACION = 500
 
 
 class TipoDocumentacionProveedor(StrEnum):
@@ -511,6 +517,40 @@ class ListaProveedoresConsulta(BaseModel):
     documentacion_por_vencer: list[UUID]
     documentacion_faltante: list[UUID]
     modo_exigencia: ModoExigencia
+
+
+class AutorizacionVerProveedores(BaseModel):
+    """Un habitante y si el Consejo lo autorizó a ver los proveedores (`0105`): la última fila."""
+
+    model_config = ConfigDict(frozen=True)
+
+    persona_id: UUID
+    nombre: str
+    unidades: list[str]
+    autorizada: bool
+    motivo: str | None
+    registrado_en: datetime | None
+    registrado_por_nombre: str | None
+
+
+class ListaAutorizacionesVerProveedores(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[AutorizacionVerProveedores]
+
+
+class CambioAutorizacionVerProveedores(BaseModel):
+    """`POST …/autorizaciones-proveedores/{persona}`: autorizar (o retirar) con el motivo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    autorizada: bool
+    motivo: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LARGO_MOTIVO_AUTORIZACION
+        ),
+    ]
 
 
 class FichaProveedorConsulta(BaseModel):
