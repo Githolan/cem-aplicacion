@@ -1,16 +1,30 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { ComandoNoDisponible } from "./ComandoNoDisponible";
 import { encabezadoCsrf } from "./csrf";
-import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe, REVISAR_FORMULARIO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
+import {
+  ErrorDeCampo,
+  type ErroresDeCampo,
+  erroresDe,
+  faltaCompletar,
+  hayErrores,
+  marcaDe,
+  resumenDe,
+  REVISAR_FORMULARIO,
+  SIN_ERRORES,
+  sinElDe,
+  soloDe,
+} from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { RUTA_PADRON } from "./Padron";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
 // y retirar las que no se aceptaron. Lo que la persona no alcanza no aparece y una lectura negada
@@ -20,7 +34,8 @@ import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 // pendientes que creó quien mira (P6); si la API lo manda nulo, no se muestra. Diseño provisorio:
 // el definitivo llega con G3. Cada invitación es una fila que abre su ficha (comentario 21), con
 // «Retirar» adentro si el rol lo permite. No hay forma de modificar una invitación: se retira y se
-// manda otra.
+// manda otra. Invitar se carga en su ventana (INV-01 del informe de fricción, 17-11-2026), que se
+// ofrece solo si hay unidades a las que invitar (C8G-09).
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Unidad = components["schemas"]["Unidad"];
@@ -67,6 +82,9 @@ const TEXTO_CAMPO: Record<string, string> = {
 /** La persona ya tiene la invitación que creó el padrón importado: una manual no la reemplaza (G-21). */
 export const INVITACION_DEL_PADRON =
   "Esa persona ya tiene una invitación pendiente para esta unidad, que salió con el padrón importado. La acepta desde el correo o desde su inicio; otra invitación no hace falta.";
+/** En lugar de «Invitar a una persona» cuando el edificio no tiene ninguna unidad que la cuenta alcance (C8G-09). */
+export const SIN_UNIDADES_INVITABLES =
+  "Esta cuenta no tiene unidades a las que invitar en este edificio. Las unidades se cargan con el padrón; el alcance de la cuenta lo define su mandato.";
 /** En la ficha de una invitación aceptada: lo que falta y dónde (G-26). */
 export const FALTA_CONFIRMAR =
   "Aceptada la invitación, el vínculo se confirma en el Padrón, donde figura «Sin confirmar» hasta entonces.";
@@ -113,11 +131,16 @@ export function Invitar() {
     REQUISITOS.invitaciones,
   );
   const puede = usePuede(consorcio);
-  const [unidades, setUnidades] = useState<Unidad[]>([]);
+  /** Las unidades a las que la cuenta puede invitar; nulas mientras se consultan. */
+  const [unidades, setUnidades] = useState<Unidad[] | null>(null);
   const [invitaciones, setInvitaciones] = useState<Invitacion[] | null>(null);
   // E54: si la lista no se pudo consultar, la sección deja de decir «Consultando…».
   const [listaFallida, setListaFallida] = useState(false);
-  const [unidadesFallidas, setUnidadesFallidas] = useState(false);
+  /** Por qué no se pudieron consultar las unidades: se dice una vez, junto a «Consultar de nuevo». */
+  const [unidadesFallidas, setUnidadesFallidas] = useState<string | null>(null);
+  /** La ventana de invitar (INV-01). */
+  const [invitando, setInvitando] = useState(false);
+  const botonInvitar = useRef<HTMLButtonElement>(null);
   const [unidad, setUnidad] = useState("");
   const [tipo, setTipo] = useState<TipoVinculo>("inquilino");
   const [correo, setCorreo] = useState("");
@@ -146,12 +169,14 @@ export function Invitar() {
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
 
   useEffect(() => {
-    if (enviando || !alAviso.current) return;
+    // Con la ventana de invitar abierta se espera a que se cierre: al cerrarse, `Hoja` devuelve el foco a
+    // «Invitar a una persona», y recién entonces el foco pasa al «Listo».
+    if (enviando || invitando || !alAviso.current) return;
     alAviso.current = false;
     // Solo si nadie tomó el foco en el medio (la persona pudo ir a otra parte de la página).
     const ahora = document.activeElement;
     if (ahora === null || ahora === document.body || ahora === foco.current) textoAviso.current?.focus();
-  }, [enviando]);
+  }, [enviando, invitando]);
 
   const aEntrar = useAEntrar();
 
@@ -198,8 +223,7 @@ export function Invitar() {
           return;
         }
         if (data === undefined) {
-          setUnidadesFallidas(true);
-          setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
+          setUnidadesFallidas(mensajeDeFalla(response.status, codigoDe(error)));
           return;
         }
         const invitables = data.elementos.filter((u) => u.invitable);
@@ -209,13 +233,13 @@ export function Invitar() {
       .catch((e: unknown) => {
         // Un rechazo del edificio anterior no pisa al que ya se eligió.
         if (!vigente) return;
-        setUnidadesFallidas(true);
-        atajar(e);
+        if (e instanceof SinSesion) aEntrar();
+        else setUnidadesFallidas(SIN_CONEXION);
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, vueltaUnidades, atajar, navegar]);
+  }, [consorcio, vueltaUnidades, aEntrar, navegar]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -260,8 +284,9 @@ export function Invitar() {
       setListaFallida(false);
       setVuelta((v) => v + 1);
     }
-    if (unidadesFallidas) {
-      setUnidadesFallidas(false);
+    if (unidadesFallidas !== null) {
+      setUnidadesFallidas(null);
+      setUnidades(null);
       setVueltaUnidades((v) => v + 1);
     }
   }
@@ -275,44 +300,72 @@ export function Invitar() {
     };
   }
 
-  function invitar(evento: FormEvent) {
-    evento.preventDefault();
-    foco.current = document.activeElement;
-    alAviso.current = true;
+  /**
+   * Abre la ventana de invitar con el nombre y el correo vacíos. La unidad y el vínculo quedan como
+   * en la invitación anterior: se suele invitar a varias personas de la misma unidad.
+   */
+  function abrirInvitar() {
+    clave.current = null;
+    setNombre("");
+    setCorreo("");
+    setErrores(SIN_ERRORES);
+    setAviso(null);
+    setInvitando(true);
+  }
+
+  /**
+   * El botón de la ventana: lo que falta se marca; si está completo, se manda. Un rechazo queda en la
+   * ventana (los campos que marcó la API, junto a cada uno); el «Listo» sale en la página, junto al
+   * botón que la abrió, y toma el foco.
+   */
+  async function invitar(): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({
+      nombre: [nombre, "Falta escribir el nombre."],
+      correo: [correo, "Falta escribir el correo."],
+    });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
-    setAviso(null);
     setErrores(SIN_ERRORES);
-    void api
-      .POST("/api/v1/consorcios/{consorcio_id}/invitaciones", {
+    try {
+      const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/invitaciones", {
         params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current } },
         headers: encabezadoCsrf(),
         body: { unidad_id: unidad, tipo, correo: correo.trim(), nombre: nombre.trim() },
-      })
-      .then(({ data, error, response }) => {
-        exigirSesion(response);
-        if (data === undefined) {
-          const codigo = codigoDe(error);
-          // Un 5xx es ambiguo (un proxy puede responder después de que el backend guardó el
-          // resultado): igual que con la red caída, el reintento lleva la misma clave para recibir
-          // lo guardado. Solo una respuesta definitiva de la aplicación la renueva.
-          // Un 409 de un pedido en curso también: el de la invitación del padrón es definitivo (G-21).
-          const ambigua = response.status >= 500 || (response.status === 409 && codigo === "idempotencia_en_curso");
-          if (codigo === "idempotencia_reutilizada" || !ambigua) clave.current = null;
-          const marcados = response.status === 422 ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
-          setErrores(marcados);
-          const texto = Object.keys(marcados).length > 0 ? resumenDe(marcados, TEXTO_CAMPO) : mensajeAlInvitar(response.status, codigo);
-          setAviso({ texto, ok: false });
-          return;
-        }
-        clave.current = null;
-        setVuelta((v) => v + 1);
-        setCorreo("");
-        setNombre("");
-        setAviso({ texto: `Listo: la invitación a ${data.nombre} quedó enviada.`, ok: true });
-      })
-      .catch(atajar)
-      .finally(() => setEnviando(false));
+      });
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        // Un 5xx es ambiguo (un proxy puede responder después de que el backend guardó el
+        // resultado): igual que con la red caída, el reintento lleva la misma clave para recibir
+        // lo guardado. Solo una respuesta definitiva de la aplicación la renueva.
+        // Un 409 de un pedido en curso también: el de la invitación del padrón es definitivo (G-21).
+        const ambigua = response.status >= 500 || (response.status === 409 && codigo === "idempotencia_en_curso");
+        if (codigo === "idempotencia_reutilizada" || !ambigua) clave.current = null;
+        const marcados = response.status === 422 ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
+        setErrores(marcados);
+        // Con campos marcados, el resumen los nombra, cada motivo está junto a su campo y el foco va al primero.
+        return { rechazo: hayErrores(marcados) ? resumenDe(marcados, TEXTO_CAMPO) : mensajeAlInvitar(response.status, codigo) };
+      }
+      clave.current = null;
+      setVuelta((v) => v + 1);
+      foco.current = botonInvitar.current;
+      alAviso.current = true;
+      setAviso({ texto: `Listo: la invitación a ${data.nombre} quedó enviada.`, ok: true });
+      return "cerrar";
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        // La sesión se pide encima: lo escrito queda en la ventana para repetir el paso.
+        aEntrar();
+        return "seguir";
+      }
+      return { rechazo: SIN_CONEXION };
+    } finally {
+      setEnviando(false);
+    }
   }
 
   function retirar(invitacion: Invitacion) {
@@ -398,120 +451,59 @@ export function Invitar() {
 
       {pantalla.tipo === "lista" && (
         <>
-          <p className="tarjeta">
-            Invitar no acredita el carácter de propietario, inquilino u ocupante: la persona entra
-            con el vínculo elegido y queda sin confirmar hasta que alguien lo confirme con el
-            título.
-          </p>
-
-          <section aria-labelledby={`${id}-nueva`} className="tarjeta">
-            <h2 id={`${id}-nueva`}>Nueva invitación</h2>
-            <form className="formulario formulario-movil" onSubmit={invitar}>
-              {edificios.length > 1 && (
-                <>
-                  <label htmlFor={`${id}-consorcio`}>Edificio</label>
-                  <select
-                    id={`${id}-consorcio`}
-                    value={consorcio}
-                    disabled={enviando}
-                    onChange={(e) => {
-                      // Nada del edificio anterior queda elegible mientras llegan los del nuevo.
-                      setInvitaciones(null);
-                      setListaFallida(false);
-                      setUnidadesFallidas(false);
-                      setUnidades([]);
-                      setUnidad("");
-                      cambiar(setConsorcio)(e.target.value);
-                    }}
-                  >
-                    {edificios.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nombre}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
-              {unidades.length === 1 ? (
-                <p>Unidad: {unidades[0]?.designacion}</p>
-              ) : (
-                <>
-                  <label htmlFor={`${id}-unidad`}>Unidad</label>
-                  <select
-                    id={`${id}-unidad`}
-                    value={unidad}
-                    {...marcaDe(`${id}-unidad`, errores.unidad_id)}
-                    onChange={(e) => cambiar(setUnidad, "unidad_id")(e.target.value)}
-                    disabled={enviando}
-                    required
-                  >
-                    {unidades.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.designacion}
-                      </option>
-                    ))}
-                  </select>
-                  <ErrorDeCampo idCampo={`${id}-unidad`} mensaje={errores.unidad_id} />
-                </>
-              )}
-              {unidadesFallidas && (
-                <>
-                  <p>No se pudieron mostrar las unidades.</p>
-                  <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
-                    Consultar de nuevo
-                  </button>
-                </>
-              )}
-              <label htmlFor={`${id}-tipo`}>Vínculo con la unidad</label>
+          {/* El edificio gobierna la invitación y la lista: va en la página, no en la ventana (INV-01). */}
+          {edificios.length > 1 && (
+            <div className="formulario formulario-movil tarjeta">
+              <label htmlFor={`${id}-consorcio`}>Edificio</label>
               <select
-                id={`${id}-tipo`}
-                value={tipo}
+                id={`${id}-consorcio`}
+                value={consorcio}
                 disabled={enviando}
-                {...marcaDe(`${id}-tipo`, errores.tipo)}
-                onChange={(e) => cambiar(setTipo, "tipo")(e.target.value as TipoVinculo)}
+                onChange={(e) => {
+                  // Nada del edificio anterior queda elegible mientras llegan los del nuevo.
+                  setInvitaciones(null);
+                  setListaFallida(false);
+                  setUnidadesFallidas(null);
+                  setUnidades(null);
+                  setUnidad("");
+                  setAviso(null);
+                  cambiar(setConsorcio)(e.target.value);
+                }}
               >
-                {TIPOS.map((t) => (
-                  <option key={t.valor} value={t.valor}>
-                    {t.texto}
+                {edificios.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
                   </option>
                 ))}
               </select>
-              <ErrorDeCampo idCampo={`${id}-tipo`} mensaje={errores.tipo} />
-              <label htmlFor={`${id}-nombre`}>Nombre</label>
-              <input
-                id={`${id}-nombre`}
-                type="text"
-                autoComplete="off"
-                maxLength={LARGO_MAXIMO_NOMBRE}
-                disabled={enviando}
-                required
-                value={nombre}
-                {...marcaDe(`${id}-nombre`, errores.nombre)}
-                onChange={(e) => cambiar(setNombre, "nombre")(e.target.value)}
-              />
-              <ErrorDeCampo idCampo={`${id}-nombre`} mensaje={errores.nombre} />
-              <label htmlFor={`${id}-correo`}>Correo</label>
-              <input
-                id={`${id}-correo`}
-                type="email"
-                autoComplete="off"
-                disabled={enviando}
-                required
-                value={correo}
-                {...marcaDe(`${id}-correo`, errores.correo)}
-                onChange={(e) => cambiar(setCorreo, "correo")(e.target.value)}
-              />
-              <ErrorDeCampo idCampo={`${id}-correo`} mensaje={errores.correo} />
-              <button type="submit" disabled={enviando || unidad === ""}>
-                Invitar
+            </div>
+          )}
+
+          {/* C8G-09: «Invitar a una persona» solo si hay a qué unidad invitar; si no, qué pasa y dónde se resuelve. */}
+          {unidadesFallidas !== null ? (
+            <div className="tarjeta">
+              <p className="aviso-error">No se pudieron mostrar las unidades. {unidadesFallidas}</p>
+              <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
+                Consultar de nuevo
               </button>
-            </form>
-          </section>
+            </div>
+          ) : unidades === null ? (
+            <p>Consultando…</p>
+          ) : unidades.length === 0 ? (
+            <ComandoNoDisponible motivo={SIN_UNIDADES_INVITABLES} />
+          ) : (
+            <p>
+              <button ref={botonInvitar} type="button" onClick={abrirInvitar} disabled={enviando}>
+                Invitar a una persona
+              </button>
+            </p>
+          )}
         </>
       )}
 
-      {/* Entre el formulario y la lista: el resultado de invitar queda al lado de lo que se escribió, y
-          si falló se corrige ahí mismo, sin bajar por toda la lista para enterarse. */}
+      {invitando && unidades !== null && unidades.length > 0 && ventanaInvitar(unidades)}
+
+      {/* Junto al botón que abrió la ventana y antes de la lista: el resultado sale donde se actuó. */}
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
@@ -540,7 +532,8 @@ export function Invitar() {
         )}
       </div>
 
-      {pantalla.tipo === "lista" && (
+      {/* INV-04: un edificio sin ninguna invitación no muestra la sección. */}
+      {pantalla.tipo === "lista" && invitaciones?.length !== 0 && (
         <section aria-labelledby={`${id}-lista`} className="tarjeta">
           <h2 id={`${id}-lista`}>Invitaciones</h2>
           {invitaciones === null && !listaFallida && <p>Consultando…</p>}
@@ -552,12 +545,10 @@ export function Invitar() {
               </button>
             </p>
           )}
-          {invitaciones?.length === 0 && <p>Todavía no hay invitaciones.</p>}
           {invitaciones !== null && invitaciones.length > 0 && (
             <>
-              {pendientes.length === 0 ? (
-                <p>No hay invitaciones pendientes.</p>
-              ) : (
+              {/* INV-04: sin pendientes no se avisa; queda directamente el historial plegado. */}
+              {pendientes.length > 0 && (
                 <ul className="filas-registro" aria-label="Pendientes">
                   {pendientes.map(fila)}
                 </ul>
@@ -577,13 +568,20 @@ export function Invitar() {
     </>
   );
 
-  /** Una invitación en la lista: en la vista principal (pendiente) o en el historial (las demás). */
+  /**
+   * Una invitación en la lista: en la vista principal (pendiente) o en el historial (las demás). La
+   * pendiente no repite «Pendiente» (ya es su lista): dice el vínculo y hasta cuándo vale (INV-02).
+   */
   function fila(i: Invitacion) {
     return (
       <li key={i.id}>
         <FilaDeRegistro
           titulo={`${i.nombre}, ${i.unidad}`}
-          resumen={`${TEXTO_ESTADO[i.estado]} · ${TEXTO_TIPO[i.tipo]}`}
+          resumen={
+            i.estado === "pendiente"
+              ? `${TEXTO_TIPO[i.tipo]} · Vence el ${fecha(i.vence_en)}`
+              : `${TEXTO_ESTADO[i.estado]} · ${TEXTO_TIPO[i.tipo]}`
+          }
           alAbrir={() => abrirFicha(i)}
           refFila={fichas.refFila(i.id)}
           abierta={fichas.abierta === i.id}
@@ -606,8 +604,7 @@ export function Invitar() {
         }}
         ocupada={enviando}
         datos={[
-          { etiqueta: "Persona", valor: i.nombre },
-          { etiqueta: "Unidad", valor: i.unidad },
+          // INV-02: la persona y la unidad ya son el título de la ficha.
           { etiqueta: "Vínculo", valor: TEXTO_TIPO[i.tipo] },
           { etiqueta: "Estado", valor: TEXTO_ESTADO[i.estado] },
           ...(i.correo ? [{ etiqueta: "Correo", valor: i.correo }] : []),
@@ -642,6 +639,73 @@ export function Invitar() {
             </p>
           ))}
       </FichaDeRegistro>
+    );
+  }
+
+  /** La ventana de invitar (INV-01): la unidad, el vínculo, el nombre y el correo. */
+  function ventanaInvitar(lista: Unidad[]) {
+    return (
+      <VentanaDeFormulario titulo="Invitar a una persona" textoEnviar="Invitar" alEnviar={invitar} alCerrar={() => setInvitando(false)}>
+        {lista.length === 1 ? (
+          <p>Unidad: {lista[0]?.designacion}</p>
+        ) : (
+          <>
+            <label htmlFor={`${id}-unidad`}>Unidad</label>
+            <select
+              id={`${id}-unidad`}
+              data-foco
+              value={unidad}
+              {...marcaDe(`${id}-unidad`, errores.unidad_id)}
+              onChange={(e) => cambiar(setUnidad, "unidad_id")(e.target.value)}
+            >
+              {lista.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.designacion}
+                </option>
+              ))}
+            </select>
+            <ErrorDeCampo idCampo={`${id}-unidad`} mensaje={errores.unidad_id} />
+          </>
+        )}
+        <label htmlFor={`${id}-tipo`}>Vínculo con la unidad</label>
+        <select
+          id={`${id}-tipo`}
+          data-foco={lista.length === 1 ? true : undefined}
+          value={tipo}
+          {...marcaDe(`${id}-tipo`, errores.tipo, `${id}-tipo-ayuda`)}
+          onChange={(e) => cambiar(setTipo, "tipo")(e.target.value as TipoVinculo)}
+        >
+          {TIPOS.map((t) => (
+            <option key={t.valor} value={t.valor}>
+              {t.texto}
+            </option>
+          ))}
+        </select>
+        {/* INV-03: lo que antes era una tarjeta fija de la página, en una línea junto al campo que decide. */}
+        <p id={`${id}-tipo-ayuda`}>Queda sin confirmar hasta que se confirme con el título.</p>
+        <ErrorDeCampo idCampo={`${id}-tipo`} mensaje={errores.tipo} />
+        <label htmlFor={`${id}-nombre`}>Nombre</label>
+        <input
+          id={`${id}-nombre`}
+          type="text"
+          autoComplete="off"
+          maxLength={LARGO_MAXIMO_NOMBRE}
+          value={nombre}
+          {...marcaDe(`${id}-nombre`, errores.nombre)}
+          onChange={(e) => cambiar(setNombre, "nombre")(e.target.value)}
+        />
+        <ErrorDeCampo idCampo={`${id}-nombre`} mensaje={errores.nombre} />
+        <label htmlFor={`${id}-correo`}>Correo</label>
+        <input
+          id={`${id}-correo`}
+          type="email"
+          autoComplete="off"
+          value={correo}
+          {...marcaDe(`${id}-correo`, errores.correo)}
+          onChange={(e) => cambiar(setCorreo, "correo")(e.target.value)}
+        />
+        <ErrorDeCampo idCampo={`${id}-correo`} mensaje={errores.correo} />
+      </VentanaDeFormulario>
     );
   }
 }

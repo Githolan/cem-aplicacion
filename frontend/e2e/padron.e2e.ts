@@ -200,7 +200,7 @@ test.describe("padrón", () => {
     await page.getByRole("button", { name: "1° A: Beto Pérez" }).click();
     await page.getByRole("dialog", { name: "1° A: Beto Pérez" }).getByRole("button", { name: "Confirmar" }).click();
     await page.getByLabel("Documento que lo prueba").fill("Contrato 77");
-    await ventana.getByRole("button", { name: "Confirmar", exact: true }).click();
+    await page.getByRole("dialog", { name: "Confirmar el vínculo" }).getByRole("button", { name: "Confirmar", exact: true }).click();
     await expect(page.getByText("La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.")).toBeVisible();
     expect(envios[0]?.csrf).toBeNull();
   });
