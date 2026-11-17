@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import { RUTA_INICIO } from "../enlace";
-import { type Aviso, ESTADO, importe, mensajeDeError, momento, sinLaFalla, sinPisarLoHecho, TEXTO_ESTADO_ORDEN } from "../egresos/comun";
+import { type Aviso, ESTADO, importe, mensajeDeError, sinLaFalla, sinPisarLoHecho, TEXTO_ESTADO_ORDEN } from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { periodo } from "../egresos/Liquidacion";
@@ -17,7 +17,6 @@ import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
 import {
   estaVacio,
   type Faltante,
-  faltantesPorEstado,
   gastoPorMes,
   gastoPorRubro,
   mesesConPagos,
@@ -29,7 +28,8 @@ import { GraficoBarras } from "./GraficoBarras";
 
 // Página /panel: el resumen de pagos del edificio en solo lectura (RF48; app 0094, H4a corte 1). Lo
 // decide la API con `fiscalizacion.ver_panel`; la pantalla solo muestra. Cada gráfico dice su base
-// de cálculo y, si la persona además puede abrir los pagos, un solo enlace arriba lleva a ellos
+// de cálculo (plegada, salvo lo que evita leerlo mal: PAN-05), un bloque sin datos no se muestra
+// (PAN-03) y, si la persona además puede abrir los pagos, un solo enlace arriba lleva a ellos
 // (regla de fricción del 05-11-2026; informe de fricción, AC-44). En «Facturas faltantes», quien puede
 // cargar la factura al preparar la sube desde la fila (decisión del propietario del 13-11-2026, app
 // 0099): queda adjunta sin versión nueva y la orden sale de la lista cuando el antivirus la acepta.
@@ -53,7 +53,8 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
   const acciones = useAcciones(consorcio);
   // Mientras no se sabe, no se ofrece: el enlace llevaría a una pantalla que puede no abrir.
   const veRegistros = acciones !== null && cumple(acciones, REQUISITOS.pagos);
-  const subeFacturas = acciones !== null && cumple(acciones, REQUISITOS.subirFactura);
+  // null mientras no se sabe: ni el botón ni «La sube la administración».
+  const subeFacturas = acciones === null ? null : cumple(acciones, REQUISITOS.subirFactura);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -112,7 +113,9 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
               avisar={setAviso}
             />
           )}
-          {lectura.tipo === "ok" && <LineaSolicitudes consorcio={consorcio} abiertas={lectura.panel.solicitudes_abiertas} />}
+          {lectura.tipo === "ok" && lectura.panel.solicitudes_abiertas > 0 && (
+            <LineaSolicitudes consorcio={consorcio} abiertas={lectura.panel.solicitudes_abiertas} />
+          )}
           {lectura.tipo === "ok" &&
             (estaVacio(lectura.panel) ? (
               <p className="tarjeta">Todavía no hay órdenes de pago en este edificio. El resumen se arma con ellas.</p>
@@ -127,7 +130,8 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
 }
 
 /** RF49 (app 0108): las solicitudes formales que no se respondieron ni se retiraron, con el enlace a
- * la pantalla. Quien ve el panel ve también las solicitudes. */
+ * la pantalla. Quien ve el panel ve también las solicitudes. Sin ninguna abierta no se dice nada
+ * (PAN-01): la pantalla ya está en el menú. */
 export const textoSolicitudesAbiertas = (n: number) => `Solicitudes abiertas: ${n}`;
 
 function LineaSolicitudes({ consorcio, abiertas }: { consorcio: string; abiertas: number }) {
@@ -155,7 +159,7 @@ type PropsContenido = {
   consorcio: string;
   veRegistros: boolean;
   /** Si puede subir la factura que falta: prepara órdenes y carga documentos. */
-  subeFacturas: boolean;
+  subeFacturas: boolean | null;
   aEntrar: () => void;
   /** Una factura quedó adjunta: el resumen se vuelve a leer. */
   alCambiar: () => void;
@@ -169,17 +173,7 @@ function Contenido({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCam
       {lista.map((moneda) => (
         <PorMoneda key={moneda} panel={panel} moneda={moneda} conMoneda={lista.length > 1} />
       ))}
-      <GraficoBarras
-        titulo="Facturas faltantes"
-        base="Órdenes aprobadas o pagadas sin el archivo de la factura. Conviene pedirlo."
-        barras={faltantesPorEstado(panel)}
-        columna="Estado de la orden"
-        valor="Sin factura"
-        vacio="No falta ninguna factura."
-        registros={
-          <Faltantes panel={panel} consorcio={consorcio} veRegistros={veRegistros} subeFacturas={subeFacturas} aEntrar={aEntrar} alCambiar={alCambiar} />
-        }
-      />
+      <Faltantes panel={panel} consorcio={consorcio} veRegistros={veRegistros} subeFacturas={subeFacturas} aEntrar={aEntrar} alCambiar={alCambiar} />
     </div>
   );
 }
@@ -192,16 +186,15 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
   const [elegido, setElegido] = useState("");
   const mes = meses.includes(elegido) ? elegido : (meses[0] ?? "");
   const en = conMoneda ? ` (${moneda})` : "";
-  const delFondo = gastoPorMes(panel, moneda, true);
   return (
     <>
       <GraficoBarras
         titulo={`Órdenes de pago por estado${en}`}
-        base="Cuántas órdenes hay en cada paso y cuánto suman. No incluye borradores."
+        aviso="No incluye borradores."
+        base="Cuántas órdenes hay en cada paso y cuánto suman."
         barras={ordenesPorEstado(panel, moneda)}
         columna="Estado"
         valor="Órdenes e importe"
-        vacio="No hay órdenes enviadas a aprobar."
       />
       <GraficoBarras
         titulo={`Gasto pagado por mes${en}`}
@@ -209,13 +202,13 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
         barras={gastoPorMes(panel, moneda)}
         columna="Mes"
         valor="Pagado"
-        vacio="Todavía no se pagó ninguna orden."
       />
-      {meses.length > 0 && (
-        <GraficoBarras
-          titulo={`Gasto pagado por rubro${en}`}
-          base="Lo pagado en el mes elegido, por el rubro que tenía el proveedor cuando se pagó."
-          control={
+      {/* Con un solo mes no hay nada que elegir: el mes va en el título (PAN-07). */}
+      <GraficoBarras
+        titulo={`Gasto pagado por rubro${meses.length === 1 ? `, ${periodo(mes)}` : ""}${en}`}
+        base="Lo pagado en el mes elegido, por el rubro que tenía el proveedor cuando se pagó."
+        control={
+          meses.length > 1 && (
             <div className="formulario">
               <label htmlFor={`${id}-mes`}>Mes</label>
               <select id={`${id}-mes`} value={mes} onChange={(e) => setElegido(e.target.value)}>
@@ -226,87 +219,97 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
                 ))}
               </select>
             </div>
-          }
-          barras={gastoPorRubro(panel, moneda, mes)}
-          columna="Rubro"
-          valor="Pagado"
-          vacio="No hay pagos en ese mes."
-        />
-      )}
-      {delFondo.length > 0 && (
-        <GraficoBarras
-          titulo={`Pagos con el fondo de reserva${en}`}
-          base="Lo que se pagó con el fondo de reserva en cada mes. No es el saldo del fondo: la aplicación todavía no registra sus ingresos."
-          barras={delFondo}
-          columna="Mes"
-          valor="Pagado con el fondo"
-          vacio=""
-          />
-      )}
+          )
+        }
+        barras={gastoPorRubro(panel, moneda, mes)}
+        columna="Rubro"
+        valor="Pagado"
+      />
+      <GraficoBarras
+        titulo={`Pagos con el fondo de reserva${en}`}
+        aviso="No es el saldo del fondo."
+        base="Lo que se pagó con el fondo de reserva en cada mes: la aplicación todavía no registra sus ingresos."
+        barras={gastoPorMes(panel, moneda, true)}
+        columna="Mes"
+        valor="Pagado con el fondo"
+      />
     </>
   );
 }
 
-/** Lo que ve en la fila quien no sube facturas (el Consejo): quién lo hace. */
+/** Lo que lee una sola vez, sobre la lista, quien no sube facturas (el Consejo): quién lo hace. */
 export const TEXTO_LA_SUBE_LA_ADMINISTRACION = "La sube la administración.";
 
-/** Cómo está la factura de una orden que falta, en palabras. */
-export function estadoDeLaFactura(f: Faltante): string {
+/** Cómo está la factura de una orden que falta, en palabras; null si simplemente falta, porque la
+ * lista ya se llama «Facturas faltantes» (PAN-06). */
+export function estadoDeLaFactura(f: Faltante): string | null {
   if (f.factura_subida === "en_cuarentena") return "El antivirus la está revisando";
   if (f.factura_subida === "rechazado") return "La subida no pasó el antivirus";
-  return "Falta";
+  return null;
 }
 
+/** La cantidad va en el título y la lista dice cuáles: sin barras por estado que repitan la columna
+ * «Estado» (PAN-04). */
+export const tituloFaltantes = (n: number) => `Facturas faltantes (${n})`;
+
+/** Las órdenes aprobadas o pagadas sin la factura. Sin ninguna, el bloque no se muestra (PAN-03). */
 function Faltantes({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCambiar }: PropsContenido) {
+  const id = useId();
   const [subiendo, setSubiendo] = useState<Faltante | null>(null);
   if (panel.comprobantes_faltantes.length === 0) return null;
   return (
-    <div className="tabla-lista tabla-tarjetas">
-      <table aria-label="Órdenes sin factura">
-        <thead>
-          <tr>
-            <th scope="col">Proveedor</th>
-            <th scope="col">Estado</th>
-            <th scope="col">Importe</th>
-            <th scope="col">Último cambio</th>
-            <th scope="col">Factura</th>
-          </tr>
-        </thead>
-        <tbody>
-          {panel.comprobantes_faltantes.map((f) => (
-            <tr key={f.orden_id}>
-              <th scope="row">
-                {veRegistros ? (
-                  <Link to={rutaFicha(f.orden_id)} state={{ consorcio }} className="enlace-fila">
-                    {f.proveedor}
-                  </Link>
-                ) : (
-                  f.proveedor
-                )}
-                <p className="tabla-lista__dato">{f.concepto}</p>
-              </th>
-              <td data-etiqueta="Estado">{TEXTO_ESTADO_ORDEN[f.estado]}</td>
-              <td data-etiqueta="Importe">{importe(f.importe_centavos, f.moneda)}</td>
-              <td data-etiqueta="Último cambio">{momento(f.actualizada_en)}</td>
-              <td data-etiqueta="Factura">
-                {estadoDeLaFactura(f)}
-                {/* Mientras el antivirus revisa la subida, no se ofrece otra. Quien no la puede
-                    subir (el Consejo) sabe quién lo hace (decisión del propietario, 13-11-2026). */}
-                {f.factura_subida !== "en_cuarentena" &&
-                  (subeFacturas ? (
-                    <div className="acciones">
-                      <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
-                        {SUBIR_FACTURA}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="tabla-lista__dato">{TEXTO_LA_SUBE_LA_ADMINISTRACION}</p>
-                  ))}
-              </td>
+    <section className="tarjeta grafico" aria-labelledby={`${id}-titulo`}>
+      <h2 id={`${id}-titulo`}>{tituloFaltantes(panel.comprobantes_faltantes.length)}</h2>
+      {/* Quien no las sube sabe quién lo hace, una sola vez (decisión del propietario del 13-11-2026; PAN-06). */}
+      {subeFacturas === false && <p className="grafico__base">{TEXTO_LA_SUBE_LA_ADMINISTRACION}</p>}
+      <div className="tabla-lista tabla-tarjetas">
+        <table aria-label="Órdenes sin factura">
+          <thead>
+            <tr>
+              <th scope="col">Proveedor</th>
+              <th scope="col">Estado</th>
+              <th scope="col">Importe</th>
+              {subeFacturas === true && <th scope="col">Factura</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {panel.comprobantes_faltantes.map((f) => {
+              const factura = estadoDeLaFactura(f);
+              return (
+                <tr key={f.orden_id}>
+                  <th scope="row">
+                    {veRegistros ? (
+                      <Link to={rutaFicha(f.orden_id)} state={{ consorcio }} className="enlace-fila">
+                        {f.proveedor}
+                      </Link>
+                    ) : (
+                      f.proveedor
+                    )}
+                    <p className="tabla-lista__dato">{f.concepto}</p>
+                    {/* Quien no sube facturas ve solo lo que cambia: una subida en revisión o que no pasó. */}
+                    {subeFacturas !== true && factura !== null && <p className="tabla-lista__dato">{factura}</p>}
+                  </th>
+                  <td data-etiqueta="Estado">{TEXTO_ESTADO_ORDEN[f.estado]}</td>
+                  <td data-etiqueta="Importe">{importe(f.importe_centavos, f.moneda)}</td>
+                  {subeFacturas === true && (
+                    <td data-etiqueta="Factura">
+                      {factura}
+                      {/* Mientras el antivirus revisa la subida, no se ofrece otra. */}
+                      {f.factura_subida !== "en_cuarentena" && (
+                        <div className="acciones">
+                          <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
+                            {SUBIR_FACTURA}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {subiendo !== null && (
         <SubirFactura consorcio={consorcio} orden={subiendo.orden_id} version={subiendo.version} reemplaza={null}
           descripcion={`${subiendo.proveedor}, ${importe(subiendo.importe_centavos, subiendo.moneda)}: ${subiendo.concepto}`}
@@ -316,6 +319,6 @@ function Faltantes({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCam
             if (cambio) alCambiar();
           }} />
       )}
-    </div>
+    </section>
   );
 }

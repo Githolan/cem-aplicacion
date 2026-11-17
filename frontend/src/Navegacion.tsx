@@ -14,6 +14,7 @@ import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
+import { useSolicitudesDirigidas } from "./fiscalizacion/solicitudesDirigidas";
 import { cumpleEnAlguno, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
 import { useSesionConNombre } from "./sesion";
 
@@ -144,10 +145,13 @@ function Item({ destino, ruta, activa, secundario, desdeInicio }: PropsItem) {
 export function Navegacion() {
   const { pathname } = useLocation();
   const { porEdificio, consultando, falla, reintentar, reintentando } = useConsultaDeAcciones();
+  // MEN-04: «Solicitudes formales» también para el destinatario que tiene alguna dirigida a él.
+  const conSolicitudes = useSolicitudesDirigidas(porEdificio);
   /** Adónde lleva la entrada para esta persona; null si no se le ofrece. */
   const rutaPara = (d: Destino): string | null => {
     if (d.opciones !== undefined)
       return porEdificio === null ? null : (d.opciones.find((o) => cumpleEnAlguno(porEdificio, o.requisito))?.ruta ?? null);
+    if (d.ruta === RUTA_SOLICITUDES && conSolicitudes) return d.ruta;
     return d.requisito === undefined || (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo)) ? d.ruta : null;
   };
   const ofrecidas = (destinos: readonly Destino[]) =>

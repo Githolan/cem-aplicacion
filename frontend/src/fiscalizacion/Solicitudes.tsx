@@ -24,9 +24,13 @@ import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { RUTA_INICIO } from "../enlace";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
+import { type DatoDeFicha, FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { SubirArchivo } from "../SubirArchivo";
+import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 
 // Página /solicitudes: la solicitud formal de documentación del Consejo a la administración (RF49,
 // CU12, PA36; app 0108; diseño `doc/diseno/RF49_Solicitud_Formal.md` del repositorio CEM). El Consejo
@@ -35,6 +39,12 @@ import { SubirArchivo } from "../SubirArchivo";
 // Consejo registra el envío por el medio externo, con el comprobante, y después la respuesta que
 // llegó. El plazo corre desde el envío. Tono informativo (RN33): la solicitud pregunta, no acusa.
 // Los botones de cada solicitud son los que la API dice que la persona puede usar (`acciones`).
+//
+// Informe de fricción del 17-11-2026, tanda 8: cada solicitud es una fila (SOL-03) que abre su ficha,
+// sola, con sus datos y sus acciones; preparar, retirar, registrar el envío y responder van en su
+// ventana (SOL-02, SOL-05), con el botón siempre activo y el campo que falta marcado (C8P-24 a
+// C8P-27). Las respondidas y las retiradas quedan plegadas (SOL-06). El resultado sale donde se actuó
+// (SOL-11). Lo legal de las dos firmas se dice solo a quien prepara, al preparar (SOL-01).
 
 type Solicitud = components["schemas"]["SolicitudFormal"];
 type Lista = components["schemas"]["ListaSolicitudesFormales"];
@@ -44,8 +54,6 @@ type Medio = components["schemas"]["MedioEnvio"];
 
 export const RUTA_SOLICITUDES = "/solicitudes";
 export const TITULO_SOLICITUDES = "Solicitudes formales";
-export const EXPLICACION =
-  "El Consejo pide a la administración documentación o una aclaración sobre algo concreto, con plazo y constancia (art. 2064 inc. b del Código Civil y Comercial). Hacen falta dos firmas de personas distintas; la segunda la emite. El plazo corre desde el envío.";
 export const PREPARAR = "Preparar una solicitud";
 export const FIRMAR = "Firmar";
 export const RETIRAR = "Retirar el borrador";
@@ -53,6 +61,9 @@ export const REGISTRAR_ENVIO = "Registrar el envío";
 export const RESPONDER = "Responder";
 export const REGISTRAR_RESPUESTA = "Registrar la respuesta recibida";
 export const SIN_SOLICITUDES = "Todavía no hay solicitudes formales en este edificio.";
+/** Lo legal, para quien prepara: dentro de la ventana de preparar (SOL-01). */
+export const DOS_FIRMAS =
+  "Pide documentación o una aclaración con plazo y constancia (art. 2064 inc. b del Código Civil y Comercial). Hacen falta dos firmas de personas distintas; la segunda la emite. Preparar no cuenta como firma.";
 /** Los largos de `cem_contracts.fiscalizacion` (la API vuelve a controlar). */
 export const LARGO_REFERENCIA = 200;
 export const LARGO_DOCUMENTACION = 2000;
@@ -60,8 +71,10 @@ export const LARGO_RESPUESTA = 4000;
 export const LARGO_MOTIVO = 500;
 export const LARGO_DETALLE = 300;
 
-/** El orden de la lista: lo que espera algo primero. */
+/** El orden de la lista de trabajo: lo que espera algo primero. */
 export const ORDEN_DE_ESTADOS: readonly Estado[] = ["borrador", "envio_pendiente", "vencida", "enviada", "respondida", "retirada"];
+/** Lo que ya no espera nada: plegado, fuera de la lista de trabajo (SOL-06). */
+const TERMINADAS: ReadonlySet<Estado> = new Set(["respondida", "retirada"]);
 
 export const TEXTO_ESTADO: Record<Estado, string> = {
   borrador: "Borrador",
@@ -90,7 +103,7 @@ export const TEXTO_MEDIO: Record<Medio, string> = {
 
 const MEDIOS_EXTERNOS: readonly Medio[] = ["carta_documento", "correo_electronico", "entrega_en_mano", "otro"];
 
-/** Una línea que resume en qué está cada solicitud. */
+/** Una línea que resume en qué está cada solicitud: la situación de su ficha. */
 export function textoSituacion(s: Solicitud): string {
   const base = TEXTO_ESTADO[s.estado];
   if (s.estado === "borrador") return `${base}: ${s.firmas.length} de 2 firmas.`;
@@ -102,6 +115,22 @@ export function textoSituacion(s: Solicitud): string {
   return `${base}.`;
 }
 
+/** El resumen de la fila de la lista de trabajo: solo lo que el título de su sección no dice (SOL-04). */
+export function resumenDeTrabajo(s: Solicitud): string | undefined {
+  if (s.estado === "borrador") return `${s.firmas.length} de 2 firmas`;
+  if (s.estado === "envio_pendiente") return "No vence mientras no se registre el envío";
+  if (s.estado === "enviada" && s.envio) return `Vence el ${fechaLegible(s.envio.vence_el)}`;
+  if (s.estado === "vencida" && s.envio) return `Venció el ${fechaLegible(s.envio.vence_el)}`;
+  return undefined;
+}
+
+export const tituloDe = (s: Solicitud) => `N.º ${s.numero} · ${TEXTO_OBJETO[s.objeto]}: ${s.referencia}`;
+
+/** La descarga de un archivo de Documentos del edificio, como en `Documentos.tsx`: el servidor
+ * responde con el 302 a la dirección firmada y decide si la persona puede bajarlo. */
+const descarga = (consorcio: string, documento: string, version: string) =>
+  `/api/v1/consorcios/${consorcio}/documentos/${documento}/versiones/${version}/descargar`;
+
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; lista: Lista };
 
 export function Solicitudes() {
@@ -112,8 +141,12 @@ export function Solicitudes() {
 function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
+  /** Por qué no llegó la lista. */
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** El resultado del último acto: en la lista, o en la ficha de la solicitud recién preparada. */
+  const [resultado, setResultado] = useState<{ es: Resultado; enFicha: boolean } | null>(null);
   const [preparando, setPreparando] = useState(false);
+  const fichas = useFichas<string>();
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -148,13 +181,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     setVuelta((v) => v + 1);
   }
 
-  /** Lo visto ya no es lo vigente (otra persona firmó, retiró o respondió): se avisa y se relee. */
-  function alCambiarLoVisto(texto: string) {
-    setAviso({ texto, ok: false });
-    releer();
-  }
-
-  function alCambiar(nueva: Solicitud, texto: string) {
+  function conLaNueva(nueva: Solicitud) {
     setLectura((l) =>
       l.tipo === "ok"
         ? {
@@ -168,8 +195,34 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           }
         : l,
     );
-    setAviso({ texto, ok: true });
   }
+
+  /** Terminó un acto en la ficha: se cierra y el resultado queda en la lista, donde ahora está. */
+  function alTerminar(nueva: Solicitud, texto: string) {
+    conLaNueva(nueva);
+    fichas.cerrar(false);
+    setResultado({ es: { texto, ok: true }, enFicha: false });
+  }
+
+  /** Lo visto ya no es lo vigente (otra persona firmó, retiró o respondió): se dice y se relee. */
+  function alCambiarLoVisto(texto: string) {
+    fichas.cerrar(false);
+    setResultado({ es: { texto, ok: false }, enFicha: false });
+    releer();
+  }
+
+  const lista = lectura.tipo === "ok" ? lectura.lista : null;
+  const abierta = lista?.elementos.find((s) => s.id === fichas.abierta);
+  const resultadoAca = (enFicha: boolean) => (
+    <ResultadoDelActo resultado={resultado !== null && resultado.enFicha === enFicha ? resultado.es : null} alOtroActo={() => setResultado(null)} />
+  );
+  const fila = (s: Solicitud, resumen: string | undefined) => (
+    <li key={s.id}>
+      <FilaDeRegistro titulo={tituloDe(s)} resumen={resumen} alAbrir={() => fichas.abrir(s.id)} refFila={fichas.refFila(s.id)}
+        abierta={fichas.abierta === s.id} />
+    </li>
+  );
+  const terminadas = lista?.elementos.filter((s) => TERMINADAS.has(s.estado)) ?? [];
 
   return (
     <>
@@ -182,7 +235,6 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
       {pantalla.tipo === "lista" && (
         <>
-          <p>{EXPLICACION}</p>
           {lectura.tipo === "cargando" && <p role="status">Cargando las solicitudes…</p>}
           {lectura.tipo === "sin_servicio" && (
             <FallaDeLectura
@@ -194,46 +246,60 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               avisar={setAviso}
             />
           )}
-          {lectura.tipo === "ok" && (
+          {lista !== null && (
             <>
-              {lectura.lista.puede_preparar &&
-                (preparando ? (
-                  <FormularioPreparar
-                    consorcio={consorcio}
-                    lista={lectura.lista}
-                    aEntrar={aEntrar}
-                    alCerrar={() => setPreparando(false)}
-                    alPreparar={(nueva) => {
-                      setPreparando(false);
-                      alCambiar(nueva, `Quedó preparada la solicitud N.º ${nueva.numero}. Falta que la firmen dos personas.`);
-                    }}
-                  />
-                ) : (
-                  <div className="acciones">
-                    <button type="button" className="secundario" onClick={() => setPreparando(true)}>
-                      {PREPARAR}
-                    </button>
-                  </div>
-                ))}
-              {lectura.lista.elementos.length === 0 ? (
+              {lista.puede_preparar && (
+                <div className="acciones">
+                  <button type="button" className="secundario" onClick={() => setPreparando(true)}>
+                    {PREPARAR}
+                  </button>
+                </div>
+              )}
+              {resultadoAca(false)}
+              {lista.elementos.length === 0 ? (
                 <p className="tarjeta">{SIN_SOLICITUDES}</p>
               ) : (
-                ORDEN_DE_ESTADOS.map((estado) => {
-                  const del = lectura.lista.elementos.filter((s) => s.estado === estado);
-                  if (del.length === 0) return null;
-                  return (
-                    <section key={estado} aria-label={TEXTO_ESTADO[estado]}>
-                      <h2>{TEXTO_ESTADO[estado]}</h2>
-                      <ul className="filas-registro">
-                        {del.map((s) => (
-                          <li key={s.id}>
-                            <Ficha consorcio={consorcio} solicitud={s} aEntrar={aEntrar} alCambiar={alCambiar} alCambiarLoVisto={alCambiarLoVisto} />
-                          </li>
-                        ))}
+                <>
+                  {ORDEN_DE_ESTADOS.filter((e) => !TERMINADAS.has(e)).map((estado) => {
+                    const del = lista.elementos.filter((s) => s.estado === estado);
+                    if (del.length === 0) return null;
+                    return (
+                      <section key={estado} aria-label={TEXTO_ESTADO[estado]}>
+                        <h2>{TEXTO_ESTADO[estado]}</h2>
+                        <ul className="filas-registro">{del.map((s) => fila(s, resumenDeTrabajo(s)))}</ul>
+                      </section>
+                    );
+                  })}
+                  {terminadas.length > 0 && (
+                    <details>
+                      <summary>Ver respondidas y retiradas ({terminadas.length})</summary>
+                      <ul className="filas-registro" aria-label="Respondidas y retiradas">
+                        {terminadas.map((s) => fila(s, textoSituacion(s)))}
                       </ul>
-                    </section>
-                  );
-                })
+                    </details>
+                  )}
+                </>
+              )}
+              {preparando && (
+                <VentanaPreparar
+                  consorcio={consorcio}
+                  lista={lista}
+                  aEntrar={aEntrar}
+                  alCerrar={() => setPreparando(false)}
+                  alPreparar={(nueva) => {
+                    // Se abre la ficha del borrador nuevo, que es donde se firma (SOL-02).
+                    conLaNueva(nueva);
+                    fichas.abrir(nueva.id);
+                    setResultado({
+                      es: { texto: `Quedó preparada la solicitud N.º ${nueva.numero}. Falta que la firmen dos personas.`, ok: true },
+                      enFicha: true,
+                    });
+                  }}
+                />
+              )}
+              {abierta !== undefined && (
+                <FichaSolicitud key={abierta.id} consorcio={consorcio} s={abierta} aEntrar={aEntrar} resultado={resultadoAca(true)}
+                  alCerrar={() => fichas.cerrar()} alTerminar={alTerminar} alCambiarLoVisto={alCambiarLoVisto} />
               )}
             </>
           )}
@@ -243,19 +309,14 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   );
 }
 
+/** Cómo terminó un pedido de un acto sobre una solicitud. */
+type FinDelActo = { tipo: "ok"; s: Solicitud } | { tipo: "falla"; texto: string } | { tipo: "cambio"; texto: string } | { tipo: "sin_sesion" };
+
 /** Un acto sobre la solicitud: manda, traduce la respuesta y conserva la clave mientras haya que
  * reintentar lo mismo. */
-function useActo(aEntrar: () => void, alCambiarLoVisto: (texto: string) => void) {
-  const [enviando, setEnviando] = useState(false);
-  const [falla, setFalla] = useState<string | null>(null);
+function useActo(aEntrar: () => void) {
   const clave = useRef<string | null>(null);
-
-  async function hacer(
-    pedido: (clave: string) => Promise<{ data?: Solicitud; error?: unknown; response: Response }>,
-    alTerminar: (s: Solicitud) => void,
-  ) {
-    setEnviando(true);
-    setFalla(null);
+  return async function hacer(pedido: (clave: string) => Promise<{ data?: Solicitud; error?: unknown; response: Response }>): Promise<FinDelActo> {
     clave.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await pedido(clave.current);
@@ -264,33 +325,19 @@ function useActo(aEntrar: () => void, alCambiarLoVisto: (texto: string) => void)
         const codigo = codigoDe(error);
         if (cambioLoVisto(response.status, codigo) && codigo !== "sin_administrador_vigente") {
           clave.current = null;
-          alCambiarLoVisto(mensajeDeActo(response.status, error));
-          return;
+          return { tipo: "cambio", texto: mensajeDeActo(response.status, error) };
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setFalla(mensajeDeActo(response.status, error));
-        return;
+        return { tipo: "falla", texto: mensajeDeActo(response.status, error) };
       }
       clave.current = null;
-      alTerminar(data);
+      return { tipo: "ok", s: data };
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else setFalla(SIN_CONEXION);
-    } finally {
-      setEnviando(false);
+      if (!(e instanceof SinSesion)) return { tipo: "falla", texto: SIN_CONEXION };
+      aEntrar();
+      return { tipo: "sin_sesion" };
     }
-  }
-
-  return { enviando, falla, setFalla, hacer };
-}
-
-function Falla({ texto }: { texto: string | null }) {
-  if (texto === null) return null;
-  return (
-    <p role="alert" className="aviso-error">
-      {texto}
-    </p>
-  );
+  };
 }
 
 type PropsPreparar = {
@@ -301,35 +348,54 @@ type PropsPreparar = {
   alPreparar: (s: Solicitud) => void;
 };
 
-function FormularioPreparar({ consorcio, lista, aEntrar, alCerrar, alPreparar }: PropsPreparar) {
+function VentanaPreparar({ consorcio, lista, aEntrar, alCerrar, alPreparar }: PropsPreparar) {
   const id = useId();
   const [objeto, setObjeto] = useState<Objeto>("periodo");
   const [referencia, setReferencia] = useState("");
   const [documentacion, setDocumentacion] = useState("");
-  const [plazo, setPlazo] = useState(lista.plazo_por_defecto_dias);
-  const acto = useActo(aEntrar, (texto) => acto.setFalla(texto));
-  const completo = referencia.trim() !== "" && documentacion.trim() !== "";
+  const [plazo, setPlazo] = useState(String(lista.plazo_por_defecto_dias));
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  const hacer = useActo(aEntrar);
+
+  async function guardar(): Promise<FinDeEnvio> {
+    const faltan: Record<string, string> = {
+      ...faltaCompletar({
+        referencia: [referencia, "Falta decir cuál."],
+        documentacion: [documentacion, "Falta escribir la documentación que se pide."],
+      }),
+    };
+    const dias = Number(plazo);
+    if (!Number.isInteger(dias) || dias < lista.plazo_minimo_dias || dias > lista.plazo_maximo_dias)
+      faltan.plazo = `El plazo va de ${lista.plazo_minimo_dias} a ${lista.plazo_maximo_dias} días.`;
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    const r = await hacer((clave) =>
+      api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+        body: { objeto, referencia: referencia.trim(), documentacion: documentacion.trim(), plazo_dias: dias },
+      }),
+    );
+    if (r.tipo === "ok") {
+      alPreparar(r.s);
+      return "cerrar";
+    }
+    return r.tipo === "sin_sesion" ? "seguir" : { rechazo: r.texto };
+  }
+
+  const campo = (nombre: string) => ({ id: `${id}-${nombre}`, ...marcaDe(`${id}-${nombre}`, errores[nombre]) });
+  const escribir = (nombre: string, poner: (v: string) => void) => (v: string) => {
+    poner(v);
+    setErrores((e) => sinElDe(e, nombre));
+  };
 
   return (
-    <form
-      className="formulario tarjeta"
-      aria-label={PREPARAR}
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        void acto.hacer(
-          (clave) =>
-            api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales", {
-              headers: encabezadoCsrf(),
-              params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-              body: { objeto, referencia: referencia.trim(), documentacion: documentacion.trim(), plazo_dias: plazo },
-            }),
-          alPreparar,
-        );
-      }}
-    >
-      <h2>{PREPARAR}</h2>
+    <VentanaDeFormulario titulo={PREPARAR} textoEnviar="Guardar el borrador" alEnviar={guardar} alCerrar={alCerrar} ancha>
+      <p>{DOS_FIRMAS}</p>
       <label htmlFor={`${id}-objeto`}>Sobre qué</label>
-      <select id={`${id}-objeto`} value={objeto} disabled={acto.enviando} onChange={(ev) => setObjeto(ev.target.value as Objeto)}>
+      <select id={`${id}-objeto`} data-foco value={objeto} onChange={(ev) => setObjeto(ev.target.value as Objeto)}>
         {(Object.keys(TEXTO_OBJETO) as Objeto[]).map((o) => (
           <option key={o} value={o}>
             {TEXTO_OBJETO[o]}
@@ -337,186 +403,176 @@ function FormularioPreparar({ consorcio, lista, aEntrar, alCerrar, alPreparar }:
         ))}
       </select>
       <label htmlFor={`${id}-referencia`}>Cuál (período, número de orden, contrato o movimiento)</label>
-      <input
-        id={`${id}-referencia`}
-        value={referencia}
-        maxLength={LARGO_REFERENCIA}
-        required
-        disabled={acto.enviando}
-        onChange={(ev) => setReferencia(ev.target.value)}
-      />
+      <input {...campo("referencia")} value={referencia} maxLength={LARGO_REFERENCIA}
+        onChange={(ev) => escribir("referencia", setReferencia)(ev.target.value)} />
+      <ErrorDeCampo idCampo={`${id}-referencia`} mensaje={errores.referencia} />
       <label htmlFor={`${id}-documentacion`}>Documentación o aclaración que se pide</label>
-      <textarea
-        id={`${id}-documentacion`}
-        value={documentacion}
-        maxLength={LARGO_DOCUMENTACION}
-        required
-        disabled={acto.enviando}
-        onChange={(ev) => setDocumentacion(ev.target.value)}
-      />
+      <textarea {...campo("documentacion")} value={documentacion} maxLength={LARGO_DOCUMENTACION}
+        onChange={(ev) => escribir("documentacion", setDocumentacion)(ev.target.value)} />
+      <ErrorDeCampo idCampo={`${id}-documentacion`} mensaje={errores.documentacion} />
       <label htmlFor={`${id}-plazo`}>Plazo en días corridos desde el envío</label>
-      <input
-        id={`${id}-plazo`}
-        type="number"
-        inputMode="numeric"
-        min={lista.plazo_minimo_dias}
-        max={lista.plazo_maximo_dias}
-        value={plazo}
-        required
-        disabled={acto.enviando}
-        onChange={(ev) => setPlazo(Number(ev.target.value))}
-      />
-      <p className="ayuda">
-        Entre {lista.plazo_minimo_dias} y {lista.plazo_maximo_dias} días. Preparar no cuenta como firma.
+      <input id={`${id}-plazo`} {...marcaDe(`${id}-plazo`, errores.plazo, `${id}-plazo-ayuda`)} type="number" inputMode="numeric"
+        min={lista.plazo_minimo_dias} max={lista.plazo_maximo_dias} value={plazo}
+        onChange={(ev) => escribir("plazo", setPlazo)(ev.target.value)} />
+      <p id={`${id}-plazo-ayuda`} className="ayuda">
+        Entre {lista.plazo_minimo_dias} y {lista.plazo_maximo_dias} días.
       </p>
-      <Falla texto={acto.falla} />
-      <div className="acciones">
-        <button type="submit" disabled={acto.enviando || !completo}>
-          Guardar el borrador
-        </button>
-        <button type="button" className="secundario" disabled={acto.enviando} onClick={alCerrar}>
-          Cancelar
-        </button>
-      </div>
-    </form>
+      <ErrorDeCampo idCampo={`${id}-plazo`} mensaje={errores.plazo} />
+    </VentanaDeFormulario>
   );
 }
 
 type PropsFicha = {
   consorcio: string;
-  solicitud: Solicitud;
+  s: Solicitud;
   aEntrar: () => void;
-  alCambiar: (s: Solicitud, texto: string) => void;
+  /** El «Listo» de preparar, si esta es la solicitud recién preparada. */
+  resultado: ReactNode;
+  alCerrar: () => void;
+  alTerminar: (s: Solicitud, texto: string) => void;
   alCambiarLoVisto: (texto: string) => void;
 };
 
 type Abierto = null | "retirar" | "envio" | "responder" | "registrar_respuesta";
 
-function Ficha({ consorcio, solicitud: s, aEntrar, alCambiar, alCambiarLoVisto }: PropsFicha) {
-  const id = useId();
+/** La ficha de una solicitud: sus datos y, abajo, solo las acciones que trae `s.acciones` (SOL-03). */
+function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar, alCambiarLoVisto }: PropsFicha) {
   const [abierto, setAbierto] = useState<Abierto>(null);
-  const acto = useActo(aEntrar, alCambiarLoVisto);
+  const [firmando, setFirmando] = useState(false);
+  /** Por qué no se firmó: en la ficha, donde se tocó «Firmar». */
+  const [falla, setFalla] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
+  const hacer = useActo(aEntrar);
   const ruta = { consorcio_id: consorcio, solicitud_id: s.id };
 
-  function firmar() {
-    void acto.hacer(
-      (clave) =>
-        api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/firma", {
-          headers: encabezadoCsrf(),
-          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-        }),
-      (nueva) =>
-        alCambiar(
-          nueva,
-          nueva.estado === "borrador"
-            ? "Quedó la firma. Falta la de otra persona."
-            : nueva.estado === "envio_pendiente"
-              ? "Quedó emitida. El administrador no tiene cuenta: falta registrar el envío por el medio formal."
-              : "Quedó emitida y enviada: el administrador la recibe en la aplicación y por correo.",
-        ),
-    );
+  /** Lo que la ventana hace con el final de su acto. */
+  function finDe(r: FinDelActo, texto: string): FinDeEnvio {
+    if (r.tipo === "ok") {
+      alTerminar(r.s, texto);
+      return "cerrar";
+    }
+    if (r.tipo === "cambio") {
+      alCambiarLoVisto(r.texto);
+      return "cerrar";
+    }
+    return r.tipo === "sin_sesion" ? "seguir" : { rechazo: r.texto };
   }
 
-  const cerrar = () => setAbierto(null);
-  const listo = (texto: string) => (nueva: Solicitud) => {
-    cerrar();
-    alCambiar(nueva, texto);
-  };
+  async function firmar() {
+    setFirmando(true);
+    setFalla(null);
+    const r = await hacer((clave) =>
+      api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/firma", {
+        headers: encabezadoCsrf(),
+        params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+      }),
+    );
+    setFirmando(false);
+    if (r.tipo === "ok")
+      alTerminar(
+        r.s,
+        r.s.estado === "borrador"
+          ? "Quedó la firma. Falta la de otra persona."
+          : r.s.estado === "envio_pendiente"
+            ? "Quedó emitida. El administrador no tiene cuenta: falta registrar el envío por el medio formal."
+            : "Quedó emitida y enviada: el administrador la recibe en la aplicación y por correo.",
+      );
+    else if (r.tipo === "cambio") alCambiarLoVisto(r.texto);
+    else if (r.tipo === "falla") setFalla(r.texto);
+  }
+
+  const cerrarVentana = () => setAbierto(null);
+  const props = { consorcio, s, hacer, alCerrar: cerrarVentana, finDe };
 
   return (
-    <article className="tarjeta" aria-labelledby={`${id}-titulo`}>
-      <h3 id={`${id}-titulo`}>
-        N.º {s.numero} · {TEXTO_OBJETO[s.objeto]}: {s.referencia}
-      </h3>
-      <p>{textoSituacion(s)}</p>
-      <details>
-        <summary>Ver el detalle</summary>
-        <Detalle s={s} />
-      </details>
-      <Falla texto={acto.falla} />
-      {abierto === null && s.acciones.length > 0 && (
-        <div className="acciones">
+    <FichaDeRegistro
+      titulo={tituloDe(s)}
+      datos={datosDe(s, consorcio, copiado, setCopiado)}
+      alCerrar={alCerrar}
+      ocupada={firmando}
+      ventana={
+        abierto === "retirar" ? (
+          <VentanaRetiro {...props} />
+        ) : abierto === "envio" ? (
+          <VentanaEnvio {...props} aEntrar={aEntrar} />
+        ) : abierto === "responder" || abierto === "registrar_respuesta" ? (
+          <VentanaRespuesta {...props} aEntrar={aEntrar} recibida={abierto === "registrar_respuesta"} />
+        ) : null
+      }
+    >
+      {resultado}
+      {falla !== null && (
+        <p role="alert" className="aviso-error">
+          {falla}
+        </p>
+      )}
+      {s.acciones.length > 0 && (
+        <p className="ficha-registro__acciones acciones">
           {s.acciones.includes("firmar") && (
-            <button type="button" className="secundario" disabled={acto.enviando} onClick={firmar}>
+            <button type="button" disabled={firmando} onClick={() => void firmar()}>
               {FIRMAR}
             </button>
           )}
           {s.acciones.includes("registrar_envio") && (
-            <button type="button" className="secundario" onClick={() => setAbierto("envio")}>
+            <button type="button" onClick={() => setAbierto("envio")}>
               {REGISTRAR_ENVIO}
             </button>
           )}
           {s.acciones.includes("responder") && (
-            <button type="button" className="secundario" onClick={() => setAbierto("responder")}>
+            <button type="button" onClick={() => setAbierto("responder")}>
               {RESPONDER}
             </button>
           )}
           {s.acciones.includes("registrar_respuesta") && (
-            <button type="button" className="secundario" onClick={() => setAbierto("registrar_respuesta")}>
+            <button type="button" onClick={() => setAbierto("registrar_respuesta")}>
               {REGISTRAR_RESPUESTA}
             </button>
           )}
           {s.acciones.includes("retirar") && (
-            <button type="button" className="secundario peligro" disabled={acto.enviando} onClick={() => setAbierto("retirar")}>
+            <button type="button" className="secundario peligro" disabled={firmando} onClick={() => setAbierto("retirar")}>
               {RETIRAR}
             </button>
           )}
-        </div>
+        </p>
       )}
-      {abierto === "retirar" && (
-        <FormularioRetiro consorcio={consorcio} s={s} aEntrar={aEntrar} alCerrar={cerrar} alCambiarLoVisto={alCambiarLoVisto}
-          alTerminar={listo(`Se retiró el borrador N.º ${s.numero}.`)} />
-      )}
-      {abierto === "envio" && (
-        <FormularioEnvio consorcio={consorcio} s={s} aEntrar={aEntrar} alCerrar={cerrar} alCambiarLoVisto={alCambiarLoVisto}
-          alTerminar={listo(`Quedó registrado el envío de la solicitud N.º ${s.numero}: desde esa fecha corre el plazo.`)} />
-      )}
-      {(abierto === "responder" || abierto === "registrar_respuesta") && (
-        <FormularioRespuesta consorcio={consorcio} s={s} recibida={abierto === "registrar_respuesta"} aEntrar={aEntrar} alCerrar={cerrar}
-          alCambiarLoVisto={alCambiarLoVisto} alTerminar={listo(`Quedó registrada la respuesta de la solicitud N.º ${s.numero}.`)} />
-      )}
-    </article>
+    </FichaDeRegistro>
   );
 }
 
-function Detalle({ s }: { s: Solicitud }) {
-  const [copiado, setCopiado] = useState(false);
-  return (
-    <dl className="detalle">
-      <dt>Documentación pedida</dt>
-      <dd className="texto-con-renglones">{s.documentacion}</dd>
-      <dt>Plazo</dt>
-      <dd>{s.plazo_dias} días corridos desde el envío</dd>
-      <dt>Preparó</dt>
-      <dd>
-        {s.preparada_por_nombre ?? "Una persona del Consejo"}, {momento(s.preparada_en)}
-      </dd>
-      <dt>Firmas</dt>
-      <dd>
-        {s.firmas.length === 0
-          ? "Todavía ninguna."
-          : s.firmas.map((f) => `${f.nombre ?? "Una persona del Consejo"}${f.propia ? " (esta cuenta)" : ""}, ${momento(f.firmada_en)}`).join("; ")}
-      </dd>
-      {s.destinatario_nombre !== null && s.destinatario_nombre !== undefined && (
+/** Los datos de la ficha, sin lo técnico que no sirve para actuar (SOL-08) y con los adjuntos a mano
+ * (SOL-09). El plazo dice solo los días: la situación ya dice desde cuándo corre (SOL-07). */
+function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: (v: boolean) => void): DatoDeFicha[] {
+  const datos: DatoDeFicha[] = [
+    { etiqueta: "Situación", valor: textoSituacion(s) },
+    { etiqueta: "Documentación pedida", valor: <span className="texto-con-renglones">{s.documentacion}</span> },
+    { etiqueta: "Plazo", valor: `${s.plazo_dias} días` },
+    { etiqueta: "Preparó", valor: s.preparada_por_nombre ?? "Una persona del Consejo" },
+  ];
+  if (s.firmas.length > 0)
+    datos.push({
+      etiqueta: "Firmas",
+      valor: s.firmas.map((f) => `${f.nombre ?? "Una persona del Consejo"}${f.propia ? " (esta cuenta)" : ""}`).join(", "),
+    });
+  if (s.destinatario_nombre !== null && s.destinatario_nombre !== undefined)
+    datos.push({
+      etiqueta: "Destinatario",
+      valor: `${s.destinatario_nombre}${s.destinatario_con_cuenta === false ? " (sin cuenta en la aplicación)" : ""}`,
+    });
+  if (s.texto_emitido !== null && s.texto_emitido !== undefined) {
+    const texto = s.texto_emitido;
+    datos.push({
+      etiqueta: "Texto emitido",
+      valor: (
         <>
-          <dt>Destinatario</dt>
-          <dd>
-            {s.destinatario_nombre}
-            {s.destinatario_con_cuenta === false ? " (sin cuenta en la aplicación)" : ""}
-          </dd>
-        </>
-      )}
-      {s.texto_emitido !== null && s.texto_emitido !== undefined && (
-        <>
-          <dt>Texto emitido</dt>
-          <dd>
-            <pre className="texto-con-renglones">{s.texto_emitido}</pre>
-            <p className="ayuda">Huella SHA-256: {s.huella_texto}</p>
+          <pre className="texto-con-renglones">{texto}</pre>
+          {/* Hecha la copia, el botón no se ofrece otra vez: vuelve al reabrir la ficha (SOL-10). */}
+          {copiado ? (
+            <span role="status">Copiado.</span>
+          ) : (
             <button
               type="button"
               className="secundario"
               onClick={() => {
-                const texto = s.texto_emitido ?? "";
                 void navigator.clipboard.writeText(texto).then(
                   () => setCopiado(true),
                   () => setCopiado(false),
@@ -525,97 +581,106 @@ function Detalle({ s }: { s: Solicitud }) {
             >
               Copiar el texto
             </button>
-            {copiado && <span role="status"> Copiado.</span>}
-          </dd>
+          )}
         </>
-      )}
-      {s.envio && (
+      ),
+    });
+  }
+  if (s.envio) {
+    const { documento_id: documento, version_documento_id: version } = s.envio;
+    datos.push({
+      etiqueta: "Envío",
+      valor: (
         <>
-          <dt>Envío</dt>
-          <dd>
-            {TEXTO_MEDIO[s.envio.medio]}
-            {s.envio.detalle ? ` (${s.envio.detalle})` : ""}, el {fechaLegible(s.envio.fecha_envio)}. Vence el {fechaLegible(s.envio.vence_el)}.
-          </dd>
+          {TEXTO_MEDIO[s.envio.medio]}
+          {s.envio.detalle ? ` (${s.envio.detalle})` : ""}, el {fechaLegible(s.envio.fecha_envio)}. Vence el {fechaLegible(s.envio.vence_el)}.
+          {documento && version && (
+            <>
+              {" "}
+              <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
+                Descargar el comprobante
+              </a>
+            </>
+          )}
         </>
-      )}
-      {s.respuesta && (
+      ),
+    });
+  }
+  if (s.respuesta) {
+    const { documento_id: documento, version_documento_id: version } = s.respuesta;
+    datos.push({
+      etiqueta: "Respuesta",
+      valor: (
         <>
-          <dt>Respuesta</dt>
-          <dd>
-            <p className="texto-con-renglones">{s.respuesta.texto}</p>
-            <p className="ayuda">
-              {s.respuesta.medio === "aplicacion" ? "Respondida en la aplicación" : "Llegó por otro medio y la registró el Consejo"} el{" "}
-              {fechaLegible(s.respuesta.respondida_el)}
-              {s.respuesta.fuera_de_plazo ? ", fuera de plazo" : ""}
-              {s.respuesta.documento_id ? ". Con un archivo adjunto en Documentos del edificio, «Otros»." : "."}
-            </p>
-          </dd>
+          <span className="texto-con-renglones">{s.respuesta.texto}</span>{" "}
+          <span className="ayuda">
+            {s.respuesta.medio === "aplicacion" ? "Respondida en la aplicación" : "Llegó por otro medio y la registró el Consejo"} el{" "}
+            {fechaLegible(s.respuesta.respondida_el)}
+            {s.respuesta.fuera_de_plazo ? ", fuera de plazo" : ""}.
+          </span>
+          {documento && version && (
+            <>
+              {" "}
+              <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
+                Descargar el adjunto
+              </a>
+            </>
+          )}
         </>
-      )}
-      {s.retiro && (
-        <>
-          <dt>Retiro</dt>
-          <dd>
-            {s.retiro.motivo} ({s.retiro.retirada_por_nombre ?? "una persona del Consejo"}, {momento(s.retiro.retirada_en)})
-          </dd>
-        </>
-      )}
-    </dl>
-  );
+      ),
+    });
+  }
+  if (s.retiro)
+    datos.push({
+      etiqueta: "Retiro",
+      valor: `${s.retiro.motivo} (${s.retiro.retirada_por_nombre ?? "una persona del Consejo"}, ${momento(s.retiro.retirada_en)})`,
+    });
+  return datos;
 }
 
-type PropsFormulario = {
+type PropsVentana = {
   consorcio: string;
   s: Solicitud;
-  aEntrar: () => void;
+  hacer: ReturnType<typeof useActo>;
   alCerrar: () => void;
-  alCambiarLoVisto: (texto: string) => void;
-  alTerminar: (s: Solicitud) => void;
+  finDe: (r: FinDelActo, texto: string) => FinDeEnvio;
 };
 
-function Botones({ enviando, listo, confirmar, alCerrar, peligro = false }: { enviando: boolean; listo: boolean; confirmar: string; alCerrar: () => void; peligro?: boolean }) {
-  return (
-    <div className="acciones">
-      <button type="submit" className={peligro ? "peligro" : undefined} disabled={enviando || !listo}>
-        {confirmar}
-      </button>
-      <button type="button" className="secundario" disabled={enviando} onClick={alCerrar}>
-        Cancelar
-      </button>
-    </div>
-  );
-}
-
-function FormularioRetiro({ consorcio, s, aEntrar, alCerrar, alCambiarLoVisto, alTerminar }: PropsFormulario) {
+function VentanaRetiro({ consorcio, s, hacer, alCerrar, finDe }: PropsVentana) {
   const id = useId();
   const [motivo, setMotivo] = useState("");
-  const acto = useActo(aEntrar, alCambiarLoVisto);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+
+  async function retirar(): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ motivo: [motivo, "Falta escribir el motivo del retiro."] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    const r = await hacer((clave) =>
+      api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/retiro", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+        body: { motivo: motivo.trim() },
+      }),
+    );
+    return finDe(r, `Se retiró el borrador N.º ${s.numero}.`);
+  }
+
   return (
-    <form
-      className="formulario"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        void acto.hacer(
-          (clave) =>
-            api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/retiro", {
-              headers: encabezadoCsrf(),
-              params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-              body: { motivo: motivo.trim() },
-            }),
-          alTerminar,
-        );
-      }}
-    >
+    <VentanaDeFormulario titulo={RETIRAR} textoEnviar={RETIRAR} peligro alEnviar={retirar} alCerrar={alCerrar}>
       <label htmlFor={`${id}-motivo`}>Motivo del retiro</label>
-      <textarea id={`${id}-motivo`} value={motivo} maxLength={LARGO_MOTIVO} required disabled={acto.enviando} onChange={(ev) => setMotivo(ev.target.value)} />
-      <Falla texto={acto.falla} />
-      <Botones enviando={acto.enviando} listo={motivo.trim() !== ""} confirmar="Confirmar el retiro" alCerrar={alCerrar} peligro />
-    </form>
+      <textarea id={`${id}-motivo`} data-foco value={motivo} maxLength={LARGO_MOTIVO} {...marcaDe(`${id}-motivo`, errores.motivo)}
+        onChange={(ev) => {
+          setMotivo(ev.target.value);
+          setErrores((e) => sinElDe(e, "motivo"));
+        }} />
+      <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={errores.motivo} />
+    </VentanaDeFormulario>
   );
 }
 
-/** Sube el archivo para el envío o la respuesta y devuelve su `adjunto_id`, o null si no se pudo
- * (con la falla dicha). */
+/** Sube el archivo para el envío o la respuesta y devuelve su `adjunto_id`, o la falla dicha. */
 function useAdjunto(consorcio: string, s: Solicitud, para: "envio" | "respuesta", aEntrar: () => void) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const clave = useRef<string | null>(null);
@@ -624,35 +689,35 @@ function useAdjunto(consorcio: string, s: Solicitud, para: "envio" | "respuesta"
   // permiso del estado actual, que ya no es el de antes del acto (Codex en app #255).
   const subido = useRef<{ archivo: File; adjunto_id: string } | null>(null);
 
-  async function subir(setFalla: (t: string) => void): Promise<string | null> {
-    if (archivo === null) return null;
-    if (subido.current?.archivo === archivo) return subido.current.adjunto_id;
+  async function subir(elegido: File): Promise<{ adjunto_id: string } | { falla: string } | null> {
+    if (subido.current?.archivo === elegido) return { adjunto_id: subido.current.adjunto_id };
     clave.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/adjuntos", {
-        headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
+        headers: { ...encabezadoCsrf(), "Content-Type": elegido.type },
         params: {
           path: { consorcio_id: consorcio, solicitud_id: s.id },
-          query: { para, titulo: tituloDeArchivo(archivo, `Solicitud N.º ${s.numero}`, LARGO_TITULO) },
+          query: { para, titulo: tituloDeArchivo(elegido, `Solicitud N.º ${s.numero}`, LARGO_TITULO) },
           header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current },
         },
         // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
-        body: archivo as unknown as string,
+        body: elegido as unknown as string,
         bodySerializer: (cuerpo) => cuerpo,
       });
       exigirSesion(response);
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setFalla(`No se cargó el archivo. ${DEL_ARCHIVO.has(response.status) ? mensajeDeCarga(response.status, codigo, "subir", [], response.headers.has("Retry-After")) : mensajeDeActo(response.status, error)}`);
-        return null;
+        return {
+          falla: `No se cargó el archivo. ${DEL_ARCHIVO.has(response.status) ? mensajeDeCarga(response.status, codigo, "subir", [], response.headers.has("Retry-After")) : mensajeDeActo(response.status, error)}`,
+        };
       }
-      subido.current = { archivo, adjunto_id: data.adjunto_id };
+      subido.current = { archivo: elegido, adjunto_id: data.adjunto_id };
       clave.current = null;
-      return data.adjunto_id;
+      return { adjunto_id: data.adjunto_id };
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else setFalla(`No se cargó el archivo. ${SIN_CONEXION}`);
+      if (!(e instanceof SinSesion)) return { falla: `No se cargó el archivo. ${SIN_CONEXION}` };
+      aEntrar();
       return null;
     }
   }
@@ -662,58 +727,47 @@ function useAdjunto(consorcio: string, s: Solicitud, para: "envio" | "respuesta"
 
 const DEL_ARCHIVO = new Set([408, 413, 415, 503]);
 
-function CampoArchivo({ de, archivo, deshabilitada, alElegir, nota }: { de: string; archivo: File | null; deshabilitada: boolean; alElegir: (a: File) => void; nota?: string }): ReactNode {
+function CampoArchivo({ id, de, archivo, alElegir, nota, falta }: { id: string; de: string; archivo: File | null; alElegir: (a: File) => void; nota?: string; falta?: string }) {
   return (
-    <SubirArchivo
-      de={de}
-      tipos={TIPOS_DE_DOCUMENTO}
-      tope={TOPE_BYTES}
-      deshabilitada={deshabilitada}
-      elegido={archivo === null ? null : archivo.name}
-      nota={nota}
-      alElegir={alElegir}
-    />
+    <>
+      <SubirArchivo de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} elegido={archivo === null ? null : archivo.name} nota={nota} alElegir={alElegir} />
+      <ErrorDeCampo idCampo={id} mensaje={falta} />
+    </>
   );
 }
 
-function FormularioEnvio({ consorcio, s, aEntrar, alCerrar, alCambiarLoVisto, alTerminar }: PropsFormulario) {
+function VentanaEnvio({ consorcio, s, hacer, alCerrar, finDe, aEntrar }: PropsVentana & { aEntrar: () => void }) {
   const id = useId();
   const [medio, setMedio] = useState<Medio>("carta_documento");
   const [detalle, setDetalle] = useState("");
   const [fecha, setFecha] = useState(hoyDelDispositivo());
-  const acto = useActo(aEntrar, alCambiarLoVisto);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const adjunto = useAdjunto(consorcio, s, "envio", aEntrar);
-  const [subiendo, setSubiendo] = useState(false);
-  const ocupado = acto.enviando || subiendo;
 
-  async function registrar() {
-    setSubiendo(true);
-    acto.setFalla(null);
-    const adjunto_id = await adjunto.subir((t) => acto.setFalla(t));
-    setSubiendo(false);
-    if (adjunto_id === null) return;
-    await acto.hacer(
-      (clave) =>
-        api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/envio", {
-          headers: encabezadoCsrf(),
-          params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-          body: { medio, fecha_envio: fecha, adjunto_id, ...(detalle.trim() === "" ? {} : { detalle: detalle.trim() }) },
-        }),
-      alTerminar,
+  async function registrar(): Promise<FinDeEnvio> {
+    const faltan: Record<string, string> = { ...faltaCompletar({ fecha: [fecha, "Falta la fecha del envío."] }) };
+    if (adjunto.archivo === null) faltan.archivo = "Falta el comprobante del envío.";
+    if (hayErrores(faltan) || adjunto.archivo === null) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    const subido = await adjunto.subir(adjunto.archivo);
+    if (subido === null) return "seguir";
+    if ("falla" in subido) return { rechazo: subido.falla };
+    const r = await hacer((clave) =>
+      api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/envio", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+        body: { medio, fecha_envio: fecha, adjunto_id: subido.adjunto_id, ...(detalle.trim() === "" ? {} : { detalle: detalle.trim() }) },
+      }),
     );
+    return finDe(r, `Quedó registrado el envío de la solicitud N.º ${s.numero}.`);
   }
 
   return (
-    <form
-      className="formulario"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        void registrar();
-      }}
-    >
-      <p>El texto emitido está en el detalle, para enviarlo. Acá queda la constancia del envío: desde esa fecha corre el plazo.</p>
+    <VentanaDeFormulario titulo={REGISTRAR_ENVIO} textoEnviar={REGISTRAR_ENVIO} alEnviar={registrar} alCerrar={alCerrar} ancha>
       <label htmlFor={`${id}-medio`}>Medio</label>
-      <select id={`${id}-medio`} value={medio} disabled={ocupado} onChange={(ev) => setMedio(ev.target.value as Medio)}>
+      <select id={`${id}-medio`} data-foco value={medio} onChange={(ev) => setMedio(ev.target.value as Medio)}>
         {MEDIOS_EXTERNOS.map((m) => (
           <option key={m} value={m}>
             {TEXTO_MEDIO[m]}
@@ -721,71 +775,84 @@ function FormularioEnvio({ consorcio, s, aEntrar, alCerrar, alCambiarLoVisto, al
         ))}
       </select>
       <label htmlFor={`${id}-detalle`}>Detalle (por ejemplo, el número de la carta documento)</label>
-      <input id={`${id}-detalle`} value={detalle} maxLength={LARGO_DETALLE} disabled={ocupado} onChange={(ev) => setDetalle(ev.target.value)} />
+      <input id={`${id}-detalle`} value={detalle} maxLength={LARGO_DETALLE} onChange={(ev) => setDetalle(ev.target.value)} />
       <label htmlFor={`${id}-fecha`}>Fecha del envío</label>
-      <input id={`${id}-fecha`} type="date" value={fecha} required disabled={ocupado} onChange={(ev) => setFecha(ev.target.value)} />
-      <CampoArchivo de="del comprobante del envío" archivo={adjunto.archivo} deshabilitada={ocupado} alElegir={adjunto.setArchivo} nota="El comprobante es obligatorio." />
-      <Falla texto={acto.falla} />
-      <Botones enviando={ocupado} listo={fecha !== "" && adjunto.archivo !== null} confirmar="Registrar el envío" alCerrar={alCerrar} />
-    </form>
+      <input id={`${id}-fecha`} type="date" value={fecha} {...marcaDe(`${id}-fecha`, errores.fecha)}
+        onChange={(ev) => {
+          setFecha(ev.target.value);
+          setErrores((e) => sinElDe(e, "fecha"));
+        }} />
+      <ErrorDeCampo idCampo={`${id}-fecha`} mensaje={errores.fecha} />
+      <CampoArchivo id={`${id}-archivo`} de="del comprobante del envío" archivo={adjunto.archivo} falta={errores.archivo}
+        alElegir={(a) => {
+          adjunto.setArchivo(a);
+          setErrores((e) => sinElDe(e, "archivo"));
+        }} />
+    </VentanaDeFormulario>
   );
 }
 
-function FormularioRespuesta({ consorcio, s, recibida, aEntrar, alCerrar, alCambiarLoVisto, alTerminar }: PropsFormulario & { recibida: boolean }) {
+function VentanaRespuesta({ consorcio, s, hacer, alCerrar, finDe, aEntrar, recibida }: PropsVentana & { aEntrar: () => void; recibida: boolean }) {
   const id = useId();
   const [texto, setTexto] = useState("");
   const [fecha, setFecha] = useState(hoyDelDispositivo());
-  const acto = useActo(aEntrar, alCambiarLoVisto);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const adjunto = useAdjunto(consorcio, s, "respuesta", aEntrar);
-  const [subiendo, setSubiendo] = useState(false);
-  const ocupado = acto.enviando || subiendo;
 
-  async function registrar() {
-    acto.setFalla(null);
-    let adjunto_id: string | null = null;
-    if (adjunto.archivo !== null) {
-      setSubiendo(true);
-      adjunto_id = await adjunto.subir((t) => acto.setFalla(t));
-      setSubiendo(false);
-      if (adjunto_id === null) return;
+  async function registrar(): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({
+      texto: [texto, "Falta escribir la respuesta."],
+      ...(recibida ? { fecha: [fecha, "Falta la fecha en que llegó."] as const } : {}),
+    });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
     }
-    const conAdjunto = adjunto_id === null ? {} : { adjunto_id };
-    await acto.hacer(
-      (clave) =>
-        recibida
-          ? api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/respuesta-recibida", {
-              headers: encabezadoCsrf(),
-              params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-              body: { texto: texto.trim(), recibida_el: fecha, ...conAdjunto },
-            })
-          : api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/respuesta", {
-              headers: encabezadoCsrf(),
-              params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-              body: { texto: texto.trim(), ...conAdjunto },
-            }),
-      alTerminar,
+    let conAdjunto = {};
+    if (adjunto.archivo !== null) {
+      const subido = await adjunto.subir(adjunto.archivo);
+      if (subido === null) return "seguir";
+      if ("falla" in subido) return { rechazo: subido.falla };
+      conAdjunto = { adjunto_id: subido.adjunto_id };
+    }
+    const r = await hacer((clave) =>
+      recibida
+        ? api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/respuesta-recibida", {
+            headers: encabezadoCsrf(),
+            params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+            body: { texto: texto.trim(), recibida_el: fecha, ...conAdjunto },
+          })
+        : api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/respuesta", {
+            headers: encabezadoCsrf(),
+            params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+            body: { texto: texto.trim(), ...conAdjunto },
+          }),
     );
+    return finDe(r, `Quedó registrada la respuesta de la solicitud N.º ${s.numero}.`);
   }
 
   return (
-    <form
-      className="formulario"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        void registrar();
-      }}
-    >
+    <VentanaDeFormulario titulo={recibida ? REGISTRAR_RESPUESTA : RESPONDER} textoEnviar={recibida ? "Registrar la respuesta" : "Enviar la respuesta"}
+      alEnviar={registrar} alCerrar={alCerrar} ancha>
       <label htmlFor={`${id}-texto`}>{recibida ? "Lo que respondió la administración" : "Respuesta"}</label>
-      <textarea id={`${id}-texto`} value={texto} maxLength={LARGO_RESPUESTA} required disabled={ocupado} onChange={(ev) => setTexto(ev.target.value)} />
+      <textarea id={`${id}-texto`} data-foco value={texto} maxLength={LARGO_RESPUESTA} {...marcaDe(`${id}-texto`, errores.texto)}
+        onChange={(ev) => {
+          setTexto(ev.target.value);
+          setErrores((e) => sinElDe(e, "texto"));
+        }} />
+      <ErrorDeCampo idCampo={`${id}-texto`} mensaje={errores.texto} />
       {recibida && (
         <>
           <label htmlFor={`${id}-fecha`}>Fecha en que llegó</label>
-          <input id={`${id}-fecha`} type="date" value={fecha} required disabled={ocupado} onChange={(ev) => setFecha(ev.target.value)} />
+          <input id={`${id}-fecha`} type="date" value={fecha} {...marcaDe(`${id}-fecha`, errores.fecha)}
+            onChange={(ev) => {
+              setFecha(ev.target.value);
+              setErrores((e) => sinElDe(e, "fecha"));
+            }} />
+          <ErrorDeCampo idCampo={`${id}-fecha`} mensaje={errores.fecha} />
         </>
       )}
-      <CampoArchivo de="adjunto de la respuesta" archivo={adjunto.archivo} deshabilitada={ocupado} alElegir={adjunto.setArchivo} nota="Opcional." />
-      <Falla texto={acto.falla} />
-      <Botones enviando={ocupado} listo={texto.trim() !== "" && (!recibida || fecha !== "")} confirmar={recibida ? "Registrar la respuesta" : "Enviar la respuesta"} alCerrar={alCerrar} />
-    </form>
+      <CampoArchivo id={`${id}-archivo`} de="adjunto de la respuesta" archivo={adjunto.archivo} alElegir={adjunto.setArchivo} nota="Opcional." />
+    </VentanaDeFormulario>
   );
 }

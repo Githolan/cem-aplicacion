@@ -102,7 +102,7 @@ test.describe("panel sin sesión", () => {
 });
 
 test.describe("panel", () => {
-  test("en un teléfono de 360 px los gráficos y sus tablas entran sin desplazar la página", async ({ page }) => {
+  test("en un teléfono de 360 px los gráficos y su base entran sin desplazar la página", async ({ page }) => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
     const imprevistos = await simularApi(page);
@@ -118,9 +118,11 @@ test.describe("panel", () => {
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
 
-    // Abiertas las tablas equivalentes, tampoco.
-    for (const resumen of await page.getByText("Ver los datos en una tabla").all()) await resumen.click();
-    await expect(page.getByRole("table", { name: "Gasto pagado por mes" })).toBeVisible();
+    // Abierto «Cómo se calcula» de cada gráfico, tampoco (la tabla equivalente es solo para el
+    // lector de pantalla: PAN-02).
+    await expect(page.getByText("Ver los datos en una tabla")).toHaveCount(0);
+    for (const resumen of await page.getByText("Cómo se calcula").all()) await resumen.click();
+    await expect(page.getByText(/^Lo pagado en cada mes, por la fecha del pago/)).toBeVisible();
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
     // Las barras son SVG en línea: la CSP no tiene que frenar nada.
