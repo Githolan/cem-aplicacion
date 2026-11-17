@@ -1,14 +1,15 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import { CabeceraInterna } from "../CabeceraInterna";
 import { RUTA_INICIO } from "../enlace";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { ErrorDeCampo, erroresDe, marcaDe } from "../ErrorDeCampo";
-import { FilaDeRegistro } from "../FichaDeRegistro";
+import { ErrorDeCampo, type ErroresDeCampo, erroresDe, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
+import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, esPasajera, SIN_CONEXION } from "../fallas";
-import { Hoja } from "../Hoja";
+import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
+import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import {
   type Aviso,
   cambioLoVisto,
@@ -26,6 +27,7 @@ import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura, Reintentar } from "./EstadoPantalla";
 import { REQUISITOS } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
+import { useCodigoEnMedio } from "./useCodigoEnMedio";
 import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /liquidacion (app 0057): la administración prepara la liquidación de un período. Abre el
@@ -37,6 +39,12 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } f
 // propio pedido, con su clave de idempotencia, y el servidor la valida igual que si fuera sola; si
 // una no entra se dice cuál y por qué, y las demás siguen. Las descartadas salen de la lista de
 // trabajo y quedan plegadas (AC-47). Descartar pide el motivo recién al tocarlo (AC-52).
+//
+// Informe de fricción del 17-11-2026, tanda 8: el período se elige en la ventana de «Abrir un
+// borrador» (LIQ-01); abierto un borrador, se ve solo él, con «Volver a la lista» (LIQ-02); las
+// órdenes se agregan en su ventana (LIQ-03, C8P-19) y el descarte también (C8P-20), con los botones
+// siempre activos; el resultado sale en el borrador, donde se actuó (LIQ-06). Sin gastos no hay
+// simulación que mostrar (LIQ-05) y «es un borrador» se dice una sola vez, en la lista (LIQ-04).
 
 type Resumen = components["schemas"]["Liquidacion"];
 type Detalle = components["schemas"]["LiquidacionDetalle"];
@@ -44,19 +52,25 @@ type Liquidable = components["schemas"]["OrdenLiquidable"];
 type EstadoLiquidacion = Resumen["estado"];
 
 export const RUTA_LIQUIDACION = "/liquidacion";
+export const ABRIR_UN_BORRADOR = "Abrir un borrador";
+export const AGREGAR_GASTOS = "Agregar gastos";
+export const DESCARTAR = "Descartar el borrador";
 
 type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_servicio" }
   | { tipo: "ok"; liquidaciones: Resumen[]; liquidables: Liquidable[] };
-/** `alCancelar`: qué queda a la vista si no se confirma (AC-53: nunca un «Cargando…» sin salida). */
-type Pendiente = { acto: string; reintentar: () => void; alCancelar?: () => void };
+/** Una lectura que pidió el segundo factor. `alCancelar`: qué queda a la vista si no se confirma
+ * (AC-53: nunca un «Cargando…» sin salida). */
+type Pendiente = { reintentar: () => void; alCancelar: () => void };
 /** La clave de un «agregar» que todavía no se sabe si llegó, con lo que identifica su gasto. */
 type GastoRetenido = { clave: string; liquidacion: string; orden: string; grupo: string };
 type Acto =
   | { tipo: "preparar"; periodo: string }
   | { tipo: "quitar"; liquidacion: string; gasto: string }
   | { tipo: "descartar"; liquidacion: string; motivo: string };
+/** La ventana abierta: elegir el período, agregar gastos o descartar el borrador. */
+type Ventana = "abrir" | "agregar" | "descartar";
 
 /** Los meses del desplegable «Mes» (AC-51): el período se elige, no se escribe como «2026-10». */
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
@@ -140,9 +154,11 @@ export function Liquidacion() {
 function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
-  const [abierta, setAbierta] = useState<string | null>(null);
+  /** La liquidación abierta: con ella a la vista, la lista no se muestra (LIQ-02). */
+  const fichas = useFichas<string>();
+  const abierta = fichas.abierta;
   const [detalle, setDetalle] = useState<Detalle | null>(null);
-  /** Por qué no llegó el detalle de la abierta: la lista sigue a la vista. */
+  /** Por qué no llegó el detalle de la abierta. */
   const [fallaDetalle, setFallaDetalle] = useState<string | null>(null);
   const [vuelta, setVuelta] = useState(0);
   /** El período elegido, «AAAA-MM»; empieza en el mes anterior (AC-51). */
@@ -151,31 +167,34 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [elegidas, setElegidas] = useState<readonly string[]>([]);
   const [grupo, setGrupo] = useState("");
   const [motivo, setMotivo] = useState("");
-  /** La hoja que pide el motivo para descartar está abierta (AC-52). */
-  const [descartando, setDescartando] = useState(false);
-  /** Por qué no se descartó, dentro de la hoja: la página de atrás está inerte y no lo diría
-   * (Codex en #242). Junto al campo si es del motivo; si no, como aviso de la hoja. */
-  const [fallaDescarte, setFallaDescarte] = useState<{ motivo?: string; general?: string } | null>(null);
+  const [ventana, setVentana] = useState<Ventana | null>(null);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [enviando, setEnviando] = useState(false);
   /** Mientras se agregan varias: cuántas van. */
   const [progreso, setProgreso] = useState<{ hechas: number; total: number } | null>(null);
+  /** Por qué no llegó la lista. */
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** El resultado del último acto, donde se actuó: en el borrador o en la lista (LIQ-06). */
+  const [resultado, setResultado] = useState<Resultado | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
+  const codigo = useCodigoEnMedio();
 
   // Otra liquidación tiene otros grupos: la orden, el grupo y el motivo de descarte elegidos no
   // pasan de una a otra (un motivo escrito para un borrador no descarta otro).
-  function abrir(id: string) {
-    setAbierta(id);
+  function abrir(liquidacion: string) {
+    fichas.abrir(liquidacion);
     setFallaDetalle(null);
     setElegidas([]);
     setGrupo("");
     setMotivo("");
-    setDescartando(false);
-    setFallaDescarte(null);
+    setVentana(null);
+    setErrores(SIN_ERRORES);
   }
 
-  function volverALaLista() {
-    setAbierta(null);
+  /** De vuelta a la lista; el foco vuelve a la fila (o, tras un acto, al resultado). */
+  function volverALaLista(devolverFoco = true) {
+    fichas.cerrar(devolverFoco);
+    setVentana(null);
     setDetalle(null);
     setFallaDetalle(null);
   }
@@ -227,7 +246,6 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           if (uno !== null && uno.data === undefined && codigoDe(uno.error) === SEGUNDO_FACTOR_REQUERIDO) {
             const estado = uno.response.status;
             setPendiente({
-              acto: "ver la liquidación",
               reintentar: () => setVuelta((v) => v + 1),
               alCancelar: () => setFallaDetalle(mensajeDeError(estado, SEGUNDO_FACTOR_REQUERIDO)),
             });
@@ -237,17 +255,16 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           setFallaDetalle(uno !== null && uno.data === undefined ? mensajeDeError(uno.response.status, codigoDe(uno.error)) : null);
           return;
         }
-        const codigo = codigoDe(falla.error);
-        if (codigo === SEGUNDO_FACTOR_REQUERIDO)
+        const codigoError = codigoDe(falla.error);
+        if (codigoError === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({
-            acto: "ver la liquidación",
             reintentar: () => setVuelta((v) => v + 1),
             alCancelar: () => setLectura({ tipo: "sin_servicio" }),
           });
-        else if (falla.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
+        else if (falla.response.status === ESTADO.sinPermiso && codigoError === "sin_permiso") aInicio();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso(sinPisarLoHecho(mensajeDeError(falla.response.status, codigo)));
+          setAviso(sinPisarLoHecho(mensajeDeError(falla.response.status, codigoError)));
         }
       })
       .catch((e: unknown) => {
@@ -269,116 +286,126 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setVuelta((v) => v + 1);
   }
 
-  function hacer(acto: Acto, reintento = false) {
-    if (!montado.current) return;
-    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(acto));
-    clave.current ??= crypto.randomUUID();
-    actoRetenido.current = acto;
-    const header = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
-    const headers = encabezadoCsrf();
+  /** Un acto sobre la liquidación, con su clave; ante el segundo factor, la hoja del código encima y,
+   * confirmado, el mismo pedido con la misma clave. Dice cómo terminó para la ventana que lo pidió. */
+  async function hacer(acto: Acto): Promise<FinDeEnvio> {
+    if (!montado.current) return "cerrar";
+    soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(acto));
     setEnviando(true);
-    setAviso(null);
-    setFallaDescarte(null);
-    const pedido =
-      acto.tipo === "preparar"
-        ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones", {
-            headers,
-            params: { path: { consorcio_id: consorcio }, header },
-            body: { periodo: acto.periodo },
-          })
-        : acto.tipo === "quitar"
-          ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos/{gasto_id}/quitar", {
+    try {
+      for (;;) {
+        clave.current ??= crypto.randomUUID();
+        actoRetenido.current = acto;
+        const header = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
+        const headers = encabezadoCsrf();
+        const { data, error, response } = await (acto.tipo === "preparar"
+          ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones", {
               headers,
-              params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion, gasto_id: acto.gasto }, header },
+              params: { path: { consorcio_id: consorcio }, header },
+              body: { periodo: acto.periodo },
             })
-          : api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/descartar", {
-              headers,
-              params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion }, header },
-              body: { motivo: acto.motivo },
-            });
-    void pedido
-      .then(({ data, error, response }) => {
+          : acto.tipo === "quitar"
+            ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos/{gasto_id}/quitar", {
+                headers,
+                params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion, gasto_id: acto.gasto }, header },
+              })
+            : api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/descartar", {
+                headers,
+                params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion }, header },
+                body: { motivo: acto.motivo },
+              }));
         exigirSesion(response);
         if (data !== undefined) {
           clave.current = null;
-          const texto = {
-            preparar: "Listo: el borrador del período quedó abierto.",
-            quitar: "Listo: el gasto salió del borrador.",
-            descartar: "Listo: el borrador se descartó. Sus gastos vuelven a estar disponibles y el período admite uno nuevo.",
-          }[acto.tipo];
-          setAviso({ texto, ok: true });
           if (acto.tipo === "preparar") {
             // Vuelve a un período completo: los desplegables nunca quedan vacíos ni a medias (Codex en #236).
             setMes(mesAnterior());
             abrir(data.id);
-          }
-          if (acto.tipo === "descartar") {
-            setMotivo("");
-            setDescartando(false);
-            volverALaLista();
+            setResultado({ texto: "Listo: el borrador del período quedó abierto.", ok: true });
+          } else if (acto.tipo === "quitar") setResultado({ texto: "Listo: el gasto salió del borrador.", ok: true });
+          else {
+            volverALaLista(false);
+            setResultado({
+              texto: "Listo: el borrador se descartó. Sus gastos vuelven a estar disponibles y el período admite uno nuevo.",
+              ok: true,
+            });
           }
           setVuelta((v) => v + 1);
-          return;
+          return "cerrar";
         }
-        const codigo = codigoDe(error);
-        if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
-          const actual = clave.current;
-          setPendiente({
-            acto: {
-              preparar: "abrir el borrador",
-              quitar: "quitar el gasto",
-              descartar: "descartar el borrador",
-            }[acto.tipo],
-            reintentar: () => {
-              clave.current = actual;
-              hacer(acto, true);
-            },
-          });
-          return;
+        const codigoError = codigoDe(error);
+        if (codigoError === SEGUNDO_FACTOR_REQUERIDO) {
+          const que = { preparar: "abrir el borrador", quitar: "quitar el gasto", descartar: "descartar el borrador" }[acto.tipo];
+          if (await codigo.pedir(que)) continue;
+          return "seguir";
         }
-        if (renovarClave(response.status, codigo)) clave.current = null;
-        const texto = mensajeDeError(response.status, codigo);
+        if (renovarClave(response.status, codigoError)) clave.current = null;
+        const texto = mensajeDeError(response.status, codigoError);
+        const cambio = cambioLoVisto(response.status, codigoError);
+        if (cambio) setVuelta((v) => v + 1);
+        if (acto.tipo === "quitar") {
+          setResultado({ texto, ok: false });
+          return "seguir";
+        }
         if (acto.tipo === "descartar") {
           // El único dato del descarte es el motivo: un 422 es de él (el del campo, o el del servidor).
-          const delMotivo = response.status === ESTADO.invalido ? (erroresDe(error).motivo ?? (error as { mensaje: string }).mensaje) : undefined;
-          setFallaDescarte(delMotivo !== undefined ? { motivo: delMotivo } : { general: texto });
-        } else setAviso({ texto, ok: false });
-        if (cambioLoVisto(response.status, codigo)) setVuelta((v) => v + 1);
-      })
-      .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
-        else if (acto.tipo === "descartar") setFallaDescarte({ general: SIN_CONEXION });
-        else setAviso({ texto: SIN_CONEXION, ok: false });
-      })
-      .finally(() => setEnviando(false));
+          if (response.status === ESTADO.invalido) {
+            setErrores({ motivo: erroresDe(error).motivo ?? (error as { mensaje: string }).mensaje });
+            return "seguir";
+          }
+          // Lo descartó otra persona: no queda nada que descartar; el porqué va en el borrador.
+          if (cambio) {
+            setResultado({ texto, ok: false });
+            return "cerrar";
+          }
+        }
+        return { rechazo: texto };
+      }
+    } catch (e: unknown) {
+      if (!(e instanceof SinSesion)) {
+        if (acto.tipo !== "quitar") return { rechazo: SIN_CONEXION };
+        setResultado({ texto: SIN_CONEXION, ok: false });
+        return "seguir";
+      }
+      aEntrar();
+      return "seguir";
+    } finally {
+      setEnviando(false);
+    }
   }
 
-  function preparar(evento: FormEvent) {
-    evento.preventDefault();
+  async function preparar(): Promise<FinDeEnvio> {
     const periodoElegido = `${mes}-01`;
     // Un período admite un solo borrador: si ya lo tiene, se abre ese y no se pide otro.
     const existente = liquidaciones.find((l) => l.periodo === periodoElegido && l.estado === "borrador");
     if (existente !== undefined) {
-      setAviso(null);
       setMes(mesAnterior());
       abrir(existente.id);
-      return;
+      return "cerrar";
     }
-    hacer({ tipo: "preparar", periodo: periodoElegido });
+    return hacer({ tipo: "preparar", periodo: periodoElegido });
   }
 
   /** Agrega las órdenes de a una, cada una con su pedido: el servidor valida cada gasto como
    * siempre. Que una orden no entre no frena a las demás; una falla pasajera (red, límite, servicio)
-   * sí, y las que faltan quedan elegidas para repetir con las mismas claves. */
-  async function agregarVarias(liquidacion: string, ordenes: readonly Liquidable[], grupoDeGasto: string) {
+   * sí, y las que faltan quedan elegidas para repetir con las mismas claves. Si entraron todas, la
+   * ventana se cierra y el «Listo» sale en el borrador; si no, la ventana dice cuáles no. */
+  async function agregar(liquidacion: string, ordenes: readonly Liquidable[], grupoDeGasto: string): Promise<FinDeEnvio> {
+    const faltan: Record<string, string> = {};
+    if (ordenes.length === 0) faltan.ordenes = "Falta tildar las órdenes para agregar.";
+    if (grupoDeGasto === "") faltan.grupo = "Falta elegir el grupo de gasto.";
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
     setEnviando(true);
-    setAviso(null);
     const agregadas: string[] = [];
     const fallas: string[] = [];
     let corte: string | null = null;
     try {
-      for (const [i, o] of ordenes.entries()) {
-        if (!montado.current) return;
+      for (let i = 0; i < ordenes.length; i += 1) {
+        const o = ordenes[i]!;
+        if (!montado.current) return "cerrar";
         setProgreso({ hechas: i, total: ordenes.length });
         const llave = `${liquidacion}:${o.orden_id}:${grupoDeGasto}`;
         const claveDeGasto = clavesDeGasto.current.get(llave)?.clave ?? crypto.randomUUID();
@@ -397,15 +424,18 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           agregadas.push(o.orden_id);
           continue;
         }
-        const codigo = codigoDe(error);
-        if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
-          const faltan = ordenes.slice(i);
-          setPendiente({ acto: "agregar los gastos", reintentar: () => void agregarVarias(liquidacion, faltan, grupoDeGasto) });
+        const codigoError = codigoDe(error);
+        if (codigoError === SEGUNDO_FACTOR_REQUERIDO) {
+          if (await codigo.pedir("agregar los gastos")) {
+            i -= 1; // la misma orden otra vez, con su misma clave
+            continue;
+          }
+          corte = "Falta la confirmación.";
           break;
         }
-        if (renovarClave(response.status, codigo)) clavesDeGasto.current.delete(llave);
+        if (renovarClave(response.status, codigoError)) clavesDeGasto.current.delete(llave);
         if (esPasajera(response.status)) {
-          corte = mensajeDeError(response.status, codigo);
+          corte = mensajeDeError(response.status, codigoError);
           break;
         }
         fallas.push(`${nombreDeOrden(o)}: ${motivoDelGasto(response.status, error)}`);
@@ -413,7 +443,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     } catch (e: unknown) {
       if (e instanceof SinSesion) {
         aEntrar();
-        return;
+        return "seguir";
       }
       corte = SIN_CONEXION;
     } finally {
@@ -421,59 +451,352 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       setProgreso(null);
     }
     setElegidas((actuales) => actuales.filter((o) => !agregadas.includes(o)));
-    if (agregadas.length > 0 || fallas.length > 0 || corte !== null) setAviso(avisoDeAgregar(ordenes.length, agregadas.length, fallas, corte));
     setVuelta((v) => v + 1);
-  }
-
-  function agregar(evento: FormEvent, liquidacion: string, ordenes: readonly Liquidable[], grupoDeGasto: string) {
-    evento.preventDefault();
-    if (ordenes.length === 0 || grupoDeGasto === "") return;
-    void agregarVarias(liquidacion, ordenes, grupoDeGasto);
+    const dicho = avisoDeAgregar(ordenes.length, agregadas.length, fallas, corte);
+    if (dicho.ok) {
+      setResultado(dicho);
+      return "cerrar";
+    }
+    return { rechazo: dicho.texto };
   }
 
   function alternar(orden: string) {
+    setErrores((e) => sinElDe(e, "ordenes"));
     setElegidas((actuales) => (actuales.includes(orden) ? actuales.filter((o) => o !== orden) : [...actuales, orden]));
   }
 
-  function descartar(evento: FormEvent, liquidacion: string) {
-    evento.preventDefault();
-    if (motivo.trim() === "") return;
-    hacer({ tipo: "descartar", liquidacion, motivo: motivo.trim() });
+  async function descartar(liquidacion: string): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ motivo: [motivo, "Falta escribir el motivo."] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    return hacer({ tipo: "descartar", liquidacion, motivo: motivo.trim() });
+  }
+
+  function abrirVentana(v: Ventana) {
+    setErrores(SIN_ERRORES);
+    setVentana(v);
   }
 
   const liquidaciones = lectura.tipo === "ok" ? lectura.liquidaciones : [];
   const liquidables = lectura.tipo === "ok" ? lectura.liquidables : [];
-  const simulacion = detalle?.simulacion;
+  // El detalle a la vista es el de la abierta: mientras llega el de otra, no se muestra el anterior.
+  const visto = detalle !== null && detalle.liquidacion.id === abierta ? detalle : null;
+  const simulacion = visto?.simulacion;
   // Un grupo puede tener dos versiones del esquema en el mismo borrador: una columna por grupo.
   const grupos = [...new Set(simulacion?.grupos.map((g) => g.grupo) ?? [])];
   const moneda = simulacion?.moneda ?? null;
   // Un borrador tiene una sola moneda: con gastos, solo se ofrecen órdenes de esa moneda.
-  const monedaBorrador = detalle?.gastos[0]?.moneda ?? null;
+  const monedaBorrador = visto?.gastos[0]?.moneda ?? null;
   // Como la regla del backend (0058): entra solo lo pagado hasta el último día del período (P3 136).
-  const hasta = detalle === null ? null : mesSiguiente(detalle.liquidacion.periodo);
+  const hasta = visto === null ? null : mesSiguiente(visto.liquidacion.periodo);
   const ofrecibles = liquidables.filter(
     (o) => (monedaBorrador === null || o.moneda === monedaBorrador) && (hasta === null || o.pagada_el < hasta),
   );
   // Solo cuentan las tildadas que siguen ofrecidas: lo que se agrega es lo que se ve tildado.
   const aAgregar = ofrecibles.filter((o) => elegidas.includes(o.orden_id));
   const todas = ofrecibles.length > 0 && aAgregar.length === ofrecibles.length;
+  // Sin órdenes para ofrecer (entraron todas, o la lectura ya las muestra en el borrador), la
+  // ventana de agregar no tiene qué mostrar: se cierra y no vuelve sola cuando haya otras.
+  const sinQueAgregar = ventana === "agregar" && visto !== null && ofrecibles.length === 0;
+  useEffect(() => {
+    if (sinQueAgregar) setVentana(null);
+  }, [sinQueAgregar]);
   // Con un solo grupo vigente no hay nada que elegir: va ese (AC-48, «un grupo por defecto»).
-  const unicoGrupo = detalle !== null && detalle.grupos.length === 1 ? detalle.grupos[0]!.grupo : null;
+  const unicoGrupo = visto !== null && visto.grupos.length === 1 ? visto.grupos[0]!.grupo : null;
   const grupoDeGasto = unicoGrupo ?? grupo;
   // Las descartadas salen de la lista de trabajo y quedan plegadas: nada se borra (AC-47).
   const enTrabajo = liquidaciones.filter((l) => l.estado !== "descartada");
   const descartadas = liquidaciones.filter((l) => l.estado === "descartada");
-  // Con un borrador abierto, el trabajo es ese: abrir otro período pasa a ser secundario.
-  const conBorrador = detalle?.liquidacion.estado === "borrador";
   const filaDe = (l: Resumen) => (
     <li key={l.id}>
-      <FilaDeRegistro titulo={tituloDeLiquidacion(l.periodo, l.estado, l.version)}
-        alAbrir={() => {
-          // La abierta no se reabre: lo escrito en su borrador queda.
-          if (abierta !== l.id) abrir(l.id);
-        }} deshabilitada={enviando} abierta={abierta === l.id} />
+      <FilaDeRegistro titulo={tituloDeLiquidacion(l.periodo, l.estado, l.version)} alAbrir={() => abrir(l.id)}
+        refFila={fichas.refFila(l.id)} deshabilitada={enviando} />
     </li>
   );
+  const resultadoDelActo = <ResultadoDelActo resultado={resultado} alOtroActo={() => setResultado(null)} />;
+
+  /** La lista: abrir un borrador nuevo y las liquidaciones del edificio. */
+  function vistaLista() {
+    return (
+      <>
+        {/* «Es un borrador» se dice una vez, acá (LIQ-04). */}
+        <p>Es un borrador para revisar los números: todavía no se aprueba ni se publica a los propietarios.</p>
+        <div className="acciones no-imprimir">
+          <button type="button" disabled={enviando} onClick={() => abrirVentana("abrir")}>
+            {ABRIR_UN_BORRADOR}
+          </button>
+        </div>
+        {resultadoDelActo}
+        {enTrabajo.length === 0 ? (
+          <p className="tarjeta no-imprimir">
+            {descartadas.length === 0 ? "Todavía no hay liquidaciones en este edificio." : "No hay borradores abiertos en este edificio."}
+          </p>
+        ) : (
+          // Cada fila entera abre su liquidación, sola (comentario 21; LIQ-02).
+          <ul className="filas-registro no-imprimir" aria-label="Liquidaciones">
+            {enTrabajo.map(filaDe)}
+          </ul>
+        )}
+        {descartadas.length > 0 && (
+          <details className="no-imprimir">
+            <summary>Ver descartados ({descartadas.length})</summary>
+            <ul className="filas-registro" aria-label="Borradores descartados">
+              {descartadas.map(filaDe)}
+            </ul>
+          </details>
+        )}
+        {ventana === "abrir" && (
+          <VentanaDeFormulario titulo={ABRIR_UN_BORRADOR} textoEnviar="Abrir el borrador" alEnviar={preparar} alCerrar={() => setVentana(null)}>
+            <label htmlFor={`${id}-mes`}>Mes</label>
+            <select id={`${id}-mes`} data-foco value={mes.slice(5, 7)}
+              onChange={(e) => {
+                const elegido = e.target.value;
+                setMes((actual) => `${actual.slice(0, 4)}-${elegido}`);
+              }}>
+              {MESES.map((nombre, i) => (
+                <option key={nombre} value={String(i + 1).padStart(2, "0")}>{nombre}</option>
+              ))}
+            </select>
+            <label htmlFor={`${id}-anio`}>Año</label>
+            <select id={`${id}-anio`} value={mes.slice(0, 4)}
+              onChange={(e) => {
+                const elegido = e.target.value;
+                setMes((actual) => `${elegido}-${actual.slice(5, 7)}`);
+              }}>
+              {aniosOfrecidos().map((anio) => (
+                <option key={anio} value={anio}>{anio}</option>
+              ))}
+            </select>
+          </VentanaDeFormulario>
+        )}
+      </>
+    );
+  }
+
+  /** La ventana de agregar: las órdenes pagadas para tildar y el grupo de gasto. */
+  function ventanaAgregar(d: Detalle) {
+    const idOrdenes = `${id}-ordenes`;
+    const marcaOrdenes = marcaDe(idOrdenes, errores.ordenes);
+    return (
+      <VentanaDeFormulario titulo={AGREGAR_GASTOS} textoEnviar={aAgregar.length > 1 ? `Agregar ${aAgregar.length} gastos` : "Agregar el gasto"}
+        alEnviar={() => agregar(d.liquidacion.id, aAgregar, grupoDeGasto)} alCerrar={() => setVentana(null)} ancha>
+        <fieldset>
+          <legend>Órdenes pagadas para agregar</legend>
+          {ofrecibles.length > 1 && (
+            <label className="opcion">
+              <input type="checkbox" data-foco checked={todas}
+                onChange={() => {
+                  setErrores((e) => sinElDe(e, "ordenes"));
+                  setElegidas(todas ? [] : ofrecibles.map((o) => o.orden_id));
+                }} />
+              Elegir las {ofrecibles.length}
+            </label>
+          )}
+          <ul className="tildes-pago" aria-label="Órdenes pagadas">
+            {ofrecibles.map((o, i) => (
+              <li key={o.orden_id}>
+                <label className="tilde-pago">
+                  <input type="checkbox" data-foco={ofrecibles.length === 1 && i === 0 ? true : undefined} checked={elegidas.includes(o.orden_id)}
+                    {...marcaOrdenes} onChange={() => alternar(o.orden_id)} />
+                  <span className="tilde-pago__datos">
+                    <span className="fila-pago__arriba">
+                      <strong>{o.razon_social}</strong>
+                      <span className="fila-pago__importe">{importe(o.importe_centavos, o.moneda)}</span>
+                    </span>
+                    <span>
+                      {o.concepto}, pagada el {dia(o.pagada_el)}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <ErrorDeCampo idCampo={idOrdenes} mensaje={errores.ordenes} />
+        </fieldset>
+        {unicoGrupo === null ? (
+          <>
+            <label htmlFor={`${id}-grupo`}>Grupo de gasto</label>
+            <select id={`${id}-grupo`} value={grupo} {...marcaDe(`${id}-grupo`, errores.grupo)}
+              onChange={(e) => {
+                setGrupo(e.target.value);
+                setErrores((actuales) => sinElDe(actuales, "grupo"));
+              }}>
+              <option value="">Elegir un grupo</option>
+              {d.grupos.map((g) => (
+                <option key={g.grupo} value={g.grupo}>
+                  {nombreDeGrupo(g.grupo)}
+                </option>
+              ))}
+            </select>
+            <ErrorDeCampo idCampo={`${id}-grupo`} mensaje={errores.grupo} />
+          </>
+        ) : (
+          <p>Se reparten como {nombreDeGrupo(unicoGrupo)}: es el único grupo de gasto del período.</p>
+        )}
+        {progreso !== null && (
+          <p role="status">
+            Agregando {progreso.hechas + 1} de {progreso.total}…
+          </p>
+        )}
+      </VentanaDeFormulario>
+    );
+  }
+
+  /** La ventana del descarte: el motivo y la confirmación. */
+  function ventanaDescartar(d: Detalle) {
+    const idMotivo = `${id}-motivo`;
+    return (
+      <VentanaDeFormulario titulo={DESCARTAR} textoEnviar={DESCARTAR} peligro alEnviar={() => descartar(d.liquidacion.id)} alCerrar={() => setVentana(null)}>
+        <p>El borrador queda guardado como descartado y sus gastos vuelven a estar disponibles.</p>
+        <label htmlFor={idMotivo}>Motivo para descartar el borrador</label>
+        <input id={idMotivo} data-foco maxLength={500} value={motivo} {...marcaDe(idMotivo, errores.motivo)}
+          onChange={(e) => {
+            setMotivo(e.target.value);
+            setErrores((actuales) => sinElDe(actuales, "motivo"));
+          }} />
+        <ErrorDeCampo idCampo={idMotivo} mensaje={errores.motivo} />
+      </VentanaDeFormulario>
+    );
+  }
+
+  /** La liquidación abierta, sola (LIQ-02): por tener tabla e impresión, como vista de la página. */
+  function vistaBorrador() {
+    const volver = (
+      <p className="no-imprimir">
+        <button type="button" className="secundario" disabled={enviando} onClick={() => volverALaLista()}>
+          Volver a la lista
+        </button>
+      </p>
+    );
+    if (fallaDetalle !== null)
+      return (
+        <>
+          {volver}
+          <section className="tarjeta" aria-label="Detalle de la liquidación">
+            <p className="aviso-error" role="alert">
+              No se pudo abrir esta liquidación. {fallaDetalle}
+            </p>
+            <Reintentar alReintentar={() => setVuelta((v) => v + 1)} />
+          </section>
+        </>
+      );
+    if (visto === null || simulacion === undefined)
+      return (
+        <>
+          {volver}
+          <p role="status">Abriendo la liquidación…</p>
+        </>
+      );
+    const borrador = visto.liquidacion.estado === "borrador";
+    const sinOrdenes = <p className="no-imprimir">No hay órdenes pagadas hasta el fin de {periodo(visto.liquidacion.periodo)} para agregar.</p>;
+    return (
+      <>
+        {volver}
+        <section className="tarjeta" aria-label={`Borrador de ${periodo(visto.liquidacion.periodo)}`}>
+          <h2>{tituloDeLiquidacion(visto.liquidacion.periodo, visto.liquidacion.estado, visto.liquidacion.version)}</h2>
+          {resultadoDelActo}
+
+          <div className="liquidacion__titulo-gastos">
+            <h3>Gastos</h3>
+            {borrador && ofrecibles.length > 0 && visto.grupos.length > 0 && (
+              <button type="button" className="secundario no-imprimir" disabled={enviando}
+                onClick={() => abrirVentana("agregar")}>
+                {AGREGAR_GASTOS}
+              </button>
+            )}
+          </div>
+          {visto.gastos.length === 0 ? (
+            // Un solo mensaje de vacío (LIQ-05): sin órdenes para ofrecer, ese lo dice todo.
+            borrador && ofrecibles.length === 0 ? sinOrdenes : <p>Todavía no hay gastos agregados.</p>
+          ) : (
+            <>
+              <ul className="versiones" aria-label="Gastos del borrador">
+                {visto.gastos.map((g) => (
+                  <li key={g.id}>
+                    {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} ({nombreDeGrupo(g.grupo)},
+                    pagada el {dia(g.pagada_el)}){" "}
+                    {borrador && (
+                      <button type="button" className="secundario peligro no-imprimir" disabled={enviando}
+                        aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
+                        onClick={() => void hacer({ tipo: "quitar", liquidacion: visto.liquidacion.id, gasto: g.id })}>
+                        Quitar
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {borrador && ofrecibles.length === 0 && sinOrdenes}
+            </>
+          )}
+          {borrador && ofrecibles.length > 0 && visto.grupos.length === 0 && (
+            <p className="no-imprimir">
+              Faltan los porcentajes de cada unidad para este período: sin ellos no se puede repartir. Los carga soporte.
+            </p>
+          )}
+
+          {/* Sin gastos no hay nada que repartir: la simulación no se muestra (LIQ-05). */}
+          {visto.gastos.length > 0 && (
+            <>
+              <h3>Simulación del reparto</h3>
+              {simulacion.bloqueo !== null ? (
+                <p className="aviso-error" role="alert">
+                  No se puede repartir. {simulacion.bloqueo}
+                </p>
+              ) : simulacion.unidades.length === 0 || moneda === null ? (
+                <p>Todavía no hay nada que repartir.</p>
+              ) : (
+                <div className="tabla-desplazable tabla-tarjetas">
+                  <table>
+                    <caption>
+                      Total {importe(simulacion.total_centavos, moneda)}, repartido por unidad
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Unidad</th>
+                        {grupos.map((g) => (
+                          <th key={g} scope="col">
+                            {nombreDeGrupo(g)}
+                          </th>
+                        ))}
+                        <th scope="col">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simulacion.unidades.map((u) => (
+                        <tr key={u.unidad_id}>
+                          <th scope="row">{u.designacion}</th>
+                          {grupos.map((g) => (
+                            <td key={g} data-etiqueta={nombreDeGrupo(g)}>{importe(u.por_grupo[g] ?? 0, moneda)}</td>
+                          ))}
+                          <td data-etiqueta="Total">{importe(u.total_centavos, moneda)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="acciones no-imprimir">
+            <button type="button" className="secundario" onClick={() => window.print()}>
+              Imprimir o guardar como PDF
+            </button>
+            {borrador && (
+              <button type="button" className="secundario peligro" disabled={enviando}
+                onClick={() => abrirVentana("descartar")}>
+                {DESCARTAR}
+              </button>
+            )}
+          </div>
+        </section>
+        {borrador && ventana === "agregar" && !sinQueAgregar && ventanaAgregar(visto)}
+        {borrador && ventana === "descartar" && ventanaDescartar(visto)}
+      </>
+    );
+  }
 
   return (
     <>
@@ -486,15 +809,15 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
-          acto={pendiente.acto}
+          acto="ver la liquidación"
           alVerificar={() => {
-            const { reintentar } = pendiente;
+            const { reintentar: repetir } = pendiente;
             setPendiente(null);
-            reintentar();
+            repetir();
           }}
           alCancelar={() => {
             setPendiente(null);
-            pendiente.alCancelar?.();
+            pendiente.alCancelar();
           }}
         />
       )}
@@ -514,262 +837,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               )}
             </FallaDeLectura>
           )}
-          {lectura.tipo === "ok" && (
-            <>
-              <p>Es un borrador para revisar los números: todavía no se aprueba ni se publica a los propietarios.</p>
-              <form className="formulario no-imprimir" onSubmit={preparar}>
-                <fieldset>
-                  <legend>Período</legend>
-                  <label htmlFor={`${id}-mes`}>Mes</label>
-                  <select id={`${id}-mes`} value={mes.slice(5, 7)} disabled={enviando}
-                    onChange={(e) => {
-                      const elegido = e.target.value;
-                      setMes((actual) => `${actual.slice(0, 4)}-${elegido}`);
-                    }}>
-                    {MESES.map((nombre, i) => (
-                      <option key={nombre} value={String(i + 1).padStart(2, "0")}>{nombre}</option>
-                    ))}
-                  </select>
-                  <label htmlFor={`${id}-anio`}>Año</label>
-                  <select id={`${id}-anio`} value={mes.slice(0, 4)} disabled={enviando}
-                    onChange={(e) => {
-                      const elegido = e.target.value;
-                      setMes((actual) => `${elegido}-${actual.slice(5, 7)}`);
-                    }}>
-                    {aniosOfrecidos().map((anio) => (
-                      <option key={anio} value={anio}>{anio}</option>
-                    ))}
-                  </select>
-                </fieldset>
-                <div className="acciones">
-                  <button type="submit" className={conBorrador ? "secundario" : undefined} disabled={enviando}>
-                    Abrir el borrador
-                  </button>
-                </div>
-              </form>
-
-              {enTrabajo.length === 0 ? (
-                <p className="tarjeta no-imprimir">
-                  {descartadas.length === 0 ? "Todavía no hay liquidaciones en este edificio." : "No hay borradores abiertos en este edificio."}
-                </p>
-              ) : (
-                // Cada fila entera abre el borrador debajo (comentario 21); la abierta queda marcada.
-                <ul className="filas-registro no-imprimir" aria-label="Liquidaciones">
-                  {enTrabajo.map(filaDe)}
-                </ul>
-              )}
-              {descartadas.length > 0 && (
-                <details className="no-imprimir">
-                  <summary>Ver descartados ({descartadas.length})</summary>
-                  <ul className="filas-registro" aria-label="Borradores descartados">
-                    {descartadas.map(filaDe)}
-                  </ul>
-                </details>
-              )}
-
-              {fallaDetalle !== null && (
-                <section className="tarjeta" aria-label="Detalle de la liquidación">
-                  <p className="aviso-error" role="alert">
-                    No se pudo abrir esta liquidación. {fallaDetalle}
-                  </p>
-                  <Reintentar alReintentar={() => setVuelta((v) => v + 1)}>
-                    <button type="button" className="secundario" onClick={volverALaLista}>
-                      Volver a la lista
-                    </button>
-                  </Reintentar>
-                </section>
-              )}
-
-              {detalle !== null && simulacion !== undefined && (
-                <section className="tarjeta" aria-label={`Borrador de ${periodo(detalle.liquidacion.periodo)}`}>
-                  <h2>
-                    {tituloDeLiquidacion(detalle.liquidacion.periodo, detalle.liquidacion.estado, detalle.liquidacion.version)}
-                  </h2>
-
-                  <h3>Gastos</h3>
-                  {detalle.gastos.length === 0 ? (
-                    <p>Todavía no hay gastos agregados.</p>
-                  ) : (
-                    <ul className="versiones" aria-label="Gastos del borrador">
-                      {detalle.gastos.map((g) => (
-                        <li key={g.id}>
-                          {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} ({nombreDeGrupo(g.grupo)},
-                          pagada el {dia(g.pagada_el)}){" "}
-                          {detalle.liquidacion.estado === "borrador" && (
-                            <button type="button" className="secundario peligro no-imprimir" disabled={enviando}
-                              aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
-                              onClick={() => hacer({ tipo: "quitar", liquidacion: detalle.liquidacion.id, gasto: g.id })}>
-                              Quitar
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {detalle.liquidacion.estado === "borrador" &&
-                    (ofrecibles.length === 0 ? (
-                      <p className="no-imprimir">No hay órdenes pagadas hasta el fin de {periodo(detalle.liquidacion.periodo)} para agregar.</p>
-                    ) : detalle.grupos.length === 0 ? (
-                      <p className="no-imprimir">
-                        Faltan los porcentajes de cada unidad para este período: sin ellos no se puede repartir. Los carga soporte.
-                      </p>
-                    ) : (
-                      <form className="formulario no-imprimir" onSubmit={(e) => agregar(e, detalle.liquidacion.id, aAgregar, grupoDeGasto)}>
-                        <fieldset>
-                          <legend>Órdenes pagadas para agregar</legend>
-                          {ofrecibles.length > 1 && (
-                            <label className="opcion">
-                              <input type="checkbox" checked={todas} disabled={enviando}
-                                onChange={() => setElegidas(todas ? [] : ofrecibles.map((o) => o.orden_id))} />
-                              Elegir las {ofrecibles.length}
-                            </label>
-                          )}
-                          <ul className="tildes-pago" aria-label="Órdenes pagadas">
-                            {ofrecibles.map((o) => (
-                              <li key={o.orden_id}>
-                                <label className="tilde-pago">
-                                  <input type="checkbox" checked={elegidas.includes(o.orden_id)} disabled={enviando}
-                                    onChange={() => alternar(o.orden_id)} />
-                                  <span className="tilde-pago__datos">
-                                    <span className="fila-pago__arriba">
-                                      <strong>{o.razon_social}</strong>
-                                      <span className="fila-pago__importe">{importe(o.importe_centavos, o.moneda)}</span>
-                                    </span>
-                                    <span>
-                                      {o.concepto}, pagada el {dia(o.pagada_el)}
-                                    </span>
-                                  </span>
-                                </label>
-                              </li>
-                            ))}
-                          </ul>
-                        </fieldset>
-                        {unicoGrupo === null ? (
-                          <>
-                            <label htmlFor={`${id}-grupo`}>Grupo de gasto</label>
-                            <select id={`${id}-grupo`} required value={grupo} disabled={enviando}
-                              onChange={(e) => setGrupo(e.target.value)}>
-                              <option value="">Elegir un grupo</option>
-                              {detalle.grupos.map((g) => (
-                                <option key={g.grupo} value={g.grupo}>
-                                  {nombreDeGrupo(g.grupo)}
-                                </option>
-                              ))}
-                            </select>
-                          </>
-                        ) : (
-                          <p>Se reparten como {nombreDeGrupo(unicoGrupo)}: es el único grupo de gasto del período.</p>
-                        )}
-                        {progreso !== null && (
-                          <p role="status">
-                            Agregando {progreso.hechas + 1} de {progreso.total}…
-                          </p>
-                        )}
-                        <div className="acciones">
-                          <button type="submit" disabled={enviando || aAgregar.length === 0 || grupoDeGasto === ""}>
-                            {aAgregar.length > 1 ? `Agregar ${aAgregar.length} gastos` : "Agregar el gasto"}
-                          </button>
-                        </div>
-                      </form>
-                    ))}
-
-                  <h3>Simulación del reparto</h3>
-                  {simulacion.bloqueo !== null ? (
-                    <p className="aviso-error" role="alert">
-                      No se puede repartir. {simulacion.bloqueo}
-                    </p>
-                  ) : simulacion.unidades.length === 0 || moneda === null ? (
-                    <p>Sin gastos no hay nada que repartir.</p>
-                  ) : (
-                    <div className="tabla-desplazable tabla-tarjetas">
-                      <table>
-                        <caption>
-                          Total {importe(simulacion.total_centavos, moneda)}, repartido por unidad
-                        </caption>
-                        <thead>
-                          <tr>
-                            <th scope="col">Unidad</th>
-                            {grupos.map((g) => (
-                              <th key={g} scope="col">
-                                {nombreDeGrupo(g)}
-                              </th>
-                            ))}
-                            <th scope="col">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {simulacion.unidades.map((u) => (
-                            <tr key={u.unidad_id}>
-                              <th scope="row">{u.designacion}</th>
-                              {grupos.map((g) => (
-                                <td key={g} data-etiqueta={nombreDeGrupo(g)}>{importe(u.por_grupo[g] ?? 0, moneda)}</td>
-                              ))}
-                              <td data-etiqueta="Total">{importe(u.total_centavos, moneda)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* Donde termina el trabajo, qué hacer con él (AC-49). */}
-                  <p>
-                    Esto sirve para controlar los números antes de liquidar por el sistema de siempre. La aprobación y la publicación llegan más
-                    adelante.
-                  </p>
-                  <div className="acciones no-imprimir">
-                    <button type="button" className="secundario" onClick={() => window.print()}>
-                      Imprimir o guardar como PDF
-                    </button>
-                    {detalle.liquidacion.estado === "borrador" && (
-                      <button type="button" className="secundario peligro" disabled={enviando}
-                        onClick={() => {
-                          setFallaDescarte(null);
-                          setDescartando(true);
-                        }}>
-                        Descartar el borrador
-                      </button>
-                    )}
-                  </div>
-                  {/* La hoja sigue abierta si la recarga muestra que el borrador ya no admite descartarse
-                      (lo descartó otra persona): dice por qué y solo ofrece cerrarla. */}
-                  {descartando && (
-                    <Hoja titulo="Descartar el borrador" alEscapar={() => setDescartando(false)}>
-                      <form className="formulario" onSubmit={(e) => descartar(e, detalle.liquidacion.id)}>
-                        <AvisoPantalla aviso={fallaDescarte?.general === undefined ? null : { texto: fallaDescarte.general, ok: false }} />
-                        {detalle.liquidacion.estado === "borrador" && (
-                          <>
-                            <p>El borrador queda guardado como descartado y sus gastos vuelven a estar disponibles.</p>
-                            <label htmlFor={`${id}-motivo`}>Motivo para descartar el borrador</label>
-                            <input id={`${id}-motivo`} data-foco required maxLength={500} value={motivo} disabled={enviando}
-                              {...marcaDe(`${id}-motivo`, fallaDescarte?.motivo)}
-                              onChange={(e) => {
-                                setMotivo(e.target.value);
-                                setFallaDescarte((f) => (f?.motivo === undefined ? f : null));
-                              }} />
-                            <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={fallaDescarte?.motivo} />
-                          </>
-                        )}
-                        <div className="acciones">
-                          {detalle.liquidacion.estado === "borrador" && (
-                            <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
-                              Descartar el borrador
-                            </button>
-                          )}
-                          <button type="button" className="secundario" disabled={enviando} onClick={() => setDescartando(false)}>
-                            Cancelar
-                          </button>
-                        </div>
-                      </form>
-                    </Hoja>
-                  )}
-                </section>
-              )}
-            </>
-          )}
+          {lectura.tipo === "ok" && (abierta === null ? vistaLista() : vistaBorrador())}
         </>
       )}
+      {codigo.hoja}
     </>
   );
 }

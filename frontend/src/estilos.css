@@ -2050,3 +2050,18 @@ p.persona-cabecera {
     background: var(--accent-tint);
   }
 }
+
+/* Fricción 17-11, tanda 8 */
+
+/* Liquidación: «Agregar gastos» va junto al título «Gastos» (LIQ-03). */
+.liquidacion__titulo-gastos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.liquidacion__titulo-gastos h3 {
+  margin: 0;
+}
