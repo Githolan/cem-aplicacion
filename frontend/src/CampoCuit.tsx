@@ -26,12 +26,14 @@ type Props = {
   id: string;
   valor: string;
   deshabilitado: boolean;
+  /** El primer campo de una ventana (`VentanaDeFormulario`): el foco entra acá al abrirla. */
+  foco?: boolean;
   /** Lo que dijo la API del CUIT (inválido o repetido), si lo marcó (tanda 3). */
   error?: string | undefined;
   alCambiar: (valor: string) => void;
 };
 
-export function CampoCuit({ id, valor, deshabilitado, error, alCambiar }: Props) {
+export function CampoCuit({ id, valor, deshabilitado, foco = false, error, alCambiar }: Props) {
   const conError = cuitConError(valor);
   // El verificador mal se dice al escribir; si no, lo que dijo la API al guardar.
   const mensaje = conError ? CUIT_INVALIDO : error;
@@ -40,6 +42,7 @@ export function CampoCuit({ id, valor, deshabilitado, error, alCambiar }: Props)
       <label htmlFor={id}>CUIT (11 números, sin guiones)</label>
       <input
         id={id}
+        data-foco={foco ? true : undefined}
         type="text"
         inputMode="numeric"
         autoComplete="off"

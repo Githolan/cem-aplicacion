@@ -327,3 +327,14 @@ export function mensajeDeError(estado: number, codigo: string | undefined): stri
 export function mensajeDeActo(estado: number, error: unknown): string {
   return motivoDeSeparacion(error) ?? mensajeDeError(estado, codigoDe(error));
 }
+
+// Las tres pantallas de proveedores (MEN-05, informe de fricción, tanda 4): el menú tiene una sola
+// entrada «Proveedores», que lleva a la que la persona alcanza; desde ahí se abren las otras.
+export const RUTA_PROVEEDORES = "/egresos/proveedores";
+export const RUTA_CONSULTA_PROVEEDORES = "/proveedores";
+export const RUTA_AUTORIZACIONES_PROVEEDORES = "/proveedores/quien-los-ve";
+export const TITULO_AUTORIZACIONES_PROVEEDORES = "Quién ve los proveedores";
+
+/** El estado del proveedor, solo si cambia lo que se puede hacer con él (PRV-04, CPR-02): «Activo» es
+ * lo esperado y no se dice. */
+export const estadoSiNoEsActivo = (estado: EstadoProveedor): string | null => (estado === "activo" ? null : TEXTO_ESTADO_PROVEEDOR[estado]);

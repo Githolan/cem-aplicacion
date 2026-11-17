@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
@@ -7,13 +8,21 @@ import type { components } from "../api/tipos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { RUTA_INICIO } from "../enlace";
 import { REQUISITOS, usePuede } from "../permisos";
-import { type Aviso, ESTADO, mensajeDeError, sinLaFalla, sinPisarLoHecho, TEXTO_ESTADO_PROVEEDOR } from "./comun";
-import { DocumentacionProveedor } from "./DocumentacionProveedor";
+import {
+  type Aviso,
+  ESTADO,
+  estadoSiNoEsActivo,
+  mensajeDeError,
+  RUTA_AUTORIZACIONES_PROVEEDORES,
+  RUTA_CONSULTA_PROVEEDORES,
+  sinLaFalla,
+  sinPisarLoHecho,
+  TITULO_AUTORIZACIONES_PROVEEDORES,
+} from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
-import { ExigenciaLegal } from "./ExigenciaLegal";
+import { datosDelProveedor, FichaDelProveedor } from "./FichaDelProveedor";
 import { MARCA_FALTANTE, MARCA_POR_VENCER, MARCA_VENCIDA } from "./Proveedores";
-import { SalteoDocumentacion } from "./SalteoDocumentacion";
 import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 
 // Página /proveedores: la consulta de los proveedores y sus seguros para quien no los gestiona
@@ -24,11 +33,15 @@ import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 // cambiar nada. Lo decide la API con `proveedores.ver`, y la base repite la regla. La excepción
 // es el salteo por urgencia del bloqueo por documentación legal (app 0106), para quien la
 // configuración del edificio deja saltear (por defecto, el Consejo).
+//
+// Informe de fricción, tanda 4: la ficha es la misma de la gestión, en una hoja sobre la lista
+// (CPR-01), sin lo que no tiene valor ni el estado «Activo» (CPR-02). «Quién ve los proveedores» se
+// abre desde acá (MEN-05).
 
 type ProveedorConsulta = components["schemas"]["ProveedorConsulta"];
 type Ficha = components["schemas"]["FichaProveedorConsulta"];
 
-export const RUTA_CONSULTA_PROVEEDORES = "/proveedores";
+export { RUTA_CONSULTA_PROVEEDORES };
 export const TITULO_CONSULTA_PROVEEDORES = "Proveedores y sus seguros";
 
 type Lectura =
@@ -48,12 +61,13 @@ export function ConsultaProveedores() {
 }
 
 function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
-  const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
-  const { abrir: abrirFila, cerrar: cerrarFila, refFila } = useFichas<string>();
+  /** Los salteos que registró esta persona desde que abrió la pantalla (comentario 40). */
+  const [salteosPropios, setSalteosPropios] = useState<ReadonlySet<number>>(new Set());
+  const fichas = useFichas<string>();
   const puede = usePuede(consorcio);
 
   useEffect(() => {
@@ -92,9 +106,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
 
-  /** `aviso`: lo que se dice al volver a leer la ficha después de un acto (el salteo). */
-  function verFicha(p: ProveedorConsulta, aviso: Aviso | null = null) {
-    setAviso(aviso);
+  /** Abre la ficha, o la vuelve a leer después de un salteo. */
+  function verFicha(p: { id: string }) {
+    setAviso(null);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/consulta-proveedores/{proveedor_id}", {
         params: { path: { consorcio_id: consorcio, proveedor_id: p.id } },
@@ -103,7 +117,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
         exigirSesion(response);
         if (data !== undefined) {
           setFicha(data);
-          abrirFila(p.id);
+          fichas.abrir(p.id);
         } else setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
@@ -114,6 +128,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     setLectura({ tipo: "cargando" });
     setVuelta((v) => v + 1);
   }
+
+  const enFicha = ficha !== null && fichas.abierta === ficha.proveedor.id ? ficha : null;
 
   return (
     <>
@@ -126,10 +142,17 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
       {pantalla.tipo === "lista" && (
         <>
+          {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú. */}
+          {puede("proveedores.autorizar") && (
+            <p>
+              <Link to={RUTA_AUTORIZACIONES_PROVEEDORES} state={{ consorcio }} className="enlace-suelto">
+                {TITULO_AUTORIZACIONES_PROVEEDORES}
+              </Link>
+            </p>
+          )}
           {lectura.tipo === "cargando" && <p role="status">Cargando los proveedores…</p>}
           {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
           {lectura.tipo === "ok" &&
-            ficha === null &&
             (lectura.proveedores.length === 0 ? (
               <p className="tarjeta">El edificio no tiene proveedores cargados.</p>
             ) : (
@@ -138,11 +161,12 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   <li key={p.id}>
                     <FilaDeRegistro
                       titulo={p.razon_social}
-                      refFila={refFila(p.id)}
+                      refFila={fichas.refFila(p.id)}
+                      abierta={fichas.abierta === p.id}
                       alAbrir={() => verFicha(p)}
                       resumen={[
                         p.rubro,
-                        TEXTO_ESTADO_PROVEEDOR[p.estado],
+                        estadoSiNoEsActivo(p.estado),
                         lectura.vencida.has(p.id) ? MARCA_VENCIDA : lectura.porVencer.has(p.id) ? MARCA_POR_VENCER : null,
                         lectura.faltante.has(p.id) ? MARCA_FALTANTE : null,
                       ]
@@ -154,77 +178,26 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               </ul>
             ))}
 
-          {ficha !== null && (
-            <section className="tarjeta" aria-labelledby={`${id}-ficha`}>
-              <h2 id={`${id}-ficha`}>{ficha.proveedor.razon_social}</h2>
-              <dl className="detalles">
-                <dt>CUIT</dt>
-                <dd>{ficha.proveedor.cuit ?? "Sin CUIT"}</dd>
-                <dt>Rubro</dt>
-                <dd>{ficha.proveedor.rubro ?? "Sin rubro"}</dd>
-                {(
-                  [
-                    ["Contacto", ficha.proveedor.contacto],
-                    ["Teléfono", ficha.proveedor.telefono],
-                    ["WhatsApp", ficha.proveedor.whatsapp],
-                    ["Correo", ficha.proveedor.correo],
-                    ["Domicilio", ficha.proveedor.domicilio],
-                  ] as const
-                )
-                  .filter(([, valor]) => valor !== null)
-                  .map(([nombre, valor]) => (
-                    <Fragment key={nombre}>
-                      <dt>{nombre}</dt>
-                      <dd>{valor}</dd>
-                    </Fragment>
-                  ))}
-                <dt>Estado</dt>
-                <dd>{TEXTO_ESTADO_PROVEEDOR[ficha.proveedor.estado]}</dd>
-              </dl>
-              <ExigenciaLegal
-                consorcio={consorcio}
-                proveedorId={ficha.proveedor.id}
-                rubros={ficha.rubros_legales}
-                faltantes={ficha.faltantes}
-                requisitos={ficha.requisitos}
-                modo={ficha.configuracion.modo_exigencia}
-                puedeCambiar={false}
-                aEntrar={aEntrar}
-                alCambiar={() => undefined}
-              />
-              <SalteoDocumentacion
-                consorcio={consorcio}
-                proveedorId={ficha.proveedor.id}
-                salteos={ficha.salteos}
-                modo={ficha.configuracion.modo_exigencia}
-                hayFaltantes={ficha.faltantes.length > 0}
-                puedeSaltear={puede("egresos.saltear_documentacion")}
-                aEntrar={aEntrar}
-                alCambiar={(texto, ok) => verFicha(ficha.proveedor, { texto, ok })}
-              />
-              <DocumentacionProveedor
-                consorcio={consorcio}
-                proveedor={ficha.proveedor}
-                documentacion={ficha.documentacion}
-                puedeCargar={false}
-                requisitos={ficha.requisitos}
-                admiteNoVence={false}
-                aEntrar={aEntrar}
-                alCambiar={() => undefined}
-              />
-              <div className="acciones">
-                <button
-                  type="button"
-                  className="secundario"
-                  onClick={() => {
-                    setFicha(null);
-                    cerrarFila();
-                  }}
-                >
-                  Volver a la lista
-                </button>
-              </div>
-            </section>
+          {enFicha !== null && (
+            <FichaDelProveedor
+              consorcio={consorcio}
+              ficha={enFicha}
+              datos={datosDelProveedor(enFicha.proveedor)}
+              puedeCambiar={false}
+              puedeCargar={false}
+              puedeSaltear={puede("egresos.saltear_documentacion")}
+              salteosPropios={salteosPropios}
+              alRegistrarSalteo={(numero) => setSalteosPropios((propios) => new Set([...propios, numero]))}
+              aEntrar={aEntrar}
+              alCambiar={() => {
+                verFicha(enFicha.proveedor);
+                setVuelta((v) => v + 1);
+              }}
+              alCerrar={() => {
+                setFicha(null);
+                fichas.cerrar();
+              }}
+            />
           )}
         </>
       )}

@@ -2050,3 +2050,13 @@ p.persona-cabecera {
     background: var(--accent-tint);
   }
 }
+
+/* Fricción 17-11, tanda 4 */
+/* Arriba de la lista de proveedores: el alta y los enlaces a las otras pantallas de proveedores (MEN-05). */
+.acciones-de-proveedores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0 0 1rem;
+}
