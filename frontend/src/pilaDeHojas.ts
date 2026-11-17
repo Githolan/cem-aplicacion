@@ -32,9 +32,14 @@ function repartirInerte() {
   });
 }
 
-/** Suma la hoja y devuelve cómo sacarla. El foco solo se mueve si cambia la hoja de arriba. */
+/**
+ * Suma la hoja y devuelve cómo sacarla. El foco solo se mueve si cambia la hoja de arriba. Al sacar
+ * la de arriba, el foco vuelve a lo que lo tenía en la de abajo (el botón de la acción que abrió una
+ * ventana sobre su ficha), si sigue ahí.
+ */
 export function abrirHoja(hoja: HojaAbierta): () => void {
-  if (pila.length === 0) origen = document.activeElement;
+  const previo = document.activeElement;
+  if (pila.length === 0) origen = previo;
   pila.push(hoja);
   repartirInerte();
   if (deArriba() === hoja) hoja.enfocar();
@@ -48,6 +53,9 @@ export function abrirHoja(hoja: HojaAbierta): () => void {
     if (siguiente === undefined) {
       if (origen instanceof HTMLElement) origen.focus();
       origen = null;
-    } else if (estabaArriba) siguiente.enfocar();
+    } else if (estabaArriba) {
+      if (previo instanceof HTMLElement && previo.isConnected && siguiente.fondo.contains(previo)) previo.focus();
+      else siguiente.enfocar();
+    }
   };
 }

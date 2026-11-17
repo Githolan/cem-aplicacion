@@ -86,6 +86,22 @@ describe("FilaDeRegistro y FichaDeRegistro", () => {
     expect(ana.getAttribute("aria-current")).toBeNull();
   });
 
+  it("desde otra pantalla: la fila lleva un estado corto, en su nombre y en su etiqueta (tanda 1)", () => {
+    render(
+      <ul className="filas-registro">
+        <li>
+          <FilaDeRegistro titulo="Plomería Sur" resumen="Plomero" estado="Vence pronto" alAbrir={() => undefined} />
+        </li>
+      </ul>,
+    );
+    const plomeria = screen.getByRole("button", { name: "Plomería Sur Vence pronto Plomero" });
+    expect(plomeria.querySelector(".fila-registro__estado")?.textContent).toBe("Vence pronto");
+    cleanup();
+    // Control: sin estado, no hay etiqueta.
+    render(<FilaDeRegistro titulo="Plomería Sur" resumen="Plomero" alAbrir={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Plomería Sur Plomero" }).querySelector(".fila-registro__estado")).toBeNull();
+  });
+
   it("tocar la fila abre la ficha con todos sus datos, marca la fila y lleva el foco adentro", () => {
     render(<Lista />);
     const ana = fila("Ana Ruiz");

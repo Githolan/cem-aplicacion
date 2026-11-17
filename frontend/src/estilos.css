@@ -1965,3 +1965,88 @@ button.fila-registro:disabled {
   background: var(--success-bg);
   color: var(--success-text);
 }
+
+/* Fricción 17-11, tanda 1: piezas compartidas (VentanaDeFormulario, FilaDeRegistro con estado,
+   ComandoNoDisponible, ResultadoDelActo) y el menú (MEN-02, MEN-03, MEN-06). */
+
+/* La ventana para cargar datos: los campos van en un fieldset sin marco, que se apaga entero
+   mientras viaja el pedido. */
+.ventana-formulario {
+  max-width: none;
+}
+
+.ventana-formulario__campos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* El estado corto de una fila, a la vista sin abrirla: una etiqueta chica junto al título. */
+.fila-registro__estado {
+  justify-self: start;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--pending-bg);
+  color: var(--pending-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+/* En lugar de un comando que no se puede usar: qué falta y dónde se resuelve, en una línea. */
+.comando-no-disponible {
+  margin: 0;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.resultado-del-acto > p {
+  margin: 0 0 var(--space-2);
+}
+
+/* El nombre de la cabecera ya no es un enlace (MEN-03). */
+p.persona-cabecera {
+  margin: 0;
+}
+
+/* Mientras se consulta qué alcanza la persona, la barra del teléfono conserva su alto (MEN-06). */
+.navegacion[aria-busy="true"] {
+  min-height: var(--alto-pestanas);
+}
+
+/* Si no se pudo leer el menú, lo dice el propio menú (MEN-06). En el teléfono, a todo el ancho
+   justo arriba de las pestañas. */
+.navegacion__falla {
+  position: absolute;
+  inset: auto 0 100%;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--divider);
+  background: var(--surface-raised);
+  font-size: 0.875rem;
+}
+
+/* En el teléfono y la tablet, una pantalla de Gestión marca «Inicio», desde donde se llega (MEN-02). */
+@media (max-width: 1024px) {
+  .navegacion__item--desde-inicio {
+    color: var(--accent);
+  }
+}
+
+@media (min-width: 769px) {
+  .navegacion__falla {
+    position: static;
+    padding: 0;
+    border-top: 0;
+    background: none;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .navegacion__item--desde-inicio {
+    background: var(--accent-tint);
+  }
+}
