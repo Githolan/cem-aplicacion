@@ -148,6 +148,9 @@ async function abrirFicha(titulo: string): Promise<HTMLElement> {
   return screen.getByRole("dialog", { name: titulo });
 }
 
+/** CON-04: el botón que envía la ventana de agregar. */
+const enviarAgregar = () => within(screen.getByRole("dialog", { name: "Agregar un contacto" })).getByRole("button", { name: "Agregar" });
+
 function escribir(etiqueta: string | RegExp, valor: string) {
   fireEvent.change(screen.getByLabelText(etiqueta), { target: { value: valor } });
 }
@@ -170,15 +173,22 @@ describe("gestión de los contactos en /contactos", () => {
     const agregar = await screen.findByRole("button", { name: "Agregar un contacto" });
     expect(screen.getByRole("heading", { level: 1, name: "Contactos de emergencia" })).toBeTruthy();
     // Va antes de la lista (G-60).
-    const lista = screen.getByRole("list", { name: "Contactos de emergencia" });
+    const lista = await screen.findByRole("list", { name: "Contactos de emergencia" });
     expect(agregar.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Una sola lista: la de gestión reemplaza a la general, no se suma.
     expect(screen.getAllByRole("list", { name: "Contactos de emergencia" })).toHaveLength(1);
     // El teléfono, a un toque al lado de la fila, como para todos.
     expect(screen.getAllByRole("link", { name: "0800-555-1234" })[0]?.getAttribute("href")).toBe("tel:08005551234");
     fireEvent.click(agregar);
-    expect(await screen.findByRole("heading", { name: "Agregar un contacto" })).toBeTruthy();
-    expect(screen.getByLabelText("Nombre")).toBeTruthy();
+    // CON-04: el alta se abre en su ventana, con solo sus campos y sus dos botones.
+    const ventana = await screen.findByRole("dialog", { name: "Agregar un contacto" });
+    expect(within(ventana).getByLabelText("Nombre")).toBeTruthy();
+    expect(within(ventana).getAllByRole("button").map((b) => b.textContent)).toEqual(["Agregar", "Cancelar"]);
+    // CON-08: sin ayudas fijas; las etiquetas, cortas.
+    expect(within(ventana).queryByText(/^Sin teléfonos ni correos/)).toBeNull();
+    expect(within(ventana).queryByText(/^Solo números de empresas/)).toBeNull();
+    expect(within(ventana).getByLabelText("Desde (opcional)")).toBeTruthy();
+    expect(within(within(ventana).getByLabelText("¿De quién es el número?")).getByRole("option", { name: "Profesional" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Contactos de emergencia" })).toBeTruthy();
   });
 
@@ -254,7 +264,6 @@ describe("gestión de los contactos en /contactos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("button", { name: "Marcar como comprobado" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Lo comprobé" }));
     expect(await screen.findByText("Listo: quedó la constancia de que el contacto Plomería Rápida se comprobó.")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Contactos de emergencia" })).toBeTruthy();
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1);
@@ -267,6 +276,31 @@ describe("gestión de los contactos en /contactos", () => {
     expect(within(ficha).getByRole("button", { name: "Señalar un error" })).toBeTruthy();
     expect(screen.queryByLabelText("Motivo")).toBeNull();
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(0);
+  });
+
+  it("CON-06: «Marcar como comprobado» se manda con su botón, sin un paso intermedio", async () => {
+    const simulado = conLista({ [`POST ${BASE}/${K1}/verificar`]: () => Response.json({ id: K1 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("button", { name: "Marcar como comprobado" }));
+    // Ninguna ventana con «Lo comprobé»: el pedido sale con el toque.
+    expect(screen.queryByRole("dialog", { name: "Dejar constancia de la comprobación" })).toBeNull();
+    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1));
+    const aviso = await screen.findByText("Listo: quedó la constancia de que el contacto Plomería Rápida se comprobó.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("CON-06: si comprobar se rechaza, el motivo queda en la ficha, que sigue abierta", async () => {
+    vi.stubGlobal("fetch", conLista({ [`POST ${BASE}/${K1}/verificar`]: () => error("sin_permiso", 403) }));
+    abrir();
+    const ficha = await abrirFicha("Emergencias: Plomería Rápida");
+    fireEvent.click(within(ficha).getByRole("button", { name: "Marcar como comprobado" }));
+    expect((await within(ficha).findByRole("alert")).textContent).toMatch(/^Esta cuenta no tiene permiso para gestionar los contactos/);
+    expect(screen.getByRole("dialog", { name: "Emergencias: Plomería Rápida" })).toBeTruthy();
+    // Control: otro acto se lleva el rechazo.
+    fireEvent.click(within(ficha).getByRole("button", { name: "Señalar un error" }));
+    expect(within(ficha).queryByRole("alert")).toBeNull();
   });
 
   it("G-54: un contacto ya señalado no ofrece «Señalar un error»; uno sin señalar, sí", async () => {
@@ -287,14 +321,17 @@ describe("gestión de los contactos en /contactos", () => {
           Response.json({ elementos: [contacto(K1, "Plomería Rápida", { verificado_en, observado, verificado_por: verificado_en === null ? null : P1 })] }),
       });
 
-    it("comprobado hace 2 meses: no lo ofrece y dice cuándo se comprobó", async () => {
+    it("comprobado hace 2 meses: no lo ofrece, y la fecha va una sola vez", async () => {
       const cuando = haceMeses(2);
       vi.stubGlobal("fetch", conComprobacion(cuando));
       abrir();
       const ficha = await abrirFicha("Emergencias: Plomería Rápida");
       expect(within(ficha).queryByRole("button", { name: "Marcar como comprobado" })).toBeNull();
-      const fecha = new Intl.DateTimeFormat("es-AR", { dateStyle: "long" }).format(new Date(cuando));
-      expect(within(ficha).getByText(`Comprobado el ${fecha}.`)).toBeTruthy();
+      // CON-07: la fecha la dice una sola vez «Última comprobación»; no hay otro «Comprobado el …».
+      expect(within(ficha).getByText("Última comprobación")).toBeTruthy();
+      expect(within(ficha).queryByText(/^Comprobado el /)).toBeNull();
+      expect(within(ficha).queryByText("Última modificación")).toBeNull();
+      expect(cuando).toBeTruthy();
       // Control: los demás actos siguen.
       expect(within(ficha).getByRole("button", { name: "Corregir" })).toBeTruthy();
       expect(within(ficha).getByRole("button", { name: "Señalar un error" })).toBeTruthy();
@@ -358,7 +395,7 @@ describe("gestión de los contactos en /contactos", () => {
     fireEvent.change(screen.getByLabelText("Función"), { target: { value: "aseguradora" } });
     escribir("Nombre", "Seguros del Plata");
     escribir(/^Teléfono/, "0810-222-3333");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
     await screen.findByText("Listo: el contacto Seguros del Plata quedó agregado.");
     expect(pedidos(simulado, "POST", BASE2)).toHaveLength(1);
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
@@ -378,7 +415,6 @@ describe("gestión de los contactos en /contactos", () => {
     );
     abrir();
     fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("button", { name: "Marcar como comprobado" }));
-    fireEvent.click(screen.getByRole("button", { name: "Lo comprobé" }));
     const edificio = screen.getByLabelText("Edificio") as HTMLSelectElement;
     await waitFor(() => expect(edificio.disabled).toBe(true));
     soltar();
@@ -435,8 +471,9 @@ describe("gestión de los contactos en /contactos", () => {
   it("sin conexión al pedir la lista de gestión lo dice, deja la lista general sin actos y el botón para agregar", async () => {
     vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => Promise.reject(new TypeError("Failed to fetch")) }));
     abrir();
-    expect(await screen.findByText("No se pudo consultar la lista para gestionar los contactos.")).toBeTruthy();
-    expect(screen.getByText(SIN_CONEXION)).toBeTruthy();
+    expect(await screen.findByText(/^No se pudo consultar la lista para gestionar los contactos\./)).toBeTruthy();
+    // CON-10: el motivo, una sola vez, junto al botón.
+    expect(screen.getAllByText((_, e) => e?.tagName === "P" && (e.textContent ?? "").includes(SIN_CONEXION))).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
     // Son teléfonos de emergencia: la lista general sigue a la vista, y su ficha es solo de lectura.
     const ficha = await abrirFicha("Emergencias: Plomería Rápida");
@@ -458,12 +495,12 @@ describe("gestión de los contactos en /contactos", () => {
     escribir("Nombre", "Bomberos");
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    await waitFor(() => expect(screen.queryByText("No se pudo consultar la lista para gestionar los contactos.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/^No se pudo consultar la lista para gestionar los contactos\./)).toBeNull());
     await filaDe("Emergencias: Plomería Rápida");
     // El mismo campo: el formulario no se desarmó mientras llegaba la lista.
     expect(screen.getByLabelText("Nombre")).toBe(nombre);
     expect(nombre.value).toBe("Bomberos");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
     expect(await screen.findByText("Listo: el contacto Bomberos quedó agregado.")).toBeTruthy();
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
   });
@@ -475,10 +512,10 @@ describe("gestión de los contactos en /contactos", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText("No se pudo consultar la lista para gestionar los contactos.")).toBeTruthy();
+    expect(await screen.findByText(/^No se pudo consultar la lista para gestionar los contactos\./)).toBeTruthy();
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    await waitFor(() => expect(screen.queryByText("No se pudo consultar la lista para gestionar los contactos.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/^No se pudo consultar la lista para gestionar los contactos\./)).toBeNull());
     expect(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("button", { name: "Corregir" })).toBeTruthy();
     expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2);
     expect(screen.queryByText(SIN_CONEXION)).toBeNull();
@@ -506,7 +543,7 @@ describe("gestión de los contactos en /contactos", () => {
     fireEvent.change(screen.getByLabelText("Función"), { target: { value: "aseguradora" } });
     escribir("Nombre", "  Seguros del Plata  ");
     escribir(/^Teléfono/, "0810-222-3333");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
 
     const aviso = await screen.findByText("Listo: el contacto Seguros del Plata quedó agregado.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
@@ -541,7 +578,7 @@ describe("gestión de los contactos en /contactos", () => {
     expect(screen.getByLabelText(/^Teléfono/).hasAttribute("required")).toBe(false);
     escribir("Nombre", "Bomberos");
     escribir(/^Teléfono/, "100");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
     await screen.findByText("Listo: el contacto Bomberos quedó agregado.");
     const cuerpo = (await pedidos(simulado, "POST", BASE)[0]?.json()) as Record<string, unknown>;
     expect([cuerpo.naturaleza, cuerpo.consentimiento_referencia]).toEqual(["organismo", null]);
@@ -607,19 +644,20 @@ describe("gestión de los contactos en /contactos", () => {
     fireEvent.change(screen.getByLabelText("Función"), { target: { value: "aseguradora" } });
     escribir("Nombre", "Seguros del Plata");
     escribir(/^Teléfono/, "0810-222-3333");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
     const fila = await screen.findByRole("button", { name: /Encargado\/a: Marta Ruiz/ });
     await waitFor(() => expect((fila as HTMLButtonElement).disabled).toBe(true));
     fireEvent.click(fila);
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "Agregar el contacto" })).toBeTruthy();
+    // Solo la ventana de agregar, que sigue abierta mientras viaja el pedido: ninguna ficha.
+    expect(screen.queryByRole("dialog", { name: "Encargado/a: Marta Ruiz" })).toBeNull();
+    expect(enviarAgregar()).toBeTruthy();
     soltar();
     await screen.findByText("Listo: el contacto Seguros del Plata quedó agregado.");
     // Control: terminado el pedido, la fila vuelve a abrir la ficha.
     expect(await abrirFicha("Encargado/a: Marta Ruiz")).toBeTruthy();
   });
 
-  it("después de un cambio, la lista vieja no se puede usar hasta que llega la nueva", async () => {
+  it("CON-09: después de un cambio, la lista vieja queda a la vista pero no se puede usar hasta que llega la nueva", async () => {
     let soltar: () => void = () => undefined;
     let vueltas = 0;
     const simulado = conLista({
@@ -640,12 +678,19 @@ describe("gestión de los contactos en /contactos", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
     await screen.findByText("Listo: el contacto Marta Ruiz quedó corregido.");
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    // Ni la ficha ni las filas: nada de la lista vieja queda a mano.
+    // La lista vieja queda a la vista, sin «Consultando…», pero sus filas no abren la ficha.
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryAllByRole("button", { name: "Corregir" })).toHaveLength(0);
-    expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
-    expect(screen.getByText("Consultando…")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Contactos de emergencia" })).toBeTruthy();
+    expect(screen.queryByText("Consultando…")).toBeNull();
+    const fila = await filaDe("Encargado/a: Marta Ruiz");
+    expect((fila as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(fila);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // «Agregar un contacto» sigue en su lugar.
+    expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
     soltar();
+    await waitFor(() => expect((fila as HTMLButtonElement).disabled).toBe(false));
     // Control: con la lista nueva, las filas vuelven y la ficha ofrece corregir otra vez.
     expect(within(await abrirFicha("Encargado/a: Marta Ruiz")).getByRole("button", { name: "Corregir" })).toBeTruthy();
   });
@@ -718,7 +763,6 @@ describe("gestión de los contactos en /contactos", () => {
     abrir();
     let plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Marcar como comprobado" }));
-    fireEvent.click(screen.getByRole("button", { name: "Lo comprobé" }));
     await screen.findByText("Listo: quedó la constancia de que el contacto Plomería Rápida se comprobó.");
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1);
     plomeria = await abrirFicha("Emergencias: Plomería Rápida");
@@ -775,11 +819,11 @@ describe("gestión de los contactos en /contactos", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
     escribir("Nombre", "Cerrajería Ficticia");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
     // Control: el error se ve mientras el formulario está abierto.
     expect(await screen.findByText(/^Hay que corregir el nombre/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
-    expect(screen.queryByRole("button", { name: "Agregar el contacto" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Agregar un contacto" })).toBeNull();
     expect(screen.queryByText(/^Hay que corregir el nombre/)).toBeNull();
   });
 
@@ -801,14 +845,14 @@ describe("gestión de los contactos en /contactos", () => {
     respuesta = () => error("contacto_terminado", 409);
     escribir("Nombre", "Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    const aviso = await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, hay que agregar uno nuevo.");
+    // CON-04: lo escrito pasa a la ventana de agregar, que dice por qué.
+    const ventana = await screen.findByRole("dialog", { name: "Agregar un contacto" });
+    expect(within(ventana).getByRole("alert").textContent).toBe("Ese contacto ya no está vigente: para cambiarlo, hay que agregar uno nuevo.");
     expect(screen.queryByRole("button", { name: "Guardar la corrección" })).toBeNull();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    await waitFor(() => expect(document.activeElement).toBe(aviso));
     // Lo escrito sigue, ahora en Agregar, y sale como un pedido nuevo y no como otro PUT.
-    expect(screen.getByRole("heading", { level: 2, name: "Agregar un contacto" })).toBeTruthy();
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida SRL");
-    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    fireEvent.click(enviarAgregar());
     expect(await screen.findByText("Listo: el contacto Plomería Rápida SRL quedó agregado.")).toBeTruthy();
     const correcciones = pedidos(simulado, "PUT", `${BASE}/${K1}`);
     expect(correcciones).toHaveLength(2);
@@ -834,7 +878,7 @@ describe("gestión de los contactos en /contactos", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
     expect(await screen.findByText("Ese contacto ya no está en este edificio.")).toBeTruthy();
     expect((await screen.findByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida SRL");
-    expect(screen.getByRole("button", { name: "Agregar el contacto" })).toBeTruthy();
+    expect(enviarAgregar()).toBeTruthy();
   });
 
   it("control: otro 409 al corregir cierra el formulario, porque un PUT viejo desharía el cambio de otro", async () => {
@@ -930,9 +974,9 @@ describe("gestión de los contactos en /contactos", () => {
     expect(await faltas()).toEqual([]);
     const marta = await abrirFicha("Encargado/a: Marta Ruiz");
     expect(await faltas()).toEqual([]);
+    // «Marcar como comprobado» no abre nada (CON-06): se manda con su botón.
     for (const [boton, cierre] of [
       ["Corregir", "Cancelar"],
-      ["Marcar como comprobado", "Cancelar"],
       ["Retirar", "Cancelar"],
     ] as const) {
       fireEvent.click(within(marta).getByRole("button", { name: boton }));

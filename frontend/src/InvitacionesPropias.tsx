@@ -28,6 +28,11 @@ async function misInvitaciones(): Promise<readonly Invitacion[]> {
   return data.elementos;
 }
 
+/** La invitación en una línea: la unidad, el vínculo y quién invitó. */
+function resumen(invitacion: Invitacion): string {
+  return [invitacion.unidad, `como ${TIPOS[invitacion.tipo]}`, `invitó ${invitacion.invitada_por ?? "el equipo de Consorcio en Mano"}`].join(" · ");
+}
+
 export function useMisInvitaciones(activa: boolean) {
   return useQuery({ queryKey: ["mis-invitaciones"], queryFn: misInvitaciones, enabled: activa, ...SIN_CACHE });
 }
@@ -84,18 +89,17 @@ export function InvitacionesPropias({ consulta }: { consulta: ReturnType<typeof 
         </>
       )}
       {elementos.length > 0 && (
-        <ul className="sesiones">
+        // INV-05 / INI-11 (informe de fricción): una fila compacta por invitación, como en el Padrón, con
+        // «Aceptar la invitación» en la misma fila.
+        <ul className="filas-registro" aria-labelledby={`${id}-titulo`}>
           {elementos.map((invitacion) => (
-            <li key={invitacion.id}>
-              <h3 id={`${id}-${invitacion.id}`}>{invitacion.consorcio}</h3>
-              <dl className="detalles">
-                <dt>Unidad</dt>
-                <dd>{invitacion.unidad}</dd>
-                <dt>Como</dt>
-                <dd>{TIPOS[invitacion.tipo]}</dd>
-                <dt>Invitó</dt>
-                <dd>{invitacion.invitada_por ?? "El equipo de Consorcio en Mano"}</dd>
-              </dl>
+            <li key={invitacion.id} className="fila-invitacion">
+              <span className="fila-invitacion__datos">
+                <span id={`${id}-${invitacion.id}`} className="fila-registro__titulo">
+                  {invitacion.consorcio}
+                </span>{" "}
+                <span className="fila-registro__resumen">{resumen(invitacion)}</span>
+              </span>
               <button
                 type="button"
                 disabled={aceptando !== null}

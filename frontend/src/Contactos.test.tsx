@@ -145,7 +145,7 @@ describe("página /contactos", () => {
     expect((await menu.findByRole("link", { name: /Contactos de emergencia/ })).getAttribute("href")).toBe("/contactos");
   });
 
-  it("muestra la lista con su fecha, guarda la copia y nunca pide la lista de gestión", async () => {
+  it("muestra la lista sin fechas internas, guarda la copia y nunca pide la lista de gestión", async () => {
     const simulado = backend({
       "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
       [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
@@ -158,8 +158,10 @@ describe("página /contactos", () => {
       "tel:08005551234",
       "tel:08005551234",
     ]);
-    expect(screen.getByText(/^Actualizado el /).textContent).not.toMatch(/\.\.$/);
-    expect(screen.getByText(/^Último cambio de la lista: /)).toBeTruthy();
+    // CON-01 y CON-02: sin tarjeta fija ni fechas internas arriba de los teléfonos.
+    expect(screen.queryByText(/^Actualizado el /)).toBeNull();
+    expect(screen.queryByText(/^Último cambio de la lista: /)).toBeNull();
+    expect(screen.queryByText(/^Los teléfonos de la administración/)).toBeNull();
     expect((copiaGuardada() as { lista: Lista }).lista).toEqual(LISTA);
     const caminos = simulado.mock.calls.map((c) => new URL((c as unknown as [Request])[0].url).pathname);
     expect(caminos.some((p) => p.endsWith("/gestion"))).toBe(false);
@@ -561,6 +563,9 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
     expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
     const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
     expect(within(ficha).getByRole("link", { name: "0800-555-1234" })).toBeTruthy();
+    // CON-03: la función y el nombre son el título; la ficha empieza por el teléfono.
+    expect([...ficha.querySelectorAll("dt")].map((d) => d.textContent)[0]).toBe("Teléfono");
+    expect(within(ficha).queryByText("Función")).toBeNull();
     expect(within(ficha).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cerrar"]);
     expect(within(ficha).queryByRole("link", { name: "Corregir" })).toBeNull();
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
