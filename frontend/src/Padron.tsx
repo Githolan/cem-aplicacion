@@ -4,9 +4,9 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
-import { conLaRedDeVuelta, sinPisarLoHecho } from "./egresos/comun";
 import { useAlVolverLaRed } from "./egresos/useConsorcio";
 import { RUTA_INICIO } from "./enlace";
+import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "./ErrorDeCampo";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
@@ -53,36 +53,41 @@ const TEXTO_TIPO: Record<TipoVinculo, string> = {
 
 type Accion = "confirmar" | "finalizar" | "anular";
 
-/** Lo que dice cada acción: el botón de la ficha, el formulario y la pregunta antes de enviar. */
-const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: string; campo: string; falta: string; si: string; hecho: string }> = {
+/**
+ * Lo que dice cada acción (PAD-03 y PAD-04 del informe de fricción): el botón de la ficha, el título
+ * de su ventana, una sola línea de ayuda y el botón que envía. Finalizar y anular no hacen una
+ * pregunta aparte: la ventana ya dice «No se puede deshacer.» y su botón es el «Sí, …».
+ */
+const TEXTO_ACCION: Record<
+  Accion,
+  { boton: string; titulo: string; ayuda: string; campo: string; ejemplo?: string; falta: string; enviar: string; hecho: string }
+> = {
   confirmar: {
     boton: "Confirmar",
     titulo: "Confirmar el vínculo",
-    ayuda:
-      "Confirmar acredita el carácter sobre la unidad según el título, no la identidad de la persona. Por ejemplo: «Escritura n.º 123 del 4/5/2020» o «Contrato de alquiler del 1/3/2026». Queda guardado en el vínculo.",
+    ayuda: "Confirmar acredita el carácter sobre la unidad según el título, no la identidad de la persona.",
     campo: "Documento que lo prueba",
+    ejemplo: "Por ejemplo: Escritura n.º 123 del 4/5/2020",
     falta: "Falta escribir el documento que lo prueba.",
-    si: "",
+    enviar: "Confirmar",
     hecho: "quedó confirmado",
   },
   finalizar: {
     boton: "Finalizar",
     titulo: "Finalizar el vínculo",
-    ayuda:
-      "Finalizar cierra la vigencia hoy y conserva el vínculo con quién, cuándo y por qué. La persona pierde el acceso que le daba este vínculo. No se puede deshacer.",
+    ayuda: "La vigencia termina hoy y la persona pierde el acceso que le daba este vínculo. No se puede deshacer.",
     campo: "Motivo",
     falta: "Falta escribir el motivo.",
-    si: "Sí, finalizar",
+    enviar: "Sí, finalizar",
     hecho: "quedó finalizado",
   },
   anular: {
     boton: "Anular",
     titulo: "Anular el vínculo",
-    ayuda:
-      "Anular borra un vínculo cargado por error que todavía no empezó y no está confirmado. Queda constancia de la unidad, el carácter y las fechas; el motivo no queda en la auditoría. No se puede deshacer.",
+    ayuda: "Borra un vínculo cargado por error. No se puede deshacer.",
     campo: "Motivo",
     falta: "Falta escribir el motivo.",
-    si: "Sí, anular",
+    enviar: "Sí, anular",
     hecho: "quedó anulado",
   },
 };
@@ -156,8 +161,8 @@ type Pantalla =
 
 const SIN_EDIFICIOS: readonly Consorcio[] = [];
 
-/** El padrón del edificio: llegó o no se pudo consultar (si la API lo niega, se va al inicio). */
-type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; filas: Fila[] };
+/** El padrón del edificio: llegó o no se pudo consultar, con el motivo (si la API lo niega, se va al inicio). */
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio"; motivo: string } | { tipo: "ok"; filas: Fila[] };
 
 type Aviso = { texto: string; ok: boolean };
 
@@ -182,8 +187,6 @@ export function Padron() {
   // La acción abierta en su ventana, encima de la ficha; nula, la ficha muestra sus datos y sus botones.
   const [accion, setAccion] = useState<Accion | null>(null);
   const [texto, setTexto] = useState("");
-  // Finalizar y anular no se deshacen: antes de enviar se pregunta.
-  const [preguntando, setPreguntando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   /** El campo de la acción que falta completar (decisión 4: el botón queda activo y marca el campo). */
@@ -240,24 +243,23 @@ export function Padron() {
         if (!vigente) return;
         if (data !== undefined) setLectura({ tipo: "ok", filas: data.elementos });
         else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
-        else {
-          setLectura({ tipo: "sin_servicio" });
-          // Si falla la recarga que sigue a un cambio, queda a la vista lo que sí se hizo.
-          setAviso(sinPisarLoHecho(mensajeDeFalla(response.status, codigoDe(error))));
-        }
+        else falloLaLectura(mensajeDeFalla(response.status, codigoDe(error)));
       })
       .catch((e: unknown) => {
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
-        else {
-          setLectura({ tipo: "sin_servicio" });
-          setAviso(sinPisarLoHecho(SIN_CONEXION));
-        }
+        else falloLaLectura(SIN_CONEXION);
       });
     return () => {
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, navegar]);
+
+  /** PAD-06: el motivo va una sola vez, junto a «Consultar de nuevo»; el aviso de arriba queda para los «Listo». */
+  function falloLaLectura(motivo: string) {
+    setLectura({ tipo: "sin_servicio", motivo });
+    setAviso(sinElAvisoDeLaRed);
+  }
 
   /** Vuelve a pedir el padrón que no se pudo consultar; un «Listo» que esté a la vista queda. */
   function reconsultar() {
@@ -279,7 +281,6 @@ export function Padron() {
   function soloLaFicha() {
     clave.current = null;
     setTexto("");
-    setPreguntando(false);
     setErrores(SIN_ERRORES);
     setAccion(null);
     setAviso((actual) => (actual?.ok === false ? null : actual));
@@ -297,7 +298,6 @@ export function Padron() {
     else {
       clave.current = null;
       setTexto("");
-      setPreguntando(false);
       setErrores(SIN_ERRORES);
       setAccion(null);
     }
@@ -307,22 +307,16 @@ export function Padron() {
   function abrirAccion(a: Accion) {
     clave.current = null;
     setTexto("");
-    setPreguntando(false);
     setErrores(SIN_ERRORES);
     setAviso(null);
     setAccion(a);
   }
 
-  /** El botón de la ventana: lo que falta se marca; finalizar y anular preguntan antes de enviar. */
+  /** El botón de la ventana: lo que falta se marca; si está completo, se manda en un solo paso (PAD-04). */
   function enviar(fila: Fila, a: Accion): FinDeEnvio | Promise<FinDeEnvio> {
     const faltan = faltaCompletar({ texto: [texto, TEXTO_ACCION[a].falta] });
     if (hayErrores(faltan)) {
       setErrores(faltan);
-      return "seguir";
-    }
-    // Finalizar y anular no se pueden deshacer: el formulario primero pide la confirmación explícita.
-    if (a !== "confirmar" && !preguntando) {
-      setPreguntando(true);
       return "seguir";
     }
     return pedir(fila, a);
@@ -348,7 +342,6 @@ export function Padron() {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) clave.current = null;
         const motivo = motivoDeSeparacion(error) ?? mensajeDeError(response.status, codigo, hecha);
-        setPreguntando(false);
         if (!cambioElPadron(response.status, codigo)) return { rechazo: motivo };
         // La lista quedó vieja: la ficha se cierra y el motivo va arriba, con la lista nueva.
         alAviso.current = true;
@@ -432,13 +425,6 @@ export function Padron() {
 
       {pantalla.tipo === "lista" && (
         <>
-          <p className="tarjeta">
-            El padrón muestra quién tiene un vínculo vigente o futuro con cada unidad. No muestra
-            correos ni teléfonos. Cada vínculo abre su ficha.
-            {puede("padron.confirmar_vinculo") &&
-              " Confirmar acredita el carácter sobre la unidad según el título; no acredita la identidad."}
-          </p>
-
           {edificios.length > 1 && (
             <div className="formulario formulario-movil tarjeta">
               <label htmlFor={`${id}-consorcio`}>Edificio</label>
@@ -463,12 +449,11 @@ export function Padron() {
             </div>
           )}
 
-          <section aria-labelledby={`${id}-padron`} className="tarjeta">
-            <h2 id={`${id}-padron`}>Vínculos por unidad</h2>
+          <section aria-label="Vínculos por unidad" className="tarjeta">
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
             {lectura.tipo === "sin_servicio" && (
               <>
-                <p>No se pudo mostrar el padrón.</p>
+                <p className="aviso-error">No se pudo mostrar el padrón. {lectura.motivo}</p>
                 <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
                   Consultar de nuevo
                 </button>
@@ -555,7 +540,7 @@ export function Padron() {
     return (
       <VentanaDeFormulario
         titulo={textos.titulo}
-        textoEnviar={preguntando ? textos.si : textos.titulo}
+        textoEnviar={textos.enviar}
         peligro={a !== "confirmar"}
         alEnviar={() => enviar(f, a)}
         alCerrar={soloLaFicha}
@@ -570,7 +555,7 @@ export function Padron() {
           maxLength={LARGO_TEXTO}
           pattern={PATRON_TEXTO}
           required
-          disabled={preguntando}
+          placeholder={textos.ejemplo}
           {...marcaDe(idCampo, errores.texto, ayuda)}
           value={texto}
           onChange={(e) => {
@@ -580,11 +565,6 @@ export function Padron() {
           }}
         />
         <ErrorDeCampo idCampo={idCampo} mensaje={errores.texto} />
-        {preguntando && (
-          <p>
-            ¿{textos.boton} el vínculo de {f.nombre} con la unidad {f.designacion}? No se puede deshacer.
-          </p>
-        )}
       </VentanaDeFormulario>
     );
   }

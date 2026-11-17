@@ -138,9 +138,10 @@ test.describe("padrón", () => {
     await page.getByLabel("Documento que lo prueba").fill("  Contrato de locación 77  ");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
-    const enviar = await page.getByRole("button", { name: "Confirmar el vínculo" }).boundingBox();
+    const ventana = page.getByRole("dialog", { name: "Confirmar el vínculo" });
+    const enviar = await ventana.getByRole("button", { name: "Confirmar", exact: true }).boundingBox();
     expect(enviar?.height).toBeGreaterThanOrEqual(44);
-    await page.getByRole("button", { name: "Confirmar el vínculo" }).click();
+    await ventana.getByRole("button", { name: "Confirmar", exact: true }).click();
     await expect(page.getByText("Listo: quedó confirmado el vínculo de Beto Pérez con la unidad 1° A.")).toBeFocused();
     expect(envios).toHaveLength(1);
     expect(envios[0]?.camino).toBe(`${BASE}/vinculos/${V_INQ}/confirmar`);
@@ -158,8 +159,6 @@ test.describe("padrón", () => {
     const propia = page.getByRole("dialog", { name: `1° A: ${NOMBRE_LARGO}` });
     await propia.getByRole("button", { name: "Finalizar" }).click();
     await page.getByLabel("Motivo").fill("Venta de la unidad");
-    await page.getByRole("button", { name: "Finalizar el vínculo" }).click();
-    await expect(page.getByRole("button", { name: "Sí, finalizar" })).toBeFocused();
     expect(envios).toHaveLength(0);
     await sinFaltasDeAccesibilidad(page);
     await page.getByRole("button", { name: "Sí, finalizar" }).click();
@@ -175,7 +174,6 @@ test.describe("padrón", () => {
     const beto = page.getByRole("dialog", { name: "1° A: Beto Pérez" });
     await beto.getByRole("button", { name: "Finalizar" }).click();
     await page.getByLabel("Motivo").fill("Fin del contrato");
-    await page.getByRole("button", { name: "Finalizar el vínculo" }).click();
     await page.getByRole("button", { name: "Sí, finalizar" }).click();
     await expect(page.getByText("Listo: quedó finalizado el vínculo de Beto Pérez con la unidad 1° A. Desde el 24 de octubre de 2026 ya no vale.")).toBeFocused();
     expect(envios.map((e) => e.camino)).toEqual([`${BASE}/vinculos/${V_PROP}/finalizar`, `${BASE}/vinculos/${V_INQ}/finalizar`]);
@@ -202,7 +200,7 @@ test.describe("padrón", () => {
     await page.getByRole("button", { name: "1° A: Beto Pérez" }).click();
     await page.getByRole("dialog", { name: "1° A: Beto Pérez" }).getByRole("button", { name: "Confirmar" }).click();
     await page.getByLabel("Documento que lo prueba").fill("Contrato 77");
-    await page.getByRole("button", { name: "Confirmar el vínculo" }).click();
+    await ventana.getByRole("button", { name: "Confirmar", exact: true }).click();
     await expect(page.getByText("La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.")).toBeVisible();
     expect(envios[0]?.csrf).toBeNull();
   });
