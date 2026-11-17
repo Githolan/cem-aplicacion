@@ -194,3 +194,31 @@ describe("faltaCompletar", () => {
     expect(hayErrores({ motivo: "x" })).toBe(true);
   });
 });
+
+describe("VentanaDeFormulario sin el botón principal (tanda 3, C8G-02 y C8G-05)", () => {
+  it("con `sinEnviar` no hay botón principal ni envío con Enter; queda «Cancelar», y la línea dice qué falta", () => {
+    const alEnviar = vi.fn((): FinDeEnvio => "cerrar");
+    const alCerrar = vi.fn();
+    const { rerender } = render(
+      <VentanaDeFormulario titulo="Dar de alta un mandato" textoEnviar="Dar de alta" alEnviar={alEnviar} alCerrar={alCerrar} sinEnviar>
+        <label htmlFor="tipo">Tipo</label>
+        <input id="tipo" data-foco defaultValue="Consejo" />
+        <p>Nadie tiene todavía un vínculo confirmado en este edificio.</p>
+      </VentanaDeFormulario>,
+    );
+    const hoja = screen.getByRole("dialog", { name: "Dar de alta un mandato" });
+    expect(within(hoja).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+    expect(within(hoja).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+    fireEvent.submit(within(hoja).getByLabelText("Tipo").closest("form") as HTMLFormElement);
+    expect(alEnviar).not.toHaveBeenCalled();
+    // Control: sin `sinEnviar`, el botón vuelve y envía.
+    rerender(
+      <VentanaDeFormulario titulo="Dar de alta un mandato" textoEnviar="Dar de alta" alEnviar={alEnviar} alCerrar={alCerrar}>
+        <label htmlFor="tipo">Tipo</label>
+        <input id="tipo" data-foco defaultValue="Consejo" />
+      </VentanaDeFormulario>,
+    );
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Dar de alta un mandato" })).getByRole("button", { name: "Dar de alta" }));
+    expect(alEnviar).toHaveBeenCalledTimes(1);
+  });
+});

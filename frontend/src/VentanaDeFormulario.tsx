@@ -55,9 +55,12 @@ type Props = {
   peligro?: boolean;
   /** Más ancha en PC y tablet (un formulario largo). */
   ancha?: boolean;
+  /** Sin el botón principal: con lo elegido el acto no se puede hacer y una línea de la ventana dice
+   * qué falta y dónde se resuelve (criterio 8). Queda «Cancelar»; al cambiar lo elegido, vuelve. */
+  sinEnviar?: boolean;
 };
 
-export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, children, peligro = false, ancha = false }: Props) {
+export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, children, peligro = false, ancha = false, sinEnviar = false }: Props) {
   const id = useId();
   const [enviando, setEnviando] = useState(false);
   const [rechazo, setRechazo] = useState<string | null>(null);
@@ -83,6 +86,7 @@ export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, c
 
   async function enviar(evento: FormEvent) {
     evento.preventDefault();
+    if (sinEnviar) return;
     setEnviando(true);
     setRechazo(null);
     let fin: FinDeEnvio;
@@ -113,9 +117,11 @@ export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, c
           </p>
         )}
         <div className="acciones">
-          <button ref={principal} type="submit" className={peligro ? "peligro" : undefined} disabled={enviando} data-foco>
-            {textoEnviar}
-          </button>
+          {!sinEnviar && (
+            <button ref={principal} type="submit" className={peligro ? "peligro" : undefined} disabled={enviando} data-foco>
+              {textoEnviar}
+            </button>
+          )}
           <button type="button" className="secundario" onClick={alCerrar} disabled={enviando}>
             Cancelar
           </button>
