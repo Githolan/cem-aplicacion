@@ -2,11 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router";
+import { Link, MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { AvisoVersion } from "./AvisoVersion";
+import { AvisoVersion, VersionAlCambiarDePantalla } from "./AvisoVersion";
 import type { Salud } from "./api/cliente";
 import { manifiesto } from "./manifiesto";
 import { NOMBRE_MODO_LECTURA } from "./ModoLectura";
@@ -299,6 +299,36 @@ describe("versión nueva (documento 13, §14.4)", () => {
     expect(pedido).not.toHaveBeenCalled();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+
+  it("MEN-07: al pasar a otra pantalla se aplica sola; mientras se queda, espera", async () => {
+    vi.stubGlobal("fetch", backend());
+    const actualizar = vi.fn();
+
+    montar("/instalar", { hayVersionNueva: true, actualizar });
+    expect(actualizar).not.toHaveBeenCalled();
+
+    fireEvent.click(within(screen.getByRole("banner")).getByRole("link", { name: "Consorcio en Mano" }));
+
+    await vi.waitFor(() => expect(actualizar).toHaveBeenCalledOnce());
+  });
+
+  it("MEN-07: si la navegación trae un «Listo», espera al cambio siguiente para no borrarlo", () => {
+    const actualizar = vi.fn();
+    render(
+      <ContextoVersion.Provider value={{ hayVersionNueva: true, actualizar }}>
+        <MemoryRouter initialEntries={["/a"]}>
+          <VersionAlCambiarDePantalla />
+          <Link to="/b" state={{ aviso: "Listo: se guardó." }}>con aviso</Link>
+          <Link to="/c">sin aviso</Link>
+        </MemoryRouter>
+      </ContextoVersion.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "con aviso" }));
+    expect(actualizar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("link", { name: "sin aviso" }));
+    expect(actualizar).toHaveBeenCalledOnce();
   });
 
   it("sin versión nueva, una ruta desconocida no actualiza nada", () => {

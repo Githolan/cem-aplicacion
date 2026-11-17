@@ -7,6 +7,7 @@ import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
+import { VersionAlCambiarDePantalla } from "./AvisoVersion";
 import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { api } from "./api/cliente";
 import { Exige, ofreceEnAlguno, REQUISITOS, useConsultaDeAcciones } from "./permisos";
@@ -274,7 +275,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
 // Una ruta que esta versión no conoce puede ser de una versión más nueva (un enlace del correo,
 // abierto con la aplicación vieja en caché). Si hay una versión nueva esperando, se aplica sola en
 // la misma URL completa, en vez de dejar a la persona en "No encontramos". En las rutas conocidas
-// la versión nueva sigue esperando el botón del aviso (documento 13, §14.4).
+// la versión nueva espera el botón del aviso o el próximo cambio de pantalla (MEN-07).
 function NoEncontrada() {
   const { hayVersionNueva, actualizar } = useVersion();
   useEffect(() => {
@@ -321,6 +322,7 @@ export function App() {
       </header>
       <main id="contenido">
         <AvisoLlegada />
+        <VersionAlCambiarDePantalla />
         <EntrarEncima />
         <Routes>
           <Route path="/" element={<Inicio barra={barra} />} />
