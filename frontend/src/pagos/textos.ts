@@ -206,3 +206,40 @@ export const FALTA_MOTIVO_DESHACER = "Falta decir por qué se deshace.";
 export const FALTA_MOTIVO = "Falta escribir el motivo.";
 export const FALTA_ARCHIVO_EXTRACTO = "Falta elegir el archivo del extracto.";
 export const textoVerMarcados = (n: number) => `Ver los marcados (${n})`;
+// Fricción 17-11, tandas 2 y 5: preparar una orden y su ficha.
+/** Lo obligatorio que falta al tocar guardar (decisión 4: el botón siempre activo). */
+export const FALTA_PROVEEDOR = "Falta elegir el proveedor.";
+export const FALTA_IMPORTE = "Falta escribir el importe.";
+export const FALTA_CONCEPTO = "Falta escribir el concepto.";
+/** C8P-01: el proveedor bloqueado por documentación legal, en el desplegable y debajo de él. */
+export const MARCA_SIN_DOCUMENTACION = "(le falta documentación legal)";
+export const SIN_DOCUMENTACION =
+  "A este proveedor le falta documentación que exige la ley: no se le puede preparar una orden. Se carga en su ficha; en una urgencia, un miembro del Consejo puede registrar ahí un salteo por urgencia.";
+export const SIN_DOCUMENTACION_SIN_SABER =
+  "Le falta documentación legal: solo se puede preparar si el Consejo registró un salteo por urgencia.";
+export const CON_SALTEO = "Le falta documentación legal: se prepara con el salteo por urgencia que registró el Consejo.";
+export const IR_A_PROVEEDORES = "Ir a Proveedores";
+/** C8P-06: al modificar, el proveedor de la orden ya no recibe órdenes. */
+export const PROVEEDOR_INACTIVO = "Este proveedor está suspendido o de baja: hay que elegir otro, o reactivarlo en Proveedores.";
+/** C8P-05: al modificar, todavía no se cambió nada. */
+export const SIN_CAMBIOS = "Todavía no hay cambios para guardar.";
+/** C8P-04: el contrato elegido no cubre el importe escrito. */
+export const textoContratoExcedido = (maximo: string) =>
+  `El importe supera el máximo de ese contrato (hasta ${maximo}): la orden va sin contrato y pide aprobación.`;
+/** ORD-06: la pregunta de la orden parecida, en su ventana. */
+export const TITULO_PARECIDA = "Ya hay una orden parecida";
+/** FIC-05 y FIC-06: en la ficha, solo lo que la frase del estado no dice. */
+export const AVISO_VER_LA_CUENTA_QUEDA = "Queda registrado quién vio la cuenta, y esa persona no puede conciliar este pago.";
+export const AVISO_SIN_SALIDA_CAUSA =
+  "Venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Después de declararlo, se puede volver a pagar.";
+export const AVISO_ESPERA_COMPROBANTE = "Esta orden no se paga mientras se espera el comprobante.";
+export const AVISO_DESHACE_DECLARACION = "Deja sin efecto lo que se declaró.";
+/** `cuando` cierra la frase con su punto (`momentoAlFinal`). */
+export const textoQuienRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando}`;
+/** FIC-14: aprobar se ofrece recién con la cuenta destino a la vista. */
+export const CARGANDO_LA_CUENTA = "Cargando la cuenta destino…";
+export const FALTA_LA_CUENTA = "Para aprobar hay que ver la cuenta destino completa.";
+/** FIC-04: cómo se resuelve una diferencia, cada camino con su botón y su confirmación. */
+export const DAR_POR_PAGADO = "Dar por pagado lo real";
+export const RECLAMAR = "Reclamar la devolución";
+export const AVISO_RECLAMO = "La orden queda abierta hasta recuperar la plata.";

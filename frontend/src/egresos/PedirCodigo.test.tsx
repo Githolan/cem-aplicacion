@@ -222,11 +222,11 @@ describe("confirmar en el momento", () => {
     expect(alVerificar).not.toHaveBeenCalled();
   });
 
-  it("«Usar otro método» muestra solo lo activo, y el que se usa queda como último", async () => {
+  it("COD-01: «Usar otro método» muestra solo lo activo, sin el que se deja, y el que se usa queda como último", async () => {
     recordarMetodo("llave");
     backend(
       conLlave({
-        "GET /api/v1/auth/totp": estadoTotp(false, 1, 5),
+        "GET /api/v1/auth/totp": estadoTotp(true, 1, 5),
         "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
       }),
     );
@@ -238,8 +238,9 @@ describe("confirmar en el momento", () => {
     await titulo("No se pudo confirmar");
     fireEvent.click(screen.getByRole("button", { name: "Usar otro método" }));
     await titulo("Usar otro método");
-    expect(screen.queryByRole("button", { name: "Código de la aplicación" })).toBeNull();
-    expect(screen.getByRole("button", { name: "PIN, huella o cara" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Código de la aplicación" })).toBeTruthy();
+    // El que acaba de fallar no se ofrece otra vez.
+    expect(screen.queryByRole("button", { name: "PIN, huella o cara" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Código de recuperación" }));
     await titulo("Código de recuperación");
@@ -249,6 +250,31 @@ describe("confirmar en el momento", () => {
 
     await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
     expect(ultimoMetodo()).toBe("recuperacion");
+  });
+
+  it("COD-01: si queda un solo método más, el botón lo nombra y va directo", async () => {
+    recordarMetodo("llave");
+    backend(conLlave({ "GET /api/v1/auth/totp": estadoTotp(false, 1, 5) }));
+    dispositivo(async () => {
+      throw new DOMException("cancelado", "NotAllowedError");
+    });
+    mostrar();
+
+    await titulo("No se pudo confirmar");
+    expect(screen.queryByRole("button", { name: "Usar otro método" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Usar un código de recuperación" }));
+    await titulo("Código de recuperación");
+    // Control: desde el código, el único otro es la llave, y no se ofrece el código de recuperación otra vez.
+    expect(screen.getByRole("button", { name: "Usar PIN, huella o cara" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Usar un código de recuperación" })).toBeNull();
+  });
+
+  it("COD-02: la hoja del código no repite el título ni dice «sigue el mismo pedido»", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(true, 0, 0) });
+    mostrar();
+
+    const hoja = await screen.findByRole("dialog");
+    expect(hoja.textContent).not.toContain("sigue el mismo pedido");
   });
 
   it("con un solo método no ofrece otro", async () => {

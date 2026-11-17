@@ -72,8 +72,8 @@ describe("sección de la llave", () => {
     mostrar();
 
     await quitarConfirmando();
-    fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
+    // Queda un solo método más: el botón lo nombra y va directo (COD-01).
+    fireEvent.click(await screen.findByRole("button", { name: "Usar un código de recuperación" }));
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 

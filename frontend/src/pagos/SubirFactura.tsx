@@ -19,13 +19,16 @@ import { SubirArchivo } from "../SubirArchivo";
 // sale de «Facturas faltantes»; si lo rechaza, lo dice y se elige otro archivo. Un error se dice dentro
 // de la hoja: la pantalla de atrás está inerte.
 //
+// Abierta desde la ficha de la orden (`cerrarAlSubir`), la hoja se cierra sola apenas la factura sube:
+// la ficha ya dice en qué va el antivirus (informe de fricción, REG-05). Queda abierta solo si la
+// subida falla.
+//
 // «Reemplazar la factura» (decisión del propietario del 13-11-2026) es la misma hoja con `reemplaza`:
 // la anterior no se borra, queda como reemplazada; mientras la nueva está en el antivirus, o si la
 // rechaza, vale la anterior. Nada más de la orden cambia.
 
 export const SUBIR_FACTURA = "Subir la factura";
-export const TEXTO_QUE_HACE =
-  "La factura queda adjunta a la orden, con quién y cuándo. No cambia el importe, el proveedor ni la cuenta, y la orden no vuelve a aprobación.";
+export const TEXTO_QUE_HACE = "No cambia el importe, el proveedor ni la cuenta, y la orden no vuelve a aprobación.";
 export const TEXTO_LISTO = "Listo: la factura quedó adjunta a la orden. El antivirus la está revisando.";
 export const TEXTO_ACEPTADA = "El antivirus aceptó la factura: la orden ya no figura en «Facturas faltantes».";
 export const TEXTO_RECHAZADA = "La factura no pasó el antivirus y no cuenta como adjunta. Hay que elegir otro archivo.";
@@ -52,8 +55,7 @@ export const TEXTOS = {
   },
   reemplazar: {
     titulo: REEMPLAZAR_FACTURA,
-    queHace:
-      "La factura nueva reemplaza a la adjunta, con quién y cuándo. La anterior no se borra: queda como reemplazada. No cambia el importe, el proveedor ni la cuenta, y la orden no vuelve a aprobación.",
+    queHace: "La anterior no se borra: queda como reemplazada. No cambia el importe ni la cuenta, y la orden no vuelve a aprobación.",
     listo: "Listo: la factura nueva quedó adjunta. El antivirus la está revisando; mientras tanto vale la anterior.",
     aceptada: "El antivirus aceptó la factura nueva: es la que vale para la orden. La anterior quedó como reemplazada.",
     rechazada: "La factura nueva no pasó el antivirus: sigue valiendo la anterior. Se puede elegir otro archivo.",
@@ -73,8 +75,11 @@ type Props = {
   orden: string;
   /** La versión vigente que se ve: si cambió, la base lo niega. */
   version: number;
-  /** De qué orden se trata, en palabras: proveedor e importe. */
-  descripcion: string;
+  /** De qué orden se trata, en palabras: proveedor e importe. Sin esto (desde la ficha, que ya lo
+   * muestra detrás), no se repite. */
+  descripcion?: string;
+  /** Se cierra sola apenas la factura sube: quien la abrió dice en qué va el antivirus. */
+  cerrarAlSubir?: boolean;
   /** La constancia de la adjunta que vale, para reemplazarla; nulo para subir la que falta. */
   reemplaza: string | null;
   aEntrar: () => void;
@@ -82,7 +87,7 @@ type Props = {
   alCerrar: (cambio: boolean) => void;
 };
 
-export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza, aEntrar, alCerrar }: Props) {
+export function SubirFactura({ consorcio, orden, version, descripcion, cerrarAlSubir = false, reemplaza, aEntrar, alCerrar }: Props) {
   const textos = reemplaza === null ? TEXTOS.subir : TEXTOS.reemplazar;
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
   const [falla, setFalla] = useState<string | null>(null);
@@ -149,6 +154,10 @@ export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza
       }
       clave.current = null;
       cambio.current = true;
+      if (cerrarAlSubir) {
+        alCerrar(true);
+        return;
+      }
       enEspera.current = { documento: data.documento_id, version: data.archivo.id };
       setFase({ tipo: "revisando", ...enEspera.current });
     } catch (e: unknown) {
@@ -179,7 +188,7 @@ export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza
 
   return (
     <Hoja titulo={textos.titulo} alEscapar={enviando ? undefined : cerrar}>
-      <p>{descripcion}</p>
+      {descripcion !== undefined && <p>{descripcion}</p>}
       {fase.tipo === "revisando" && (
         <p role="status" className="aviso-ok">
           {textos.listo}

@@ -290,8 +290,8 @@ describe("página /cuenta/segundo-factor", () => {
     abrir();
 
     await desactivarConfirmando();
-    fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
+    // Queda un solo método más: el botón lo nombra y va directo (COD-01).
+    fireEvent.click(await screen.findByRole("button", { name: "Usar un código de recuperación" }));
     await screen.findByRole("button", { name: "Verificar y seguir" });
     escribirCodigo("Código", " K7M2Q X9P4T ");
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));

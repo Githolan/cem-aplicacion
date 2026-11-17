@@ -55,6 +55,12 @@ const TEXTO_METODO: Record<MetodoConfirmar, string> = {
   recuperacion: "Código de recuperación",
 };
 const METODOS = Object.keys(TEXTO_METODO) as MetodoConfirmar[];
+/** Cuando queda un solo método más, el botón lo nombra y va directo (informe de fricción, COD-01). */
+const USAR_METODO: Record<MetodoConfirmar, string> = {
+  llave: "Usar PIN, huella o cara",
+  aplicacion: "Usar el código de la aplicación",
+  recuperacion: "Usar un código de recuperación",
+};
 
 const TITULO_CODIGO: Record<Clase, string> = {
   aplicacion: "Código de la aplicación",
@@ -115,6 +121,8 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const id = useId();
   const [paso, setPaso] = useState<Paso>({ tipo: "leyendo" });
   const [activos, setActivos] = useState<Activos | null>(null);
+  /** El método que se está usando (o el que acaba de fallar): «Usar otro método» no lo ofrece. */
+  const [actual, setActual] = useState<MetodoConfirmar | null>(null);
   const [vuelta, setVuelta] = useState(0);
   const [codigo, setCodigo] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -150,6 +158,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   }
 
   function usar(metodo: MetodoConfirmar) {
+    setActual(metodo);
     setError(null);
     setCodigo("");
     if (metodo === "llave") confirmar();
@@ -227,24 +236,32 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
     else verificar(limpio, clase);
   }
 
-  const hayOtro = activos !== null && METODOS.filter((m) => activos[m]).length > 1;
+  const otros = activos === null ? [] : METODOS.filter((m) => activos[m] && m !== actual);
   const cancelar = (
     <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
       Cancelar
     </button>
   );
-  const usarOtro = hayOtro && (
-    <button type="button" className="secundario" disabled={enviando} onClick={() => setPaso({ tipo: "otro" })}>
-      Usar otro método
-    </button>
-  );
+  const [unico] = otros;
+  const usarOtro =
+    otros.length === 1 && unico !== undefined ? (
+      <button type="button" className="secundario" disabled={enviando} onClick={() => usar(unico)}>
+        {USAR_METODO[unico]}
+      </button>
+    ) : (
+      otros.length > 1 && (
+        <button type="button" className="secundario" disabled={enviando} onClick={() => setPaso({ tipo: "otro" })}>
+          Usar otro método
+        </button>
+      )
+    );
 
   if (paso.tipo === "leyendo") return <p role="status">Preparando la confirmación…</p>;
 
   if (paso.tipo === "llave")
     return (
       <Hoja key="llave" titulo="Confirmar con PIN, huella o cara" alEscapar={alCancelar}>
-        <p>Para {acto}. Lo pide el dispositivo y después sigue el mismo pedido.</p>
+        <p>Para {acto}.</p>
         <div className="formulario">
           <div className="acciones">{cancelar}</div>
         </div>
@@ -280,7 +297,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
       <Hoja key="otro" titulo="Usar otro método" alEscapar={alCancelar}>
         <div className="formulario">
           <div className="acciones">
-            {METODOS.filter((m) => activos?.[m] === true).map((m, i) => (
+            {otros.map((m, i) => (
               // Opciones del mismo peso: ninguna es la principal (pregunta 13).
               <button key={m} type="button" className="secundario" data-foco={i === 0 ? true : undefined} onClick={() => usar(m)}>
                 {TEXTO_METODO[m]}
@@ -295,10 +312,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   if (paso.tipo === "llave_lejos")
     return (
       <Hoja key="llave_lejos" titulo="La llave está en otro dispositivo" alEscapar={alCancelar}>
-        <p>
-          Este navegador no puede usar la llave de acceso. Para {acto} se puede usar un código de
-          recuperación; cada uno sirve una sola vez.
-        </p>
+        <p>Este navegador no puede usar la llave de acceso. Para {acto} se puede usar un código de recuperación.</p>
         <div className="formulario">
           <div className="acciones">
             <button type="button" data-foco onClick={() => usar("recuperacion")}>
@@ -323,7 +337,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
     return (
       <Hoja key="sin_alta" titulo="Falta la confirmación con PIN, huella o código" alEscapar={activando ? undefined : alCancelar}>
         <p>
-          Para {acto} hace falta la confirmación con PIN, huella o código.
+          Para {acto}.
           {conLlave && " Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo."}
         </p>
         <ActivarLlave
@@ -345,7 +359,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const { clase } = paso;
   return (
     <Hoja key={clase} titulo={TITULO_CODIGO[clase]} alEscapar={alCancelar}>
-      <p>Para {acto}. Después sigue el mismo pedido.</p>
+      <p>Para {acto}.</p>
       <form className="formulario" onSubmit={(e) => enviar(e, clase)} noValidate>
         <label htmlFor={`${id}-codigo`}>Código</label>
         <input

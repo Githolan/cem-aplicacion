@@ -15,8 +15,9 @@ import {
 // Los botones de una orden: exactamente los que mandó el servidor, en su orden y con su peso (una
 // sola principal, llena; las secundarias con borde; las negativas en rojo). La ficha no escribe
 // ningún botón de acto a mano (informe de fricción, §4.3). Lo único que decide la pantalla es lo que
-// ya está a la vista: un formulario abierto, una pregunta de confirmación o la cuenta ya mostrada
-// esconden el botón que los abrió. Lo que deshace algo ya hecho (tipo `plegada`, D-13) no queda a la
+// ya está a la vista: una ventana abierta o la cuenta ya mostrada esconden el botón que las abrió, y lo
+// que todavía no se puede usar no se dibuja (criterio 8: ningún botón apagado, salvo mientras viaja
+// un pedido). Lo que deshace algo ya hecho (tipo `plegada`, D-13) no queda a la
 // vista: va dentro de «Hubo un error», con borde rojo.
 
 export type Enlace = { a: string; estado: unknown };
@@ -27,8 +28,6 @@ type Props = {
   alElegir: (codigo: AccionPago) => void;
   /** Lo que la pantalla ya tiene abierto por esa acción. */
   ocultas?: ReadonlySet<AccionPago>;
-  /** Visibles, pero todavía no se pueden tocar (aprobar sin haber visto la cuenta). */
-  deshabilitadas?: ReadonlySet<AccionPago>;
   /** Cuando el botón dice lo que ocurre al tocarlo, y eso depende de la orden. */
   textos?: Partial<Record<AccionPago, string>>;
   enlaces?: Partial<Record<AccionPago, Enlace>>;
@@ -41,14 +40,14 @@ export function aDibujar(acciones: readonly AccionOfrecida[], ocultas: ReadonlyS
   return acciones.filter((a) => !CON_FORMULARIO.has(a.codigo) && !ocultas.has(a.codigo));
 }
 
-export function Acciones({ acciones, enviando, alElegir, ocultas, deshabilitadas, textos, enlaces, children }: Props) {
+export function Acciones({ acciones, enviando, alElegir, ocultas, textos, enlaces, children }: Props) {
   const dibujadas = aDibujar(acciones, ocultas);
   const visibles = dibujadas.filter((a) => a.tipo !== "plegada");
   const plegadas = dibujadas.filter((a) => a.tipo === "plegada");
   if (visibles.length === 0 && children === undefined && plegadas.length === 0) return null;
   const boton = (a: AccionOfrecida) => (
     <button key={a.codigo} type="button" className={claseDe(a)} data-accion={a.codigo} data-tipo={a.tipo}
-      disabled={enviando || deshabilitadas?.has(a.codigo) === true} onClick={() => alElegir(a.codigo)}>
+      disabled={enviando} onClick={() => alElegir(a.codigo)}>
       {textos?.[a.codigo] ?? TEXTO_ACCION[a.codigo]}
     </button>
   );

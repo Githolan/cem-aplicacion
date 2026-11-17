@@ -109,6 +109,7 @@ type Props = {
   /** La diferencia que se corrige (decisión 6): mismo formulario que «Se transfirió otro importe o a otra cuenta», con el
    * comprobante que ya tiene. Se puede dejar de corregir. */
   diferencia?: Diferencia;
+  /** Cerrar la ventana donde se registra (o dejar de corregir la diferencia). */
   alCancelar?: () => void;
   /** Lo que la IA leyó del comprobante; nula si la lectura no corrió. */
   lectura: Lectura | null;
@@ -281,6 +282,7 @@ export function RegistroPago(props: Props) {
     // Otro archivo es otro pedido: si el anterior no entró, sirve su documento, no su clave.
     claveArchivo.current = null;
     setElegido(archivo);
+    setCambiaArchivo(false);
     void subir(archivo);
   }
 
@@ -415,15 +417,31 @@ export function RegistroPago(props: Props) {
             </button>
           </div>
         )}
-        {!enCurso && !leyendo && !corrigeDiferencia && (!pregunta || cambiaArchivo) && (
-          <SubirArchivo titulo={comprobante === null ? "Comprobante de la transferencia" : "Cambiar el comprobante de la transferencia"} de="del comprobante"
+        {/* Sin comprobante, la zona para subirlo; con uno, cambiarlo es la excepción: un botón (REG-03). */}
+        {!enCurso && !leyendo && !corrigeDiferencia && (comprobante === null || cambiaArchivo) && (
+          <SubirArchivo titulo={comprobante === null ? "Comprobante de la transferencia" : "Otro comprobante"} de="del comprobante"
             tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={comprobante !== null} deshabilitada={enviando} alElegir={elegir} />
+        )}
+        {!enCurso && !leyendo && !corrigeDiferencia && comprobante !== null && !pregunta && (
+          <div className="acciones">
+            <button type="button" className="secundario" disabled={enviando} onClick={() => setCambiaArchivo((c) => !c)}>
+              {cambiaArchivo ? "No cambiarlo" : "Cambiar el comprobante"}
+            </button>
+          </div>
         )}
       </section>
 
       {conDatos && noLeida && !corrige && <p role="note">{AVISO_LECTURA_FALLO}</p>}
       {conDatos && difiere && !otraCosa && <DistintoDeLaOrden leida={leida} version={version} />}
-      {conDatos && pregunta && (
+      {/* Tocado «Es otro comprobante», la pregunta deja lugar a la subida, con su «Cancelar» (REG-02). */}
+      {conDatos && pregunta && cambiaArchivo && (
+        <div className="acciones">
+          <button type="button" className="secundario" disabled={enviando} onClick={() => setCambiaArchivo(false)}>
+            Cancelar el cambio
+          </button>
+        </div>
+      )}
+      {conDatos && pregunta && !cambiaArchivo && (
         <div className="formulario">
           <h3>¿Qué pasó?</h3>
           <div className="acciones">
@@ -459,8 +477,8 @@ export function RegistroPago(props: Props) {
             </>
           ) : (
             <>
-              <h3>{corrige ? "Corregir el registro" : "Registrar el pago"}</h3>
-              {/* Leído con IA, se avisa solo lo que no coincide o falta (D-25): lo que coincide no se dice. */}
+              {/* Sin título: es el de la ventana (REG-04). Leído con IA, se avisa solo lo que no coincide
+                  o falta (D-25): lo que coincide no se dice. */}
               {cuentaLeida ? (
                 leida.titular_distinto && (
                   <p role="note">
@@ -470,7 +488,7 @@ export function RegistroPago(props: Props) {
               ) : (
                 <p>
                   {corrige
-                    ? "Corregir lo que está mal. Queda registrado qué cambió y quién lo cambió."
+                    ? "Queda registrado qué cambió y quién lo cambió."
                     : leida !== null
                       ? "Revisar lo que se leyó del comprobante y completar lo que falta."
                       : "Los datos van como figuran en el comprobante."}
@@ -491,7 +509,7 @@ export function RegistroPago(props: Props) {
           <ErrorDeCampo idCampo={`${id}-fecha`} mensaje={errores.fecha_operacion} />
           {(!cuentaLeida || otraCosa) && (
             <>
-              <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)"}</label>
+              <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido"}</label>
               <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
                 alCambiar={(texto) => cambiar("importe", texto)} />
             </>
@@ -517,7 +535,7 @@ export function RegistroPago(props: Props) {
             </p>
           ) : cuentaLeida && !otraCosa ? null : (
             <>
-              <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
+              <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino</label>
               <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
                 onChange={(e) => cambiar("cuenta", e.target.value)} />
             </>
@@ -550,8 +568,15 @@ export function RegistroPago(props: Props) {
               </button>
             )}
           </div>
-          <p>{otraCosa ? AVISO_OTRA_COSA : "Queda pagada cuando el Consejo lo concilie."}</p>
+          {otraCosa && <p>{AVISO_OTRA_COSA}</p>}
         </form>
+      )}
+      {(!conDatos || pregunta) && alCancelar !== undefined && (
+        <div className="acciones">
+          <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+            Cancelar
+          </button>
+        </div>
       )}
     </div>
   );

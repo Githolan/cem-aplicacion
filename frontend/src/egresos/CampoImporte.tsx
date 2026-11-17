@@ -7,13 +7,16 @@ interface Props {
   valor: string;
   deshabilitado: boolean;
   alCambiar: (texto: string) => void;
+  /** La marca del error junto al campo (`marcaDe`), si el formulario la usa. */
+  "aria-invalid"?: true;
+  "aria-describedby"?: string;
 }
 
 // Abre el teclado numérico de cualquier dispositivo y admite punto o coma. Mientras se escribe, el
 // texto queda como está; al salir se ve en el formato del idioma, con centavos, y así se ve también
 // cómo se leyó lo escrito. Es solo lo que se muestra: el formulario conserva lo escrito, porque
 // tocarlo soltaría la clave del pedido y un reintento podría registrar el acto dos veces.
-export function CampoImporte({ id, valor, deshabilitado, alCambiar }: Props) {
+export function CampoImporte({ id, valor, deshabilitado, alCambiar, ...marca }: Props) {
   const [escribiendo, setEscribiendo] = useState(false);
   const centavos = aCentavos(valor);
   return (
@@ -23,6 +26,7 @@ export function CampoImporte({ id, valor, deshabilitado, alCambiar }: Props) {
       inputMode="decimal"
       value={!escribiendo && centavos !== null ? importeEnCampo(centavos) : valor}
       disabled={deshabilitado}
+      {...marca}
       onFocus={() => setEscribiendo(true)}
       onBlur={() => setEscribiendo(false)}
       onChange={(e) => alCambiar(e.target.value)}

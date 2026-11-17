@@ -238,7 +238,8 @@ describe("resumen de pagos del edificio", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
-    await screen.findByRole("link", { name: "Documentos del edificio" });
+    // Decisión 5: el inicio no repite el menú; la entrada de Documentos está en la navegación.
+    await within(await screen.findByRole("navigation", { name: "Secciones" })).findByRole("link", { name: /^Documentos/ });
     expect(screen.queryByRole("link", { name: "Resumen de pagos del edificio" })).toBeNull();
     expect(api.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/panel"))).toBe(false);
   });
