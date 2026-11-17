@@ -31,9 +31,7 @@ def operaciones(openapi: dict) -> tuple[set[str], set[str]]:
     for ruta, metodos in openapi["paths"].items():
         for metodo, op in metodos.items():
             contenido = op.get("requestBody", {}).get("content", {})
-            binario = any(
-                c.get("schema", {}).get("format") == "binary" for c in contenido.values()
-            )
+            binario = any(c.get("schema", {}).get("format") == "binary" for c in contenido.values())
             (con_archivo if binario else otras).add(f"{metodo.upper()} {ruta}")
     return con_archivo, otras
 
