@@ -99,11 +99,12 @@ describe("invitaciones en el inicio", () => {
     abrir();
 
     const seccion = within(await screen.findByRole("region", SECCION));
-    expect(seccion.getByRole("heading", { name: "Edificio Azul" })).toBeTruthy();
-    expect(seccion.getByText("1° A")).toBeTruthy();
-    expect(seccion.getByText("inquilino/a")).toBeTruthy();
-    expect(seccion.getByText("Beto")).toBeTruthy();
-    expect(seccion.getByRole("button", { ...BOTON, description: "Edificio Azul" })).toBeTruthy();
+    // INV-05 / INI-11: una fila compacta, con los datos en una línea y el botón en la misma fila.
+    const fila = seccion.getByRole("listitem");
+    expect(within(fila).getByText("Edificio Azul")).toBeTruthy();
+    expect(within(fila).getByText("1° A · como inquilino/a · invitó Beto")).toBeTruthy();
+    expect(within(fila).getByRole("button", { ...BOTON, description: "Edificio Azul" })).toBeTruthy();
+    expect(seccion.queryByRole("heading", { name: "Edificio Azul" })).toBeNull();
   });
 
   it("control: sin invitaciones la sección no aparece, y el pedido salió igual", async () => {

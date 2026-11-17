@@ -2050,3 +2050,29 @@ p.persona-cabecera {
     background: var(--accent-tint);
   }
 }
+
+/* Fricción 17-11, tanda 7: padrón, invitaciones, contactos y documentos. */
+
+/* Una invitación pendiente del inicio en una fila compacta, como las del Padrón (INV-05, INI-11):
+   los datos a la izquierda y «Aceptar la invitación» en la misma fila; en el teléfono angosto, el
+   botón baja debajo de los datos. */
+.fila-invitacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-card);
+}
+
+.fila-invitacion__datos {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: 0.125rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
