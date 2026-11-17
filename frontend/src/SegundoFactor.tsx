@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
@@ -16,6 +16,8 @@ import { Hoja } from "./Hoja";
 import { llaveDisponible } from "./llaveAcceso";
 import { SeccionLlave } from "./SeccionLlave";
 import { pidiendoEntrar, useAEntrar } from "./sesionEncima";
+import { ErrorDeCampo, marcaDe } from "./ErrorDeCampo";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
@@ -30,6 +32,11 @@ import { pidiendoEntrar, useAEntrar } from "./sesionEncima";
 // acción principal y la aplicación queda como otra opción (AC-15); en un teléfono, el alta empieza
 // por abrir la aplicación y el QR queda plegado (AC-17); los códigos se pueden copiar o guardar, y
 // con pocos se dice cómo tener otros (AC-18); desactivar pide confirmarlo en una hoja (AC-14).
+//
+// Tanda 9: el alta de la aplicación va en una ventana con «Cancelar», sin la tarjeta de la llave, y
+// el código se verifica solo al sexto número (CTA-09); qué es la aplicación se explica ahí adentro
+// (CTA-11). Con la llave a la vista, que ya está activado lo dice su tarjeta (CTA-10). Con pocos
+// códigos queda solo el aviso, y la baja se explica en su hoja, no en la página (CTA-12).
 
 type EstadoFactor = components["schemas"]["EstadoSegundoFactor"];
 type Alta = components["schemas"]["AltaTotp"];
@@ -128,6 +135,9 @@ export function SegundoFactor() {
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [conLlave, setConLlave] = useState(false);
   const [codigo, setCodigo] = useState("");
+  // Lo escrito, leído en el mismo paso en que se completa el sexto número (el estado llega después).
+  const codigoEscrito = useRef("");
+  const [errorCodigo, setErrorCodigo] = useState<string | undefined>(undefined);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -201,11 +211,6 @@ export function SegundoFactor() {
   }
 
   /** E53: con la sesión vencida, ofrecer entrar de nuevo en cualquier acción, como `empezarAlta`. */
-  function rechazar(status: number, cuerpo: unknown) {
-    if (status !== ESTADO_SIN_SESION) setAviso(avisoDeRechazo(status, cuerpo));
-    else sinSesion();
-  }
-
   function empezarAlta() {
     setEnviando(true);
     setAviso(null);
@@ -214,6 +219,8 @@ export function SegundoFactor() {
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setCodigo("");
+          codigoEscrito.current = "";
+          setErrorCodigo(undefined);
           pasarA({ tipo: "alta", alta: data });
         } else if (codigoDe(error) === CODIGO_YA_ACTIVO) consultar();
         // Quien ya tiene una llave suma la aplicación confirmando con ella.
@@ -226,33 +233,56 @@ export function SegundoFactor() {
       .finally(() => setEnviando(false));
   }
 
-  function confirmar(evento: FormEvent<HTMLFormElement>) {
-    evento.preventDefault();
-    const limpio = codigoAplicacion(codigo);
+  /** El envío de la ventana del alta: con el código escrito hasta ahora (llega solo al sexto número). */
+  async function confirmar(): Promise<FinDeEnvio> {
+    const limpio = codigoAplicacion(codigoEscrito.current);
     if (!limpio) {
-      setAviso(fallo("Hacen falta los seis números que muestra la aplicación."));
-      return;
+      setErrorCodigo("Hacen falta los seis números que muestra la aplicación.");
+      return "seguir";
     }
-    setEnviando(true);
     setAviso(null);
     setAltaEnCurso(true);
-    void api
-      .POST("/api/v1/auth/totp/confirmar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
-      .then(({ data, error, response }) => {
-        setAltaEnCurso(false);
-        if (data !== undefined) {
-          setCodigo("");
-          setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
-        } else if (codigoDe(error) === CODIGO_SIN_ALTA) {
-          pasarA({ tipo: "inactivo" });
-          setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Hay que empezar de nuevo."));
-        } else rechazar(response.status, error);
-      })
-      .catch(() => {
-        setAltaEnCurso(false);
-        setAviso(fallo(SIN_CONEXION));
-      })
-      .finally(() => setEnviando(false));
+    let respuesta;
+    try {
+      respuesta = await api.POST("/api/v1/auth/totp/confirmar", { body: { codigo: limpio }, headers: encabezadoCsrf() });
+    } catch {
+      return { rechazo: SIN_CONEXION };
+    } finally {
+      setAltaEnCurso(false);
+    }
+    const { data, error, response } = respuesta;
+    if (data !== undefined) {
+      setCodigo("");
+      setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
+      return "cerrar";
+    }
+    if (codigoDe(error) === CODIGO_SIN_ALTA) {
+      pasarA({ tipo: "inactivo" });
+      setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Hay que empezar de nuevo."));
+      return "cerrar";
+    }
+    if (response.status === ESTADO_SIN_SESION) {
+      sinSesion();
+      return "seguir";
+    }
+    return { rechazo: avisoDeRechazo(response.status, error).texto };
+  }
+
+  function escribirCodigo(evento: ChangeEvent<HTMLInputElement>) {
+    const valor = evento.target.value;
+    codigoEscrito.current = valor;
+    setCodigo(valor);
+    setErrorCodigo(undefined);
+    // Al sexto número se verifica solo, como en la hoja de confirmar (CTA-09).
+    if (codigoAplicacion(valor) !== null) evento.target.form?.requestSubmit();
+  }
+
+  /** «Cancelar» o Escape en el alta: vuelve a la página sin activar nada. */
+  function cancelarAlta() {
+    setCodigo("");
+    codigoEscrito.current = "";
+    setErrorCodigo(undefined);
+    pasarA({ tipo: "inactivo" });
   }
 
   function desactivar() {
@@ -280,6 +310,7 @@ export function SegundoFactor() {
   const conMensaje = aviso !== null || ["cargando", "sin_servicio"].includes(pantalla.tipo);
   // La llave ya se ofrece arriba como la acción principal: la aplicación queda como otra opción.
   const llaveArriba = llaveDisponible();
+  const pocos = pantalla.tipo === "activo" && pantalla.estado.codigos_recuperacion_restantes <= POCOS_CODIGOS;
 
   // Los códigos no se sueltan hasta «Códigos guardados: seguir»: van en una hoja que deja inerte el resto de la
   // aplicación (la marca de la cabecera, el aviso de versión nueva) y no se cierra con Escape.
@@ -314,7 +345,8 @@ export function SegundoFactor() {
           <p role="status">Esperando la respuesta. Los códigos de recuperación aparecen acá.</p>
         </Hoja>
       )}
-      {["inactivo", "alta", "activo"].includes(pantalla.tipo) && (
+      {/* Durante el alta de la aplicación, la llave no queda a la vista (CTA-09). */}
+      {["inactivo", "activo"].includes(pantalla.tipo) && (
         <SeccionLlave
           alCambiar={consultar}
           alCodigos={mostrarCodigosDeLlave}
@@ -338,15 +370,11 @@ export function SegundoFactor() {
           opción secundaria, para que no parezca una tarea pendiente (comentarios 23 y 25). */}
       {pantalla.tipo === "inactivo" && pendiente === null && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          {conLlave && <p className="aviso-info">{ACTIVADO_CON_LLAVE}</p>}
+          {/* Con la tarjeta de la llave a la vista, ella ya dice que está activado (CTA-10). */}
+          {conLlave && !llaveArriba && <p className="aviso-info">{ACTIVADO_CON_LLAVE}</p>}
           <h2 id={`${id}-titulo`}>
             {conLlave ? "Otro método, opcional" : llaveArriba ? "Otra opción: una aplicación de códigos" : "Todavía no está activado"}
           </h2>
-          <p>
-            Con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
-            Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
-            números que cambia cada 30 segundos.
-          </p>
           <button
             type="button"
             className={conLlave || llaveArriba ? "secundario" : undefined}
@@ -359,8 +387,17 @@ export function SegundoFactor() {
       )}
 
       {pantalla.tipo === "alta" && (
-        <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>Cargar la cuenta en la aplicación</h2>
+        <VentanaDeFormulario
+          titulo="Cargar la cuenta en la aplicación"
+          textoEnviar="Activar la aplicación"
+          alEnviar={confirmar}
+          alCerrar={cancelarAlta}
+        >
+          <p>
+            Con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
+            Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
+            números que cambia cada 30 segundos.
+          </p>
           {pantallaTactil() ? (
             // En el teléfono de la aplicación, el QR no se puede escanear: primero, abrirla desde acá.
             <ol className="pasos">
@@ -402,22 +439,20 @@ export function SegundoFactor() {
               <li>Escribir el código de seis números que muestra la aplicación.</li>
             </ol>
           )}
-          <form className="formulario" onSubmit={confirmar} noValidate>
-            <label htmlFor={`${id}-codigo`}>Código de la aplicación</label>
-            <input
-              id={`${id}-codigo`}
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={9}
-              value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
-            />
-            <button type="submit" disabled={enviando}>
-              Activar la aplicación
-            </button>
-          </form>
-        </section>
+          <label htmlFor={`${id}-codigo`}>Código de la aplicación</label>
+          <input
+            id={`${id}-codigo`}
+            data-foco
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={9}
+            value={codigo}
+            {...marcaDe(`${id}-codigo`, errorCodigo)}
+            onChange={escribirCodigo}
+          />
+          <ErrorDeCampo idCampo={`${id}-codigo`} mensaje={errorCodigo} />
+        </VentanaDeFormulario>
       )}
 
       {pantalla.tipo === "activo" && pendiente === null && (
@@ -430,10 +465,15 @@ export function SegundoFactor() {
                 <dd>{FORMATO_FECHA.format(new Date(pantalla.estado.activado_en))}</dd>
               </>
             )}
-            <dt>Códigos de recuperación sin usar</dt>
-            <dd>{pantalla.estado.codigos_recuperacion_restantes}</dd>
+            {/* Con pocos, el aviso de abajo ya dice cuántos quedan (CTA-12). */}
+            {pocos ? null : (
+              <>
+                <dt>Códigos de recuperación sin usar</dt>
+                <dd>{pantalla.estado.codigos_recuperacion_restantes}</dd>
+              </>
+            )}
           </dl>
-          {pantalla.estado.codigos_recuperacion_restantes <= POCOS_CODIGOS && (
+          {pocos && (
             <p className="aviso-info">
               {pantalla.estado.codigos_recuperacion_restantes === 1
                 ? "Queda 1 código de recuperación."
@@ -442,10 +482,7 @@ export function SegundoFactor() {
               diez nuevos.
             </p>
           )}
-          <h3>Desactivar</h3>
-          <p>
-            Borra la aplicación cargada y los códigos de recuperación. Se avisa por correo.
-          </p>
+          {/* Qué borra la baja lo dice su hoja de confirmación (CTA-12). */}
           <button type="button" className="peligro" onClick={() => setConfirmarBaja(true)} disabled={enviando}>
             Desactivar la confirmación con código
           </button>
@@ -455,7 +492,7 @@ export function SegundoFactor() {
       {confirmarBaja && (
         <Hoja titulo="¿Desactivar la aplicación de códigos?" alEscapar={() => setConfirmarBaja(false)}>
           <p>
-            Se borran la aplicación cargada y los códigos de recuperación.
+            Se borran la aplicación cargada y los códigos de recuperación, y se avisa por correo.
             {conLlave
               ? " Las acciones delicadas se siguen confirmando con la llave de acceso."
               : " Para aprobar, pagar o conciliar habrá que activar de nuevo un método de confirmación."}
