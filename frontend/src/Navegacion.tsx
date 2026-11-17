@@ -16,6 +16,7 @@ import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
+import { useSolicitudesDirigidas } from "./fiscalizacion/solicitudesDirigidas";
 import { ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
 import { useSesionConNombre } from "./sesion";
 
@@ -130,7 +131,12 @@ function Item({ destino, secundario, desdeInicio }: { destino: Destino; secundar
 export function Navegacion() {
   const { pathname } = useLocation();
   const { porEdificio, consultando, falla, reintentar, reintentando } = useConsultaDeAcciones();
-  const ofrecido = (d: Destino) => d.requisito === undefined || (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo));
+  // MEN-04: «Solicitudes formales» también para el destinatario que tiene alguna dirigida a él.
+  const conSolicitudes = useSolicitudesDirigidas(porEdificio);
+  const ofrecido = (d: Destino) =>
+    d.requisito === undefined ||
+    (d.ruta === RUTA_SOLICITUDES && conSolicitudes) ||
+    (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo));
   const administracion = DE_ADMINISTRACION.filter(ofrecido);
   const enGestion = enAlgunaDe(DE_ADMINISTRACION, pathname);
   const marca = (
