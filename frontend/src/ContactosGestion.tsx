@@ -4,10 +4,23 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe, REVISAR_FORMULARIO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
+import {
+  ErrorDeCampo,
+  type ErroresDeCampo,
+  erroresDe,
+  faltaCompletar,
+  hayErrores,
+  marcaDe,
+  resumenDe,
+  REVISAR_FORMULARIO,
+  SIN_ERRORES,
+  sinElDe,
+  soloDe,
+} from "./ErrorDeCampo";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, LIMITE_DE_PEDIDOS, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // La gestión de los contactos de emergencia (H2b 2b-7c; doc/diseno/H2b_7_Diseno.md §3 y §4 del
 // repositorio CEM), dentro de /contactos (G-52 y G-53: una sola pantalla). `Contactos.tsx` la monta
@@ -15,7 +28,8 @@ import { codigoDe, LIMITE_DE_PEDIDOS, mensajeDeFalla, SIN_CONEXION } from "./fal
 // línea: a nadie más se le pide la lista de gestión. Trae los futuros, la observación y la
 // constancia del consentimiento, y los formularios para agregar, corregir, retirar, verificar y
 // señalar. Cada contacto es una fila que abre su ficha (comentario 21), con sus datos y sus actos;
-// cada acto se abre y termina en la misma pantalla, con su «Listo». Es solo interfaz: la API decide
+// cada acto sobre un contacto se abre en su ventana, encima de la ficha (tanda 1 del informe de
+// fricción, CON-05), y termina en la misma pantalla, con su «Listo». Es solo interfaz: la API decide
 // cada pedido, la base vuelve a controlar y un 403 al actuar se dice en la pantalla. Esta lista nunca
 // se guarda en el dispositivo (§5): la copia sin conexión es solo la de la lista general. Si la API
 // niega la lista de gestión (403), queda la lista general, sin actos.
@@ -386,12 +400,40 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
     setDatos((d) => ({ ...d, [campo]: valor }));
   }
 
+  /** Agregar, en la página: el rechazo va arriba, con el formulario abierto. */
   function enviar(evento: FormEvent) {
     evento.preventDefault();
-    if (abierto !== null) pedir(abierto);
+    if (abierto !== null) void pedir(abierto);
   }
 
-  function pedir({ accion, contacto }: Abierto) {
+  /** El botón de la ventana de corregir o señalar: lo que falta se marca sin enviar (decisión 4). */
+  function enviarDesdeLaFicha(a: Abierto): FinDeEnvio | Promise<FinDeEnvio> {
+    const profesional = datos.naturaleza === "profesional";
+    const faltan =
+      a.accion === "corregir"
+        ? faltaCompletar({
+            nombre: [datos.nombre, "Falta escribir el nombre."],
+            ...(profesional
+              ? {
+                  telefono: [datos.telefono, "Falta escribir el teléfono."],
+                  consentimiento_referencia: [datos.consentimiento, "Falta escribir dónde consta que aceptó figurar."],
+                }
+              : {}),
+          })
+        : a.accion === "senalar"
+          ? faltaCompletar({ motivo: [motivo, "Falta escribir el motivo."] })
+          : SIN_ERRORES;
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    // El teléfono mal escrito ya está marcado junto al campo.
+    if (a.accion === "corregir" && telefonoMalEscrito(datos.telefono)) return "seguir";
+    return pedir(a);
+  }
+
+  /** Manda el acto. Agregar dice el rechazo arriba; un acto sobre un contacto, en su ventana. */
+  async function pedir({ accion, contacto }: Abierto): Promise<FinDeEnvio> {
     clave.current ??= crypto.randomUUID();
     const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const base = { consorcio_id: consorcio };
@@ -437,53 +479,61 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
         break;
     }
     const nombre = accion === "agregar" ? datos.nombre.trim() : (contacto?.nombre ?? "");
-    void pedido
-      .then(({ data, error, response }) => {
-        exigirSesion(response);
-        if (data === undefined) {
-          const codigo = codigoDe(error);
-          if (renovarClave(response.status, codigo)) clave.current = null;
-          const marcados = response.status === ESTADO.invalido ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
-          setErrores(marcados);
-          setAviso({ texto: mensajeDeError(response.status, codigo, accion, Object.keys(marcados).map((c) => `body.${c}`)), ok: false });
-          if (cambioLaLista(response.status, codigo)) {
-            // Lo escrito no se pierde: una corrección que ya no tiene contacto sigue como uno nuevo, y el
-            // motivo espera la lista nueva, que muestra el formulario solo si el contacto sigue ahí.
-            if (accion === "corregir" && yaNoEsta(response.status, codigo)) {
-              setAbierto({ accion: "agregar", contacto: null });
-              cerrarFichaDe(false);
-            } else if (accion !== "senalar" && accion !== "agregar") cerrarFicha(false);
-            volverAPedir();
-          }
-          return;
+    try {
+      const { data, error, response } = await pedido;
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) clave.current = null;
+        const marcados = response.status === ESTADO.invalido ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
+        setErrores(marcados);
+        const texto = mensajeDeError(response.status, codigo, accion, Object.keys(marcados).map((c) => `body.${c}`));
+        if (!cambioLaLista(response.status, codigo)) {
+          if (accion === "agregar") setAviso({ texto, ok: false });
+          return { rechazo: texto };
         }
-        const hecho: Record<Accion, string> = {
-          agregar: `el contacto ${nombre} quedó agregado`,
-          corregir: `el contacto ${nombre} quedó corregido`,
-          retirar: `el contacto ${nombre} se retiró`,
-          verificar: `quedó la constancia de que el contacto ${nombre} se comprobó`,
-          senalar: `quedó señalado el dato incorrecto del contacto ${nombre}`,
-        };
-        if (accion === "agregar") cerrar();
-        else cerrarFicha(false);
-        setAviso({ texto: `Listo: ${hecho[accion]}.`, ok: true });
-        // Lo que se ve lo decide la API: las dos listas se vuelven a pedir, y la copia sin conexión
-        // queda con el cambio.
+        // La lista quedó vieja: el motivo va arriba, con la lista nueva. Lo escrito no se pierde: una
+        // corrección que ya no tiene contacto sigue como uno nuevo, y el motivo espera la lista nueva,
+        // que vuelve a abrir su ventana solo si el contacto sigue ahí.
+        setAviso({ texto, ok: false });
+        if (accion === "corregir" && yaNoEsta(response.status, codigo)) {
+          setAbierto({ accion: "agregar", contacto: null });
+          cerrarFichaDe(false);
+        } else if (accion !== "senalar" && accion !== "agregar") cerrarFicha(false);
         volverAPedir();
-        alCambiar();
-      })
-      .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
-        else setAviso({ texto: SIN_CONEXION, ok: false });
-      })
-      .finally(() => setEnviando(false));
+        return accion === "senalar" ? "seguir" : "cerrar";
+      }
+      const hecho: Record<Accion, string> = {
+        agregar: `el contacto ${nombre} quedó agregado`,
+        corregir: `el contacto ${nombre} quedó corregido`,
+        retirar: `el contacto ${nombre} se retiró`,
+        verificar: `quedó la constancia de que el contacto ${nombre} se comprobó`,
+        senalar: `quedó señalado el dato incorrecto del contacto ${nombre}`,
+      };
+      if (accion === "agregar") cerrar();
+      else cerrarFicha(false);
+      setAviso({ texto: `Listo: ${hecho[accion]}.`, ok: true });
+      // Lo que se ve lo decide la API: las dos listas se vuelven a pedir, y la copia sin conexión
+      // queda con el cambio.
+      volverAPedir();
+      alCambiar();
+      return "cerrar";
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        // La sesión se pide encima: lo escrito queda para repetir el paso.
+        aEntrar();
+        return "seguir";
+      }
+      if (accion === "agregar") setAviso({ texto: SIN_CONEXION, ok: false });
+      return { rechazo: SIN_CONEXION };
+    } finally {
+      setEnviando(false);
+    }
   }
 
   // La ficha muestra el contacto de la lista vigente: mientras llega una lista nueva, no se ve.
   const enFicha = contactos?.find((c) => c.id === fichaAbierta);
-  // Con la ficha abierta, lo de atrás queda inerte: un rechazo va dentro de la ficha.
-  const avisoEnFicha = enFicha !== undefined && aviso !== null && !aviso.ok;
-  const conMensaje = aviso !== null && !avisoEnFicha;
+  const conMensaje = aviso !== null;
 
   // La API negó la lista de gestión: la persona ve la lista general, como cualquiera del edificio.
   if (lectura.tipo === "sin_permiso") return <>{listaGeneral}</>;
@@ -491,7 +541,7 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
   return (
     <>
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
-        {aviso && !avisoEnFicha && (
+        {aviso && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
           </p>
@@ -501,7 +551,7 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
       {/* Arriba, antes de la lista (G-60). Agregar no depende de la lista leída: con la lista caída
           sigue a la vista, y un formulario abierto no se va mientras llega la lista. */}
       {abierto?.accion === "agregar" ? (
-        <div className="tarjeta">{formularioDatos(null, `${id}-nuevo`)}</div>
+        <div className="tarjeta">{formularioAgregar(`${id}-nuevo`)}</div>
       ) : (
         lectura.tipo !== "cargando" && (
           <p className="acciones-pantalla">
@@ -590,49 +640,51 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
           { etiqueta: "Última comprobación", valor: c.verificado_en === null ? "Sin comprobar" : momento(c.verificado_en) },
           ...(c.observado ? [{ etiqueta: "Dato señalado como incorrecto", valor: c.observacion ?? "Sin el motivo" }] : []),
         ]}
+        ventana={accion !== null && accion !== "agregar" && ventana(c, accion, base)}
       >
-        {avisoEnFicha && (
-          <p ref={textoAviso} tabIndex={-1} role="alert" className="aviso-error">
-            {aviso.texto}
-          </p>
-        )}
-        {accion === null ? (
-          <>
-            {/* Sin «Marcar como comprobado», lo que dice por qué: la comprobación reciente. */}
-            {!comprobar && c.verificado_en !== null && <p>Comprobado el {FORMATO_FECHA.format(new Date(c.verificado_en))}.</p>}
-            <p className="ficha-registro__acciones">
-              {actos.map((a) => (
-                <button key={a} type="button" className={a === "retirar" ? "secundario peligro" : "secundario"} onClick={() => abrir(a, c)} disabled={enviando}>
-                  {TEXTO_ACTO[a]}
-                </button>
-              ))}
-            </p>
-          </>
-        ) : accion === "corregir" ? (
-          formularioDatos(c, base)
-        ) : accion === "retirar" ? (
-          preguntaRetirar(c, base)
-        ) : (
-          accion !== "agregar" && formularioAccion(accion, base)
-        )}
+        {/* Sin «Marcar como comprobado», lo que dice por qué: la comprobación reciente. */}
+        {!comprobar && c.verificado_en !== null && <p>Comprobado el {FORMATO_FECHA.format(new Date(c.verificado_en))}.</p>}
+        <p className="ficha-registro__acciones">
+          {actos.map((a) => (
+            <button key={a} type="button" className={a === "retirar" ? "secundario peligro" : "secundario"} onClick={() => abrir(a, c)} disabled={enviando}>
+              {TEXTO_ACTO[a]}
+            </button>
+          ))}
+        </p>
       </FichaDeRegistro>
     );
   }
 
-  /** Agregar (contacto nulo) o corregir. */
-  function formularioDatos(c: Contacto | null, titulo: string) {
-    const nuevo = c === null;
+  /** Agregar, en la página, debajo del título (CON-04 lo pasa a una ventana en la tanda 7). */
+  function formularioAgregar(titulo: string) {
+    return (
+      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
+        <h2 id={`${titulo}-accion`}>Agregar un contacto</h2>
+        {camposDatos(true, titulo)}
+        <p>
+          <button type="submit" disabled={enviando}>
+            Agregar el contacto
+          </button>{" "}
+          <button type="button" className="secundario" onClick={cancelarAgregar} disabled={enviando}>
+            Cancelar
+          </button>
+        </p>
+      </form>
+    );
+  }
+
+  /** Los campos de un contacto: los de agregar (con «Desde») o los de corregir. */
+  function camposDatos(nuevo: boolean, titulo: string) {
     const profesional = datos.naturaleza === "profesional";
     const ayudaTelefono = `${titulo}-ayuda-telefono`;
     const ayudaTexto = `${titulo}-ayuda-texto`;
     const errorTelefono = telefonoMalEscrito(datos.telefono) ? TELEFONO_MAL_ESCRITO : errores.telefono;
     return (
-      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
-        {/* Agregar va en la página, debajo del título; corregir, dentro de la ficha, debajo del suyo. */}
-        {nuevo ? <h2 id={`${titulo}-accion`}>Agregar un contacto</h2> : <h3 id={`${titulo}-accion`}>Corregir el contacto</h3>}
+      <>
         <label htmlFor={`${titulo}-funcion`}>Función</label>
         <select
           id={`${titulo}-funcion`}
+          data-foco
           ref={(e) => {
             primerCampo.current = e;
           }}
@@ -734,76 +786,49 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
             <ErrorDeCampo idCampo={`${titulo}-desde`} mensaje={errores.vigente_desde} />
           </>
         )}
-        <p>
-          <button type="submit" disabled={enviando}>
-            {nuevo ? "Agregar el contacto" : "Guardar la corrección"}
-          </button>{" "}
-          <button type="button" className="secundario" onClick={nuevo ? cancelarAgregar : volverALaFicha} disabled={enviando}>
-            Cancelar
-          </button>
-        </p>
-      </form>
+      </>
     );
   }
 
-  /** Retirar no se puede deshacer: se pregunta una vez, en la tarjeta, sin un paso previo. */
-  function preguntaRetirar(c: Contacto, titulo: string) {
-    const pregunta = `${titulo}-pregunta`;
-    return (
-      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={pregunta}>
-        <p id={pregunta}>¿Retirar el contacto {c.nombre}? No se puede deshacer.</p>
-        <p>
-          <button
-            type="submit"
-            className="peligro"
-            disabled={enviando}
-            ref={(e) => {
-              primerCampo.current = e;
-            }}
-          >
-            Sí, retirar
-          </button>{" "}
-          <button type="button" className="secundario" onClick={volverALaFicha} disabled={enviando}>
-            No
-          </button>
-        </p>
-      </form>
-    );
-  }
-
-  /** Dejar constancia de la comprobación o señalar un error. */
-  function formularioAccion(accion: "verificar" | "senalar", titulo: string) {
-    const ayuda = `${titulo}-ayuda`;
-    const texto = {
-      verificar: {
-        titulo: "Dejar constancia de la comprobación",
-        ayuda: "Sirve para dejar constancia de que se llamó o se comprobó de otra forma que el contacto es correcto. Resuelve el dato señalado, si había.",
-        boton: "Lo comprobé",
-      },
-      senalar: {
-        titulo: "Señalar un dato incorrecto",
-        ayuda: "Qué está mal, sin teléfonos ni correos. Lo resuelve quien corrija o compruebe el contacto.",
-        boton: "Señalar el error",
-      },
-    }[accion];
-    return (
-      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
-        <h3 id={`${titulo}-accion`}>{texto.titulo}</h3>
-        <p id={ayuda}>{texto.ayuda}</p>
-        {accion === "senalar" && (
-          <>
+  /** El acto sobre un contacto, en su ventana encima de la ficha (CON-05). */
+  function ventana(c: Contacto, accion: Exclude<Accion, "agregar">, titulo: string) {
+    const alEnviar = () => enviarDesdeLaFicha({ accion, contacto: c });
+    switch (accion) {
+      case "corregir":
+        return (
+          <VentanaDeFormulario titulo="Corregir el contacto" textoEnviar="Guardar la corrección" alEnviar={alEnviar} alCerrar={volverALaFicha}>
+            {camposDatos(false, titulo)}
+          </VentanaDeFormulario>
+        );
+      case "retirar":
+        // Retirar no se puede deshacer: se pregunta una vez, en la ventana, sin un paso previo.
+        return (
+          <VentanaDeFormulario titulo="Retirar el contacto" textoEnviar="Sí, retirar" peligro alEnviar={alEnviar} alCerrar={volverALaFicha}>
+            <p>¿Retirar el contacto {c.nombre}? No se puede deshacer.</p>
+          </VentanaDeFormulario>
+        );
+      case "verificar":
+        return (
+          <VentanaDeFormulario titulo="Dejar constancia de la comprobación" textoEnviar="Lo comprobé" alEnviar={alEnviar} alCerrar={volverALaFicha}>
+            <p>
+              Sirve para dejar constancia de que se llamó o se comprobó de otra forma que el contacto es correcto. Resuelve el dato señalado, si había.
+            </p>
+          </VentanaDeFormulario>
+        );
+      case "senalar": {
+        const ayuda = `${titulo}-ayuda`;
+        return (
+          <VentanaDeFormulario titulo="Señalar un dato incorrecto" textoEnviar="Señalar el error" alEnviar={alEnviar} alCerrar={volverALaFicha}>
+            <p id={ayuda}>Qué está mal, sin teléfonos ni correos. Lo resuelve quien corrija o compruebe el contacto.</p>
             <label htmlFor={`${titulo}-motivo`}>Motivo</label>
             <input
               id={`${titulo}-motivo`}
-              ref={(e) => {
-                primerCampo.current = e;
-              }}
+              data-foco
               type="text"
               autoComplete="off"
               maxLength={LARGO_TEXTO}
               pattern={PATRON_TEXTO}
               required
-              disabled={enviando}
               {...marcaDe(`${titulo}-motivo`, errores.motivo, ayuda)}
               value={motivo}
               onChange={(e) => {
@@ -813,27 +838,9 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
               }}
             />
             <ErrorDeCampo idCampo={`${titulo}-motivo`} mensaje={errores.motivo} />
-          </>
-        )}
-        <p>
-          <button
-            type="submit"
-            disabled={enviando}
-            ref={
-              accion === "senalar"
-                ? undefined
-                : (e) => {
-                    primerCampo.current = e;
-                  }
-            }
-          >
-            {texto.boton}
-          </button>{" "}
-          <button type="button" className="secundario" onClick={volverALaFicha} disabled={enviando}>
-            Cancelar
-          </button>
-        </p>
-      </form>
-    );
+          </VentanaDeFormulario>
+        );
+      }
+    }
   }
 }

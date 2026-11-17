@@ -18,11 +18,13 @@ import { Hoja } from "./Hoja";
 //         return r.ok ? "cerrar" : { rechazo: r.texto };  // salió bien: se cierra sola
 //       }}>
 //       <label htmlFor={idMotivo}>Motivo</label>
-//       <input id={idMotivo} value={motivo} {...marcaDe(idMotivo, errores.motivo)} onChange={…} />
+//       <input id={idMotivo} data-foco value={motivo} {...marcaDe(idMotivo, errores.motivo)} onChange={…} />
 //       <ErrorDeCampo idCampo={idMotivo} mensaje={errores.motivo} />
 //     </VentanaDeFormulario>
 //   )}
 //
+// - Al abrirse, el foco va al primer elemento con `data-foco` (el primer campo: ponérselo); si no hay
+//   ninguno (una pregunta sin campos), al botón principal.
 // - El botón principal está siempre activo (decisión 4): lo obligatorio lo comprueba `alEnviar`, que
 //   marca el campo con `ErrorDeCampo` y devuelve "seguir". El navegador no valida (`noValidate`).
 // - Mientras viaja el pedido, los campos y los dos botones se apagan (lo único apagado que admite el
@@ -111,7 +113,7 @@ export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, c
           </p>
         )}
         <div className="acciones">
-          <button ref={principal} type="submit" className={peligro ? "peligro" : undefined} disabled={enviando}>
+          <button ref={principal} type="submit" className={peligro ? "peligro" : undefined} disabled={enviando} data-foco>
             {textoEnviar}
           </button>
           <button type="button" className="secundario" onClick={alCerrar} disabled={enviando}>
