@@ -128,7 +128,9 @@ test.describe("PWA servida por la imagen", () => {
     await page.goto("/");
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
-    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+    // Con el servicio funcionando no hay punto de estado (INI-09): se espera el menú.
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio no funciona" })).toHaveCount(0);
 
     // Sin la simulación: la consulta de la sesión falla por la red, como le pasa a la persona.
     await dejarDeSimularSesion(page);

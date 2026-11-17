@@ -29,9 +29,10 @@ test.describe("inicio contra el cem-backend real", () => {
     const cuerpo = (await salud.json()) as Salud;
     expect(cuerpo.sha_imagen).toBe(SHA_BACKEND);
 
-    // Un punto en la barra, con nombre accesible; la versión queda al pie de Cuenta.
-    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
-    await expect(page.getByRole("banner").getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+    // Con el servicio funcionando no hay punto de estado (comentario 19, INI-09); la versión queda
+    // al pie de Cuenta.
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+    await expect(page.getByRole("img", { name: /El servicio/ })).toHaveCount(0);
     await expect(page.getByText(SHA_BACKEND.slice(0, LARGO_SHA_CORTA))).toHaveCount(0);
     await expect(page.getByText("El servicio no funciona")).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
@@ -54,14 +55,22 @@ test.describe("inicio contra el cem-backend real", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
-    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
   });
 
-  test("enlaza a /instalar", async ({ page }) => {
+  test("con la oferta del navegador, enlaza a /instalar (INI-10)", async ({ page }) => {
     await simularPuntero(page, false);
     await simularSesion(page, "con_sesion");
     await page.goto("/");
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+    // Sin la oferta, un teléfono no tiene nada que tocar: el enlace no está.
+    await expect(page.getByRole("link", { name: /Instalar la aplicación/ })).toHaveCount(0);
+    await page.evaluate(() => {
+      const evento = new Event("beforeinstallprompt", { cancelable: true });
+      Object.assign(evento, { prompt: () => Promise.resolve(), userChoice: Promise.resolve({ outcome: "dismissed" }) });
+      window.dispatchEvent(evento);
+    });
     await page.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }).click();
     await expect(page).toHaveURL(/\/instalar$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalar Consorcio en Mano en este dispositivo");

@@ -78,6 +78,13 @@ function montar(ruta = "/", version: Version = SIN_VERSION_NUEVA) {
   );
 }
 
+/** El inicio ya leyó /health (y lo que dependa de esa lectura ya se dibujó). */
+async function saludLeida() {
+  const simulado = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  await vi.waitFor(() => expect(caminosDe(simulado)).toContain("/health"));
+  await new Promise((r) => setTimeout(r));
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -85,13 +92,14 @@ afterEach(() => {
 });
 
 describe("página de inicio", () => {
-  it("muestra el estado del backend leído de /health", async () => {
+  it("lee /health y, mientras el servicio funciona, no muestra ningún punto ni aviso (INI-09)", async () => {
     const pedido = backend();
     vi.stubGlobal("fetch", pedido);
 
     montar();
 
-    expect(await screen.findByRole("img", { name: "El servicio funciona" })).toBeTruthy();
+    await saludLeida();
+    expect(screen.queryByRole("img", { name: /El servicio/ })).toBeNull();
     // La versión queda al pie de Cuenta: el inicio no la muestra.
     expect(screen.queryByText("0849ee9")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -111,7 +119,7 @@ describe("página de inicio", () => {
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
     vi.stubGlobal("fetch", backend());
     const { container } = montar();
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
 
     // jsdom no calcula estilos: el contraste se mide en el navegador, no aquí.
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -137,7 +145,7 @@ describe("/ decide por la sesión", () => {
     montar();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
   });
 
@@ -151,7 +159,7 @@ describe("/ decide por la sesión", () => {
     montar();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(caminosDe(pedido)).toContain(RUTA_SESION);
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
   });
@@ -215,6 +223,9 @@ describe("inicio sin edificios", () => {
 
     const texto = await screen.findByText(SIN_EDIFICIO);
     await vi.waitFor(() => expect(texto.textContent).toMatch(PARA_SUMARTE));
+    // Un solo renglón: sin el rótulo «Edificio» ni la marca «Sin edificio» (INI-08).
+    expect(screen.queryByText("Sin edificio")).toBeNull();
+    expect(screen.queryByLabelText("Edificio")).toBeNull();
     expect(screen.getByRole("link", { name: "Cuenta" })).toBeTruthy();
   });
 
@@ -224,7 +235,7 @@ describe("inicio sin edificios", () => {
     montar();
 
     await vi.waitFor(() => expect(caminosDe(pedido)).toContain("/api/v1/consorcios/c1/mis-acciones"));
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(screen.queryByText(SIN_EDIFICIO)).toBeNull();
   });
 
@@ -266,7 +277,7 @@ describe("versión nueva (documento 13, §14.4)", () => {
 
     const { container } = montar("/", { hayVersionNueva: true, actualizar });
 
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(screen.getByRole("alert").textContent).toContain("Hay una versión nueva");
     expect(actualizar).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));

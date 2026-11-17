@@ -182,7 +182,8 @@ afterEach(() => {
 });
 
 describe("página /documentos", () => {
-  it("el inicio tiene el enlace a los documentos", async () => {
+  // La pestaña del menú: el inicio no la repite (informe de fricción, INI-02).
+  it("el menú tiene el enlace a los documentos", async () => {
     vi.stubGlobal(
       "fetch",
       backend({
@@ -193,7 +194,8 @@ describe("página /documentos", () => {
       }),
     );
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Documentos del edificio" })).getAttribute("href")).toBe("/documentos");
+    const menu = within(await screen.findByRole("navigation"));
+    expect((await menu.findByRole("link", { name: "Documentos" })).getAttribute("href")).toBe("/documentos");
   });
 
   it("si el archivo no se puede bajar, lo dice en la pantalla y no navega", async () => {

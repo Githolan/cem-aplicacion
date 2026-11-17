@@ -68,7 +68,9 @@ test.describe("cabeceras de seguridad del nginx de la imagen", () => {
     await page.goto("/instalar");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await page.goto("/");
-    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+    // Con el servicio funcionando no hay punto de estado (INI-09): se espera el menú.
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio no funciona" })).toHaveCount(0);
     expect(errores).toEqual([]);
   });
 });

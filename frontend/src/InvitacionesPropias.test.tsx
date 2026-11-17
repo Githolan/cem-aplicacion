@@ -125,7 +125,8 @@ describe("invitaciones en el inicio", () => {
     fireEvent.click(await screen.findByRole("button", BOTON));
 
     expect(await screen.findByText("Listo: la cuenta ya es parte de Edificio Azul.")).toBeTruthy();
-    expect(await screen.findByRole("link", { name: "Contactos de emergencia" })).toBeTruthy();
+    // La pestaña del menú aparece con lo que ahora alcanza.
+    expect(await screen.findByRole("link", { name: /Contactos de emergencia/ })).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("region", SECCION)).toBeNull());
     const [aceptacion, ...otras] = pedidos(simulado, ACEPTAR);
     expect(otras).toEqual([]);
