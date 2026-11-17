@@ -443,8 +443,9 @@ describe("página /cuenta", () => {
     fireEvent.click(region.getByRole("button", { name: "Reintentar" }));
 
     expect(await screen.findByText(recupera)).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+    // En la pantalla no queda ningún aviso (el menú, que esta prueba no simula, dice lo suyo aparte).
+    expect(enPantalla().queryByRole("alert")).toBeNull();
+    expect(enPantalla().queryByRole("button", { name: "Reintentar" })).toBeNull();
     // Reintentar pide esa parte: las que estaban bien no se vuelven a leer.
     const nuevas = pedidosDe(simulado)
       .slice(pedidosAntes)
@@ -514,14 +515,16 @@ describe("página /cuenta", () => {
 });
 
 describe("quién tiene la sesión, en la cabecera", () => {
-  it("con sesión: su nombre, sus iniciales y el enlace a la cuenta", async () => {
+  it("con sesión: su nombre y sus iniciales, sin otro enlace a la cuenta (MEN-03)", async () => {
     vi.stubGlobal("fetch", conSesion());
     abrir();
 
     const cabecera = within(screen.getByRole("banner"));
-    const enlace = await cabecera.findByRole("link", { name: "Ana Pérez" });
-    expect(enlace.getAttribute("href")).toBe("/cuenta");
-    expect(within(enlace).getByText("AP").getAttribute("aria-hidden")).toBe("true");
+    const nombre = await cabecera.findByText("Ana Pérez");
+    const persona = nombre.closest(".persona-cabecera") as HTMLElement;
+    expect(within(persona).getByText("AP").getAttribute("aria-hidden")).toBe("true");
+    // A la cuenta se llega por la entrada «Cuenta» del menú: el nombre no es un enlace.
+    expect(cabecera.queryByRole("link", { name: "Ana Pérez" })).toBeNull();
   });
 
   it("control: sin sesión no muestra a nadie", async () => {
@@ -529,7 +532,7 @@ describe("quién tiene la sesión, en la cabecera", () => {
     abrir();
 
     await screen.findByRole("heading", ENTRAR);
-    expect(within(screen.getByRole("banner")).queryByRole("link", { name: "Ana Pérez" })).toBeNull();
+    expect(within(screen.getByRole("banner")).queryByText("Ana Pérez")).toBeNull();
   });
 });
 
