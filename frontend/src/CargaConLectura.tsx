@@ -50,7 +50,9 @@ type Fase =
 export const TEXTO_SUBIENDO = "Subiendo…";
 export const TEXTO_REVISANDO = "El antivirus lo está revisando…";
 export const TEXTO_LEYENDO = "Leyendo los datos…";
-export const TEXTO_LEIDA = "Listo: se leyeron los datos del documento. Hay que revisar cada campo marcado antes de guardar.";
+// DOC-17 (informe de fricción, 17-11-2026): qué revisar ya lo dice la marca de cada campo; el
+// resultado no lo repite, y no hay nota fija que lo anuncie antes de elegir.
+export const TEXTO_LEIDA = "Listo: se leyeron los datos.";
 export const TEXTO_A_MANO = "No se pudieron leer los datos del documento: hay que completarlos a mano.";
 export const TEXTO_SIN_LECTURA = "La lectura de documentos no está disponible: hay que completar los datos a mano.";
 export const TEXTO_RECHAZADO = "Este archivo no se puede usar: no pasó el antivirus. Hay que elegir otro.";
@@ -64,7 +66,6 @@ export const MARCA_LECTURA = "Lo completó la lectura: revisar";
 export const TEXTO_LEIDA_CON_DIFERENCIAS =
   "Se leyeron los datos del documento. Hay que revisar lo marcado antes de guardar: no coincide o falta.";
 export const NOTA_SOLO_DIFERENCIAS = "Los datos que se lean completan el formulario. Se marca solo lo que no coincide o lo que falta.";
-const NOTA_TODO = "Los datos que se lean completan el formulario: hay que revisarlos antes de guardar.";
 /** Lo que decía el campo antes de que la lectura lo cambiara por otra cosa. */
 export const textoNoCoincide = (antes: string) => `Lo leído no coincide con lo que estaba («${antes}»): revisar.`;
 export const TEXTO_FALTA_OBLIGATORIO = "No se leyó del documento y es obligatorio: hay que completarlo.";
@@ -320,7 +321,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     <section className="carga-con-lectura" aria-label={titulo}>
       <SubirArchivo titulo={titulo} de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={cargado !== null}
         deshabilitada={deshabilitada || ocupada || quitar !== "nada"}
-        nota={soloDiferencias ? NOTA_SOLO_DIFERENCIAS : NOTA_TODO} alElegir={elegir} />
+        nota={soloDiferencias ? NOTA_SOLO_DIFERENCIAS : undefined} alElegir={elegir} />
       {progreso !== null && (
         <p role="status" className="aviso-info">
           {progreso}
