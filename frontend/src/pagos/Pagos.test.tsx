@@ -9,7 +9,7 @@ import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import type { components } from "../api/tipos";
 import { App } from "../App";
 import {
-  CONFIRMAR_QUITAR, MARCA_LECTURA, NO_QUITAR, preguntaQuitar, QUITAR_ARCHIVO, SEGUIR_SIN_ESPERAR, TEXTO_QUITADO, SEGUIR_SIN_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_DEJADO_SIN_ARCHIVO, TEXTO_DEJADO_SIN_LECTURA,
+  CAMBIAR_ARCHIVO, CONFIRMAR_QUITAR, MARCA_LECTURA, NO_QUITAR, preguntaQuitar, QUITAR_ARCHIVO, SEGUIR_SIN_ESPERAR, TEXTO_QUITADO, SEGUIR_SIN_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_DEJADO_SIN_ARCHIVO, TEXTO_DEJADO_SIN_LECTURA,
   TEXTO_ESPERA_PARA_GUARDAR, TEXTO_FALTA_OBLIGATORIO, TEXTO_LEIDA, TEXTO_LEIDA_CON_DIFERENCIAS, TEXTO_LEYENDO,
   TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR, textoNoCoincide,
 } from "../CargaConLectura";
@@ -19,9 +19,14 @@ import { ContextoVersion } from "../version";
 import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables, textoMonedaAjena } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
-import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTOS } from "./SubirFactura";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
+import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_LISTO } from "./SubirFactura";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
 import { TEXTO_ACCION, TITULO_PLEGADAS } from "./textosDeAcciones";
+import {
+  AVISO_DESHACE_DECLARACION, AVISO_SIN_SALIDA_CAUSA, AVISO_RECLAMO, AVISO_VER_LA_CUENTA_QUEDA, CON_SALTEO, DAR_POR_PAGADO, FALTA_CONCEPTO, FALTA_IMPORTE, FALTA_LA_CUENTA, FALTA_MOTIVO,
+  FALTA_PROVEEDOR, IR_A_PROVEEDORES, MARCA_SIN_DOCUMENTACION, PROVEEDOR_INACTIVO, RECLAMAR, SIN_CAMBIOS, SIN_DOCUMENTACION,
+  SIN_DOCUMENTACION_SIN_SABER, textoContratoExcedido, TITULO_PARECIDA,
+} from "./textos";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
 // banco 999, y nada se transfiere. La API está simulada: que el servidor mande el `paso` correcto lo
@@ -317,6 +322,17 @@ function abrirFicha(f: Ficha | (() => Ficha), extra: Respuestas = {}) {
   return api;
 }
 
+/** Registrar o corregir el pago se hace en su ventana (REG-01): el botón de la ficha la abre. */
+async function abrirRegistro() {
+  fireEvent.click(await screen.findByRole("button", { name: /^(Subir el comprobante|Registrar el pago|Corregir el registro)$/ }));
+  await screen.findByRole("dialog");
+}
+
+/** Lo de adentro de una ventana abierta (criterio 3): su botón puede llamarse como el que la abrió. */
+async function ventana(nombre: string) {
+  return within(await screen.findByRole("dialog", { name: nombre }));
+}
+
 async function verificarCodigo() {
   fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
 }
@@ -589,10 +605,13 @@ describe("el ancho de la pantalla", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
+    await abrirRegistro();
     fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), {
       target: { files: [new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" })] },
     });
     await waitFor(() => expect(pedidos(api, "POST", ARCHIVO_NUEVO)).toHaveLength(1));
+    // Con la ventana abierta la bandeja queda inerte, pero la ruta puede cambiar igual (atrás del
+    // navegador): el clic directo en el enlace lo simula.
     fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
     await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" });
     const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
@@ -693,8 +712,9 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     ],
     ["aprobar", APROBAR, "Aprobar la orden", "puede_aprobar"],
     ["pagar", PAGAR, "Ver la cuenta para pagar", "puede_pagar"],
-    ["subir_comprobante", SUBIR, "Elegir un archivo", "puede_subir_comprobante"],
-    ["corregir", CORREGIR, "Guardar la corrección", "puede_corregir"],
+    // La carga va en su ventana: la ficha muestra el botón que la abre (REG-01).
+    ["subir_comprobante", SUBIR, "Subir el comprobante", "puede_subir_comprobante"],
+    ["corregir", CORREGIR, "Corregir el registro", "puede_corregir"],
     ["declarar_no_pago", ficha({ situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true }), "Declarar que no se pagó", "puede_declarar"],
     ["conciliar", CONCILIAR, "Está bien: conciliar", "puede_conciliar"],
     [
@@ -776,15 +796,18 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   });
 
   it("las versiones anteriores muestran solo lo que cambió, y nada si no cambió nada visible (comentario 25)", async () => {
-    const v1 = version({ numero: 1, importe_centavos: 4_000_000, aprobada_por: [] });
-    const v2 = version({ numero: 2, importe_centavos: 4_000_000, aprobada_por: [] });
-    const v3 = version({ numero: 3, importe_centavos: 4_500_000, aprobada_por: [] });
-    abrirFicha({ ...APROBAR, orden: { ...APROBAR.orden, version_vigente: 3 }, versiones: [v1, v2, v3] });
+    const v1 = version({ numero: 1, importe_centavos: 4_000_000, concepto: "Antes", aprobada_por: [] });
+    const v2 = version({ numero: 2, importe_centavos: 4_000_000, concepto: "Antes", aprobada_por: [] });
+    const v3 = version({ numero: 3, importe_centavos: 4_000_000, concepto: "Ahora", aprobada_por: [] });
+    const v4 = version({ numero: 4, importe_centavos: 4_500_000, concepto: "Ahora", aprobada_por: [] });
+    abrirFicha({ ...APROBAR, orden: { ...APROBAR.orden, version_vigente: 4 }, versiones: [v1, v2, v3, v4] });
     await boton("Aprobar la orden");
     const mas = screen.getByText("Más datos").closest("details") as HTMLElement;
     const filas = [...mas.querySelectorAll("h3 + ol.versiones li")].map((li) => li.textContent);
-    // v1 → v2 no cambió nada visible; v2 → v3 cambió el importe.
-    expect(filas).toEqual([expect.stringMatching(/^importe \$\s?40\.000,00 → \$\s?45\.000,00$/)]);
+    // v1 → v2 no cambió nada visible; v2 → v3 cambió el concepto. El último cambio (v3 → v4, el
+    // importe) se dice en el cuerpo de la ficha y «Más datos» no lo repite (FIC-08).
+    expect(filas).toEqual(["concepto «Antes» → «Ahora»"]);
+    expect(screen.getByText(/^Cambió el importe: antes era/)).toBeTruthy();
   });
 
   it("la alerta de fraccionamiento se ve al decidir", async () => {
@@ -897,7 +920,7 @@ describe("pagar", () => {
   it("la cuenta no está antes del acto y el botón avisa qué deja registrado", async () => {
     circuito();
     await boton("Ver la cuenta para pagar");
-    expect(screen.getByText(AVISO_VER_LA_CUENTA)).toBeTruthy();
+    expect(screen.getByText(AVISO_VER_LA_CUENTA_QUEDA)).toBeTruthy();
     expect(document.body.textContent).not.toContain(CUENTA);
   });
 
@@ -910,7 +933,8 @@ describe("pagar", () => {
     const [emision] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/emitir`);
     expect(await cuerpo(emision)).toEqual({ version: 1, huella: H1 });
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)[0])).toEqual({ version: 1, huella: H1 });
-    expect(await boton("Elegir un archivo")).toBeTruthy();
+    // Lo que sigue es subir el comprobante: su botón abre la ventana (REG-01).
+    expect(await boton("Subir el comprobante")).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
   });
 
@@ -1036,6 +1060,7 @@ describe("pagar", () => {
     });
     fireEvent.click(await boton("Ver la cuenta de nuevo"));
     await screen.findByText(CUENTA);
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -1050,6 +1075,7 @@ describe("registrar y corregir", () => {
     const api = abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     expect((screen.getByLabelText(/^Importe transferido/) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(/^CBU\/CVU de destino/) as HTMLInputElement).value).toBe("");
@@ -1072,6 +1098,7 @@ describe("registrar y corregir", () => {
         return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
       },
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -1088,6 +1115,7 @@ describe("registrar y corregir", () => {
     abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => error("no_coincide_con_la_orden", 422),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -1100,6 +1128,7 @@ describe("registrar y corregir", () => {
     const api = abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => Response.json({ id: DIF, orden_id: O1 }, { status: 201 }),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
@@ -1116,6 +1145,7 @@ describe("registrar y corregir", () => {
     const api = abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => Response.json({ id: DIF, orden_id: O1 }, { status: 201 }),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
@@ -1133,6 +1163,7 @@ describe("registrar y corregir", () => {
     abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => error("sin_diferencia", 422),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
@@ -1144,16 +1175,18 @@ describe("registrar y corregir", () => {
 
   it("sin poder registrar no ofrece pagué otra cosa", async () => {
     abrirFicha({ ...LISTO, puede_registrar: false });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     expect(screen.queryByRole("button", { name: "Se transfirió otro importe o a otra cuenta" })).toBeNull();
   });
 
   it("al corregir, pagué otra cosa pide la cuenta del comprobante", async () => {
     abrirFicha(CORREGIR);
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     expect(screen.queryByLabelText("CBU/CVU de destino (como figura en el comprobante)")).toBeNull();
     fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
-    expect(screen.getByLabelText("CBU/CVU de destino (como figura en el comprobante)")).toBeTruthy();
+    expect(screen.getByLabelText("CBU/CVU de destino")).toBeTruthy();
   });
 
   describe("resolver lo que se pagó", () => {
@@ -1164,13 +1197,17 @@ describe("registrar y corregir", () => {
         [`POST ${CAMINO}/resolucion`]: () => Response.json({ orden_id: O1, estado: "pagada" }),
       });
       await screen.findByText("La orden contra lo que salió del banco");
-      expect(screen.getByRole("radio", { name: /Dar por pagados .*12\.500,00 y preparar otra orden por .*2\.500,00/ })).toBeTruthy();
-      // El botón dice lo elegido (comentario 29), y cambia con la elección.
-      fireEvent.click(screen.getByRole("radio", { name: /Reclamar la devolución/ }));
-      expect(await boton("Reclamar la devolución")).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Dar por pagado lo real" })).toBeNull();
-      fireEvent.click(screen.getByRole("radio", { name: /Dar por pagados/ }));
-      fireEvent.click(await boton("Dar por pagado lo real"));
+      // Cada camino con su botón, y lo que hace lo dice su confirmación (FIC-04).
+      expect(screen.queryByRole("radio")).toBeNull();
+      fireEvent.click(await boton(RECLAMAR));
+      const reclamo = await ventana(RECLAMAR);
+      expect(reclamo.getByText(AVISO_RECLAMO)).toBeTruthy();
+      fireEvent.click(reclamo.getByRole("button", { name: "Cancelar" }));
+      expect(pedidos(api, "POST", `${CAMINO}/resolucion`)).toHaveLength(0);
+      fireEvent.click(await boton(DAR_POR_PAGADO));
+      const pagado = await ventana(DAR_POR_PAGADO);
+      expect(pagado.getByText(/^Se dan por pagados/).textContent?.replaceAll(" ", " ")).toMatch(/12\.500,00 y se prepara otra orden por .*2\.500,00/);
+      fireEvent.click(pagado.getByRole("button", { name: DAR_POR_PAGADO }));
       expect(await screen.findByText(/quedó pagada por lo que salió del banco/)).toBeTruthy();
       expect(await cuerpo(pedidos(api, "POST", `${CAMINO}/resolucion`)[0])).toEqual({ resolucion: "pagada_por_lo_real" });
     });
@@ -1181,8 +1218,9 @@ describe("registrar y corregir", () => {
         diferencia_vigente: diferencia({ tipo: "cuenta", cuenta_ultimos_digitos: "9044", importe_real: "15000.00", falta_centavos: null, se_puede_dar_por_pagada: false }),
       }), { [`POST ${CAMINO}/resolucion`]: () => Response.json({ orden_id: O1, estado: "en_verificacion" }) });
       expect(await screen.findByText("…9044")).toBeTruthy();
-      expect(screen.queryByRole("radio", { name: /Dar por pagados/ })).toBeNull();
-      fireEvent.click(await boton("Reclamar la devolución"));
+      sinBoton(DAR_POR_PAGADO);
+      fireEvent.click(await boton(RECLAMAR));
+      fireEvent.click((await ventana(RECLAMAR)).getByRole("button", { name: RECLAMAR }));
       expect(await screen.findByText(/queda abierta hasta recuperar/)).toBeTruthy();
       expect(await cuerpo(pedidos(api, "POST", `${CAMINO}/resolucion`)[0])).toEqual({ resolucion: "reclamo" });
     });
@@ -1218,6 +1256,7 @@ describe("registrar y corregir", () => {
     abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => error("operacion_de_otra_orden", 409),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -1235,6 +1274,7 @@ describe("registrar y corregir", () => {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () =>
         conFactor ? Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) : error("segundo_factor_requerido", 403),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -1249,6 +1289,7 @@ describe("registrar y corregir", () => {
     const api = abrirFicha(CORREGIR, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
+    await abrirRegistro();
     expect((await screen.findByText(/no hay que transferir de nuevo/)).textContent).toContain("No coincide el número");
     expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
     expect(await boton("Ver más grande")).toBeTruthy();
@@ -1270,6 +1311,7 @@ describe("registrar y corregir", () => {
 
   it("control: un registro nuevo no se llena con nada de la orden y pide la cuenta", async () => {
     abrirFicha(LISTO);
+    await abrirRegistro();
     expect((await screen.findByLabelText<HTMLInputElement>("Número de operación")).value).toBe("");
     expect(screen.getByLabelText<HTMLInputElement>(/^Importe transferido/).value).toBe("");
     expect(screen.getByLabelText<HTMLInputElement>(/^CBU\/CVU de destino/).value).toBe("");
@@ -1297,6 +1339,7 @@ describe("el comprobante en un paso", () => {
   const FOTO = new File(["\xff\xd8\xff SINTETICO"], "foto.jpg", { type: "image/jpeg" });
 
   async function elegir(archivo = PDF) {
+    if (screen.queryByRole("dialog") === null) await abrirRegistro();
     fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
   }
 
@@ -1320,6 +1363,7 @@ describe("el comprobante en un paso", () => {
 
   it("elegir el archivo dispara todo, sin un botón de subir ni una lista", async () => {
     const api = abrirFicha(SUBIR, COMPROBANTE);
+    await abrirRegistro();
     expect(await boton("Elegir un archivo")).toBeTruthy();
     expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
@@ -1335,6 +1379,7 @@ describe("el comprobante en un paso", () => {
 
   it("soltar un archivo en la zona también lo sube", async () => {
     const api = abrirFicha(SUBIR, COMPROBANTE);
+    await abrirRegistro();
     const zona = (await screen.findByText("Soltar el archivo acá")).parentElement as HTMLElement;
     fireEvent.drop(zona, { dataTransfer: { files: [PDF] } });
     await waitFor(() => expect(escrituras(api)).toEqual([CREAR, SUBIDA]));
@@ -1346,6 +1391,7 @@ describe("el comprobante en un paso", () => {
   ])("en un ancho %s ofrece a la vez soltar, la cámara, la galería y el archivo", async (_, alLado) => {
     ancho(alLado);
     abrirFicha(SUBIR);
+    await abrirRegistro();
     expect(await boton("Sacar una foto")).toBeTruthy();
     expect(await boton("Elegir de la galería")).toBeTruthy();
     expect(await boton("Elegir un archivo")).toBeTruthy();
@@ -1358,6 +1404,7 @@ describe("el comprobante en un paso", () => {
 
   it("una foto de la cámara también se sube sola", async () => {
     const { cambiar } = conSubida();
+    await abrirRegistro();
     fireEvent.change(await screen.findByLabelText("Foto del comprobante"), { target: { files: [FOTO] } });
     expect((await screen.findByRole("img", { name: "Vista previa de foto.jpg" })).getAttribute("src")).toBe("blob:sintetico");
     cambiar(SUBIR);
@@ -1365,6 +1412,7 @@ describe("el comprobante en un paso", () => {
 
   it("un archivo de otro tipo se rechaza en la zona, sin mandar nada", async () => {
     const api = abrirFicha(SUBIR, COMPROBANTE);
+    await abrirRegistro();
     fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), {
       target: { files: [new File(["hola"], "notas.txt", { type: "text/plain" })] },
     });
@@ -1413,6 +1461,7 @@ describe("el comprobante en un paso", () => {
     const colgadas: ((r: Response) => void)[] = [];
     let responder = (): Response | Promise<Response> => Response.json(EN_REVISION);
     abrirFicha(EN_REVISION, { [`GET ${BASE}/pagos/${O1}`]: () => responder() });
+    await abrirRegistro();
     expect(await screen.findByText("Revisando el comprobante")).toBeTruthy();
     responder = () => new Promise<Response>((r) => colgadas.push(r));
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
@@ -1433,6 +1482,7 @@ describe("el comprobante en un paso", () => {
       [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -1443,6 +1493,7 @@ describe("el comprobante en un paso", () => {
   it("tras un minuto avisa que se puede salir y sigue consultando", async () => {
     conEsperaManual();
     const api = abrirFicha(EN_REVISION);
+    await abrirRegistro();
     await screen.findByText("Revisando el comprobante");
     await act(() => vi.advanceTimersByTimeAsync(ESPERA * 19));
     expect(screen.queryByText(AVISO_ANTIVIRUS_TARDA)).toBeNull();
@@ -1455,6 +1506,7 @@ describe("el comprobante en un paso", () => {
 
   it("al volver a la ficha con un archivo en revisión sigue la consulta, sin subir nada", async () => {
     const api = abrirFicha(EN_REVISION);
+    await abrirRegistro();
     expect(await screen.findByText("Revisando el comprobante")).toBeTruthy();
     expect(escrituras(api)).toEqual([]);
     expect(screen.queryByLabelText("Archivo del comprobante")).toBeNull();
@@ -1483,9 +1535,12 @@ describe("el comprobante en un paso", () => {
       },
       [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
     });
+    await abrirRegistro();
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
-    await boton("Elegir un archivo");
+    // Con un comprobante ya subido, cambiarlo es la excepción: un botón, no la zona (REG-03).
+    expect(screen.queryByText("Soltar otro archivo acá")).toBeNull();
+    fireEvent.click(await boton("Cambiar el comprobante"));
     expect(screen.getByText("Soltar otro archivo acá")).toBeTruthy();
     await elegir();
     await screen.findByText("Revisando el comprobante");
@@ -1518,6 +1573,7 @@ describe("el comprobante en un paso", () => {
         throw new TypeError("sin red");
       },
     });
+    await abrirRegistro();
     await elegir();
     expect(await boton("Reintentar")).toBeTruthy();
     expect(screen.getByText("comprobante.pdf")).toBeTruthy();
@@ -1533,6 +1589,7 @@ describe("el comprobante en un paso", () => {
 
   it("si no vio la cuenta, la carga se niega y no sube el archivo", async () => {
     const api = abrirFicha(SUBIR, { [`POST ${CREAR}`]: () => error("no_es_quien_ejecuto", 403) });
+    await abrirRegistro();
     await elegir();
     expect((await screen.findByRole("alert")).textContent).toContain("quien vio la cuenta");
     expect(pedidos(api, "POST", SUBIDA)).toHaveLength(0);
@@ -1540,6 +1597,7 @@ describe("el comprobante en un paso", () => {
 
   it("un archivo que no es PDF, JPEG ni PNG no se manda y deja elegir otro", async () => {
     const api = abrirFicha(SUBIR);
+    await abrirRegistro();
     await elegir(new File(["x"], "a.exe", { type: "application/x-msdownload" }));
     expect((await screen.findByRole("alert")).textContent).toContain("PDF, JPEG o PNG");
     expect(escrituras(api)).toEqual([]);
@@ -1554,6 +1612,7 @@ describe("el comprobante en un paso", () => {
       [`GET ${BASE}/pagos/${O1}`]: lectura,
     }));
     abrir(`/pagos/${O1}`);
+    await abrirRegistro();
     await screen.findByText("Revisando el comprobante");
     caido = true;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
@@ -1590,6 +1649,7 @@ describe("la lectura con IA del comprobante", () => {
     conEsperaManual();
     let actual: Ficha = LEYENDO;
     const api = abrirFicha(() => actual);
+    await abrirRegistro();
     expect(await screen.findByText("Revisando el comprobante")).toBeTruthy();
     expect(screen.queryByText("Leyendo los datos…")).toBeNull(); // D-24: sin la lista de pasos
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
@@ -1603,6 +1663,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("si coincide, los campos traen lo leído y se registra sin escribir la cuenta", async () => {
     const api = abrirFicha(COINCIDE, { [`POST ${RUTA_REGISTRO}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
+    await abrirRegistro();
     await waitFor(() => expect(valor("Número de operación")).toBe("0048213377"));
     // D-25: leído con IA, lo que coincide no se avisa; solo lo que no coincide o falta.
     expect(screen.queryByText(/coinciden con la orden/)).toBeNull();
@@ -1618,6 +1679,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("corregir lo que se leyó pide la cuenta y deja lo leído, sin traer nada de la orden", async () => {
     abrirFicha(COINCIDE);
+    await abrirRegistro();
     fireEvent.click(await boton("Corregir lo que se leyó"));
     expect(valor(/^CBU\/CVU de destino/)).toBe("");
     expect(valor(/^Importe transferido/)).toBe("15.000,00");
@@ -1626,6 +1688,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("lo que no se leyó queda vacío: nunca se llena con lo de la orden", async () => {
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ ...VACIA, numero_operacion: "0048213377" }) });
+    await abrirRegistro();
     expect(await screen.findByText("Revisar lo que se leyó del comprobante y completar lo que falta.")).toBeTruthy();
     expect(valor("Número de operación")).toBe("0048213377");
     expect(valor(/^Importe transferido/)).toBe("");
@@ -1635,6 +1698,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("si difiere de la orden lo dice antes de registrar y la persona elige qué pasó", async () => {
     abrirFicha(OTRO_IMPORTE);
+    await abrirRegistro();
     expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y la orden es por $ 15.000,00.");
     sinBoton("Registrar el pago");
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
@@ -1646,12 +1710,14 @@ describe("la lectura con IA del comprobante", () => {
 
   it("otra cuenta se dice por sus últimos dígitos", async () => {
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ cuenta_coincide: false, cuenta_ultimos_digitos: "7710", distinto_de_la_orden: ["cuenta"] }) });
+    await abrirRegistro();
     expect((await screen.findByRole("alert")).textContent).toContain(`El comprobante dice la cuenta …7710 y la orden es a la cuenta …${CUENTA.slice(-4)}.`);
   });
 
   it("otra cuenta con los mismos últimos dígitos: termina igual, y dice que no es la misma", async () => {
     const ultimos = CUENTA.slice(-4);
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ cuenta_coincide: false, cuenta_ultimos_digitos: ultimos, distinto_de_la_orden: ["cuenta"] }) });
+    await abrirRegistro();
     const aviso = (await screen.findByRole("alert")).textContent;
     expect(aviso).toContain(`La cuenta del comprobante termina igual que la de la orden (…${ultimos}), pero no es la misma cuenta.`);
     expect(aviso?.split(`…${ultimos}`)).toHaveLength(2);
@@ -1660,6 +1726,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("se leyó mal: se escribe sobre lo leído, y el aviso sigue a la vista", async () => {
     abrirFicha(OTRO_IMPORTE);
+    await abrirRegistro();
     fireEvent.click(await boton("Se leyó mal: corregir el dato"));
     expect(valor(/^Importe transferido/)).toBe("8.500,00");
     expect(valor(/^CBU\/CVU de destino/)).toBe("");
@@ -1670,6 +1737,7 @@ describe("la lectura con IA del comprobante", () => {
   it("elegir «Se leyó mal» viaja con el registro", async () => {
     const REGISTRO = `${BASE}/ordenes-pago/${O1}/pago-manual`;
     const api = abrirFicha(OTRO_IMPORTE, { [`POST ${REGISTRO}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
+    await abrirRegistro();
     fireEvent.click(await boton("Se leyó mal: corregir el dato"));
     fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
     fireEvent.click(await boton("Registrar el pago"));
@@ -1680,6 +1748,7 @@ describe("la lectura con IA del comprobante", () => {
   it("control: con la lectura que coincide no se dice nada", async () => {
     const REGISTRO = `${BASE}/ordenes-pago/${O1}/pago-manual`;
     const api = abrirFicha({ ...LISTO, lectura_comprobante: leida() }, { [`POST ${REGISTRO}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
+    await abrirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     await vi.waitFor(() => expect(pedidos(api, "POST", REGISTRO)).toHaveLength(1));
     expect(await cuerpo(pedidos(api, "POST", REGISTRO)[0])).toMatchObject({ lectura_mal: false });
@@ -1687,6 +1756,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("es otro comprobante: recién ahí aparece dónde subirlo", async () => {
     abrirFicha(OTRO_IMPORTE);
+    await abrirRegistro();
     await boton("Es otro comprobante: cambiarlo");
     expect(screen.queryByText("Soltar otro archivo acá")).toBeNull();
     fireEvent.click(await boton("Es otro comprobante: cambiarlo"));
@@ -1695,6 +1765,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("pagué otra cosa arranca con lo leído", async () => {
     abrirFicha(OTRO_IMPORTE);
+    await abrirRegistro();
     fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
     expect(valor("Importe que salió del banco")).toBe("8.500,00");
     expect(valor("Número de operación")).toBe("0048213377");
@@ -1703,6 +1774,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("un titular distinto avisa y no traba", async () => {
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ titular_destino: "Otra Razón SRL", titular_distinto: true }) });
+    await abrirRegistro();
     expect(await screen.findByText(/El comprobante dice que el titular es «Otra Razón SRL»/)).toBeTruthy();
     expect(screen.queryByText(/coinciden con la orden/)).toBeNull(); // D-25: solo lo que no coincide
     expect(await boton("Registrar el pago")).toBeTruthy();
@@ -1711,6 +1783,7 @@ describe("la lectura con IA del comprobante", () => {
   it("si no se pudo leer, se carga a mano con el texto del diseño y sin reintentar", async () => {
     conEsperaManual();
     const api = abrirFicha(NO_LEIDA);
+    await abrirRegistro();
     expect(await screen.findByText(TEXTO_FALLO)).toBeTruthy();
     expect(valor("Número de operación")).toBe("");
     const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
@@ -1721,6 +1794,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("control: con la lectura apagada no dice nada y es el formulario de siempre", async () => {
     abrirFicha(LISTO);
+    await abrirRegistro();
     expect(await screen.findByText("Los datos van como figuran en el comprobante.")).toBeTruthy();
     expect(screen.queryByText(TEXTO_FALLO)).toBeNull();
     expect(valor(/^CBU\/CVU de destino/)).toBe("");
@@ -1730,6 +1804,7 @@ describe("la lectura con IA del comprobante", () => {
     conEsperaManual();
     let actual: Ficha = LEYENDO;
     const api = abrirFicha(() => actual, { [`POST ${RUTA_REGISTRO}`]: () => error("orden_no_admite", 409) });
+    await abrirRegistro();
     await screen.findByText("Revisando el comprobante");
     await act(() => vi.advanceTimersByTimeAsync(ESPERA * 21));
     expect(await screen.findByText(TEXTO_FALLO)).toBeTruthy();
@@ -1761,8 +1836,10 @@ describe("la lectura con IA del comprobante", () => {
       },
       [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
     });
+    await abrirRegistro();
     await waitFor(() => expect(valor("Número de operación")).toBe("0048213377"));
     const archivo = new File(["%PDF-1.4 SINTETICO"], "otro.pdf", { type: "application/pdf" });
+    fireEvent.click(await boton("Cambiar el comprobante"));
     fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     expect(await screen.findByText(TEXTO_FALLO)).toBeTruthy();
     expect(valor("Número de operación")).toBe("");
@@ -1771,6 +1848,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("corregir abre con lo registrado aunque haya una lectura", async () => {
     abrirFicha({ ...CORREGIR, lectura_comprobante: leida({ numero_operacion: "OTRO999", importe_centavos: 850_000, distinto_de_la_orden: ["importe"] }) });
+    await abrirRegistro();
     await screen.findByRole("heading", { name: "Corregir el registro" });
     expect(valor("Número de operación")).toBe("0001234567");
     expect(sinDuros(screen.getByRole("alert").textContent)).toContain("El comprobante dice $ 8.500,00");
@@ -1833,6 +1911,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("antes de registrar, también: otra moneda sin importe pregunta qué pasó", async () => {
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_la_orden: ["moneda"] }) });
+    await abrirRegistro();
     expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y la orden es en ARS.");
     sinBoton("Registrar el pago");
     expect(await boton("Se leyó mal: corregir el dato")).toBeTruthy();
@@ -1910,30 +1989,31 @@ describe("no se pagó", () => {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
     });
     fireEvent.click(await boton("Declarar que no se pagó"));
-    fireEvent.change(await screen.findByLabelText("Por qué no se pagó"), { target: { value: "No había saldo" } });
-    fireEvent.click(await boton("Declarar que no se pagó"));
+    const declarar = await ventana("Declarar que no se pagó");
+    fireEvent.change(declarar.getByLabelText("Por qué no se pagó"), { target: { value: "No había saldo" } });
+    fireEvent.click(declarar.getByRole("button", { name: "Declarar que no se pagó" }));
     expect(await screen.findByText(/Listo: quedó declarado que no se pagó/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`)[0])).toEqual({ version: 1, motivo: "No había saldo" });
   });
 
-  it("cancelar la declaración no pierde lo escrito en el registro", async () => {
+  it("cancelar la declaración deja la ficha como estaba, con el registro a mano", async () => {
     abrirFicha(LISTO);
-    await screen.findByLabelText("Número de operación");
-    escribirRegistro();
     fireEvent.click(await boton("Declarar que no se pagó"));
-    fireEvent.click(await boton("Cancelar"));
-    expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
+    fireEvent.click((await ventana("Declarar que no se pagó")).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await boton("Registrar el pago")).toBeTruthy();
   });
 
   it("sin salida, declara sin ver la cuenta", async () => {
     const api = abrirFicha(ficha({ orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true, ejecucion: ejecucion() }), {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
     });
-    expect(await screen.findByText(AVISO_SIN_SALIDA)).toBeTruthy();
+    expect(await screen.findByText(AVISO_SIN_SALIDA_CAUSA)).toBeTruthy();
     fireEvent.click(await boton("Declarar que no se pagó"));
-    fireEvent.change(await screen.findByLabelText("Por qué no se pagó"), { target: { value: "Venció" } });
-    fireEvent.click(await boton("Declarar que no se pagó"));
+    const declarar = await ventana("Declarar que no se pagó");
+    fireEvent.change(declarar.getByLabelText("Por qué no se pagó"), { target: { value: "Venció" } });
+    fireEvent.click(declarar.getByRole("button", { name: "Declarar que no se pagó" }));
     await screen.findByText(/Listo: quedó declarado/);
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(0);
   });
@@ -1951,6 +2031,7 @@ describe("no se pagó", () => {
       orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "espera_resolver", puede_corregir_diferencia: true, ejecucion: ejecucion(), diferencia_vigente: d,
     }), { [`POST ${CORRECCION}`]: () => Response.json({ id: d.id, orden_id: O1 }, { status: 201 }) });
     fireEvent.click(await boton("Corregir lo registrado"));
+    await ventana("Corregir lo registrado");
     expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe(d.numero_operacion);
     expect((screen.getByLabelText(/^CBU\/CVU de destino/) as HTMLInputElement).value).toBe("");
     fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
@@ -1975,8 +2056,11 @@ describe("no se pagó", () => {
   });
 
   it("una orden que no se pagó avisa por dónde sigue: a aprobar de nuevo, o por el Consejo si hubo diferencia", async () => {
+    // Sin diferencia, la frase del estado y el botón ya dicen por dónde sigue: no se repite (FIC-05).
     abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago" }));
-    expect(await screen.findByText(/hay que enviarla a aprobar de nuevo/)).toBeTruthy();
+    await screen.findByRole("heading", { level: 2 });
+    expect(screen.queryByText(/hay que enviarla a aprobar de nuevo/)).toBeNull();
+    expect(screen.queryByText(/El Consejo confirmó que no se pagó/)).toBeNull();
     expect(screen.queryByText(/la aprueba el Consejo, sea cual sea/)).toBeNull();
     cleanup();
     abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", ejecucion: ejecucion(), diferencia_vigente: diferencia({ resolucion: "reclamo", recuperada_en: "2026-11-01T12:00:00Z" }) }));
@@ -1991,10 +2075,12 @@ describe("no se pagó", () => {
       orden: orden({ estado: "en_verificacion" }), situacion: "reclamo", paso: "resolver_diferencia", puede_recuperar: true, ejecucion: ejecucion(), diferencia_vigente: d,
     }), { [`POST ${CIERRE}`]: () => Response.json({ orden_id: O1, estado: "fallida" }) });
     fireEvent.click(await boton("Cerrar sin recuperar"));
-    const enviar = (await boton("Cerrar sin recuperar")) as HTMLButtonElement;
-    expect(enviar.disabled).toBe(true);
+    const cerrar = await ventana("Cerrar sin recuperar");
+    const enviar = cerrar.getByRole("button", { name: "Cerrar sin recuperar" });
+    fireEvent.click(enviar);
+    expect(await cerrar.findByText(FALTA_MOTIVO)).toBeTruthy();
     expect(pedidos(api, "POST", CIERRE)).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Por qué se cierra sin recuperar"), { target: { value: "SINTETICO: el banco no devuelve" } });
+    fireEvent.change(cerrar.getByLabelText("Por qué se cierra sin recuperar"), { target: { value: "SINTETICO: el banco no devuelve" } });
     fireEvent.click(enviar);
     await vi.waitFor(() => expect(pedidos(api, "POST", CIERRE)).toHaveLength(1));
     expect(await cuerpo(pedidos(api, "POST", CIERRE)[0])).toEqual({ motivo: "SINTETICO: el banco no devuelve" });
@@ -2014,10 +2100,13 @@ describe("no se pagó", () => {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/tomar`]: () => Response.json(tomado, { status: 201 }),
     });
     fireEvent.click(await boton("Hacerse cargo de este pago"));
-    expect(screen.getByRole("alert").textContent).toMatch(/hay que confirmar con quien vio la cuenta/);
+    const tomar = await ventana("Hacerse cargo de este pago");
+    expect(tomar.getByText(/hay que confirmar con quien vio la cuenta/)).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/tomar`)).toHaveLength(0);
-    fireEvent.click(await boton("Nadie transfirió: hacerse cargo del pago"));
-    await screen.findByText(/Listo: el pago quedó a cargo de esta cuenta/);
+    fireEvent.click(tomar.getByRole("button", { name: "Nadie transfirió: hacerse cargo del pago" }));
+    // Sin «Listo»: la ficha releída lo dice (FIC-11).
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText(/Listo: el pago quedó a cargo de esta cuenta/)).toBeNull();
     const [pedido] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/tomar`);
     expect(await cuerpo(pedido)).toMatchObject({ no_se_transfirio: true });
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(0);
@@ -2046,7 +2135,7 @@ describe("no se pagó", () => {
       declaracion_vigente: DECLARACION, ejecucion: ejecucion([], [DECLARACION]),
     }), { [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO) });
     fireEvent.click(await screen.findByText(TITULO_PLEGADAS));
-    expect(await screen.findByText(AVISO_RETOMAR)).toBeTruthy();
+    expect(await screen.findByText(AVISO_DESHACE_DECLARACION)).toBeTruthy();
     fireEvent.click(await boton("Anular la declaración y pagar"));
     expect(await screen.findByText(CUENTA)).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(1);
@@ -2096,16 +2185,22 @@ describe("preparar, enviar y renovar", () => {
   });
 
   it("el proveedor arranca en blanco y sin elegirlo no se guarda (comentario 26)", async () => {
-    vi.stubGlobal("fetch", backend(LECTURAS));
+    const api = backend({ ...LECTURAS, [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }) });
+    vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
     const elegir = (await screen.findByLabelText("Proveedor")) as HTMLSelectElement;
     expect(elegir.value).toBe("");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
-    expect(((await boton("Guardar como borrador")) as HTMLButtonElement).disabled).toBe(true);
-    // Control: al elegirlo, se puede guardar.
+    // El botón queda activo (decisión 4): tocarlo dice qué falta, junto al campo, y no manda nada.
+    const guardar = (await boton("Guardar como borrador")) as HTMLButtonElement;
+    expect(guardar.disabled).toBe(false);
+    fireEvent.click(guardar);
+    expect(await screen.findByText(FALTA_PROVEEDOR)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(0);
+    // Control: al elegirlo, el aviso se va.
     fireEvent.change(elegir, { target: { value: P1 } });
-    expect(((await boton("Guardar como borrador")) as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(screen.queryByText(FALTA_PROVEEDOR)).toBeNull());
   });
 
   /** Un edificio que opera también en dólares (P-14: lo habilita el equipo). */
@@ -2271,14 +2366,15 @@ describe("preparar, enviar y renovar", () => {
 
     it("pregunta antes, retira con su clave y lleva a la bandeja con el resultado", async () => {
       const api = abrirFicha(ESPERANDO, { [`POST ${RUTA_RETIRO}`]: () => Response.json({ id: O1, version: 1 }) });
-      expect(await screen.findByText(AVISO_SE_PUEDE_RETIRAR)).toBeTruthy();
       const retirar = await boton(RETIRAR);
+      expect(screen.queryByText(AVISO_SE_PUEDE_RETIRAR)).toBeNull(); // FIC-06
       expect(retirar.className).toBe("secundario peligro");
       fireEvent.click(retirar);
-      // Primero pregunta: todavía no se mandó nada.
-      expect(screen.getByText(PREGUNTA_RETIRAR)).toBeTruthy();
+      // Primero pregunta, en su ventana: todavía no se mandó nada.
+      const pregunta = await ventana(RETIRAR);
+      expect(pregunta.getByText(PREGUNTA_RETIRAR)).toBeTruthy();
       expect(pedidos(api, "POST", RUTA_RETIRO)).toHaveLength(0);
-      fireEvent.click(await boton(CONFIRMAR_RETIRAR));
+      fireEvent.click(pregunta.getByRole("button", { name: CONFIRMAR_RETIRAR }));
       expect(await screen.findByText(TEXTO_RETIRADA)).toBeTruthy();
       expect(lugar()).toBe("/pagos");
       const [pedido] = pedidos(api, "POST", RUTA_RETIRO);
@@ -2286,10 +2382,10 @@ describe("preparar, enviar y renovar", () => {
       expect(await cuerpo(pedido)).toEqual({ version_esperada: 1 });
     });
 
-    it("«No, dejarla» no manda nada y la orden sigue", async () => {
+    it("«Cancelar» no manda nada y la orden sigue", async () => {
       const api = abrirFicha(ESPERANDO, { [`POST ${RUTA_RETIRO}`]: () => Response.json({ id: O1, version: 1 }) });
       fireEvent.click(await boton(RETIRAR));
-      fireEvent.click(await boton(NO_RETIRAR));
+      fireEvent.click((await ventana(RETIRAR)).getByRole("button", { name: "Cancelar" }));
       expect(screen.queryByText(PREGUNTA_RETIRAR)).toBeNull();
       expect(await boton(RETIRAR)).toBeTruthy();
       expect(pedidos(api, "POST", RUTA_RETIRO)).toHaveLength(0);
@@ -2298,8 +2394,9 @@ describe("preparar, enviar y renovar", () => {
     it("si alguien ya la aprobó, lo dice y no se va de la ficha", async () => {
       abrirFicha(ESPERANDO, { [`POST ${RUTA_RETIRO}`]: () => error("orden_con_aprobaciones", 409) });
       fireEvent.click(await boton(RETIRAR));
-      fireEvent.click(await boton(CONFIRMAR_RETIRAR));
-      expect((await screen.findByRole("alert")).textContent).toMatch(/ya no se retira/);
+      const pregunta = await ventana(RETIRAR);
+      fireEvent.click(pregunta.getByRole("button", { name: CONFIRMAR_RETIRAR }));
+      expect((await pregunta.findByRole("alert")).textContent).toMatch(/ya no se retira/);
       expect(lugar()).toBe(`/pagos/${O1}`);
     });
 
@@ -2315,8 +2412,9 @@ describe("preparar, enviar y renovar", () => {
         orden: orden({ estado: "retirada" }), versiones: [version({ aprobada_por: [] })], situacion: "retirada",
         retiro: { retirada_por: PERSONA, retirada_por_nombre: "Marta Ficticia", retirada_en: "2026-11-09T15:00:00Z" },
       }));
-      const retiro = await screen.findByText(/La retiró Marta Ficticia el .*No se aprueba ni se paga\./);
-      expect(retiro.textContent).toMatch(/\sm\. No se aprueba ni se paga\.$/); // un solo punto después de la hora
+      // Quién y cuándo; «no se aprueba ni se paga» ya lo dice la frase del estado (FIC-05).
+      const retiro = await screen.findByText(/^La retiró Marta Ficticia el /);
+      expect(retiro.textContent).toMatch(/\sm\.$/); // un solo punto después de la hora
       expect(retiro.textContent).not.toContain("..");
       expect(screen.getByText("Retirada")).toBeTruthy();
       sinBoton(RETIRAR);
@@ -2347,7 +2445,9 @@ describe("preparar, enviar y renovar", () => {
       fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       expect(escrituras(api)).toEqual([]);
       fireEvent.click(await boton("Guardar y enviar a aprobar de nuevo"));
+      // Vuelve a aprobación: termina como los demás actos, en la bandeja (FIC-03).
       expect(await screen.findByText("Listo: los cambios quedaron guardados.")).toBeTruthy();
+      expect(lugar()).toBe("/pagos");
       expect(screen.queryByRole("button", { name: "Sí, crear la versión nueva" })).toBeNull();
       expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)[0])).toMatchObject({ version_esperada: 1, concepto: "Otro concepto" });
       expect(screen.queryByLabelText("Concepto")).toBeNull();
@@ -2359,20 +2459,21 @@ describe("preparar, enviar y renovar", () => {
         [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
       });
       fireEvent.click(await boton("Modificar la orden"));
-      await screen.findByLabelText("Concepto");
+      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       fireEvent.click(await boton("Guardar la orden"));
       await screen.findByText("Listo: los cambios quedaron guardados.");
       expect(escrituras(api)).toHaveLength(1);
       expect(screen.queryByText(AVISO_MODIFICAR)).toBeNull();
     });
 
-    it("sin cambios o con el proveedor inactivo, el formulario sigue abierto con lo escrito", async () => {
+    it("si el servidor dice que no hay cambios, el formulario sigue abierto con lo escrito y el aviso adentro", async () => {
       abrirFicha(BORRADOR, { ...LECTURAS, [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("sin_cambios", 409) });
       fireEvent.click(await boton("Modificar la orden"));
-      await screen.findByLabelText("Concepto");
+      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       fireEvent.click(await boton("Guardar la orden"));
-      expect((await screen.findByRole("alert")).textContent).toContain("ningún cambio");
-      expect(screen.getByLabelText("Concepto")).toBeTruthy();
+      const adentro = await ventana("Modificar la orden");
+      expect((await adentro.findByRole("alert")).textContent).toContain("ningún cambio");
+      expect((adentro.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Otro concepto");
     });
 
     it("volver a pagar abre el formulario con los datos de la orden", async () => {
@@ -2399,7 +2500,6 @@ describe("preparar, enviar y renovar", () => {
 
     it("enviar a aprobar de nuevo manda los mismos datos, sin abrir el formulario, y dice a quién le toca", async () => {
       const api = fallidaQueCambia(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), VUELTA_A_REVISION);
-      expect(await screen.findByText(/hay que enviarla a aprobar de nuevo/)).toBeTruthy();
       fireEvent.click(await boton("Enviar a aprobar de nuevo"));
       expect(await screen.findByText("Listo: la orden volvió a aprobación. Le toca al Consejo.")).toBeTruthy();
       expect(screen.queryByLabelText("Concepto")).toBeNull();
@@ -2579,7 +2679,7 @@ describe("preparar, enviar y renovar", () => {
         },
       });
       fireEvent.click(await boton("Modificar la orden"));
-      await screen.findByLabelText("Concepto");
+      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       fireEvent.click(await boton("Guardar y enviar a aprobar de nuevo"));
       await waitFor(() => expect(screen.queryByLabelText("Concepto")).toBeNull());
     });
@@ -2587,7 +2687,7 @@ describe("preparar, enviar y renovar", () => {
     it("otro conflicto de la orden cierra el formulario y vuelve a la ficha", async () => {
       abrirFicha(BORRADOR, { ...LECTURAS, [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("orden_no_admite", 409) });
       fireEvent.click(await boton("Modificar la orden"));
-      await screen.findByLabelText("Concepto");
+      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       fireEvent.click(await boton("Guardar la orden"));
       expect((await screen.findByRole("alert")).textContent).toContain("ya no admite");
       await waitFor(() => expect(screen.queryByLabelText("Concepto")).toBeNull());
@@ -2596,7 +2696,7 @@ describe("preparar, enviar y renovar", () => {
 });
 
 describe("aprobar y rechazar", () => {
-  /** El botón ya se puede tocar: llegó la cuenta que se aprueba. */
+  /** El botón ya está: llegó la cuenta que se aprueba (FIC-14: antes no se dibuja). */
   async function listoParaAprobar() {
     await waitFor(async () => expect(((await boton("Aprobar la orden")) as HTMLButtonElement).disabled).toBe(false));
   }
@@ -2645,7 +2745,8 @@ describe("aprobar y rechazar", () => {
     });
     const volver = await boton("Volver a pedir la cuenta");
     expect(screen.getByRole("alert").textContent).toContain("El servicio no está disponible");
-    expect(((await boton("Aprobar la orden")) as HTMLButtonElement).disabled).toBe(true);
+    sinBoton("Aprobar la orden");
+    expect(screen.getByText(FALTA_LA_CUENTA)).toBeTruthy();
     expect(((await boton("Rechazar")) as HTMLButtonElement).disabled).toBe(false);
     caido = false;
     fireEvent.click(volver);
@@ -2770,7 +2871,7 @@ describe("aprobar y rechazar", () => {
     const api = abrirFicha(APROBAR, { [`POST ${BASE}/ordenes-pago/${O1}/rechazar`]: () => Response.json({ id: O1, version: 1 }) });
     fireEvent.click(await boton("Rechazar"));
     const enviar = (await boton("Rechazar la orden")) as HTMLButtonElement;
-    expect(enviar.disabled).toBe(true);
+    expect(enviar.disabled).toBe(false); // decisión 4: siempre activo
     fireEvent.change(screen.getByLabelText("Motivo del rechazo"), { target: { value: "Falta el presupuesto" } });
     fireEvent.click(enviar);
     expect(await screen.findByText("Listo: la orden se rechazó.")).toBeTruthy();
@@ -2891,7 +2992,9 @@ describe("conciliar", () => {
     const api = abrirFicha(CONCILIAR, { [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
     fireEvent.click(await boton("No coincide: devolverlo a corregir"));
     const enviar = (await boton("Devolverlo a corregir")) as HTMLButtonElement;
-    expect(enviar.disabled).toBe(true);
+    fireEvent.click(enviar);
+    expect(await screen.findByText(FALTA_MOTIVO)).toBeTruthy();
+    expect(escrituras(api)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Qué no coincide"), { target: { value: "El número" } });
     fireEvent.click(enviar);
     expect(await screen.findByText(/Listo: el pago volvió a quien lo registró/)).toBeTruthy();
@@ -2902,7 +3005,8 @@ describe("conciliar", () => {
     const api = abrirFicha({ ...CONCILIAR, ejecucion: ejecucion([pago({ fuera_de_termino: true })]) }, {
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    expect(await screen.findByText(/Para darlo por conforme hace falta el motivo/)).toBeTruthy();
+    expect(await screen.findByText(/Se transfirió después de que venció la aprobación/)).toBeTruthy();
+    expect(screen.queryByText(/Para darlo por conforme hace falta el motivo/)).toBeNull(); // FIC-06
     fireEvent.click(await boton("Está bien: conciliar"));
     expect(escrituras(api)).toEqual([]);
     fireEvent.change(await screen.findByLabelText("Motivo para aceptarlo fuera de término"), { target: { value: "Lo autorizó el Consejo" } });
@@ -2933,7 +3037,9 @@ describe("conciliar", () => {
     expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
     const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
     expect(within(tabla).getAllByText(/15\.000,00/)).toHaveLength(2);
-    expect(await within(tabla).findByText(CUENTA)).toBeTruthy();
+    // La cuenta va como dato suelto, fuera de la tabla (FIC-09).
+    expect(within(tabla).queryByText("Cuenta")).toBeNull();
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
     expect(screen.getByText("0001234567")).toBeTruthy();
     expect(screen.getByText(/Marta Ficticia/)).toBeTruthy();
   });
@@ -2943,8 +3049,7 @@ describe("conciliar", () => {
       [REVISION]: () => Response.json({ orden: CONCILIAR.orden, versiones: CONCILIAR.versiones.map((x) => ({ ...x, cuenta_destino: null })), puede_aprobar: false, puede_rechazar: false }),
     });
     await boton("Está bien: conciliar");
-    const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
-    expect(within(tabla).getByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
+    expect(screen.getByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
     await waitFor(() => expect(document.body.textContent).not.toContain(CUENTA));
   });
 
@@ -3599,17 +3704,17 @@ describe("la factura arriba de la orden (0088)", () => {
     it("con la pregunta de quitar abierta no se elige otro archivo: ni se sube ni se suelta su espera", async () => {
       const api = await conFacturaSubida({ [`POST ${QUITAR}`]: () => Response.json({ id: FAC }) });
       fireEvent.click(await boton(QUITAR_ARCHIVO));
-      expect((screen.getByRole("button", { name: "Elegir un archivo" }) as HTMLButtonElement).disabled).toBe(true);
-      expect((screen.getByLabelText("Archivo de la factura") as HTMLInputElement).disabled).toBe(true);
-      // Aunque llegue un archivo (soltado o por el campo), no se manda nada.
-      const otra = new File(["%PDF-1.4 OTRA SINTETICA"], "otra-factura.pdf", { type: "application/pdf" });
-      fireEvent.change(screen.getByLabelText("Archivo de la factura"), { target: { files: [otra] } });
+      // Con la pregunta a la vista no hay dónde elegir otro archivo (C8P-12): ni la zona ni «Cambiar el archivo».
+      expect(screen.queryByRole("button", { name: "Elegir un archivo" })).toBeNull();
+      expect(screen.queryByLabelText("Archivo de la factura")).toBeNull();
+      sinBoton(CAMBIAR_ARCHIVO);
       expect(pedidos(api, "POST", PARA_CARGA)).toHaveLength(1);
       expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
       expect(screen.queryByText(TEXTO_REVISANDO)).toBeNull();
-      // Control: al cerrar la pregunta se puede elegir otro archivo de nuevo.
+      // Control: al cerrar la pregunta se puede cambiar el archivo de nuevo.
       fireEvent.click(await boton(NO_QUITAR));
-      expect((screen.getByRole("button", { name: "Elegir un archivo" }) as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.click(await boton(CAMBIAR_ARCHIVO));
+      expect(((await boton("Elegir un archivo")) as HTMLButtonElement).disabled).toBe(false);
       expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
     });
 
@@ -3804,14 +3909,16 @@ describe("la factura arriba de la orden (0088)", () => {
 
       async function reemplazar() {
         fireEvent.click(await boton("Modificar la orden"));
-        // La factura de la versión se ve desde el principio.
-        expect(await boton("Ver la factura")).toBeTruthy();
-        fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Otro concepto" } });
-        fireEvent.change(screen.getByLabelText("Archivo de la factura"), { target: { files: [FACTURA] } });
-        expect(await screen.findByText(TEXTO_REVISANDO)).toBeTruthy();
+        const hoja = await ventana("Modificar la orden");
+        // La factura de la versión se ve desde el principio; cambiarla es un botón (ORD-03).
+        expect(await hoja.findByRole("button", { name: "Ver la factura" })).toBeTruthy();
+        fireEvent.change(await hoja.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
+        fireEvent.click(hoja.getByRole("button", { name: CAMBIAR_ARCHIVO }));
+        fireEvent.change(hoja.getByLabelText("Archivo de la factura"), { target: { files: [FACTURA] } });
+        expect(await hoja.findByText(TEXTO_REVISANDO)).toBeTruthy();
         // Mientras el nuevo está en el antivirus, la anterior sigue adjunta y a la vista.
-        expect(screen.getByText(TEXTO_SIGUE_ANTERIOR)).toBeTruthy();
-        expect(screen.getByRole("button", { name: "Ver la factura" })).toBeTruthy();
+        expect(hoja.getByText(TEXTO_SIGUE_ANTERIOR)).toBeTruthy();
+        expect(hoja.getByRole("button", { name: "Ver la factura" })).toBeTruthy();
       }
 
       async function guardarVersion(api: ReturnType<typeof vi.fn>) {
@@ -4146,7 +4253,8 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
       expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
       expect(escrituras(api)).toEqual([CREAR, ENVIO_O1]);
       expect(await cuerpo(pedidos(api, "POST", ENVIO_O1)[0])).toEqual({ version_esperada: 1 });
-      expect(lugar()).toBe(`/pagos/${O1}`);
+      // Enviada, termina como los demás actos: en la bandeja (ORD-05).
+      expect(lugar()).toBe("/pagos");
       expect(screen.queryByText(/borrador/)).toBeNull();
     });
 
@@ -4408,13 +4516,16 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
       vi.stubGlobal("fetch", api);
       abrir("/pagos/nueva");
       await llenar();
-      const aviso = await screen.findByText(textoParecidaAntes(fechaCorta(OTRA.creada_en)));
+      // La pregunta va en su ventana (ORD-06), y «Ver la otra» abre en otra pestaña: lo escrito no se pierde.
+      const pregunta = await ventana(TITULO_PARECIDA);
+      expect(pregunta.getByText(new RegExp(`^${textoParecidaAntes(fechaCorta(OTRA.creada_en))}`))).toBeTruthy();
       const consulta = new URL(pedidos(api, "GET", `${BASE}/pagos/parecida`)[0]?.url ?? "");
       expect(Object.fromEntries(consulta.searchParams)).toEqual({ proveedor_id: P1, importe_centavos: "1500000", moneda: "ARS" });
       expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(0);
-      const zona = aviso.closest("[role=alert]") as HTMLElement;
-      expect(within(zona).getByRole("link", { name: VER_LA_OTRA }).getAttribute("href")).toBe(`/pagos/${O2}`);
-      fireEvent.click(within(zona).getByRole("button", { name: GUARDAR_IGUAL }));
+      const otra = pregunta.getByRole("link", { name: VER_LA_OTRA });
+      expect(otra.getAttribute("href")).toBe(`/pagos/${O2}`);
+      expect(otra.getAttribute("target")).toBe("_blank");
+      fireEvent.click(pregunta.getByRole("button", { name: GUARDAR_IGUAL }));
       await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
       expect(await screen.findByText("Listo: la orden quedó en borrador.")).toBeTruthy();
     });
@@ -4443,11 +4554,11 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
       vi.stubGlobal("fetch", api);
       abrir("/pagos/nueva");
       await llenar();
-      await screen.findByText(/^Ya hay una orden parecida/);
+      fireEvent.click((await ventana(TITULO_PARECIDA)).getByRole("button", { name: "Cancelar" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "16000" } });
-      expect(screen.queryByText(/^Ya hay una orden parecida/)).toBeNull();
       fireEvent.click(await boton("Guardar como borrador"));
-      await screen.findByText(/^Ya hay una orden parecida/);
+      await ventana(TITULO_PARECIDA);
       expect(pedidos(api, "GET", `${BASE}/pagos/parecida`)).toHaveLength(2);
       expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(0);
     });
@@ -4509,9 +4620,10 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     const CIERRE = `${BASE}/ordenes-pago/${O1}/cerrar-sin-pagar`;
     const api = abrirFicha(NO_SE_PAGO, { [`POST ${CIERRE}`]: () => Response.json({ id: O1, version: 1 }) });
     fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
-    expect(screen.getByText(PREGUNTA_CERRAR_SIN_PAGAR)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Por qué ya no hace falta pagarla"), { target: { value: "Se pagó por caja chica" } });
-    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    const cerrar = await ventana(TEXTO_ACCION.cerrar_sin_pagar);
+    expect(cerrar.getByText(PREGUNTA_CERRAR_SIN_PAGAR)).toBeTruthy();
+    fireEvent.change(cerrar.getByLabelText("Por qué ya no hace falta pagarla"), { target: { value: "Se pagó por caja chica" } });
+    fireEvent.click(cerrar.getByRole("button", { name: TEXTO_ACCION.cerrar_sin_pagar }));
     await waitFor(() => expect(pedidos(api, "POST", CIERRE)).toHaveLength(1));
     expect(await cuerpo(pedidos(api, "POST", CIERRE)[0])).toEqual({ version_esperada: 1, motivo: "Se pagó por caja chica" });
     expect(await screen.findByText(TEXTO_CERRADA_SIN_PAGO)).toBeTruthy();
@@ -4527,9 +4639,10 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
       Response.json({ codigo: "motivo_con_cuenta", mensaje: "x", detalle: { campos: ["body.motivo"] }, id_correlacion: "c" }, { status: 422 });
     abrirFicha(NO_SE_PAGO, { [`POST ${CIERRE}`]: conCampo });
     fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
-    const campo = screen.getByLabelText("Por qué ya no hace falta pagarla");
+    const cerrar = await ventana(TEXTO_ACCION.cerrar_sin_pagar);
+    const campo = cerrar.getByLabelText("Por qué ya no hace falta pagarla");
     fireEvent.change(campo, { target: { value: "Se pagó a la cuenta 9990003100000000001234" } });
-    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    fireEvent.click(cerrar.getByRole("button", { name: TEXTO_ACCION.cerrar_sin_pagar }));
     await waitFor(() => expect(campo.getAttribute("aria-invalid")).toBe("true"));
     const mensaje = document.getElementById(campo.getAttribute("aria-describedby") ?? "") as HTMLElement;
     expect(mensaje.textContent).toMatch(/^El motivo no puede llevar el número de una cuenta/);
@@ -4547,10 +4660,11 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     const CIERRE = `${BASE}/ordenes-pago/${O1}/cerrar-sin-pagar`;
     abrirFicha(NO_SE_PAGO, { [`POST ${CIERRE}`]: () => error("error_interno", 500) });
     fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
-    const campo = screen.getByLabelText("Por qué ya no hace falta pagarla");
+    const cerrar = await ventana(TEXTO_ACCION.cerrar_sin_pagar);
+    const campo = cerrar.getByLabelText("Por qué ya no hace falta pagarla");
     fireEvent.change(campo, { target: { value: "Se pagó por caja chica" } });
-    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
-    await screen.findByRole("alert");
+    fireEvent.click(cerrar.getByRole("button", { name: TEXTO_ACCION.cerrar_sin_pagar }));
+    await cerrar.findByRole("alert");
     expect(campo.getAttribute("aria-invalid")).toBeNull();
   });
 
@@ -4625,12 +4739,14 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), {
       target: { files: [new File(["%PDF-1.4 SINTETICO"], "factura.pdf", { type: "application/pdf" })] },
     });
-    expect(await within(hoja).findByText(TEXTO_LISTO)).toBeTruthy();
+    // Subida, la hoja se cierra sola: la ficha dice en qué va el antivirus (REG-05).
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText(TEXTO_LISTO)).toBeNull();
     expect(new URL(pedidos(api, "POST", SUBIDA)[0]!.url).searchParams.get("version_esperada")).toBe("1");
-    await act(() => vi.advanceTimersByTimeAsync(3000));
-    expect(await within(hoja).findByText(TEXTO_ACEPTADA)).toBeTruthy();
+    expect(await screen.findByText(/el antivirus la está revisando\.$/)).toBeTruthy();
+    actual = ficha({ factura_adjunta: { ...ADJUNTA, estado: "disponible" } });
     const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
-    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    await act(() => vi.advanceTimersByTimeAsync(3000));
     await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`).length).toBeGreaterThan(lecturas));
     // Con la factura ya adjunta, la ficha no invita a subir otra y dice quién y cuándo.
     const adjunta = await screen.findByText(/^Factura subida después de aprobada la orden, por Admin Ficticia/);
@@ -4717,12 +4833,12 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), {
       target: { files: [new File(["%PDF-1.4 SINTETICO"], "factura.pdf", { type: "application/pdf" })] },
     });
-    expect(await within(hoja).findByText(TEXTOS.reemplazar.listo)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const url = new URL(pedidos(api, "POST", SUBIDA)[0]!.url);
     expect([url.searchParams.get("version_esperada"), url.searchParams.get("reemplaza")]).toEqual(["1", VALE.id]);
+    expect(await screen.findByText(/para reemplazarla: el antivirus la está revisando/)).toBeTruthy();
+    actual = ficha({ factura_adjunta: NUEVA, facturas_anteriores: [VALE], puede_reemplazar_factura: true });
     await act(() => vi.advanceTimersByTimeAsync(3000));
-    expect(await within(hoja).findByText(TEXTOS.reemplazar.aceptada)).toBeTruthy();
-    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
     expect(await screen.findByText(/^Factura que reemplazó a la anterior, subida por Admin Ficticia/)).toBeTruthy();
     const reemplazadas = screen.getByRole("list", { name: "Facturas anteriores" });
     expect(within(reemplazadas).getByText(/^Reemplazada: la factura subida por Admin Ficticia/)).toBeTruthy();
@@ -4786,7 +4902,7 @@ describe("tanda 10: el código como el diseño", () => {
     expect(plegable).not.toBeNull();
     expect(plegable?.open).toBe(false);
     expect(plegable?.querySelector("summary")?.textContent).toBe("Hubo un error");
-    expect(within(plegable as HTMLElement).getByText(AVISO_RETOMAR)).toBeTruthy();
+    expect(within(plegable as HTMLElement).getByText(AVISO_DESHACE_DECLARACION)).toBeTruthy();
     expect(anular.className).toBe("secundario peligro");
     return plegable as HTMLElement;
   }
@@ -4811,6 +4927,7 @@ describe("tanda 10: el código como el diseño", () => {
       [`POST ${RUTA_REGISTRO}`]: () =>
         Response.json({ codigo: "fecha_operacion_invalida", mensaje: "x", detalle: { campos: ["body.fecha_operacion"] }, id_correlacion: "c" }, { status: 422 }),
     });
+    await abrirRegistro();
     await boton("Registrar el pago");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -4828,6 +4945,7 @@ describe("tanda 10: el código como el diseño", () => {
 
   it("D-43 control: un rechazo que no nombra la fecha no marca el campo", async () => {
     abrirFicha(LISTO, { [`POST ${RUTA_REGISTRO}`]: () => error("no_coincide_con_la_orden", 422) });
+    await abrirRegistro();
     await boton("Registrar el pago");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
@@ -4879,5 +4997,341 @@ describe("RF50: la documentación vencida del proveedor marca la orden (app 0103
     abrirFicha(ficha());
     await screen.findByRole("heading", { level: 2 });
     expect(screen.queryByText(/^Documentación del proveedor:/)).toBeNull();
+  });
+});
+
+describe("fricción 17-11, tanda 2: preparar una orden", () => {
+  const LEER = {
+    [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+    [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [contrato(K1)] }),
+  };
+  /** El edificio bloquea y al proveedor le falta documentación legal (app 0104 y 0106). */
+  const BLOQUEADO = {
+    [`GET ${BASE}/proveedores`]: () =>
+      Response.json({ elementos: [proveedor()], documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [], modo_exigencia: "bloquear" }),
+    [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+  };
+  const SALTEO_VIGENTE = {
+    numero: 1, proveedor_id: P1, motivo: "SINTETICO: pérdida de gas", registrado_en: "2026-11-17T10:00:00Z",
+    registrado_por_nombre: "Consejera Ficticia", vence_en: "2026-11-18T10:00:00Z", estado: "vigente", orden_id: null, version: null, usado_en: null,
+  };
+  const fichaDelProveedor = (salteos: unknown[]) => () => Response.json({ proveedor: proveedor(), salteos });
+
+  async function elegirElBloqueado() {
+    fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
+  }
+
+  it("C8P-01: sin salteo, no se ofrece guardar y una línea dice qué falta y dónde se resuelve", async () => {
+    const api = backend({ ...BLOQUEADO, [`GET ${BASE}/proveedores/${P1}`]: fichaDelProveedor([]) });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    expect(screen.getByRole("option", { name: `Limpieza Ficticia SRL ${MARCA_SIN_DOCUMENTACION}` })).toBeTruthy();
+    const linea = await screen.findByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`));
+    expect(within(linea).getByRole("link", { name: IR_A_PROVEEDORES }).getAttribute("href")).toBe("/egresos/proveedores");
+    sinBoton("Guardar y enviar a aprobar");
+    sinBoton("Guardar como borrador");
+    expect(await boton("Cancelar")).toBeTruthy();
+    expect(escrituras(api)).toEqual([]);
+  });
+
+  it("C8P-01 (lección 21 D): con un salteo que espera su orden, se puede preparar y lo dice", async () => {
+    vi.stubGlobal("fetch", backend({ ...BLOQUEADO, [`GET ${BASE}/proveedores/${P1}`]: fichaDelProveedor([SALTEO_VIGENTE]) }));
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    expect(await screen.findByText(CON_SALTEO)).toBeTruthy();
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    expect(await boton("Guardar como borrador")).toBeTruthy();
+    expect(screen.queryByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`))).toBeNull();
+  });
+
+  it("C8P-01: si no se puede saber si hay salteo, lo avisa y deja guardar (decide la base)", async () => {
+    vi.stubGlobal("fetch", backend({ ...BLOQUEADO, [`GET ${BASE}/proveedores/${P1}`]: () => error("error_interno", 500) }));
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    expect(await screen.findByText(new RegExp(`^${SIN_DOCUMENTACION_SIN_SABER}`))).toBeTruthy();
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+  });
+
+  it("control C8P-01: en modo «avisar» no se mira el salteo ni se marca el proveedor", async () => {
+    const api = backend({
+      [`GET ${BASE}/proveedores`]: () =>
+        Response.json({ elementos: [proveedor()], documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [], modo_exigencia: "avisar" }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    expect(screen.queryByRole("option", { name: new RegExp(MARCA_SIN_DOCUMENTACION.replace(/[()]/g, "\\$&")) })).toBeNull();
+    expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`)).toEqual([]);
+  });
+
+  it("C8P-13 y decisión 4: guardar está siempre activo y marca lo que falta, sin mandar nada", async () => {
+    const api = backend(LEER);
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    const guardar = (await boton("Guardar como borrador")) as HTMLButtonElement;
+    expect(guardar.disabled).toBe(false);
+    fireEvent.click(guardar);
+    expect(await screen.findByText(FALTA_PROVEEDOR)).toBeTruthy();
+    expect(screen.getByText(FALTA_IMPORTE)).toBeTruthy();
+    expect(screen.getByText(FALTA_CONCEPTO)).toBeTruthy();
+    expect(screen.getByLabelText("Proveedor").getAttribute("aria-invalid")).toBe("true");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Proveedor")));
+    expect(escrituras(api)).toEqual([]);
+    // Al elegirlo, su marca se va; las otras siguen.
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+    expect(screen.queryByText(FALTA_PROVEEDOR)).toBeNull();
+    expect(screen.getByText(FALTA_CONCEPTO)).toBeTruthy();
+  });
+
+  it("C8P-04: un contrato que no cubre el importe no se ofrece, y si estaba elegido, la orden va sin él", async () => {
+    const api = backend({
+      ...LEER,
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+    fireEvent.change(screen.getByLabelText("Contrato o abono (opcional)"), { target: { value: K1 } });
+    expect(screen.queryByText(/supera el máximo/)).toBeNull(); // control: lo cubre
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "25000" } });
+    expect(screen.queryByLabelText("Contrato o abono (opcional)")).toBeNull();
+    expect(screen.getByText(textoContratoExcedido("$ 20.000,00").replace(/\s/g, " "), { normalizer: (t) => t.replace(/\s/g, " ") })).toBeTruthy();
+    fireEvent.click(await boton("Guardar como borrador"));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago`)[0])).toMatchObject({ contrato_id: null, importe_centavos: 2_500_000 });
+  });
+
+  it("ORD-01 y ORD-03: sin el título repetido ni la ayuda que repite la casilla", async () => {
+    vi.stubGlobal("fetch", backend(LEER));
+    abrir("/pagos/nueva");
+    await screen.findByLabelText("Proveedor");
+    expect(screen.getAllByRole("heading", { name: "Preparar una orden" })).toHaveLength(1);
+    expect(screen.queryByText(/Tildar solo si/)).toBeNull();
+    expect(screen.queryByText(/Se marca solo lo que no coincide/)).toBeNull();
+    expect(screen.getByRole("form", { name: "Preparar una orden" })).toBeTruthy();
+  });
+
+  it("ORD-05: guardada y enviada, vuelve a la bandeja con lo que pasó", async () => {
+    const enviada = { ...BORRADOR, orden: orden({ estado: "en_revision" }), situacion: "en_revision" as const, paso: "espera_aprobar" as const, le_toca_a: "consejo" as const };
+    let actual: Ficha = BORRADOR;
+    const api = backend({
+      ...LEER,
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`POST ${BASE}/ordenes-pago/${O1}/enviar-a-revision`]: () => {
+        actual = enviada;
+        return Response.json({ id: O1, version: 1 });
+      },
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(actual),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+    fireEvent.click(await boton("Guardar y enviar a aprobar"));
+    await waitFor(() => expect(lugar()).toBe("/pagos"));
+    expect(await screen.findByText(/^Listo: la orden quedó esperando aprobación/)).toBeTruthy();
+  });
+
+  it("ORD-06: la orden parecida se pregunta en una ventana, y «Ver la otra» se abre aparte sin perder lo escrito", async () => {
+    const OTRA = { orden_id: O2, creada_en: "2026-11-03T12:00:00Z", estado_visible: "esperando_aprobacion" as const };
+    const api = backend({
+      ...LEER,
+      [`GET ${BASE}/pagos/parecida`]: () => Response.json({ parecida: OTRA }),
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+    fireEvent.click(await boton("Guardar como borrador"));
+    const ventana = await screen.findByRole("dialog", { name: TITULO_PARECIDA });
+    expect(ventana.textContent).toContain(textoParecidaAntes(fechaCorta(OTRA.creada_en)));
+    const otra = within(ventana).getByRole("link", { name: VER_LA_OTRA });
+    expect(otra.getAttribute("target")).toBe("_blank");
+    expect(otra.getAttribute("href")).toBe(`/pagos/${O2}`);
+    expect(escrituras(api)).toEqual([]);
+    fireEvent.click(within(ventana).getByRole("button", { name: GUARDAR_IGUAL }));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+  });
+});
+
+describe("fricción 17-11, tanda 5: la ficha de la orden", () => {
+  const EN_REVISION = { ...APROBAR, paso: "espera_aprobar" as const, le_toca_a: "consejo" as const, puede_aprobar: false, puede_rechazar: false, puede_modificar: true, puede_retirar: true };
+  const LEER = {
+    [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+    [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+  };
+
+  it("FIC-01 y C8P-14: el motivo va en una ventana con el botón activo; vacío, marca el campo y no manda nada", async () => {
+    const api = abrirFicha(APROBAR, { [`POST ${BASE}/ordenes-pago/${O1}/rechazar`]: () => Response.json({ id: O1, version: 1 }) });
+    fireEvent.click(await boton("Rechazar"));
+    const ventana = await screen.findByRole("dialog", { name: "Rechazar" });
+    const enviar = within(ventana).getByRole("button", { name: "Rechazar la orden" }) as HTMLButtonElement;
+    expect(enviar.disabled).toBe(false);
+    fireEvent.click(enviar);
+    expect(await within(ventana).findByText(FALTA_MOTIVO)).toBeTruthy();
+    expect(escrituras(api)).toEqual([]);
+    fireEvent.change(within(ventana).getByLabelText("Motivo del rechazo"), { target: { value: "Falta el presupuesto" } });
+    expect(within(ventana).queryByText(FALTA_MOTIVO)).toBeNull();
+    fireEvent.click(enviar);
+    expect(await screen.findByText("Listo: la orden se rechazó.")).toBeTruthy();
+  });
+
+  it("FIC-01: un rechazo del servidor queda adentro de la ventana, con lo escrito", async () => {
+    abrirFicha(APROBAR, { [`POST ${BASE}/ordenes-pago/${O1}/rechazar`]: () => error("error_interno", 500) });
+    fireEvent.click(await boton("Rechazar"));
+    const ventana = await screen.findByRole("dialog", { name: "Rechazar" });
+    fireEvent.change(within(ventana).getByLabelText("Motivo del rechazo"), { target: { value: "Uno" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Rechazar la orden" }));
+    expect((await within(ventana).findByRole("alert")).textContent).toContain("El servicio no está disponible");
+    expect((within(ventana).getByLabelText("Motivo del rechazo") as HTMLInputElement).value).toBe("Uno");
+  });
+
+  it("FIC-02: retirar pregunta en una ventana, y «Cancelar» la cierra sin mandar nada", async () => {
+    const api = abrirFicha(EN_REVISION, { ...LEER });
+    fireEvent.click(await boton(RETIRAR));
+    const ventana = await screen.findByRole("dialog", { name: RETIRAR });
+    expect(ventana.textContent).toContain(PREGUNTA_RETIRAR);
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(escrituras(api)).toEqual([]);
+  });
+
+  it("FIC-03: modificar abre el formulario en una ventana ancha, sin el título repetido", async () => {
+    abrirFicha(EN_REVISION, LEER);
+    fireEvent.click(await boton("Modificar la orden"));
+    const ventana = await screen.findByRole("dialog", { name: "Modificar la orden" });
+    expect(ventana.className).toContain("hoja--ancha");
+    expect(await within(ventana).findByLabelText("Concepto")).toBeTruthy();
+    expect(within(ventana).getAllByRole("heading")).toHaveLength(1);
+  });
+
+  it("FIC-03: guardar y enviar a aprobar de nuevo termina como los demás actos: vuelve a la bandeja", async () => {
+    abrirFicha(EN_REVISION, {
+      ...LEER,
+      [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
+    });
+    fireEvent.click(await boton("Modificar la orden"));
+    const ventana = await screen.findByRole("dialog", { name: "Modificar la orden" });
+    fireEvent.change(await within(ventana).findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Guardar y enviar a aprobar de nuevo" }));
+    await waitFor(() => expect(lugar()).toBe("/pagos"));
+    expect(await screen.findByText("Listo: los cambios quedaron guardados.")).toBeTruthy();
+  });
+
+  it("C8P-05: al modificar sin cambiar nada no se ofrece guardar; al cambiar algo, sí", async () => {
+    abrirFicha(BORRADOR, LEER);
+    fireEvent.click(await boton("Modificar la orden"));
+    const ventana = await screen.findByRole("dialog", { name: "Modificar la orden" });
+    expect(await within(ventana).findByText(SIN_CAMBIOS)).toBeTruthy();
+    expect(within(ventana).queryByRole("button", { name: "Guardar la orden" })).toBeNull();
+    fireEvent.change(within(ventana).getByLabelText("Concepto"), { target: { value: "Otro" } });
+    expect(within(ventana).getByRole("button", { name: "Guardar la orden" })).toBeTruthy();
+    expect(within(ventana).queryByText(SIN_CAMBIOS)).toBeNull();
+  });
+
+  it("C8P-06: con el proveedor de la orden suspendido, lo dice y no ofrece guardar", async () => {
+    abrirFicha(BORRADOR, { ...LEER, [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor({ estado: "suspendido" })] }) });
+    fireEvent.click(await boton("Modificar la orden"));
+    const ventana = await screen.findByRole("dialog", { name: "Modificar la orden" });
+    expect(await within(ventana).findByText(new RegExp(`^${PROVEEDOR_INACTIVO}`))).toBeTruthy();
+    fireEvent.change(within(ventana).getByLabelText("Concepto"), { target: { value: "Otro" } });
+    expect(within(ventana).queryByRole("button", { name: "Guardar la orden" })).toBeNull();
+  });
+
+  it("FIC-11: el «Listo» de modificar se va al tocar otra acción de la ficha", async () => {
+    abrirFicha({ ...BORRADOR, puede_retirar: true }, {
+      ...LEER,
+      [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
+    });
+    fireEvent.click(await boton("Modificar la orden"));
+    const ventana = await screen.findByRole("dialog", { name: "Modificar la orden" });
+    fireEvent.change(await within(ventana).findByLabelText("Concepto"), { target: { value: "Otro" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Guardar la orden" }));
+    expect(await screen.findByText("Listo: los cambios quedaron guardados.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(await boton(RETIRAR));
+    await screen.findByRole("dialog", { name: RETIRAR });
+    expect(screen.queryByText("Listo: los cambios quedaron guardados.")).toBeNull();
+  });
+
+  it("FIC-14 y C8P-09: «Aprobar la orden» no se dibuja hasta tener la cuenta; si falla, lo dice y reintenta solo al volver la red", async () => {
+    let caido = true;
+    abrirFicha(APROBAR, {
+      [REVISION]: () =>
+        caido
+          ? error("error_interno", 500)
+          : Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+    });
+    expect(await screen.findByText(FALTA_LA_CUENTA)).toBeTruthy();
+    sinBoton("Aprobar la orden");
+    expect(await boton("Volver a pedir la cuenta")).toBeTruthy();
+    caido = false;
+    volvioLaRed();
+    expect(await boton("Aprobar la orden")).toBeTruthy();
+    expect(screen.queryByText(FALTA_LA_CUENTA)).toBeNull();
+    sinBoton("Volver a pedir la cuenta");
+  });
+
+  it("FIC-04: la diferencia se resuelve con un botón por camino, cada uno con su confirmación", async () => {
+    const RUTA = `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia/${DIF}/resolucion`;
+    const api = abrirFicha(ficha(RESOLVER), { [`POST ${RUTA}`]: () => Response.json({ id: DIF }) });
+    expect(await boton(DAR_POR_PAGADO)).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    fireEvent.click(await boton(RECLAMAR));
+    const ventana = await screen.findByRole("dialog", { name: RECLAMAR });
+    expect(ventana.textContent).toContain(AVISO_RECLAMO);
+    expect(escrituras(api)).toEqual([]);
+    fireEvent.click(within(ventana).getByRole("button", { name: RECLAMAR }));
+    await waitFor(() => expect(pedidos(api, "POST", RUTA)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", RUTA)[0])).toEqual({ resolucion: "reclamo" });
+  });
+
+  it("control FIC-04: si no se puede dar por pagada, queda un solo botón", async () => {
+    abrirFicha(ficha({ ...RESOLVER, diferencia_vigente: diferencia({ se_puede_dar_por_pagada: false }) }));
+    expect(await boton(RECLAMAR)).toBeTruthy();
+    sinBoton(DAR_POR_PAGADO);
+  });
+
+  it("FIC-05 y FIC-06: los avisos no repiten la frase del estado ni el botón de al lado", async () => {
+    abrirFicha(EN_REVISION, LEER);
+    await boton(RETIRAR);
+    expect(screen.queryByText(AVISO_SE_PUEDE_RETIRAR)).toBeNull();
+    cleanup();
+    abrirFicha(PAGAR);
+    expect(await screen.findByText(AVISO_VER_LA_CUENTA_QUEDA)).toBeTruthy();
+    expect(screen.queryByText(AVISO_VER_LA_CUENTA)).toBeNull();
+  });
+
+  it("FIC-09: al conciliar, la tabla compara solo el importe y la cuenta va como dato suelto", async () => {
+    abrirFicha(CONCILIAR);
+    const tabla = await screen.findByRole("table", { name: "La orden contra lo registrado" });
+    expect(within(tabla).queryByText("Cuenta")).toBeNull();
+    expect(within(tabla).getByText("Importe")).toBeTruthy();
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+    expect(screen.queryByText(/La misma: el registro no se acepta con otra/)).toBeNull();
+  });
+
+  it("REG-01: registrar el pago se abre con un solo botón, en su ventana", async () => {
+    abrirFicha(LISTO);
+    sinBoton("Elegir un archivo");
+    fireEvent.click(await boton("Registrar el pago"));
+    const ventana = await screen.findByRole("dialog", { name: "Registrar el pago" });
+    expect(within(ventana).getByLabelText("Número de operación")).toBeTruthy();
+    // REG-03: con el comprobante cargado, cambiarlo es un botón y no la zona entera.
+    expect(within(ventana).queryByRole("button", { name: "Elegir un archivo" })).toBeNull();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cambiar el comprobante" }));
+    expect(within(ventana).getByRole("button", { name: "Elegir un archivo" })).toBeTruthy();
+    // REG-04: sin el pie que el «Listo» repite.
+    expect(within(ventana).queryByText("Queda pagada cuando el Consejo lo concilie.")).toBeNull();
   });
 });

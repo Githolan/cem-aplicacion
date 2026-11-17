@@ -63,7 +63,6 @@ export const MARCA_LECTURA = "Lo completó la lectura: revisar";
 // nada que revisar no se dice nada (propietario, 16-11-2026): los campos llenos ya lo muestran.
 export const TEXTO_LEIDA_CON_DIFERENCIAS =
   "Se leyeron los datos del documento. Hay que revisar lo marcado antes de guardar: no coincide o falta.";
-export const NOTA_SOLO_DIFERENCIAS = "Los datos que se lean completan el formulario. Se marca solo lo que no coincide o lo que falta.";
 const NOTA_TODO = "Los datos que se lean completan el formulario: hay que revisarlos antes de guardar.";
 /** Lo que decía el campo antes de que la lectura lo cambiara por otra cosa. */
 export const textoNoCoincide = (antes: string) => `Lo leído no coincide con lo que estaba («${antes}»): revisar.`;
@@ -74,6 +73,8 @@ export const TEXTO_DEJADO_SIN_LECTURA = "Se dejó de esperar la lectura: el arch
 export const SEGUIR_SIN_ESPERAR = "Seguir sin este archivo";
 export const SEGUIR_SIN_LECTURA = "Seguir sin la lectura";
 export const QUITAR_ARCHIVO = "Quitar el archivo";
+export const CAMBIAR_ARCHIVO = "Cambiar el archivo";
+export const NO_CAMBIAR_ARCHIVO = "Dejar este archivo";
 export const CONFIRMAR_QUITAR = "Sí, quitar el archivo";
 export const NO_QUITAR = "No, dejarlo";
 /** La pregunta antes de quitar. */
@@ -123,6 +124,9 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   const [tocado, setTocado] = useState(false);
   const cargado = tocado ? propio : inicial;
   const [viendo, setViendo] = useState(false);
+  /** Con un archivo ya cargado, la zona para elegir otro se abre solo si se pide (ORD-04): el paso
+   * siguiente es completar el formulario, no volver a subir. */
+  const [cambiando, setCambiando] = useState(false);
   /** Preguntando si se quita el archivo subido acá, o quitándolo. */
   const [quitar, setQuitar] = useState<"nada" | "preguntando" | "quitando">("nada");
   const claveQuitar = useRef<string | null>(null);
@@ -286,6 +290,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     setFalloQuitar(null);
     // Otro archivo cancela una pregunta de quitar abierta: se preguntaba por el anterior.
     setQuitar("nada");
+    setCambiando(false);
     void subir(archivo);
   }
 
@@ -318,9 +323,18 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
 
   return (
     <section className="carga-con-lectura" aria-label={titulo}>
-      <SubirArchivo titulo={titulo} de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={cargado !== null}
-        deshabilitada={deshabilitada || ocupada || quitar !== "nada"}
-        nota={soloDiferencias ? NOTA_SOLO_DIFERENCIAS : NOTA_TODO} alElegir={elegir} />
+      {/* Sin la pregunta de quitar abierta (C8P-12): con ella a la vista no se elige otro archivo. */}
+      {(cargado === null || cambiando) && quitar === "nada" ? (
+        <SubirArchivo titulo={titulo} de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={cargado !== null}
+          deshabilitada={deshabilitada || ocupada}
+          nota={soloDiferencias ? undefined : NOTA_TODO} alElegir={elegir} />
+      ) : (
+        cargado !== null && (
+          <p className="archivo-elegido">
+            <strong>{titulo}:</strong> {cargado.nombre}
+          </p>
+        )
+      )}
       {progreso !== null && (
         <p role="status" className="aviso-info">
           {progreso}
@@ -377,6 +391,11 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
           <button type="button" className="secundario" onClick={() => setViendo(true)}>
             {textoVer}
           </button>
+          {quitar === "nada" && !ocupada && (
+            <button type="button" className="secundario" disabled={deshabilitada} onClick={() => setCambiando((c) => !c)}>
+              {cambiando ? NO_CAMBIAR_ARCHIVO : CAMBIAR_ARCHIVO}
+            </button>
+          )}
           {/* Solo el subido acá: el que trae la orden o el proveedor ya respalda algo guardado. */}
           {tocado && propio !== null && quitar === "nada" && (
             <button type="button" className="secundario peligro" disabled={deshabilitada || ocupada} onClick={() => setQuitar("preguntando")}>

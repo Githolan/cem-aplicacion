@@ -1,5 +1,5 @@
 import type { components } from "../api/tipos";
-import { AVISO_RETOMAR } from "./textos";
+import { AVISO_DESHACE_DECLARACION } from "./textos";
 
 // Las palabras de cada acción que el servidor ofrece en una orden (informe de fricción, parte 4).
 // Qué se ofrece, en qué orden y con qué peso lo dice el servidor (`acciones: [{codigo, tipo}]`),
@@ -54,8 +54,8 @@ const PRINCIPAL_EN_ROJO: ReadonlySet<AccionPago> = new Set(["declarar_no_pago", 
  * 14-11-2026; texto impersonal, respuesta del 14-11): la acción no queda a la vista, para que nada invite a deshacer lo hecho sin querer. */
 export const TITULO_PLEGADAS = "Hubo un error";
 
-/** Lo que se dice dentro del plegable, antes del botón: qué deja sin efecto. */
-export const AVISO_PLEGADA: Partial<Record<AccionPago, string>> = { retomar_pago: AVISO_RETOMAR };
+/** Lo que se dice dentro del plegable, antes del botón: qué deja sin efecto, sin repetir el botón (FIC-06). */
+export const AVISO_PLEGADA: Partial<Record<AccionPago, string>> = { retomar_pago: AVISO_DESHACE_DECLARACION };
 
 /** La clase del botón según el tipo que mandó el servidor: una sola principal, llena. Las negativas
  * y las plegadas (deshacen algo ya hecho, D-13) van con borde rojo. */
