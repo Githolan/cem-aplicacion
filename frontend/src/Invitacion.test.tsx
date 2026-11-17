@@ -109,8 +109,10 @@ describe("página /invitacion", () => {
     expect(screen.getByText("3° B")).toBeTruthy();
     expect(screen.getByText("inquilino/a")).toBeTruthy();
     expect(window.location.href).not.toContain(TOKEN);
-    const [consulta, ...otros] = pedidosDe(pedido);
+    // C8G-11: además de la invitación se lee la sesión, para no ofrecer aceptar a otra cuenta.
+    const [consulta, ...otros] = pedidosDe(pedido).filter((p) => new URL(p.url).pathname !== "/api/v1/auth/sesion");
     expect(otros).toEqual([]);
+    expect(pedidosDe(pedido).filter((p) => new URL(p.url).pathname === "/api/v1/auth/sesion")).toHaveLength(1);
     if (consulta === undefined) throw new Error("no hubo consulta");
     const url = new URL(consulta.url);
     expect([consulta.method, url.pathname, url.search]).toEqual([
@@ -195,6 +197,48 @@ describe("página /invitacion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
     expect(await screen.findByText(/no es la del correo invitado/)).toBeTruthy();
+  });
+
+  it("C8G-11: con la sesión de otra cuenta lo dice de entrada, sin «Aceptar», y al salir ofrece aceptar", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+    let adentro = true;
+    const pedido = vi.fn(async (p: Request) => {
+      const camino = new URL(p.url).pathname;
+      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === SALIR) {
+        adentro = false;
+        return new Response(null, { status: 204 });
+      }
+      if (camino === "/api/v1/auth/sesion")
+        return adentro ? Response.json({ correo: "otra@ejemplo.com", nombre: "Otra" }) : error("no_autenticado", 401);
+      if (camino === "/health") return error("servicio_no_disponible", 503);
+      throw new Error(`pedido no previsto: ${p.method} ${camino}`);
+    });
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByText(/no es la del correo invitado/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
+    expect(aceptacionesDe(pedido)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Salir de esta cuenta" }));
+    expect(await screen.findByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+    expect(screen.queryByText(/no es la del correo invitado/)).toBeNull();
+  });
+
+  it("control C8G-11: con la sesión del correo invitado (aunque cambie la mayúscula) ofrece aceptar", async () => {
+    const pedido = vi.fn(async (p: Request) => {
+      const camino = new URL(p.url).pathname;
+      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === "/api/v1/auth/sesion") return Response.json({ correo: " Beto@Ejemplo.com", nombre: "Beto" });
+      if (camino === "/health") return error("servicio_no_disponible", 503);
+      throw new Error(`pedido no previsto: ${p.method} ${camino}`);
+    });
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+    expect(screen.queryByText(/no es la del correo invitado/)).toBeNull();
   });
 
   it("si la creó quien la acepta, lo dice (F9)", async () => {

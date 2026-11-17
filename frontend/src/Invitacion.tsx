@@ -8,6 +8,7 @@ import { RUTA_INVITACION, tokenDelFragmento } from "./enlace";
 import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceAlInicio, SalirDeEstaCuenta } from "./SalidaDeInvitacion";
 import { useIrAlInicio } from "./sesion";
+import { comprobarSesion } from "./sesionEncima";
 
 // Página /invitacion: la que abre el enlace de la invitación del correo (RF03). Como en /entrar,
 // el token llega en el fragmento (#token=…), que el navegador nunca manda al servidor; la página
@@ -18,6 +19,11 @@ import { useIrAlInicio } from "./sesion";
 // la tenía, hay que entrar con ese correo: la invitación nunca abre la cuenta de otra persona. Se
 // entra acá mismo y, al entrar, la aceptación se repite sola con el mismo enlace (G-35): no hace
 // falta tocar «Aceptar» otra vez. Diseño provisorio: el definitivo llega con G3.
+//
+// C8G-11 (informe de fricción, 17-11-2026): si hay una sesión abierta de otra cuenta, ya se sabe
+// que «Aceptar» no va a servir. La página lo dice de entrada, con «Salir de esta cuenta», sin el
+// formulario. Si la cuenta del correo ya existe sin sesión, o si la invitación la creó esta cuenta,
+// la página todavía no lo puede saber: hace falta que la consulta del enlace lo informe (backend).
 
 type Recibida = components["schemas"]["InvitacionRecibida"];
 
@@ -56,6 +62,19 @@ function leerToken(): string | null {
   return tokenDelFragmento(window.location.hash);
 }
 
+/** El correo de la sesión abierta; sin sesión, o si no se pudo saber, nulo: decide el servidor al aceptar. */
+async function correoDeLaSesion(): Promise<string | null> {
+  try {
+    const { data } = await api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion });
+    return data?.correo ?? null;
+  } catch {
+    // Sin respuesta no se sabe nada de la sesión: se ofrece aceptar y el servidor decide, como antes.
+    return null;
+  }
+}
+
+const mismoCorreo = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 export function Invitacion() {
   const id = useId();
   // En el inicializador: StrictMode monta dos veces y la segunda vez el fragmento ya no está.
@@ -72,14 +91,14 @@ export function Invitacion() {
 
   const consultar = useCallback((elToken: string) => {
     setEstado("consultando");
-    void api
-      .POST("/api/v1/auth/invitacion/consultar", { body: { token: elToken } })
-      .then(({ data, error, response }) => {
+    void Promise.all([api.POST("/api/v1/auth/invitacion/consultar", { body: { token: elToken } }), correoDeLaSesion()])
+      .then(([{ data, error, response }, correoSesion]) => {
         if (data !== undefined) {
           setInvitacion(data);
           setNombre(data.nombre);
           setCorreoParaEntrar(data.correo);
-          setEstado("lista");
+          // C8G-11: con la sesión de otra cuenta, aceptar llevaría al rechazo: se dice ya.
+          setEstado(correoSesion !== null && !mismoCorreo(correoSesion, data.correo) ? "otra_persona" : "lista");
         } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else fallar(response.status, codigoDe(error));
       })
