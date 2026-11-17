@@ -6,7 +6,19 @@ import type { components } from "./api/tipos";
 import { hoyDelDispositivo, TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "./archivos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe as resumenDeErrores, REVISAR_DATO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
+import {
+  ErrorDeCampo,
+  type ErroresDeCampo,
+  erroresDe,
+  faltaCompletar,
+  hayErrores,
+  marcaDe,
+  resumenDe as resumenDeErrores,
+  REVISAR_DATO,
+  SIN_ERRORES,
+  sinElDe,
+  soloDe,
+} from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import {
@@ -24,6 +36,7 @@ import { useConsultaDelAntivirus } from "./egresos/useConsorcio";
 import { SubirArchivo } from "./SubirArchivo";
 import { VisorDocumento } from "./VisorDocumento";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
 // documentos del edificio por categoría, con sus versiones, y la carga en dos pasos (se crea el
@@ -328,8 +341,10 @@ export function Documentos() {
   // cambiar los datos o el archivo.
   const claveCrear = useRef<string | null>(null);
   const claveSubir = useRef<string | null>(null);
-  /** El retiro abierto en la ficha: el documento y el motivo escrito. */
+  /** El retiro abierto en su ventana, sobre la ficha: el documento y el motivo escrito. */
   const [retiro, setRetiro] = useState<{ documento: string; motivo: string } | null>(null);
+  /** El motivo del retiro, si falta (decisión 4: el botón queda activo y marca el campo). */
+  const [erroresRetiro, setErroresRetiro] = useState<ErroresDeCampo>(SIN_ERRORES);
   const claveRetiro = useRef<string | null>(null);
   const primerCampo = useRef<HTMLElement | null>(null);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
@@ -599,13 +614,36 @@ export function Documentos() {
     setEnviando(true);
     setAviso(null);
     if (formulario.tipo === "subir") {
-      void subir(formulario.documento, formulario.titulo, archivo, false).finally(() => setEnviando(false));
+      void subir(formulario.documento, formulario.titulo, archivo, false)
+        .then(avisarRechazo)
+        .finally(() => setEnviando(false));
       return;
     }
     const titulo = datos.titulo.trim();
     void crear(titulo)
-      .then((documento) => (documento === null ? undefined : subir(documento, titulo, archivo, true)))
+      .then((documento) => (documento === null ? undefined : subir(documento, titulo, archivo, true).then(avisarRechazo)))
       .finally(() => setEnviando(false));
+  }
+
+  /** En la página, un rechazo de la subida va al aviso de arriba. */
+  function avisarRechazo(fin: FinDeEnvio) {
+    if (typeof fin === "object") setAviso({ texto: fin.rechazo, ok: false });
+  }
+
+  /** Subir el archivo desde la ficha, en su ventana: el rechazo queda en la ventana. */
+  async function subirDesdeLaFicha(documento: string, titulo: string): Promise<FinDeEnvio> {
+    if (archivo === null) return { rechazo: FALTA_ARCHIVO };
+    alAviso.current = true;
+    setEnviando(true);
+    setAviso(null);
+    try {
+      const fin = await subir(documento, titulo, archivo, false);
+      // Solo un «Listo» lleva el foco a la página; un rechazo lo toma la ventana.
+      if (fin !== "cerrar") alAviso.current = false;
+      return fin;
+    } finally {
+      setEnviando(false);
+    }
   }
 
   /** Primer paso: crea el documento. Devuelve su id, o nulo si no se creó (el aviso ya lo dice). */
@@ -635,21 +673,21 @@ export function Documentos() {
     }
   }
 
-  /** Segundo paso: sube el archivo crudo, sin JSON ni multipart, con su tipo como `Content-Type`. */
-  async function subir(documento: string, titulo: string, elegido: File, recienCreado: boolean) {
+  /**
+   * Segundo paso: sube el archivo crudo, sin JSON ni multipart, con su tipo como `Content-Type`.
+   * Devuelve cómo terminó: el rechazo lo dice quien llamó (la página o la ventana de la ficha).
+   */
+  async function subir(documento: string, titulo: string, elegido: File, recienCreado: boolean): Promise<FinDeEnvio> {
     claveSubir.current ??= crypto.randomUUID();
     // Si el documento se acaba de crear y el archivo no entra, el documento queda sin archivo:
     // se dice y el formulario pasa a subir solo el archivo de ese documento.
-    const fallo = (texto: string) => {
-      setAviso({
-        texto: recienCreado ? `El documento «${titulo}» quedó creado, pero el archivo no se subió. ${texto}` : texto,
-        ok: false,
-      });
+    const fallo = (texto: string): FinDeEnvio => {
       if (recienCreado) {
         claveCrear.current = null;
         setAbierto({ tipo: "subir", documento, titulo });
         actualizarLista();
       }
+      return { rechazo: recienCreado ? `El documento «${titulo}» quedó creado, pero el archivo no se subió. ${texto}` : texto };
     };
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
@@ -667,8 +705,7 @@ export function Documentos() {
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveSubir.current = null;
-        fallo(mensajeDeError(response.status, codigo, "subir", [], response.headers.has("Retry-After")));
-        return;
+        return fallo(mensajeDeError(response.status, codigo, "subir", [], response.headers.has("Retry-After")));
       }
       cerrar();
       cerrarFichaDe(false);
@@ -685,16 +722,18 @@ export function Documentos() {
           : "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; la lista se actualiza sola.";
       setAviso({ texto: `Listo: el archivo de «${titulo}» se subió. ${despues}`, ok: true });
       actualizarLista();
+      return "cerrar";
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else fallo(SIN_CONEXION);
+      if (!(e instanceof SinSesion)) return fallo(SIN_CONEXION);
+      // La sesión se pide encima: el archivo elegido queda para repetir el paso.
+      aEntrar();
+      return "seguir";
     }
   }
 
-  // El error de subir el archivo desde la ficha se dice en la ficha: la página de atrás queda
+  // El error de subir el archivo desde la ficha se dice en su ventana: la página de atrás queda
   // inerte mientras está abierta (G-01).
-  const avisoEnFicha = aviso !== null && !aviso.ok && abierto?.tipo === "subir" && enSuFicha(abierto.documento);
-  const conMensaje = (aviso !== null && !avisoEnFicha) || rechazados.length > 0 || esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR) || pantalla.tipo !== "lista";
+  const conMensaje = aviso !== null || rechazados.length > 0 || esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR) || pantalla.tipo !== "lista";
 
   if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
 
@@ -808,7 +847,7 @@ export function Documentos() {
             </button>
           </>
         )}
-        {aviso && !avisoEnFicha && (
+        {aviso && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
           </p>
@@ -862,12 +901,16 @@ export function Documentos() {
     );
   }
 
-  /** Retirar el documento: con el motivo, por la API, que lo niega si algo guardado lo cita. */
-  async function retirar(evento: FormEvent, documento: string, titulo: string) {
-    evento.preventDefault();
-    if (retiro === null) return;
+  /** Retirar el documento: con el motivo, por la API, que lo niega si algo guardado lo cita. El
+   * rechazo queda en la ventana del retiro, sobre la ficha, para corregir o cancelar. */
+  async function retirar(documento: string, titulo: string): Promise<FinDeEnvio> {
+    if (retiro === null) return "cerrar";
+    const faltan = faltaCompletar({ motivo: [retiro.motivo, "Falta escribir el motivo del retiro."] });
+    if (hayErrores(faltan)) {
+      setErroresRetiro(faltan);
+      return "seguir";
+    }
     claveRetiro.current ??= crypto.randomUUID();
-    alAviso.current = true;
     setEnviando(true);
     setAviso(null);
     try {
@@ -880,68 +923,57 @@ export function Documentos() {
       if (!response.ok) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveRetiro.current = null;
-        setAviso({ texto: `El documento no se retiró. ${mensajeDeRetiro(response.status, codigo)}`, ok: false });
-        cerrarFichaDe(false);
-        return;
+        return { rechazo: `El documento no se retiró. ${mensajeDeRetiro(response.status, codigo)}` };
       }
       claveRetiro.current = null;
+      alAviso.current = true;
       setRetiro(null);
       cerrarFichaDe(false);
       setAviso({ texto: `Listo: se retiró «${titulo}». Ya no aparece en la lista.`, ok: true });
       actualizarLista();
+      return "cerrar";
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else {
-        setAviso({ texto: `El documento no se retiró. ${SIN_CONEXION}`, ok: false });
-        cerrarFichaDe(false);
-      }
+      if (!(e instanceof SinSesion)) return { rechazo: `El documento no se retiró. ${SIN_CONEXION}` };
+      aEntrar();
+      return "seguir";
     } finally {
       setEnviando(false);
     }
   }
 
-  /** El formulario del retiro, en la ficha: el motivo y la confirmación. */
-  function formularioRetiro(d: Documento) {
+  /** El retiro, en su ventana sobre la ficha: el motivo y la confirmación. */
+  function ventanaRetiro(d: Documento) {
+    if (retiro?.documento !== d.id) return null;
     const base = `${id}-retiro-${d.id}`;
-    if (retiro?.documento !== d.id)
-      return (
-        <p>
-          <button type="button" className="secundario peligro" disabled={enviando}
-            onClick={() => {
-              claveRetiro.current = null;
-              setRetiro({ documento: d.id, motivo: "" });
-            }}>
-            {RETIRAR_DOCUMENTO}
-          </button>
-        </p>
-      );
     return (
-      <form className="formulario formulario-movil" onSubmit={(e) => void retirar(e, d.id, d.titulo)} aria-labelledby={`${base}-accion`}>
-        <h3 id={`${base}-accion`}>{RETIRAR_DOCUMENTO}</h3>
+      <VentanaDeFormulario
+        titulo={RETIRAR_DOCUMENTO}
+        textoEnviar={RETIRAR_DOCUMENTO}
+        peligro
+        alEnviar={() => retirar(d.id, d.titulo)}
+        alCerrar={() => {
+          setErroresRetiro(SIN_ERRORES);
+          setRetiro(null);
+        }}
+      >
         <p id={`${base}-ayuda`}>{AYUDA_RETIRO}</p>
         <label htmlFor={`${base}-motivo`}>Motivo del retiro</label>
         <textarea
           id={`${base}-motivo`}
+          data-foco
           required
           maxLength={LARGO_MOTIVO_RETIRO}
-          disabled={enviando}
-          aria-describedby={`${base}-ayuda ${base}-ayuda-motivo`}
+          {...marcaDe(`${base}-motivo`, erroresRetiro.motivo, `${base}-ayuda ${base}-ayuda-motivo`)}
           value={retiro.motivo}
           onChange={(e) => {
             claveRetiro.current = null;
+            setErroresRetiro((actuales) => sinElDe(actuales, "motivo"));
             setRetiro({ documento: d.id, motivo: e.target.value });
           }}
         />
         <p id={`${base}-ayuda-motivo`}>Obligatorio. Sin teléfonos, correos ni números de cuenta.</p>
-        <p>
-          <button type="submit" className="secundario peligro" disabled={enviando || retiro.motivo.trim() === ""}>
-            {RETIRAR_DOCUMENTO}
-          </button>{" "}
-          <button type="button" className="secundario" disabled={enviando} onClick={() => setRetiro(null)}>
-            No retirar
-          </button>
-        </p>
-      </form>
+        <ErrorDeCampo idCampo={`${base}-motivo`} mensaje={erroresRetiro.motivo} />
+      </VentanaDeFormulario>
     );
   }
 
@@ -949,10 +981,11 @@ export function Documentos() {
   function cerrarFicha() {
     if (abierto?.tipo === "subir" && abierto.documento === fichaAbierta) cancelar();
     setRetiro(null);
+    setErroresRetiro(SIN_ERRORES);
     cerrarFichaDe();
   }
 
-  /** Si la ficha de ese documento está a la vista (ahí se dibuja su formulario de archivo). */
+  /** Si la ficha de ese documento está a la vista (ahí se abre la ventana de su archivo). */
   function enSuFicha(documento: string) {
     return fichaAbierta === documento && lectura.tipo === "ok" && lectura.documentos.some((d) => d.id === documento);
   }
@@ -1005,23 +1038,51 @@ export function Documentos() {
               ),
           },
         ]}
+        ventana={
+          subiendo ? (
+            <VentanaDeFormulario
+              titulo={`Subir el archivo de «${d.titulo}»`}
+              textoEnviar="Subir el archivo"
+              alEnviar={() => subirDesdeLaFicha(d.id, d.titulo)}
+              alCerrar={cancelar}
+            >
+              {campoArchivo()}
+            </VentanaDeFormulario>
+          ) : (
+            ventanaRetiro(d)
+          )
+        }
       >
-        {subiendo
-          ? formularioArchivo(`${id}-${d.id}`, `Subir el archivo de «${d.titulo}»`, "h3", true)
-          : subir !== null &&
-            puede(...accionesDeCarga(d.categoria)) && (
-              <p>
-                {/* G-04: sin archivo, subirlo es lo que hace avanzar: el principal (pregunta 13). */}
-                <button type="button" className={esperaArchivo(d) ? undefined : "secundario"}
-                  onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })} disabled={enviando}>
-                  {subir}
-                </button>
-              </p>
-            )}
+        {subir !== null && puede(...accionesDeCarga(d.categoria)) && (
+          <p>
+            {/* G-04: sin archivo, subirlo es lo que hace avanzar: el principal (pregunta 13). */}
+            <button type="button" className={esperaArchivo(d) ? undefined : "secundario"}
+              onClick={() => {
+                setRetiro(null);
+                abrir({ tipo: "subir", documento: d.id, titulo: d.titulo });
+              }} disabled={enviando}>
+              {subir}
+            </button>
+          </p>
+        )}
         {/* Retirar: quien carga la categoría y además tiene la facultad de ver (`0089`). */}
         {/* G-02: si algo guardado lo cita, se dice en lugar del botón, sin pedir el motivo para nada. */}
-        {!subiendo && puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") &&
-          (d.respalda === true ? <p>{RESPALDA_ALGO}</p> : formularioRetiro(d))}
+        {puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") &&
+          (d.respalda === true ? (
+            <p>{RESPALDA_ALGO}</p>
+          ) : (
+            <p>
+              <button type="button" className="secundario peligro" disabled={enviando}
+                onClick={() => {
+                  if (subiendo) cancelar();
+                  claveRetiro.current = null;
+                  setErroresRetiro(SIN_ERRORES);
+                  setRetiro({ documento: d.id, motivo: "" });
+                }}>
+                {RETIRAR_DOCUMENTO}
+              </button>
+            </p>
+          ))}
       </FichaDeRegistro>
     );
   }
@@ -1047,18 +1108,13 @@ export function Documentos() {
   }
 
   /** Subir el archivo de un documento que ya existe (o reintentar el segundo paso). */
-  function formularioArchivo(titulo: string, encabezado: string, Nivel: "h2" | "h3" | "h5" = "h5", enFicha = false) {
+  function formularioArchivo(titulo: string, encabezado: string, Nivel: "h2" | "h3" | "h5" = "h5") {
     // En la tarjeta de arriba el encabezado nombra también la sección (`${titulo}` es su id).
     const idEncabezado = Nivel === "h2" ? titulo : `${titulo}-accion`;
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={idEncabezado}>
         <Nivel id={idEncabezado}>{encabezado}</Nivel>
         {campoArchivo()}
-        {enFicha && aviso !== null && !aviso.ok && (
-          <p className="aviso-error" role="alert">
-            {aviso.texto}
-          </p>
-        )}
         <p>
           <button type="submit" disabled={enviando}>
             Subir el archivo

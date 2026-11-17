@@ -24,7 +24,8 @@ type Props = {
   nota?: string;
   /** El archivo ya elegido, en palabras, cuando hace falta otro paso para mandarlo. */
   elegido?: string | null;
-  /** Para llevar el foco al primer botón al abrir un formulario. */
+  /** Para llevar el foco al primer botón al abrir un formulario. Con esto, el primer botón lleva
+   * también `data-foco`: dentro de una `Hoja` (una `VentanaDeFormulario`), el foco entra ahí. */
   refPrimero?: (boton: HTMLButtonElement | null) => void;
   alElegir: (archivo: File) => void;
 };
@@ -97,7 +98,8 @@ export function SubirArchivo({ titulo, de, tipos, tope, reemplaza = false, desha
       <div className="subir-archivo__botones">
         {conFotos && (
           <>
-            <button type="button" className="secundario" ref={refPrimero} disabled={deshabilitada} onClick={() => foto.current?.click()}>
+            <button type="button" className="secundario" ref={refPrimero} data-foco={refPrimero === undefined ? undefined : true}
+              disabled={deshabilitada} onClick={() => foto.current?.click()}>
               Sacar una foto
             </button>
             <button type="button" className="secundario" disabled={deshabilitada} onClick={() => galeria.current?.click()}>
@@ -105,7 +107,8 @@ export function SubirArchivo({ titulo, de, tipos, tope, reemplaza = false, desha
             </button>
           </>
         )}
-        <button type="button" className="secundario" ref={conFotos ? undefined : refPrimero} disabled={deshabilitada}
+        <button type="button" className="secundario" ref={conFotos ? undefined : refPrimero}
+          data-foco={conFotos || refPrimero === undefined ? undefined : true} disabled={deshabilitada}
           onClick={() => archivo.current?.click()}>
           Elegir un archivo
         </button>

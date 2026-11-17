@@ -130,6 +130,9 @@ async function tarjeta(titulo: string): Promise<HTMLElement> {
   return screen.findByRole("dialog", { name: titulo });
 }
 
+/** La ventana de una acción de la ficha, abierta encima de ella (tanda 1 del informe de fricción). */
+const ventanaDe = (titulo: string) => screen.getByRole("dialog", { name: titulo });
+
 function escribir(etiqueta: string | RegExp, valor: string) {
   fireEvent.change(screen.getByLabelText(etiqueta), { target: { value: valor } });
 }
@@ -354,9 +357,11 @@ describe("página /documentos", () => {
     const acta = await tarjeta("Acta de asamblea ordinaria");
     expect(within(acta).queryByRole("button", { name: "Subir archivo" })).toBeNull();
     fireEvent.click(within(acta).getByRole("button", { name: "Subir otra versión" }));
-    expect(within(acta).getByRole("heading", { level: 3, name: "Subir el archivo de «Acta de asamblea ordinaria»" })).toBeTruthy();
-    fireEvent.change(within(acta).getByLabelText("Archivo del documento"), { target: { files: [archivo([BYTES_PDF], "acta.pdf", "application/pdf")] } });
-    fireEvent.click(within(acta).getByRole("button", { name: "Subir el archivo" }));
+    // DOC-03: el archivo se elige en su ventana, encima de la ficha, sin los datos de la ficha.
+    const ventana = ventanaDe("Subir el archivo de «Acta de asamblea ordinaria»");
+    expect(within(ventana).queryByText("Fecha del documento")).toBeNull();
+    fireEvent.change(within(ventana).getByLabelText("Archivo del documento"), { target: { files: [archivo([BYTES_PDF], "acta.pdf", "application/pdf")] } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Subir el archivo" }));
     expect(await screen.findByText(/^Listo: el archivo de «Acta de asamblea ordinaria»/)).toBeTruthy();
     // Una versión nueva del mismo documento: no se creó otro. La ficha se cierra y queda el aviso.
     expect(pedidos(simulado, "POST", versiones(D1))).toHaveLength(1);
@@ -619,7 +624,7 @@ describe("página /documentos", () => {
     abrir();
     const contrato = await tarjeta("Contrato de limpieza");
     fireEvent.click(within(contrato).getByRole("button", { name: "Subir archivo" }));
-    expect(document.activeElement).toBe(within(contrato).getByRole("button", { name: "Sacar una foto" }));
+    expect(document.activeElement).toBe(within(ventanaDe("Subir el archivo de «Contrato de limpieza»")).getByRole("button", { name: "Sacar una foto" }));
     elegir(pdf("contrato.pdf"));
     fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
     expect(await screen.findByText("El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.")).toBeTruthy();
@@ -634,20 +639,22 @@ describe("página /documentos", () => {
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
   });
 
-  it("G-01: el error de subir desde la ficha se dice dentro de la ficha, junto al botón", async () => {
+  it("G-01: el error de subir desde la ficha se dice dentro de su ventana, junto al botón", async () => {
     const simulado = conLista({ [`POST ${versiones(D3)}`]: () => error("archivo_demasiado_grande", 413) });
     vi.stubGlobal("fetch", simulado);
     abrir();
     const contrato = await tarjeta("Contrato de limpieza");
     fireEvent.click(within(contrato).getByRole("button", { name: "Subir archivo" }));
-    // Sin archivo: el aviso queda en la ficha, que es lo que está a la vista.
-    fireEvent.click(within(contrato).getByRole("button", { name: "Subir el archivo" }));
-    expect(within(contrato).getByText("Falta elegir el archivo.")).toBeTruthy();
-    // El rechazo del servidor, también.
-    fireEvent.change(within(contrato).getByLabelText("Archivo del documento"), { target: { files: [pdf("contrato.pdf")] } });
+    const ventana = ventanaDe("Subir el archivo de «Contrato de limpieza»");
+    // Sin archivo: el aviso queda en la ventana, que es lo que está a la vista.
+    fireEvent.click(within(ventana).getByRole("button", { name: "Subir el archivo" }));
+    expect(await within(ventana).findByText("Falta elegir el archivo.")).toBeTruthy();
     expect(within(contrato).queryByText("Falta elegir el archivo.")).toBeNull();
-    fireEvent.click(within(contrato).getByRole("button", { name: "Subir el archivo" }));
-    expect(await within(contrato).findByText("El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.")).toBeTruthy();
+    // El rechazo del servidor, también; el anterior se va con el envío nuevo.
+    fireEvent.change(within(ventana).getByLabelText("Archivo del documento"), { target: { files: [pdf("contrato.pdf")] } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Subir el archivo" }));
+    expect(await within(ventana).findByText("El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.")).toBeTruthy();
+    expect(within(ventana).queryByText("Falta elegir el archivo.")).toBeNull();
   });
 
   it("G-08: un 422 de la fecha marca la fecha y no habla del título", async () => {
@@ -708,13 +715,15 @@ describe("página /documentos", () => {
     expect(screen.getByLabelText("Fecha del documento").getAttribute("aria-invalid")).toBeNull();
   });
 
-  it("G-13: cerrar la ficha se lleva el error de subir el archivo", async () => {
+  it("G-13: cancelar la ventana se lleva el error de subir el archivo", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir();
     const contrato = await tarjeta("Contrato de limpieza");
     fireEvent.click(within(contrato).getByRole("button", { name: "Subir archivo" }));
-    fireEvent.click(within(contrato).getByRole("button", { name: "Subir el archivo" }));
-    expect(screen.getAllByText(/^(Falta|Hay que) elegir el archivo\.$/).length).toBeGreaterThan(0);
+    fireEvent.click(within(ventanaDe("Subir el archivo de «Contrato de limpieza»")).getByRole("button", { name: "Subir el archivo" }));
+    expect((await screen.findAllByText(/^(Falta|Hay que) elegir el archivo\.$/)).length).toBeGreaterThan(0);
+    fireEvent.click(within(ventanaDe("Subir el archivo de «Contrato de limpieza»")).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText(/^(Falta|Hay que) elegir el archivo\.$/)).toBeNull();
     fireEvent.click(within(contrato).getByRole("button", { name: "Cerrar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByText(/^(Falta|Hay que) elegir el archivo\.$/)).toBeNull();
@@ -742,8 +751,8 @@ describe("página /documentos", () => {
       ),
     ).toBeTruthy();
     // La lista nueva trae el documento sin archivo, con el formulario para subirlo abierto.
-    const tarjetaNueva = await tarjeta("Presupuesto de pintura");
-    expect(within(tarjetaNueva).getByRole("heading", { level: 3, name: "Subir el archivo de «Presupuesto de pintura»" })).toBeTruthy();
+    await tarjeta("Presupuesto de pintura");
+    const tarjetaNueva = ventanaDe("Subir el archivo de «Presupuesto de pintura»");
     expect(within(tarjetaNueva).getByText(/Elegido: acta\.pdf/)).toBeTruthy();
     respuesta = () =>
       Response.json(
@@ -1133,7 +1142,8 @@ describe("«Retirar el documento» (0089)", () => {
   async function abrirRetiro(titulo = "Contrato de limpieza"): Promise<HTMLElement> {
     const ficha = await tarjeta(titulo);
     fireEvent.click(within(ficha).getByRole("button", { name: "Retirar el documento" }));
-    return within(ficha).getByRole("form", { name: "Retirar el documento" });
+    // DOC-03: el retiro va en su ventana, encima de la ficha.
+    return ventanaDe("Retirar el documento");
   }
 
   it("pide el motivo, avisa qué pasa, manda el retiro con su clave y vuelve a pedir la lista", async () => {
@@ -1143,13 +1153,18 @@ describe("«Retirar el documento» (0089)", () => {
     const formulario = await abrirRetiro();
     expect(within(formulario).getByText(/No se borra: queda en la exportación del edificio y en la auditoría/)).toBeTruthy();
     const enviar = within(formulario).getByRole("button", { name: "Retirar el documento" }) as HTMLButtonElement;
-    // Sin motivo no se manda: es obligatorio.
-    expect(enviar.disabled).toBe(true);
+    // Sin motivo no se manda: el botón sigue activo y marca el campo (decisión 4).
+    expect(enviar.disabled).toBe(false);
     escribir("Motivo del retiro", "   ");
-    expect(enviar.disabled).toBe(true);
+    fireEvent.click(enviar);
+    expect(await within(formulario).findByText("Falta escribir el motivo del retiro.")).toBeTruthy();
+    expect(screen.getByLabelText("Motivo del retiro").getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(simulado, "POST", RETIRO)).toHaveLength(0);
     expect((screen.getByLabelText("Motivo del retiro") as HTMLTextAreaElement).maxLength).toBe(300);
     escribir("Motivo del retiro", `  ${MOTIVO} `);
-    expect(enviar.className).toBe("secundario peligro");
+    expect(within(formulario).queryByText("Falta escribir el motivo del retiro.")).toBeNull();
+    // El principal de la ventana es el acto negativo: lleno y en rojo.
+    expect(enviar.className).toBe("peligro");
     fireEvent.click(enviar);
     expect(await screen.findByText("Listo: se retiró «Contrato de limpieza». Ya no aparece en la lista.")).toBeTruthy();
     const [pedido] = pedidos(simulado, "POST", RETIRO);
@@ -1159,14 +1174,15 @@ describe("«Retirar el documento» (0089)", () => {
     expect(screen.queryByRole("dialog", { name: "Contrato de limpieza" })).toBeNull();
   });
 
-  it("«No retirar» cierra el formulario sin mandar nada", async () => {
+  it("«Cancelar» cierra la ventana sin mandar nada y deja la ficha", async () => {
     const simulado = conAcciones(ADMINISTRA);
     vi.stubGlobal("fetch", simulado);
     abrir();
     const formulario = await abrirRetiro();
     escribir("Motivo del retiro", MOTIVO);
-    fireEvent.click(within(formulario).getByRole("button", { name: "No retirar" }));
+    fireEvent.click(within(formulario).getByRole("button", { name: "Cancelar" }));
     expect(screen.queryByLabelText("Motivo del retiro")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Contrato de limpieza" })).toBeTruthy();
     expect(pedidos(simulado, "POST", RETIRO)).toHaveLength(0);
   });
 
@@ -1176,11 +1192,13 @@ describe("«Retirar el documento» (0089)", () => {
     const formulario = await abrirRetiro();
     escribir("Motivo del retiro", MOTIVO);
     fireEvent.click(within(formulario).getByRole("button", { name: "Retirar el documento" }));
+    // El rechazo queda en la ventana, con el motivo escrito, para cancelar sin volver a abrir la ficha.
     expect(
-      await screen.findByText(
-        "El documento no se retiró. Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede retirar.",
-      ),
-    ).toBeTruthy();
+      (await within(formulario).findByRole("alert")).textContent,
+    ).toBe(
+      "El documento no se retiró. Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede retirar.",
+    );
+    expect((screen.getByLabelText("Motivo del retiro") as HTMLTextAreaElement).value).toBe(MOTIVO);
     expect(screen.queryByText(/^Listo: se retiró/)).toBeNull();
   });
 
