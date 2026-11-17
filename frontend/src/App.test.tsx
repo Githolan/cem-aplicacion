@@ -70,6 +70,7 @@ function montar(ruta = "/", version: Version = SIN_VERSION_NUEVA) {
         <QueryClientProvider client={consultas}>
           <MemoryRouter initialEntries={[ruta]}>
             <App />
+            <VersionAlCambiarDePantalla />
           </MemoryRouter>
           <AvisoVersion />
         </QueryClientProvider>

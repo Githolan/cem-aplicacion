@@ -7,7 +7,6 @@ import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
-import { VersionAlCambiarDePantalla } from "./AvisoVersion";
 import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { api } from "./api/cliente";
 import { Exige, ofreceEnAlguno, REQUISITOS, useConsultaDeAcciones } from "./permisos";
@@ -322,7 +321,6 @@ export function App() {
       </header>
       <main id="contenido">
         <AvisoLlegada />
-        <VersionAlCambiarDePantalla />
         <EntrarEncima />
         <Routes>
           <Route path="/" element={<Inicio barra={barra} />} />
