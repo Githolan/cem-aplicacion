@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
@@ -10,21 +10,28 @@ import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
-import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
+import { ErrorDeCampo, erroresDe, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { type DatoDeFicha, FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { REQUISITOS, usePuede } from "../permisos";
+import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { CargandoPagos } from "./CargandoPagos";
 import { RUTA_COTEJO, RUTA_PAGOS } from "./rutas";
-import { NO_ES_PAGO, RETIRAR_MARCA, TITULO_MARCADOS, TITULO_SIN_EXPLICAR } from "./textos";
+import { FALTA_MOTIVO, NO_ES_PAGO, RETIRAR_MARCA, TITULO_MARCADOS, TITULO_SIN_EXPLICAR, textoVerMarcados } from "./textos";
 import { useActo } from "./useActo";
 
 // `/pagos/extracto-sin-explicar`: los débitos de los extractos ya subidos que ningún pago explica
 // (pregunta 8 del propietario, 13-11-2026, opción c). Lo ven quien concilia y la administración, que
 // solo lee. Quien concilia puede decir que un débito no es el pago de una orden (una comisión, un
 // impuesto), con motivo y el gesto: no se borra, sale de la lista (respuesta del 13-11, opción a).
-// Abajo, las marcas vigentes: quien concilia puede retirarlas, con motivo, y el débito vuelve a la
-// lista (respuesta del 13-11). Qué entra en cada lista y quién marca o retira lo decide el servidor
-// (`backend/tests/test_avisos_y_sin_explicar_0098.py`).
+// Las marcas vigentes se piden aparte: quien concilia puede retirarlas, con motivo, y el débito
+// vuelve a la lista (respuesta del 13-11). Qué entra en cada lista y quién marca o retira lo decide
+// el servidor (`backend/tests/test_avisos_y_sin_explicar_0098.py`).
+//
+// Informe de fricción del 17-11-2026 (tanda 6): sin el párrafo de presentación (COT-07); cada débito
+// es una fila compacta que abre su ficha, y el motivo se escribe en su ventana (COT-08); lo ya
+// marcado no queda debajo de la lista de trabajo, sino detrás de «Ver los marcados» (COT-09); el
+// botón del acto está siempre activo y dice qué falta (C8P-17).
 
 type Movimiento = components["schemas"]["MovimientoSinExplicar"];
 type Marca = components["schemas"]["MarcaNoEsPago"];
@@ -40,16 +47,31 @@ type Lectura =
       totalMarcas: number;
       siguienteMarcas: string | null;
     };
-type Abierto = { que: "marcar" | "retirar"; movimiento: string };
+type Que = "marcar" | "retirar";
 
 const CAMPOS_MOTIVO = { motivo: "el motivo" } as const;
 const LARGO_MOTIVO = 300;
-// Retirar es un acto negativo: en rojo, con borde para abrir el formulario y lleno para hacerlo
-// (`pesoDeBotones.ts`).
 const ACTOS = {
-  marcar: { nombre: "marcar que no es el pago de una orden", etiqueta: "Qué es este débito", boton: NO_ES_PAGO, abre: "secundario", hace: undefined },
-  retirar: { nombre: "retirar la marca", etiqueta: "Por qué se retira la marca", boton: RETIRAR_MARCA, abre: "secundario peligro", hace: "peligro" },
+  marcar: {
+    nombre: "marcar que no es el pago de una orden",
+    etiqueta: "Qué es este débito",
+    boton: NO_ES_PAGO,
+    abre: "secundario",
+    peligro: false,
+    listo: "Listo: el débito salió de la lista.",
+  },
+  // Retirar es un acto negativo: en rojo (`pesoDeBotones.ts`).
+  retirar: {
+    nombre: "retirar la marca",
+    etiqueta: "Por qué se retira la marca",
+    boton: RETIRAR_MARCA,
+    abre: "secundario peligro",
+    peligro: true,
+    listo: "Listo: la marca se retiró y el débito volvió a la lista.",
+  },
 } as const;
+
+const dato = (m: Movimiento | Marca) => (m.numero_operacion === null ? fechaLegible(m.fecha) : `Referencia ${m.numero_operacion} · ${fechaLegible(m.fecha)}`);
 
 export function SinExplicar() {
   const elegido = useConsorcio(REQUISITOS.sinExplicar);
@@ -60,13 +82,18 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
-  const [abierto, setAbierto] = useState<Abierto | null>(null);
+  const [verMarcados, setVerMarcados] = useState(false);
+  /** La ficha abierta: un débito sin explicar o uno marcado (cada movimiento está en una sola lista). */
+  const fichas = useFichas<string>();
+  const [ventana, setVentana] = useState<Que | null>(null);
   const [motivo, setMotivo] = useState("");
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  /** Un rechazo que llega después de pedir el código, con la ventana todavía abierta. */
+  const [tardio, setTardio] = useState<string | null>(null);
   const puede = usePuede(consorcio);
   const coteja = puede("egresos.conciliar_pago");
   const acto = useActo(aEntrar);
-  const { enviando, aviso, setAviso, pendiente, setPendiente } = acto;
+  const { aviso, setAviso, pendiente, setPendiente, enviando } = acto;
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -133,18 +160,27 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       );
   }
 
-  function cerrar() {
-    setAbierto(null);
+  function cerrarVentana() {
+    setVentana(null);
     setMotivo("");
     setErrores(SIN_ERRORES);
+    setTardio(null);
   }
 
-  function abrir(que: Abierto["que"], movimiento: string) {
-    cerrar();
-    setAbierto({ que, movimiento });
+  function abrirVentana(que: Que) {
+    cerrarVentana();
+    setAviso(null);
+    setVentana(que);
   }
 
-  function pedir(que: Abierto["que"], movimiento: string, texto: string, clave: string) {
+  /** Hecho, o el débito ya cambió: se cierran la ventana y la ficha y la lista se vuelve a leer. */
+  function terminar() {
+    cerrarVentana();
+    fichas.cerrar(false);
+    setVuelta((v) => v + 1);
+  }
+
+  function pedir(que: Que, movimiento: string, texto: string, clave: string) {
     const opciones = {
       headers: encabezadoCsrf(),
       params: { path: { consorcio_id: consorcio, movimiento_id: movimiento }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
@@ -155,80 +191,99 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       : api.POST("/api/v1/consorcios/{consorcio_id}/pagos/extracto/no-es-pago/{movimiento_id}/retiro", opciones);
   }
 
-  function enviar(evento: FormEvent, { que, movimiento }: Abierto) {
-    evento.preventDefault();
+  /** El acto, desde su ventana: el rechazo queda en la ventana; si pide el código, el reintento
+   * termina por su cuenta y lo que salga mal se dice en la ventana (`tardio`). */
+  async function enviar(que: Que, movimiento: string): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ motivo: [motivo, FALTA_MOTIVO] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
     const texto = motivo.trim();
-    void acto.hacer({
+    let fin: FinDeEnvio = "seguir";
+    let primera = true;
+    const fallo = (rechazo: string) => {
+      setAviso(null);
+      if (primera) fin = { rechazo };
+      else setTardio(rechazo);
+    };
+    setTardio(null);
+    await acto.hacer({
       quePide: [que, movimiento, texto],
       nombre: ACTOS[que].nombre,
       pedir: (clave) => pedir(que, movimiento, texto, clave),
       alTerminar: () => {
-        setAviso({
-          texto:
-            que === "marcar"
-              ? "Listo: el débito salió de la lista. No se borra: queda quién lo marcó, cuándo y por qué."
-              : "Listo: la marca se retiró y el débito volvió a la lista. Queda quién la retiró, cuándo y por qué.",
-          ok: true,
-        });
-        cerrar();
-        setVuelta((v) => v + 1);
+        fin = "cerrar";
+        terminar();
+        setAviso({ texto: ACTOS[que].listo, ok: true });
       },
       alFallar: (estado, codigo, error) => {
+        fallo(mensajeDeActo(estado, error));
         setErrores(soloDe(erroresDe(error, mensajeDeActo(estado, error)), CAMPOS_MOTIVO));
+        // El débito ya cambió: la ficha se cierra y el motivo se dice arriba.
         if (estado === ESTADO.conflicto || estado === ESTADO.noEncontrado || codigo === "movimiento_ya_explicado") {
-          cerrar();
-          setVuelta((v) => v + 1);
+          terminar();
+          setAviso({ texto: mensajeDeActo(estado, error), ok: false });
         }
       },
+      alNoLlegar: () => fallo(SIN_CONEXION),
     });
+    primera = false;
+    return fin;
   }
 
-  // Funciones y no componentes: un componente definido acá se volvería a montar en cada tecla.
-  function formulario(actual: Abierto) {
-    const { etiqueta, boton, hace } = ACTOS[actual.que];
+  const ok = lectura.tipo === "ok" ? lectura : null;
+  const suelto = ok?.elementos.find((m) => m.movimiento_id === fichas.abierta);
+  const marcado = ok?.marcas.find((m) => m.movimiento_id === fichas.abierta);
+
+  /** La ficha de un débito: sus datos y, para quien concilia, el acto que le corresponde. */
+  function ficha(m: Movimiento | Marca, que: Que, datos: DatoDeFicha[]) {
+    const { etiqueta, boton, abre, peligro } = ACTOS[que];
     return (
-      <form className="formulario" onSubmit={(evento) => enviar(evento, actual)}>
-        <label htmlFor={`${id}-motivo`}>{etiqueta}</label>
-        <textarea
-          id={`${id}-motivo`}
-          required
-          maxLength={LARGO_MOTIVO}
-          rows={3}
-          value={motivo}
-          disabled={enviando}
-          {...marcaDe(`${id}-motivo`, errores.motivo)}
-          onChange={(evento) => {
-            setMotivo(evento.target.value);
-            setErrores((e) => sinElDe(e, "motivo"));
-          }}
-        />
-        <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={errores.motivo} />
-        <p>No se borra: queda quién lo hizo, cuándo y por qué.</p>
-        <div className="acciones">
-          <button type="submit" className={hace} disabled={enviando || motivo.trim() === ""}>
-            {boton}
-          </button>
-          <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
-            Cancelar
-          </button>
-        </div>
-      </form>
+      <FichaDeRegistro
+        titulo={importe(m.importe_centavos, m.moneda)}
+        datos={[...(m.numero_operacion === null ? [] : [{ etiqueta: "Referencia", valor: m.numero_operacion }]), { etiqueta: "Fecha", valor: fechaLegible(m.fecha) }, ...datos]}
+        alCerrar={() => {
+          cerrarVentana();
+          fichas.cerrar();
+        }}
+        ocupada={enviando}
+        ventana={
+          ventana === que && (
+            <VentanaDeFormulario titulo={boton} textoEnviar={boton} peligro={peligro} alCerrar={cerrarVentana} alEnviar={() => enviar(que, m.movimiento_id)}>
+              <label htmlFor={`${id}-motivo`}>{etiqueta}</label>
+              <textarea
+                id={`${id}-motivo`}
+                data-foco
+                maxLength={LARGO_MOTIVO}
+                rows={3}
+                value={motivo}
+                {...marcaDe(`${id}-motivo`, errores.motivo)}
+                onChange={(evento) => {
+                  setMotivo(evento.target.value);
+                  setErrores((e) => sinElDe(e, "motivo"));
+                }}
+              />
+              <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={errores.motivo} />
+              {tardio !== null && (
+                <p className="aviso-error" role="alert">
+                  {tardio}
+                </p>
+              )}
+            </VentanaDeFormulario>
+          )
+        }
+      >
+        {coteja && (
+          <p className="ficha-registro__acciones">
+            <button type="button" className={abre} onClick={() => abrirVentana(que)}>
+              {boton}
+            </button>
+          </p>
+        )}
+      </FichaDeRegistro>
     );
   }
-
-  function accion(que: Abierto["que"], movimiento: string) {
-    if (!coteja) return null;
-    if (abierto?.que === que && abierto.movimiento === movimiento) return formulario(abierto);
-    return (
-      <div className="formulario">
-        <button type="button" className={ACTOS[que].abre} disabled={enviando} onClick={() => abrir(que, movimiento)}>
-          {ACTOS[que].boton}
-        </button>
-      </div>
-    );
-  }
-
-  const dato = (m: Movimiento | Marca) => (m.numero_operacion === null ? fechaLegible(m.fecha) : `Referencia ${m.numero_operacion} · ${fechaLegible(m.fecha)}`);
 
   return (
     <>
@@ -251,12 +306,7 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       )}
       {pantalla.tipo === "lista" && consorcio !== "" && (
         <>
-          <section className="tarjeta" aria-label={TITULO_SIN_EXPLICAR} hidden={pendiente !== null}>
-            <p>
-              {coteja
-                ? "Débitos de los extractos del banco que ningún pago de Consorcio en Mano explica. La administración también los ve. Si uno no es el pago de una orden (una comisión, un impuesto), se marca con el motivo y sale de la lista."
-                : "Débitos de los extractos del banco que ningún pago de Consorcio en Mano explica. Los ven quien concilia y la administración, para saber qué falta registrar; desde acá no se cambia nada."}
-            </p>
+          <section aria-label={TITULO_SIN_EXPLICAR}>
             {lectura.tipo === "cargando" && <CargandoPagos />}
             {lectura.tipo === "sin_servicio" && (
               <FallaDeLectura
@@ -268,67 +318,80 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 avisar={setAviso}
               />
             )}
-            {lectura.tipo === "ok" && lectura.total === 0 && <p>El extracto no tiene nada sin explicar.</p>}
-            {lectura.tipo === "ok" && lectura.total > 0 && (
+            {ok !== null && ok.total === 0 && <p className="tarjeta">El extracto no tiene nada sin explicar.</p>}
+            {ok !== null && ok.total > 0 && (
               <>
-                <ul className="filas-pago">
-                  {lectura.elementos.map((m) => (
-                    <li key={m.movimiento_id} className="fila-pago fila-pago--con-borde">
-                      <span className="fila-pago__arriba">
-                        <strong>Débito sin explicar</strong>
-                        <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
-                      </span>
-                      <span>{dato(m)}</span>
-                      <span className="fila-pago__nota">Extracto subido el {momentoAlFinal(m.visto_en)}</span>
-                      {accion("marcar", m.movimiento_id)}
+                <ul className="filas-registro" aria-label="Débitos sin explicar">
+                  {ok.elementos.map((m) => (
+                    <li key={m.movimiento_id}>
+                      <FilaDeRegistro
+                        titulo={importe(m.importe_centavos, m.moneda)}
+                        resumen={dato(m)}
+                        alAbrir={() => fichas.abrir(m.movimiento_id)}
+                        refFila={fichas.refFila(m.movimiento_id)}
+                        abierta={fichas.abierta === m.movimiento_id}
+                      />
                     </li>
                   ))}
                 </ul>
-                {lectura.siguiente !== null && (
+                {ok.siguiente !== null && (
                   <div className="formulario">
-                    <button type="button" className="secundario" disabled={enviando} onClick={() => lectura.siguiente !== null && verMas("sueltos", lectura.siguiente)}>
+                    <button type="button" className="secundario" onClick={() => ok.siguiente !== null && verMas("sueltos", ok.siguiente)}>
                       Ver más débitos sin explicar
                     </button>
                   </div>
                 )}
               </>
             )}
-            {/* Quien concilia sube el extracto que lo explique; la administración solo lee. */}
-            {coteja && (
-              <p className="salidas-pago">
-                <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
-                  Cotejar con el banco
-                </Link>
-              </p>
-            )}
           </section>
-          {lectura.tipo === "ok" && lectura.totalMarcas > 0 && (
-            <section className="tarjeta" aria-label={TITULO_MARCADOS} hidden={pendiente !== null}>
-              <h2>{TITULO_MARCADOS}</h2>
-              <ul className="filas-pago">
-                {lectura.marcas.map((m) => (
-                  <li key={m.movimiento_id} className="fila-pago fila-pago--con-borde">
-                    <span className="fila-pago__arriba">
-                      <strong>No es el pago de una orden</strong>
-                      <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
-                    </span>
-                    <span>{dato(m)}</span>
-                    <span className="fila-pago__nota">
-                      Marcado el {momento(m.marcado_en)}: {m.motivo}
-                    </span>
-                    {accion("retirar", m.movimiento_id)}
+          {ok !== null && ok.totalMarcas > 0 && !verMarcados && (
+            <p className="salidas-pago">
+              <button type="button" className="secundario" onClick={() => setVerMarcados(true)}>
+                {textoVerMarcados(ok.totalMarcas)}
+              </button>
+            </p>
+          )}
+          {ok !== null && ok.totalMarcas > 0 && verMarcados && (
+            <section aria-labelledby={`${id}-marcados`}>
+              <h2 id={`${id}-marcados`} className="titulo-grupo">
+                {TITULO_MARCADOS} <span className="cantidad">{ok.totalMarcas}</span>
+              </h2>
+              <ul className="filas-registro" aria-label={TITULO_MARCADOS}>
+                {ok.marcas.map((m) => (
+                  <li key={m.movimiento_id}>
+                    <FilaDeRegistro
+                      titulo={importe(m.importe_centavos, m.moneda)}
+                      resumen={dato(m)}
+                      alAbrir={() => fichas.abrir(m.movimiento_id)}
+                      refFila={fichas.refFila(m.movimiento_id)}
+                      abierta={fichas.abierta === m.movimiento_id}
+                    />
                   </li>
                 ))}
               </ul>
-              {lectura.siguienteMarcas !== null && (
+              {ok.siguienteMarcas !== null && (
                 <div className="formulario">
-                  <button type="button" className="secundario" disabled={enviando} onClick={() => lectura.siguienteMarcas !== null && verMas("marcas", lectura.siguienteMarcas)}>
+                  <button type="button" className="secundario" onClick={() => ok.siguienteMarcas !== null && verMas("marcas", ok.siguienteMarcas)}>
                     Ver más marcados
                   </button>
                 </div>
               )}
             </section>
           )}
+          {/* Quien concilia sube el extracto que lo explique; la administración solo lee. */}
+          {coteja && (
+            <p className="salidas-pago">
+              <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+                Cotejar con el banco
+              </Link>
+            </p>
+          )}
+          {suelto !== undefined && ficha(suelto, "marcar", [{ etiqueta: "Extracto subido", valor: momentoAlFinal(suelto.visto_en) }])}
+          {marcado !== undefined &&
+            ficha(marcado, "retirar", [
+              { etiqueta: "Marcado", valor: momento(marcado.marcado_en) },
+              { etiqueta: "Motivo", valor: marcado.motivo },
+            ])}
         </>
       )}
     </>

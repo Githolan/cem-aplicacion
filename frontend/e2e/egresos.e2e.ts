@@ -132,8 +132,8 @@ test.describe("egresos en un teléfono", () => {
 });
 
 // El circuito de pagos: una bandeja y una ficha, con la API simulada desde el navegador. Cada prueba
-// corre en los tres proyectos (escritorio, movil, tablet) con su ancho, sin fijarlo: en PC la ficha
-// se abre al lado y más angosto va aparte. La cuenta completa no está en la página hasta el acto de
+// corre en los tres proyectos (escritorio, movil, tablet) con su ancho, sin fijarlo: la ficha se abre
+// sola, tocando la fila, en todos los anchos. La cuenta completa no está en la página hasta el acto de
 // ejecución (un POST que la API responde con todas las barreras).
 const EJECUCION = "e7777777-7777-4777-8777-777777777777";
 const PAGO = "f8888888-8888-4888-8888-888888888888";
@@ -309,34 +309,30 @@ async function sinDesbordar(pagina: Page) {
   expect(contenido).toBeLessThanOrEqual(ventana);
 }
 
-/** Entra a la bandeja y llega a la ficha: en PC ya está abierta al lado; más angosto, se toca. */
+/** Entra a la bandeja y abre la ficha tocando la fila, en todos los anchos (decisión 1: la ficha va sola). */
 async function abrirLaFicha(pagina: Page) {
   await pagina.goto("/pagos");
   const fila = pagina.getByRole("link", { name: new RegExp(RAZON_LARGA) });
   await expect(fila).toBeVisible();
   expect((await fila.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   await sinDesbordar(pagina);
-  if (anchoDe(pagina) < ANCHO_PC_PX) await fila.click();
+  await fila.click();
 }
 
 test.describe("circuito de pagos", () => {
-  test("en PC la ficha va al lado de la bandeja; más angosto, aparte", async ({ page, baseURL }) => {
+  test("en todos los anchos la ficha se abre sola, con «Volver a Pagos»", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, PARA_PAGAR);
     await page.goto("/pagos");
     const pagar = page.getByRole("button", { name: "Ver la cuenta para pagar" });
     const fila = page.getByRole("link", { name: new RegExp(RAZON_LARGA) });
     await expect(fila).toBeVisible();
-    if (anchoDe(page) >= ANCHO_PC_PX) {
-      await expect(pagar).toBeVisible();
-      const [lista, ficha] = [await fila.boundingBox(), await pagar.boundingBox()];
-      expect(ficha?.x).toBeGreaterThan((lista?.x ?? 0) + (lista?.width ?? 0));
-    } else {
-      await expect(pagar).toHaveCount(0);
-      await fila.click();
-      await expect(pagar).toBeVisible();
-      await expect(fila).toHaveCount(0);
-    }
+    // FIC-13 / BAN-02: la primera orden no se abre sola, tampoco en PC.
+    await expect(pagar).toHaveCount(0);
+    await fila.click();
+    await expect(pagar).toBeVisible();
+    await expect(fila).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Volver a Pagos" })).toBeVisible();
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);

@@ -135,9 +135,11 @@ describe("Pagos en el inicio de quien revisa", () => {
 
     const hero = within(await tarjeta());
     expect((await hero.findByText("cosas para hacer", { exact: false })).textContent).toBe("2 cosas para hacer");
-    expect(hero.getByText("Para hacer")).toBeTruthy();
     expect(hero.getByText("Edificio Azul")).toBeTruthy();
-    expect(hero.getByRole("link", { name: "Ver los pagos" }).getAttribute("href")).toBe("/pagos");
+    // BAN-09, INI-06: sin la marca «Para hacer» que repite la cifra; la tarjeta entera es el enlace.
+    expect(hero.queryByText("Para hacer")).toBeNull();
+    expect(hero.getByRole("link", { name: "Pagos 2 cosas para hacer Edificio Azul" }).getAttribute("href")).toBe("/pagos");
+    expect(hero.queryByRole("link", { name: "Ver los pagos" })).toBeNull();
   });
 
   it("los pagos por cotejar cuentan; una rechazada ya vista o un borrador viejo, no (tanda 2)", async () => {
@@ -298,7 +300,7 @@ describe("selector de edificio del inicio", () => {
     expect(opciones.map((o) => o.textContent)).toEqual(["Edificio Azul", "Edificio Verde"]);
   });
 
-  it("elegir otro cambia la cuenta y «Ver los pagos» abre ese edificio", async () => {
+  it("elegir otro cambia la cuenta y la tarjeta abre ese edificio, sin repetir el nombre que dice el selector (INI-06)", async () => {
     const simulado = dosEdificios();
     vi.stubGlobal("fetch", simulado);
     abrir();
@@ -306,22 +308,22 @@ describe("selector de edificio del inicio", () => {
     fireEvent.change(await selector(), { target: { value: C2 } });
     const hero = within(await tarjeta());
     expect((await hero.findByText("cosas para hacer", { exact: false })).textContent).toBe("3 cosas para hacer");
-    expect(hero.getByText("Edificio Verde")).toBeTruthy();
+    expect(hero.queryByText("Edificio Verde")).toBeNull();
 
     const antes = pedidosA(simulado, bandejaDe(C2));
-    fireEvent.click(hero.getByRole("link", { name: "Ver los pagos" }));
+    fireEvent.click(hero.getByRole("link", { name: "Pagos 3 cosas para hacer" }));
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
     await waitFor(() => expect(pedidosA(simulado, bandejaDe(C2))).toBeGreaterThan(antes));
   });
 
-  it("control: sin elegir, «Ver los pagos» abre el primero", async () => {
+  it("control: sin elegir, la tarjeta abre el primero", async () => {
     const simulado = dosEdificios();
     vi.stubGlobal("fetch", simulado);
     abrir();
 
     const hero = within(await tarjeta());
     await hero.findByText("cosa para hacer", { exact: false });
-    fireEvent.click(hero.getByRole("link", { name: "Ver los pagos" }));
+    fireEvent.click(hero.getByRole("link", { name: /^Pagos/ }));
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
     await waitFor(() => expect(pedidosA(simulado, bandejaDe(C1))).toBeGreaterThan(1));
     expect(pedidosA(simulado, bandejaDe(C2))).toBe(0);
@@ -406,12 +408,14 @@ describe("salidas de la bandeja según el rol", () => {
     await waitFor(() => expect(screen.queryByRole("link", { name: "Cotejar con el banco" })).toBeNull());
   });
 
-  it("quien concilia, con pagos por cotejar: «Cotejar con el banco» manda y no ofrece preparar", async () => {
+  it("quien concilia, con pagos por cotejar: una fila lleva al cotejo (BAN-07) y no ofrece preparar", async () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conPorCotejar(2) } }));
     abrir("/pagos");
 
-    await screen.findByRole("link", { name: "Cotejar con el banco" });
-    expect(principal("Cotejar con el banco")).toBe(true);
+    const fila = await screen.findByRole("link", { name: "Para cotejar 2 pagos" });
+    expect(fila.getAttribute("href")).toBe("/pagos/cotejo");
+    expect(fila.classList.contains("fila-registro")).toBe(true);
+    expect(principal("Consultar pagos")).toBe(false);
     expect(conBorde("Consultar pagos")).toBe(true);
     await waitFor(() => expect(screen.queryByRole("link", { name: "Preparar una orden" })).toBeNull());
   });

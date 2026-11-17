@@ -183,3 +183,26 @@ export const VERBO_CONCILIAR = "Está bien: conciliar";
 export const AVISO_OBSERVAR = "Vuelve a quien lo registró para que lo corrija.";
 export const AVISO_POR_EL_CONSEJO = "Hubo una diferencia: para volver a pagarla, la aprueba el Consejo, sea cual sea el importe.";
 export const AVISO_MODIFICAR = "Si se cambia algo, el Consejo tiene que aprobarla de nuevo.";
+
+// Fricción 17-11, tanda 6: la bandeja, la consulta y el cotejo.
+/** La bandeja sin nada para hacer: una sola línea (BAN-06). */
+export const NADA_PENDIENTE = "Nada pendiente.";
+/** Las marcas cortas de una fila de la bandeja; el texto completo está en la ficha (BAN-04). */
+export const MARCA_REPETIDA = "Puede estar repetida";
+/** Las monedas por su nombre, como en la orden (COT-02). */
+export const NOMBRE_MONEDA: Readonly<Record<string, string>> = { ARS: "Pesos", USD: "Dólares" };
+export const SUBIR_EXTRACTO = "Subir el extracto";
+export const COMPARAR = "Comparar";
+export const VER_LO_YA_COTEJADO = "Ver lo ya cotejado";
+export const DESHACER_COTEJO = "Deshacer el cotejo";
+export const TILDAR_PAGOS = "Tildar los pagos que figuran en el banco.";
+export const textoMarcarCotejados = (n: number) => (n === 1 ? "Marcar 1 como cotejado" : `Marcar ${n} como cotejados`);
+export const textoTopeTildes = (maximo: number) => `Se marcan hasta ${maximo} por vez: primero estos, y después los demás.`;
+export const textoLosCotejaOtra = (n: number) =>
+  n === 1 ? "1 pago lo coteja otra persona del Consejo: esta cuenta participó de él." : `${n} pagos los coteja otra persona del Consejo: esta cuenta participó de ellos.`;
+export const textoLosDeshaceOtra = (n: number) =>
+  n === 1 ? "1 cotejo lo deshace otra persona del Consejo: esta cuenta participó de ese pago." : `${n} cotejos los deshace otra persona del Consejo: esta cuenta participó de esos pagos.`;
+export const FALTA_MOTIVO_DESHACER = "Falta decir por qué se deshace.";
+export const FALTA_MOTIVO = "Falta escribir el motivo.";
+export const FALTA_ARCHIVO_EXTRACTO = "Falta elegir el archivo del extracto.";
+export const textoVerMarcados = (n: number) => `Ver los marcados (${n})`;

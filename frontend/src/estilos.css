@@ -725,18 +725,7 @@ main:has(.tabla-lista) {
   white-space: nowrap;
 }
 
-/* Circuito de pagos: una bandeja y una ficha. En PC, una al lado de la otra; más angosto, aparte. */
-main:has(.circuito-pagos--al-lado),
-main:has(.cotejo) {
-  max-width: 80rem;
-}
-
-.circuito-pagos--al-lado {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 2rem;
-  align-items: start;
-}
+/* Circuito de pagos: una bandeja y una ficha, cada una sola en todos los anchos (fricción 17-11). */
 
 .titulo-grupo {
   margin: 1.5rem 0 0.5rem;
@@ -833,22 +822,9 @@ main:has(.cotejo) {
   color: var(--on-hero);
 }
 
-/* Cotejar con el banco: el extracto y la lista a mano, una al lado de la otra desde tablet ancha. */
-.cotejo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0 2rem;
-  align-items: start;
-}
-
+/* Cotejar con el banco: la lista de lo que falta cotejar; el extracto se sube en su ventana (COT-01). */
 .cotejo[hidden] {
   display: none;
-}
-
-@media (min-width: 64.0625em) {
-  .cotejo {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 /* Elegir un archivo (SubirArchivo.tsx): la zona para soltarlo y, en todos los anchos, la cámara, la
@@ -2049,4 +2025,54 @@ p.persona-cabecera {
   .navegacion__item--desde-inicio {
     background: var(--accent-tint);
   }
+}
+
+/* Fricción 17-11, tanda 6: bandeja, consulta y cotejo. */
+
+/* La fila compacta del Padrón cuando lleva a otra pantalla (pagos/FilaEnlace.tsx): un enlace con el
+   mismo dibujo que button.fila-registro. */
+a.fila-registro {
+  display: grid;
+  gap: 0.125rem;
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+a.fila-registro:hover {
+  border-color: var(--accent);
+}
+
+/* Las filas del cotejo y de lo que el extracto no explica, debajo de los grupos (BAN-07). */
+.bandeja-banco {
+  margin-top: 1.5rem;
+}
+
+/* «Nada pendiente.»: una sola línea (BAN-06). */
+.bandeja-al-dia {
+  margin: 0;
+  font-weight: 700;
+}
+
+/* La tarjeta de Pagos del inicio entera es el enlace (INI-06). */
+.resumen-inicio__enlace {
+  display: grid;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  border-radius: var(--radius-md);
+  color: var(--on-hero);
+  text-decoration: none;
+}
+
+.resumen-inicio__enlace .resumen-inicio__arriba,
+.resumen-inicio__cuenta,
+.resumen-inicio__enlace .resumen-inicio__edificio {
+  display: block;
 }

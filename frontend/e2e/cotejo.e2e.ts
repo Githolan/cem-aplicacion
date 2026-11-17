@@ -10,7 +10,6 @@ const A = "a1111111-1111-4111-8111-111111111111";
 const ORDEN = "c5555555-5555-4555-8555-555555555555";
 const P1 = "e7777777-7777-4777-8777-777777777777";
 const P2 = "e8888888-8888-4888-8888-888888888888";
-const ANCHO_PC_PX = 1025;
 const ALTO_TOQUE_PX = 44;
 const BYTES_SOBRE_EL_TOPE_DE_NGINX = 2 * 1024 * 1024;
 const RAZON_LARGA = "Mantenimiento Integral de Ascensores y Equipos Electromecánicos del Río de la Plata S.R.L.";
@@ -90,63 +89,65 @@ test.describe("cotejar con el banco", () => {
     const errores = vigilarErrores(page);
     const pedidos = await simularCotejo(page, baseURL!);
     await page.goto("/pagos");
-    await page.getByRole("link", { name: "Cotejar con el banco" }).click();
+    // BAN-07: el banco es una fila de la bandeja con su cuenta, no un párrafo con enlace.
+    await page.getByRole("link", { name: "Para cotejar 1 pago" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Cotejar con el banco" })).toBeVisible();
     const tilde = page.getByRole("checkbox", { name: new RegExp("0048213377") });
     await expect(tilde).toBeVisible();
     const fila = page.locator("label.tilde-pago").first();
     expect((await fila.boundingBox())?.height).toBeGreaterThanOrEqual(ALTO_TOQUE_PX);
-    await expect(page.getByText(/Lo coteja otra persona del Consejo/)).toBeVisible();
+    // COT-05: lo que esta cuenta no puede cotejar no se lista; va en una línea al pie.
+    await expect(page.getByText("1 pago lo coteja otra persona del Consejo: esta cuenta participó de él.")).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: new RegExp("0048211904") })).toHaveCount(0);
+    // C8P-16: sin nada tildado no hay botón; el número del botón cuenta lo tildado.
+    await expect(page.getByRole("button", { name: /^Marcar/ })).toHaveCount(0);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
 
     await tilde.check();
-    await page.getByRole("button", { name: "Marcar como cotejados" }).click();
+    await page.getByRole("button", { name: "Marcar 1 como cotejado" }).click();
     await expect(page.getByText("Listo: quedó cotejado 1 pago.")).toBeVisible();
     await expect(tilde).toHaveCount(0);
     expect(pedidos.tildes).toEqual([{ pagos: [P1] }]);
     expect(errores).toEqual([]);
   });
 
-  test("sube el extracto, elige las columnas y ve solo lo que hay que mirar", async ({ page, baseURL }) => {
+  test("sube el extracto en una ventana, elige las columnas y ve el resultado en una hoja", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     const pedidos = await simularCotejo(page, baseURL!);
     await page.goto("/pagos/cotejo");
+    // COT-01: subir el extracto es un botón que abre su ventana; la lista queda de fondo.
+    await page.getByRole("button", { name: "Subir el extracto" }).click();
+    const subida = page.getByRole("dialog", { name: "Subir el extracto" });
     // Soltar o elegir el archivo en todos los anchos; un CSV no se saca con la cámara.
-    await expect(page.getByText("Soltar el archivo acá")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Elegir un archivo" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Sacar una foto" })).toHaveCount(0);
-    await page.getByLabel("Archivo del extracto").setInputFiles({ name: "extracto.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) });
+    await expect(subida.getByText("Soltar el archivo acá")).toBeVisible();
+    await expect(subida.getByRole("button", { name: "Elegir un archivo" })).toBeVisible();
+    await expect(subida.getByRole("button", { name: "Sacar una foto" })).toHaveCount(0);
+    await subida.getByLabel("Archivo del extracto").setInputFiles({ name: "extracto.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) });
+    await subida.getByRole("button", { name: "Subir el extracto" }).click();
 
-    await expect(page.getByRole("heading", { name: "¿Qué es cada columna?" })).toBeVisible();
-    await expect(page.getByText("Primera fila: 05/11/2026 · -184350,00 · 0048213377")).toBeVisible();
+    const columnas = page.getByRole("dialog", { name: "¿Qué es cada columna?" });
+    await expect(columnas.getByText("Primera fila: 05/11/2026 · -184350,00 · 0048213377")).toBeVisible();
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
-    await page.getByRole("button", { name: "Comparar" }).click();
+    await columnas.getByRole("button", { name: "Comparar" }).click();
 
-    await expect(page.getByText("12 pagos coinciden con el banco y quedaron cotejados.")).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Están acá y no en el banco/ })).toBeVisible();
-    await expect(page.getByRole("heading", { name: /Están en el banco y no acá/ })).toBeVisible();
-    await expect(page.getByText("Débito sin registrar")).toBeVisible();
+    // COT-04: el resultado va en una hoja que se cierra con «Listo».
+    const hoja = page.getByRole("dialog", { name: /^Extracto del / });
+    await expect(hoja.getByText("12 pagos coinciden con el banco y quedaron cotejados.")).toBeVisible();
+    await expect(hoja.getByRole("heading", { name: /Están acá y no en el banco/ })).toBeVisible();
+    await expect(hoja.getByRole("heading", { name: /Están en el banco y no acá/ })).toBeVisible();
+    await expect(hoja.getByText(/0048213999/)).toBeVisible();
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
+    await hoja.getByRole("button", { name: "Listo" }).click();
+    await expect(hoja).toHaveCount(0);
 
     const [subido] = pedidos.extracto;
     expect(subido?.cuerpo).toBe(CSV); // el archivo tal cual, sin pasar por JSON
     expect(subido?.parametros.get("importe")).toBe("Debito");
     expect(subido?.parametros.get("moneda")).toBe("ARS"); // el extracto dice en qué moneda está (decisión 9)
     expect(errores).toEqual([]);
-  });
-
-  test("en PC el extracto y la lista van uno al lado del otro; más angosto, uno abajo del otro", async ({ page, baseURL }) => {
-    await simularCotejo(page, baseURL!);
-    await page.goto("/pagos/cotejo");
-    const extracto = page.getByRole("heading", { name: "Subir el extracto" });
-    const lista = page.getByRole("heading", { name: "O marcar a mano" });
-    await expect(lista).toBeVisible();
-    const [a, b] = [await extracto.boundingBox(), await lista.boundingBox()];
-    if ((page.viewportSize()?.width ?? 0) >= ANCHO_PC_PX) expect(b?.x).toBeGreaterThan(a?.x ?? 0);
-    else expect(b?.y).toBeGreaterThan(a?.y ?? 0);
   });
 
   test("nginx deja pasar el extracto hasta el backend, que es quien dice el tope", async ({ request }) => {
