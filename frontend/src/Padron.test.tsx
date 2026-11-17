@@ -120,6 +120,9 @@ async function abrirFicha(titulo: string): Promise<HTMLElement> {
   return screen.getByRole("dialog", { name: titulo });
 }
 
+/** La ventana de una acción, abierta encima de la ficha (tanda 1 del informe de fricción). */
+const ventanaDe = (titulo: string) => screen.getByRole("dialog", { name: titulo });
+
 function cerrarFicha(ficha: HTMLElement) {
   fireEvent.click(within(ficha).getByRole("button", { name: "Cerrar" }));
 }
@@ -347,15 +350,19 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
-    expect(within(beto).getByText(/La persona pierde el acceso que le daba este vínculo. No se puede deshacer./)).toBeTruthy();
+    // PAD-02: el formulario se abre en su ventana, encima de la ficha, sin los datos de la ficha.
+    const ventana = ventanaDe("Finalizar el vínculo");
+    expect(within(ventana).getByText(/La persona pierde el acceso que le daba este vínculo. No se puede deshacer./)).toBeTruthy();
+    expect(within(ventana).queryByText("Vigencia")).toBeNull();
+    expect(within(ventana).getAllByRole("button").map((b) => b.textContent)).toEqual(["Finalizar el vínculo", "Cancelar"]);
     escribir("Motivo", "Fin del contrato de locación");
-    fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
+    fireEvent.click(within(ventana).getByRole("button", { name: "Finalizar el vínculo" }));
 
     // Todavía no se mandó nada: primero la pregunta, con el foco en «Sí, finalizar».
+    const si = await within(ventana).findByRole("button", { name: "Sí, finalizar" });
     expect(pedidos(simulado, "POST", finalizarRuta(V_INQ))).toEqual([]);
-    const pregunta = screen.getByRole("group", { name: "¿Finalizar el vínculo de Beto Pérez con la unidad 1° A? No se puede deshacer." });
-    const si = within(pregunta).getByRole("button", { name: "Sí, finalizar" });
-    expect(document.activeElement).toBe(si);
+    expect(within(ventana).getByText("¿Finalizar el vínculo de Beto Pérez con la unidad 1° A? No se puede deshacer.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(si));
     fireEvent.click(si);
 
     expect(
@@ -368,19 +375,41 @@ describe("página /padron", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: nombreDeFila("1° A: Beto Pérez") })).toBeNull());
   });
 
-  it("«No» en la pregunta de finalizar vuelve al formulario sin enviar", async () => {
+  it("«Cancelar» en la pregunta de finalizar cierra la ventana sin enviar y vuelve a la ficha", async () => {
     const simulado = conPadron();
     vi.stubGlobal("fetch", simulado);
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
-    fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
+    // Con el foco en el botón, como al tocarlo.
+    const finalizar = within(beto).getByRole("button", { name: "Finalizar" });
+    finalizar.focus();
+    fireEvent.click(finalizar);
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
-    fireEvent.click(screen.getByRole("button", { name: "No" }));
-    expect(document.activeElement).toBe(screen.getByLabelText("Motivo"));
+    await screen.findByRole("button", { name: "Sí, finalizar" });
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
-    expect(within(beto).getByRole("button", { name: "Finalizar" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Finalizar el vínculo" })).toBeNull();
+    // El foco vuelve a la acción que abrió la ventana, en la ficha.
+    expect(document.activeElement).toBe(finalizar);
     expect(pedidos(simulado, "POST", finalizarRuta(V_INQ))).toEqual([]);
+  });
+
+  it("con el campo vacío, el botón sigue activo y marca el campo sin enviar (decisión 4)", async () => {
+    const simulado = conPadron();
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
+    const enviar = within(ventanaDe("Confirmar el vínculo")).getByRole("button", { name: "Confirmar el vínculo" }) as HTMLButtonElement;
+    expect(enviar.disabled).toBe(false);
+    fireEvent.click(enviar);
+    const campo = screen.getByLabelText("Documento que lo prueba");
+    expect(await screen.findByText("Falta escribir el documento que lo prueba.")).toBeTruthy();
+    expect(campo.getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(simulado, "POST", confirmarRuta(V_INQ))).toEqual([]);
+    // Control: al escribir, la marca se va.
+    escribir("Documento que lo prueba", "Escritura 1234");
+    expect(screen.queryByText("Falta escribir el documento que lo prueba.")).toBeNull();
   });
 
   it.each([
@@ -411,7 +440,7 @@ describe("página /padron", () => {
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sí, finalizar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí, finalizar" }));
     expect(await screen.findByText("Ese vínculo todavía no empezó: no se puede finalizar.")).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThanOrEqual(2));
   });
@@ -423,7 +452,7 @@ describe("página /padron", () => {
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sí, finalizar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí, finalizar" }));
     const aviso = await screen.findByText(/^No hay permiso para finalizar este vínculo/);
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     // jsdom no agrupa los renders como el navegador: el orden de los efectos lo vigila padron.e2e.ts.
@@ -436,14 +465,14 @@ describe("página /padron", () => {
     expect(sinConfirmarPrimero(filas).map((f) => f.nombre)).toEqual(["B", "D", "A", "C"]);
   });
 
-  it("un rechazo queda dentro del formulario abierto, junto a lo escrito", async () => {
+  it("un rechazo queda dentro de la ventana abierta, junto a lo escrito", async () => {
     vi.stubGlobal("fetch", conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("datos_invalidos", 422) }));
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Documento que lo prueba", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
-    const aviso = await within(beto).findByRole("alert");
+    const aviso = await within(ventanaDe("Confirmar el vínculo")).findByRole("alert");
     expect(aviso.textContent).toMatch(/^Hay que revisar la referencia/);
     expect(aviso.closest("form")).toBeTruthy();
     expect(estadoDePantalla().textContent).toBe("");
@@ -576,8 +605,8 @@ describe("página /padron", () => {
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
+    await screen.findByRole("button", { name: "Sí, finalizar" });
     expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "No" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     cerrarFicha(beto);
     const carla = await abrirFicha("2° B: Carla Gómez");
@@ -597,14 +626,15 @@ describe("página /padron", () => {
     abrir();
     const carla = await abrirFicha("2° B: Carla Gómez");
     fireEvent.click(within(carla).getByRole("button", { name: "Anular" }));
-    expect(within(carla).getByText(/borra un vínculo cargado por error/)).toBeTruthy();
+    const ventana = ventanaDe("Anular el vínculo");
+    expect(within(ventana).getByText(/borra un vínculo cargado por error/)).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByLabelText("Motivo"));
     escribir("Motivo", "Fecha de inicio cargada por error");
     fireEvent.click(screen.getByRole("button", { name: "Anular el vínculo" }));
+    const si = await within(ventana).findByRole("button", { name: "Sí, anular" });
     expect(pedidos(simulado, "POST", anularRuta(V_FUT))).toEqual([]);
-    const pregunta = screen.getByRole("group", { name: "¿Anular el vínculo de Carla Gómez con la unidad 2° B? No se puede deshacer." });
-    const si = within(pregunta).getByRole("button", { name: "Sí, anular" });
-    expect(document.activeElement).toBe(si);
+    expect(within(ventana).getByText("¿Anular el vínculo de Carla Gómez con la unidad 2° B? No se puede deshacer.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(si));
     fireEvent.click(si);
 
     const aviso = await screen.findByText("Listo: quedó anulado el vínculo de Carla Gómez con la unidad 2° B.");
@@ -628,7 +658,7 @@ describe("página /padron", () => {
     fireEvent.click(within(carla).getByRole("button", { name: "Anular" }));
     escribir("Motivo", "Error de carga");
     fireEvent.click(screen.getByRole("button", { name: "Anular el vínculo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sí, anular" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí, anular" }));
     expect(await within(estadoDePantalla()).findByText(texto)).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThanOrEqual(2));
@@ -815,7 +845,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
       escribir("Documento que lo prueba", "Escritura 1234");
       fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
-      await within(beto).findByRole("alert");
+      await within(ventanaDe("Confirmar el vínculo")).findByRole("alert");
       const lecturas = pedidos(simulado, "GET", RUTA_PADRON).length;
       volvioLaRed();
       await new Promise((r) => setTimeout(r, 0));
@@ -933,7 +963,7 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Documento que lo prueba", "Escritura 123");
-    fireEvent.click(within(beto).getByRole("button", { name: "Confirmar el vínculo" }));
+    fireEvent.click(within(ventanaDe("Confirmar el vínculo")).getByRole("button", { name: "Confirmar el vínculo" }));
     expect(await screen.findByText(/No hay permiso para confirmar este vínculo/)).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Padrón del edificio" })).toBeTruthy();
   });

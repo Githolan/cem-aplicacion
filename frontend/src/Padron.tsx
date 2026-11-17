@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
@@ -7,10 +7,12 @@ import { encabezadoCsrf } from "./csrf";
 import { conLaRedDeVuelta, sinPisarLoHecho } from "./egresos/comun";
 import { useAlVolverLaRed } from "./egresos/useConsorcio";
 import { RUTA_INICIO } from "./enlace";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "./ErrorDeCampo";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /padron (H2b 2b-5, corte 4; doc/diseno/H2b_5_Diseno.md §5 del repositorio CEM): el padrón
 // mínimo de D6 (unidad, nombre, carácter, vigencia y si está confirmado; nunca correo ni teléfono).
@@ -52,13 +54,14 @@ const TEXTO_TIPO: Record<TipoVinculo, string> = {
 type Accion = "confirmar" | "finalizar" | "anular";
 
 /** Lo que dice cada acción: el botón de la ficha, el formulario y la pregunta antes de enviar. */
-const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: string; campo: string; si: string; hecho: string }> = {
+const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: string; campo: string; falta: string; si: string; hecho: string }> = {
   confirmar: {
     boton: "Confirmar",
     titulo: "Confirmar el vínculo",
     ayuda:
       "Confirmar acredita el carácter sobre la unidad según el título, no la identidad de la persona. Por ejemplo: «Escritura n.º 123 del 4/5/2020» o «Contrato de alquiler del 1/3/2026». Queda guardado en el vínculo.",
     campo: "Documento que lo prueba",
+    falta: "Falta escribir el documento que lo prueba.",
     si: "",
     hecho: "quedó confirmado",
   },
@@ -68,6 +71,7 @@ const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: strin
     ayuda:
       "Finalizar cierra la vigencia hoy y conserva el vínculo con quién, cuándo y por qué. La persona pierde el acceso que le daba este vínculo. No se puede deshacer.",
     campo: "Motivo",
+    falta: "Falta escribir el motivo.",
     si: "Sí, finalizar",
     hecho: "quedó finalizado",
   },
@@ -77,6 +81,7 @@ const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: strin
     ayuda:
       "Anular borra un vínculo cargado por error que todavía no empezó y no está confirmado. Queda constancia de la unidad, el carácter y las fechas; el motivo no queda en la auditoría. No se puede deshacer.",
     campo: "Motivo",
+    falta: "Falta escribir el motivo.",
     si: "Sí, anular",
     hecho: "quedó anulado",
   },
@@ -174,35 +179,26 @@ export function Padron() {
   const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const fichas = useFichas<string>();
-  // La acción en curso dentro de la ficha abierta; nula, la ficha muestra sus datos y sus botones.
+  // La acción abierta en su ventana, encima de la ficha; nula, la ficha muestra sus datos y sus botones.
   const [accion, setAccion] = useState<Accion | null>(null);
   const [texto, setTexto] = useState("");
   // Finalizar y anular no se deshacen: antes de enviar se pregunta.
   const [preguntando, setPreguntando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** El campo de la acción que falta completar (decisión 4: el botón queda activo y marca el campo). */
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   // Cada cambio vuelve a pedir el padrón: lo que se ve lo decide la API, no la pantalla.
   const [vuelta, setVuelta] = useState(0);
   const consultado = useRef(false);
   // Una clave por intento lógico: se conserva si el pedido se cae (el reintento recibe la misma
   // respuesta, sin repetir el efecto) y se renueva al cambiar el texto o el vínculo.
   const clave = useRef<string | null>(null);
-  const campo = useRef<HTMLInputElement | null>(null);
-  const preguntaSi = useRef<HTMLButtonElement | null>(null);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
   // Al terminar un pedido la fila puede cambiar o desaparecer: el foco va al aviso del resultado.
   const alAviso = useRef(false);
 
-  useEffect(() => {
-    if (accion !== null && !preguntando) campo.current?.focus();
-  }, [accion, preguntando]);
-
-  useEffect(() => {
-    if (preguntando) preguntaSi.current?.focus();
-  }, [preguntando]);
-
-  // Va después de los dos anteriores: si la API rechaza la finalización, volver de la pregunta
-  // reenfoca el campo en el mismo commit, y el foco tiene que quedar en el aviso.
+  // El rechazo de una acción lo dice su ventana; acá, el resultado que cierra la ficha.
   useEffect(() => {
     if (enviando || !alAviso.current) return;
     alAviso.current = false;
@@ -284,6 +280,7 @@ export function Padron() {
     clave.current = null;
     setTexto("");
     setPreguntando(false);
+    setErrores(SIN_ERRORES);
     setAccion(null);
     setAviso((actual) => (actual?.ok === false ? null : actual));
   }
@@ -301,6 +298,7 @@ export function Padron() {
       clave.current = null;
       setTexto("");
       setPreguntando(false);
+      setErrores(SIN_ERRORES);
       setAccion(null);
     }
     fichas.cerrar(devolverFoco);
@@ -310,86 +308,95 @@ export function Padron() {
     clave.current = null;
     setTexto("");
     setPreguntando(false);
+    setErrores(SIN_ERRORES);
     setAviso(null);
     setAccion(a);
   }
 
-  function enviar(evento: FormEvent, fila: Fila) {
-    evento.preventDefault();
-    if (accion === null) return;
-    // Finalizar y anular no se pueden deshacer: el formulario primero pide la confirmación explícita.
-    if (accion !== "confirmar" && !preguntando) {
-      setPreguntando(true);
-      return;
+  /** El botón de la ventana: lo que falta se marca; finalizar y anular preguntan antes de enviar. */
+  function enviar(fila: Fila, a: Accion): FinDeEnvio | Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ texto: [texto, TEXTO_ACCION[a].falta] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
     }
-    pedir(fila, accion);
+    // Finalizar y anular no se pueden deshacer: el formulario primero pide la confirmación explícita.
+    if (a !== "confirmar" && !preguntando) {
+      setPreguntando(true);
+      return "seguir";
+    }
+    return pedir(fila, a);
   }
 
-  function pedir(fila: Fila, hecha: Accion) {
+  /** Manda la acción. Un rechazo queda en la ventana; si la lista quedó vieja, se cierra la ficha. */
+  async function pedir(fila: Fila, hecha: Accion): Promise<FinDeEnvio> {
     clave.current ??= crypto.randomUUID();
     const camino = { consorcio_id: consorcio, vinculo_id: fila.vinculo_id };
     const params = { path: camino, header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current } };
     const valor = texto.trim();
-    alAviso.current = true;
     setEnviando(true);
     setAviso(null);
     const opciones = { params, headers: encabezadoCsrf() };
-    const pedido =
-      hecha === "confirmar"
+    try {
+      const { data, error, response } = await (hecha === "confirmar"
         ? api.POST("/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/confirmar", { ...opciones, body: { referencia: valor } })
         : hecha === "finalizar"
           ? api.POST("/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar", { ...opciones, body: { motivo: valor } })
-          : api.POST("/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/anular", { ...opciones, body: { motivo: valor } });
-    void pedido
-      .then(({ data, error, response }) => {
-        exigirSesion(response);
-        if (data === undefined) {
-          const codigo = codigoDe(error);
-          if (renovarClave(response.status, codigo)) clave.current = null;
-          setAviso({ texto: motivoDeSeparacion(error) ?? mensajeDeError(response.status, codigo, hecha), ok: false });
-          setPreguntando(false);
-          if (cambioElPadron(response.status, codigo)) {
-            cerrarFicha(false);
-            setVuelta((v) => v + 1);
-          }
-          return;
-        }
+          : api.POST("/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/anular", { ...opciones, body: { motivo: valor } }));
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) clave.current = null;
+        const motivo = motivoDeSeparacion(error) ?? mensajeDeError(response.status, codigo, hecha);
+        setPreguntando(false);
+        if (!cambioElPadron(response.status, codigo)) return { rechazo: motivo };
+        // La lista quedó vieja: la ficha se cierra y el motivo va arriba, con la lista nueva.
+        alAviso.current = true;
+        setAviso({ texto: motivo, ok: false });
         cerrarFicha(false);
-        const quien = `el vínculo de ${fila.nombre} con la unidad ${fila.designacion}`;
-        if (hecha === "confirmar") {
-          setLectura((actual) =>
-            actual.tipo === "ok"
-              ? { tipo: "ok", filas: actual.filas.map((f) => (f.vinculo_id === fila.vinculo_id ? { ...f, confirmado: true } : f)) }
-              : actual,
-          );
-          setAviso({ texto: `Listo: quedó confirmado ${quien}.`, ok: true });
-        } else {
-          // Un vínculo finalizado o anulado sale del padrón (solo lista vigentes y futuros).
-          setLectura((actual) =>
-            actual.tipo === "ok" ? { tipo: "ok", filas: actual.filas.filter((f) => f.vinculo_id !== fila.vinculo_id) } : actual,
-          );
-          // Solo la finalización trae el fin de la vigencia; la anulación borra el vínculo.
-          const fin = "vigente_hasta" in data && typeof data.vigente_hasta === "string" ? data.vigente_hasta : null;
-          setAviso({
-            texto: `Listo: ${TEXTO_ACCION[hecha].hecho} ${quien}.${fin === null ? "" : ` Desde el ${dia(fin)} ya no vale.`}`,
-            ok: true,
-          });
-        }
         setVuelta((v) => v + 1);
-      })
-      .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
-        else setAviso({ texto: SIN_CONEXION, ok: false });
-      })
-      .finally(() => setEnviando(false));
+        return "cerrar";
+      }
+      alAviso.current = true;
+      cerrarFicha(false);
+      const quien = `el vínculo de ${fila.nombre} con la unidad ${fila.designacion}`;
+      if (hecha === "confirmar") {
+        setLectura((actual) =>
+          actual.tipo === "ok"
+            ? { tipo: "ok", filas: actual.filas.map((f) => (f.vinculo_id === fila.vinculo_id ? { ...f, confirmado: true } : f)) }
+            : actual,
+        );
+        setAviso({ texto: `Listo: quedó confirmado ${quien}.`, ok: true });
+      } else {
+        // Un vínculo finalizado o anulado sale del padrón (solo lista vigentes y futuros).
+        setLectura((actual) =>
+          actual.tipo === "ok" ? { tipo: "ok", filas: actual.filas.filter((f) => f.vinculo_id !== fila.vinculo_id) } : actual,
+        );
+        // Solo la finalización trae el fin de la vigencia; la anulación borra el vínculo.
+        const fin = "vigente_hasta" in data && typeof data.vigente_hasta === "string" ? data.vigente_hasta : null;
+        setAviso({
+          texto: `Listo: ${TEXTO_ACCION[hecha].hecho} ${quien}.${fin === null ? "" : ` Desde el ${dia(fin)} ya no vale.`}`,
+          ok: true,
+        });
+      }
+      setVuelta((v) => v + 1);
+      return "cerrar";
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        // La sesión se pide encima: lo escrito queda en la ventana para repetir el paso.
+        aEntrar();
+        return "seguir";
+      }
+      return { rechazo: SIN_CONEXION };
+    } finally {
+      setEnviando(false);
+    }
   }
 
   const filas = lectura.tipo === "ok" ? lectura.filas : [];
   // La ficha muestra la fila de la lista vigente: si una recarga la saca, la ficha se va.
   const enFicha = filas.find((f) => f.vinculo_id === fichas.abierta);
-  // Un rechazo con un formulario abierto va junto a él, dentro de la ficha, para corregirlo ahí.
-  const avisoEnLaFicha = enFicha !== undefined && accion !== null && aviso !== null && !aviso.ok;
-  const conMensaje = (aviso !== null && !avisoEnLaFicha) || pantalla.tipo !== "lista";
+  const conMensaje = aviso !== null || pantalla.tipo !== "lista";
 
   return (
     <>
@@ -416,7 +423,7 @@ export function Padron() {
           </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Esta cuenta todavía no participa de ningún edificio.</p>}
-        {aviso && !avisoEnLaFicha && (
+        {aviso && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
           </p>
@@ -524,77 +531,61 @@ export function Padron() {
           { etiqueta: "Vigencia", valor: `${vigencia(f)}${f.iniciado ? "" : " (todavía no empezó)"}` },
           { etiqueta: "Confirmación", valor: f.confirmado ? "Confirmado con el título" : "Sin confirmar" },
         ]}
+        ventana={accion !== null && acciones.includes(accion) && ventana(f, accion)}
       >
-        {accion === null
-          ? acciones.length > 0 && (
-              <p className="ficha-registro__acciones">
-                {acciones.map((a) => (
-                  <button key={a} type="button" className={a === "confirmar" ? undefined : "secundario peligro"} onClick={() => abrirAccion(a)}>
-                    {TEXTO_ACCION[a].boton}
-                  </button>
-                ))}
-              </p>
-            )
-          : acciones.includes(accion) && formulario(f, accion)}
+        {acciones.length > 0 && (
+          <p className="ficha-registro__acciones">
+            {acciones.map((a) => (
+              <button key={a} type="button" className={a === "confirmar" ? undefined : "secundario peligro"} onClick={() => abrirAccion(a)}>
+                {TEXTO_ACCION[a].boton}
+              </button>
+            ))}
+          </p>
+        )}
       </FichaDeRegistro>
     );
   }
 
-  function formulario(f: Fila, a: Accion) {
+  /** La acción en su ventana, encima de la ficha: el campo, el botón y «Cancelar». */
+  function ventana(f: Fila, a: Accion) {
     const textos = TEXTO_ACCION[a];
     const base = `${id}-${f.vinculo_id}`;
     const ayuda = `${base}-ayuda`;
-    const pregunta = `${base}-pregunta`;
-    const confirmar = a === "confirmar";
+    const idCampo = `${base}-texto`;
     return (
-      <form className="formulario formulario-movil" onSubmit={(e) => enviar(e, f)} aria-labelledby={`${base}-accion`}>
-        <h3 id={`${base}-accion`}>{textos.titulo}</h3>
+      <VentanaDeFormulario
+        titulo={textos.titulo}
+        textoEnviar={preguntando ? textos.si : textos.titulo}
+        peligro={a !== "confirmar"}
+        alEnviar={() => enviar(f, a)}
+        alCerrar={soloLaFicha}
+      >
         <p id={ayuda}>{textos.ayuda}</p>
-        <label htmlFor={`${base}-texto`}>{textos.campo}</label>
+        <label htmlFor={idCampo}>{textos.campo}</label>
         <input
-          id={`${base}-texto`}
-          ref={campo}
+          id={idCampo}
+          data-foco
           type="text"
           autoComplete="off"
           maxLength={LARGO_TEXTO}
           pattern={PATRON_TEXTO}
           required
-          disabled={enviando || preguntando}
-          aria-describedby={ayuda}
+          disabled={preguntando}
+          {...marcaDe(idCampo, errores.texto, ayuda)}
           value={texto}
           onChange={(e) => {
             clave.current = null;
+            setErrores((actuales) => sinElDe(actuales, "texto"));
             setTexto(e.target.value);
           }}
         />
-        {avisoEnLaFicha && (
-          <p ref={textoAviso} tabIndex={-1} role="alert" className="aviso-error">
-            {aviso.texto}
-          </p>
-        )}
-        {preguntando ? (
-          <div role="group" aria-labelledby={pregunta}>
-            <p id={pregunta}>
-              ¿{textos.boton} el vínculo de {f.nombre} con la unidad {f.designacion}? No se puede deshacer.
-            </p>
-            <button type="submit" className="peligro" ref={preguntaSi} disabled={enviando}>
-              {textos.si}
-            </button>{" "}
-            <button type="button" className="secundario" onClick={() => setPreguntando(false)} disabled={enviando}>
-              No
-            </button>
-          </div>
-        ) : (
+        <ErrorDeCampo idCampo={idCampo} mensaje={errores.texto} />
+        {preguntando && (
           <p>
-            <button type="submit" className={confirmar ? undefined : "peligro"} disabled={enviando}>
-              {textos.titulo}
-            </button>{" "}
-            <button type="button" className="secundario" onClick={soloLaFicha} disabled={enviando}>
-              Cancelar
-            </button>
+            ¿{textos.boton} el vínculo de {f.nombre} con la unidad {f.designacion}? No se puede deshacer.
           </p>
         )}
-      </form>
+      </VentanaDeFormulario>
     );
   }
 }

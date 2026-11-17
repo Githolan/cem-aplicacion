@@ -163,8 +163,11 @@ test.describe("padrón", () => {
     expect(envios).toHaveLength(0);
     await sinFaltasDeAccesibilidad(page);
     await page.getByRole("button", { name: "Sí, finalizar" }).click();
-    await expect(propia.getByText(/No hay permiso para finalizar/)).toBeFocused();
+    // El rechazo queda en la ventana de la acción, encima de la ficha (tanda 1 del informe de fricción).
+    const ventana = page.getByRole("dialog", { name: "Finalizar el vínculo" });
+    await expect(ventana.getByText(/No hay permiso para finalizar/)).toBeFocused();
     await sinFaltasDeAccesibilidad(page);
+    await ventana.getByRole("button", { name: "Cancelar" }).click();
     await propia.getByRole("button", { name: "Cerrar" }).click();
     await expect(page.getByRole("button", { name: `1° A: ${NOMBRE_LARGO}` })).toBeFocused();
 
