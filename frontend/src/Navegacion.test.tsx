@@ -68,32 +68,56 @@ afterEach(() => cleanup());
 describe("menú", () => {
   it("ninguna entrada es el comienzo de otra sin ser exacta (MEN-01)", () => {
     expect(prefijosSinExacta(DESTINOS_DEL_MENU)).toEqual([]);
-    // Control: la prueba encuentra el par del defecto 37 si a «/proveedores» le falta `exacta`.
-    const sinExacta = DESTINOS_DEL_MENU.map((d) => (d.ruta === "/proveedores" ? { ...d, exacta: false } : d));
-    expect(prefijosSinExacta(sinExacta)).toEqual([["/proveedores", "/proveedores/quien-los-ve"]]);
-    // Control: «Inicio» es el comienzo de todas; sin `exacta`, aparece con cada una.
+    // Control: la prueba encuentra el par del defecto 37 si esas dos rutas vuelven a ser dos entradas.
+    const separadas = [
+      ...DESTINOS_DEL_MENU,
+      { ruta: "/proveedores", texto: "Consulta", icono: "proveedor" as const },
+      { ruta: "/proveedores/quien-los-ve", texto: "Quién", icono: "ojo" as const },
+    ];
+    expect(prefijosSinExacta(separadas)).toContainEqual(["/proveedores", "/proveedores/quien-los-ve"]);
+    // Control: «Inicio» es el comienzo de todas; sin `exacta`, aparece con cada ruta de las demás.
     const sinInicio = DESTINOS_DEL_MENU.map((d) => (d.ruta === "/" ? { ...d, exacta: false } : d));
-    expect(prefijosSinExacta(sinInicio)).toHaveLength(DESTINOS_DEL_MENU.length - 1);
+    const rutasDeLasDemas = DESTINOS_DEL_MENU.filter((d) => d.ruta !== "/").reduce((n, d) => n + (d.opciones?.length ?? 1), 0);
+    expect(prefijosSinExacta(sinInicio)).toHaveLength(rutasDeLasDemas);
   });
 
-  it("en «Quién ve los proveedores» queda activa una sola entrada (defecto 37)", () => {
-    const menu = menuEn("/proveedores/quien-los-ve");
-    expect(activas(menu)).toEqual(["Quién ve los proveedores"]);
-    cleanup();
-    // Control: en la consulta, la consulta.
-    expect(activas(menuEn("/proveedores"))).toEqual(["Proveedores y sus seguros"]);
-    cleanup();
+  it("las tres pantallas de proveedores marcan una sola entrada, «Proveedores» (defecto 37, MEN-05)", () => {
+    for (const ruta of ["/proveedores/quien-los-ve", "/proveedores", "/egresos/proveedores"]) {
+      expect(activas(menuEn(ruta))).toEqual(["Proveedores"]);
+      cleanup();
+    }
     // Control: las pantallas hijas de Pagos, sin entrada propia, siguen marcando «Pagos».
     expect(activas(menuEn("/pagos/consulta"))).toEqual(["Pagos"]);
   });
 
-  it("las entradas de proveedores y de solicitudes no repiten el ícono de otra (MEN-05)", () => {
+  it("una sola entrada de proveedores, que lleva a lo que la persona alcanza (MEN-05)", () => {
+    const destino = () => within(screen.getByRole("navigation", { name: "Secciones" })).queryAllByRole("link", { name: /proveedores/i });
+    // Quien gestiona en un edificio: a la gestión, aunque en otro solo consulte.
+    menuEn("/");
+    expect(destino().map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["Proveedores", "/egresos/proveedores"]]);
+    cleanup();
+    // Quien solo consulta: a la consulta.
+    consulta.actual = sabido(new Map([["e1", ["proveedores.ver", "proveedores.autorizar"]]]));
+    menuEn("/");
+    expect(destino().map((a) => a.getAttribute("href"))).toEqual(["/proveedores"]);
+    cleanup();
+    // Quien solo autoriza: a «Quién ve los proveedores».
+    consulta.actual = sabido(new Map([["e1", ["proveedores.autorizar"]]]));
+    menuEn("/");
+    expect(destino().map((a) => a.getAttribute("href"))).toEqual(["/proveedores/quien-los-ve"]);
+    cleanup();
+    // Control: sin ninguna de las tres, no hay entrada.
+    consulta.actual = sabido(new Map([["e1", ["documentos.ver"]]]));
+    menuEn("/");
+    expect(destino()).toEqual([]);
+  });
+
+  it("la entrada de solicitudes no repite el ícono de otra (MEN-05)", () => {
     const menu = menuEn("/");
     const icono = (nombre: string) => within(menu).getByRole("link", { name: nombre }).querySelector("svg")?.innerHTML;
-    expect(icono("Quién ve los proveedores")).not.toBe(icono("Proveedores"));
     expect(icono("Solicitudes formales")).not.toBe(icono("Documentos"));
-    // Control: la comparación distingue íconos iguales.
-    expect(icono("Proveedores")).toBe(icono("Proveedores y sus seguros"));
+    // Control: la comparación distingue íconos distintos.
+    expect(icono("Proveedores")).not.toBe(icono("Documentos"));
   });
 
   it("en una pantalla de Gestión, «Inicio» queda marcada para el teléfono y la tablet (MEN-02)", () => {

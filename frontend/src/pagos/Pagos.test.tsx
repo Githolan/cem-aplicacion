@@ -3870,7 +3870,8 @@ describe("la factura arriba de la orden (0088)", () => {
       fireEvent.change(await screen.findByLabelText("Archivo del proveedor"), { target: { files: [FACTURA] } });
       expect(await screen.findByText(TEXTO_REVISANDO)).toBeTruthy();
       const alta = screen.getByRole("button", { name: "Dar de alta el proveedor" }) as HTMLButtonElement;
-      expect(alta.disabled).toBe(true);
+      // El botón queda activo (decisión 4 del informe de fricción, tanda 4): la línea de arriba dice por qué no sale.
+      expect(alta.disabled).toBe(false);
       expect(screen.getByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeTruthy();
       fireEvent.submit(alta.closest("form") as HTMLFormElement);
       expect(pedidos(api, "POST", `${BASE}/proveedores`)).toHaveLength(0);
@@ -3878,7 +3879,7 @@ describe("la factura arriba de la orden (0088)", () => {
       await vuelta();
       expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
       // Control: terminado, el alta sale con su documento.
-      expect(alta.disabled).toBe(false);
+      expect(screen.queryByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeNull();
       fireEvent.change(screen.getByLabelText(/CBU|Cuenta/), { target: { value: CUENTA } });
       fireEvent.submit(alta.closest("form") as HTMLFormElement);
       await waitFor(() => expect(pedidos(api, "POST", `${BASE}/proveedores`)).toHaveLength(1));

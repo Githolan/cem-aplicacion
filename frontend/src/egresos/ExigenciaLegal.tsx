@@ -3,7 +3,9 @@ import { useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, renovarClave } from "./comun";
 import { TEXTO_TIPO, type RequisitoLegal } from "./DocumentacionProveedor";
 import { exigirSesion, SinSesion } from "./useConsorcio";
@@ -13,16 +15,23 @@ import { exigirSesion, SinSesion } from "./useConsorcio";
 // dice qué requisito de esos rubros le falta o tiene vencido. Qué hace la falta lo decide la
 // configuración del edificio: «bloquear» no deja prepararle órdenes nuevas; «avisar» solo marca.
 // Quien solo consulta ve lo mismo, sin los botones.
+//
+// Informe de fricción, tanda 4: agregar un rubro se hace en su ventana (SEG-01), con el botón
+// siempre activo (C8P-21); «Quitar» no repite el rubro que tiene al lado (SEG-02); y sin nada que
+// mostrar ni hacer, la sección no se dibuja (SEG-03).
 
 type Faltante = components["schemas"]["RequisitoFaltante"];
 type Modo = components["schemas"]["ModoExigencia"];
 
 export const TITULO_EXIGENCIA = "Lo que exige la ley";
-export const SIN_RUBROS = "No tiene rubros legales asignados: no se le exige nada en particular.";
 export const AVISO_FALTA_BLOQUEA =
   "Le falta documentación que exige la ley, o la tiene vencida: no se le pueden preparar órdenes nuevas hasta cargarla. Las órdenes que ya existen siguen su curso.";
 export const AVISO_FALTA_AVISA = "Le falta documentación que exige la ley, o la tiene vencida. Se le puede seguir contratando; queda marcado.";
+export const AGREGAR_UN_RUBRO = "Agregar un rubro legal";
 export const AGREGAR_RUBRO = "Agregar el rubro";
+export const RUBRO_LEGAL = "Rubro legal";
+export const FALTA_RUBRO = "Falta elegir el rubro.";
+export const QUITAR = "Quitar";
 
 /** Los rubros de la matriz legal en palabras; uno nuevo que la pantalla no conoce va por su código. */
 export const TEXTO_RUBRO: Record<string, string> = {
@@ -58,15 +67,19 @@ type Props = {
 
 export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requisitos, modo, puedeCambiar, aEntrar, alCambiar }: Props) {
   const id = useId();
+  const [agregando, setAgregando] = useState(false);
   const [nuevo, setNuevo] = useState("");
-  const [enviando, setEnviando] = useState(false);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  const [quitando, setQuitando] = useState(false);
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
   const disponibles = [...new Set(requisitos.map((r) => r.rubro_legal))].filter((r) => !rubros.includes(r));
+  const ofreceAgregar = puedeCambiar && disponibles.length > 0;
+  // Sin rubros, sin faltas y sin nada que agregar, la sección no tiene nada que decir (SEG-03).
+  if (rubros.length === 0 && faltantes.length === 0 && !ofreceAgregar) return null;
 
-  async function cambiar(rubro: string, asignar: boolean) {
-    setEnviando(true);
-    setFalla(null);
+  /** Asigna o quita el rubro. Devuelve el rechazo, o null si salió bien (la ficha se vuelve a leer). */
+  async function cambiar(rubro: string, asignar: boolean): Promise<string | null> {
     clave.current ??= crypto.randomUUID();
     const pedido = {
       headers: encabezadoCsrf(),
@@ -76,38 +89,76 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
       },
     };
     const ruta = "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}";
+    const { data, error, response } = asignar ? await api.POST(ruta, pedido) : await api.DELETE(ruta, pedido);
+    exigirSesion(response);
+    if (data === undefined) {
+      if (renovarClave(response.status, codigoDe(error))) clave.current = null;
+      return mensajeDeActo(response.status, error);
+    }
+    clave.current = null;
+    alCambiar();
+    return null;
+  }
+
+  async function quitar(rubro: string) {
+    setQuitando(true);
+    setFalla(null);
     try {
-      const { data, error, response } = asignar ? await api.POST(ruta, pedido) : await api.DELETE(ruta, pedido);
-      exigirSesion(response);
-      if (data === undefined) {
-        if (renovarClave(response.status, codigoDe(error))) clave.current = null;
-        setFalla(mensajeDeActo(response.status, error));
-        return;
-      }
-      clave.current = null;
-      setNuevo("");
-      alCambiar();
+      setFalla(await cambiar(rubro, false));
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
       else setFalla(SIN_CONEXION);
     } finally {
-      setEnviando(false);
+      setQuitando(false);
     }
   }
 
+  /** El botón de la ventana: sin rubro elegido lo marca (C8P-21); si no, lo asigna. */
+  async function agregar(): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ rubro: [nuevo, FALTA_RUBRO] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    try {
+      const rechazo = await cambiar(nuevo, true);
+      return rechazo === null ? "cerrar" : { rechazo };
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        aEntrar();
+        return "seguir";
+      }
+      return { rechazo: SIN_CONEXION };
+    }
+  }
+
+  function abrirAgregar() {
+    clave.current = null;
+    setNuevo("");
+    setErrores(SIN_ERRORES);
+    setFalla(null);
+    setAgregando(true);
+  }
+
+  const idRubro = `${id}-rubro`;
   return (
     <section aria-labelledby={`${id}-titulo`}>
       <h3 id={`${id}-titulo`}>{TITULO_EXIGENCIA}</h3>
-      {rubros.length === 0 ? (
-        <p>{SIN_RUBROS}</p>
-      ) : (
+      {rubros.length > 0 && (
         <ul className="lista-documentacion" aria-label="Rubros legales">
           {rubros.map((r) => (
             <li key={r}>
               <strong>{textoRubro(r)}</strong>
               {puedeCambiar && (
-                <button type="button" className="secundario peligro" disabled={enviando} onClick={() => void cambiar(r, false)}>
-                  Quitar {textoRubro(r)}
+                // El rubro ya está escrito al lado: el nombre completo es para el lector de pantalla.
+                <button
+                  type="button"
+                  className="secundario peligro"
+                  aria-label={`${QUITAR} ${textoRubro(r)}`}
+                  disabled={quitando}
+                  onClick={() => void quitar(r)}
+                >
+                  {QUITAR}
                 </button>
               )}
             </li>
@@ -126,10 +177,30 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
           </ul>
         </>
       )}
-      {puedeCambiar && disponibles.length > 0 && (
-        <div className="formulario">
-          <label htmlFor={`${id}-rubro`}>Rubro legal</label>
-          <select id={`${id}-rubro`} value={nuevo} disabled={enviando} onChange={(e) => setNuevo(e.target.value)}>
+      {ofreceAgregar && (
+        <button type="button" className="secundario" onClick={abrirAgregar}>
+          {AGREGAR_UN_RUBRO}
+        </button>
+      )}
+      {falla !== null && (
+        <p role="alert" className="aviso-error">
+          {falla}
+        </p>
+      )}
+      {agregando && (
+        <VentanaDeFormulario titulo={AGREGAR_UN_RUBRO} textoEnviar={AGREGAR_RUBRO} alEnviar={agregar} alCerrar={() => setAgregando(false)}>
+          <label htmlFor={idRubro}>{RUBRO_LEGAL}</label>
+          <select
+            id={idRubro}
+            data-foco
+            value={nuevo}
+            {...marcaDe(idRubro, errores.rubro)}
+            onChange={(e) => {
+              clave.current = null;
+              setErrores((actuales) => sinElDe(actuales, "rubro"));
+              setNuevo(e.target.value);
+            }}
+          >
             <option value="">Elegir un rubro</option>
             {disponibles.map((r) => (
               <option key={r} value={r}>
@@ -137,17 +208,8 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
               </option>
             ))}
           </select>
-          <div className="acciones">
-            <button type="button" className="secundario" disabled={enviando || nuevo === ""} onClick={() => void cambiar(nuevo, true)}>
-              {AGREGAR_RUBRO}
-            </button>
-          </div>
-        </div>
-      )}
-      {falla !== null && (
-        <p role="alert" className="aviso-error">
-          {falla}
-        </p>
+          <ErrorDeCampo idCampo={idRubro} mensaje={errores.rubro} />
+        </VentanaDeFormulario>
       )}
     </section>
   );

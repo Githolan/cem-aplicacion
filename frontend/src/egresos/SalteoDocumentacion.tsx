@@ -3,8 +3,11 @@ import { useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, momento, renovarClave } from "./comun";
+import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
+import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
+import { cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, momento, momentoAlFinal, renovarClave } from "./comun";
 import { exigirSesion, SinSesion } from "./useConsorcio";
 
 // El salteo con motivo del bloqueo por documentación legal (app 0106; respuesta del propietario
@@ -13,25 +16,33 @@ import { exigirSesion, SinSesion } from "./useConsorcio";
 // diga (por defecto, un miembro del Consejo) registra el salteo con el motivo. Lo usa una sola
 // orden: la próxima que se le prepare a ese proveedor, y no la puede preparar quien registró el
 // salteo. Nada se borra: la ficha muestra cada salteo, quién, cuándo y qué orden lo usó.
+//
+// Informe de fricción, tanda 4: el motivo se pide en una ventana (SEG-04), con el botón siempre
+// activo (C8P-22) y lo que sirve para decidir adentro, no en la ficha (SEG-06); a la vista queda
+// solo el salteo que espera su orden y los demás van plegados (SEG-07). Comentario 40 del
+// propietario (lección 21): quien acaba de registrar un salteo no ve otra vez el botón mientras el
+// suyo espera su orden (la base no le deja registrar otro: `salteo_vigente`).
 
 type Salteo = components["schemas"]["SalteoDocumentacion"];
 type Modo = components["schemas"]["ModoExigencia"];
 
 export const TITULO_SALTEO = "Salteo por urgencia";
-export const EXPLICACION_SALTEO =
-  "En una urgencia (por ejemplo, una pérdida de gas), un miembro del Consejo puede dejar preparar una orden a este proveedor aunque le falte documentación, con el motivo. Sirve para una sola orden, la próxima que se prepare, y no la puede preparar quien registra el salteo.";
+/** Lo que sirve para decidir, dentro de la ventana del salteo (SEG-06). */
+export const EXPLICACION_SALTEO = "Sirve para una sola orden, la próxima, y no la puede preparar quien registra el salteo.";
 export const SALTEAR = "Saltear el bloqueo para una orden";
 export const CONFIRMAR_SALTEO = "Confirmar el salteo";
 export const MOTIVO_SALTEO = "Motivo de la urgencia";
+export const FALTA_MOTIVO_SALTEO = "Falta el motivo de la urgencia.";
 export const LARGO_MOTIVO_SALTEO = 500;
 export const SALTEO_REGISTRADO = "Salteo registrado: la próxima orden a este proveedor se puede preparar.";
 
 export function textoSalteo(s: Salteo): string {
   const quien = `${momento(s.registrado_en)}, ${s.registrado_por_nombre}: ${s.motivo}`;
-  if (s.estado === "usado" && s.version !== null && s.version !== undefined)
-    return `Usado por una orden (versión ${s.version}). Registrado el ${quien}`;
-  if (s.estado === "vencido") return `Venció sin usarse el ${momento(s.vence_en)}. Registrado el ${quien}`;
-  return `Espera su orden hasta el ${momento(s.vence_en)}. Registrado el ${quien}`;
+  // Sin la versión de la orden: es un dato interno (SEG-07).
+  if (s.estado === "usado") return `Usado por una orden. Registrado el ${quien}`;
+  // «p. m.» ya trae su punto: la frase no lleva otro (comentario 40).
+  if (s.estado === "vencido") return `Venció sin usarse el ${momentoAlFinal(s.vence_en)} Registrado el ${quien}`;
+  return `Espera su orden hasta el ${momentoAlFinal(s.vence_en)} Registrado el ${quien}`;
 }
 
 /** La línea de la ficha de la orden: la versión se preparó con un salteo. */
@@ -47,31 +58,44 @@ type Props = {
   hayFaltantes: boolean;
   /** Lo que la configuración del edificio deja saltear. Solo para mostrar: la API y la base deciden. */
   puedeSaltear: boolean;
+  /** Los salteos que registró esta persona desde que abrió la pantalla. La ficha no dice quién
+   * registró cada uno (solo el nombre), así que es lo único que se sabe sin preguntarle al servidor. */
+  propios: ReadonlySet<number>;
+  /** Se registró un salteo: su número, para no ofrecer otro mientras espera su orden. */
+  alRegistrar: (numero: number) => void;
   aEntrar: () => void;
   /** Se registró el salteo, o lo visto ya no es lo que hay: volver a leer la ficha. */
-  alCambiar: (texto: string, ok: boolean) => void;
+  alCambiar: () => void;
 };
 
-export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hayFaltantes, puedeSaltear, aEntrar, alCambiar }: Props) {
+export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hayFaltantes, puedeSaltear, propios, alRegistrar, aEntrar, alCambiar }: Props) {
   const id = useId();
-  const [abierto, setAbierto] = useState(false);
+  const [abierta, setAbierta] = useState(false);
   const [motivo, setMotivo] = useState("");
-  const [enviando, setEnviando] = useState(false);
-  const [falla, setFalla] = useState<string | null>(null);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  const [resultado, setResultado] = useState<Resultado | null>(null);
   const clave = useRef<string | null>(null);
   const bloquea = modo === "bloquear" && hayFaltantes;
-  if (salteos.length === 0 && !(bloquea && puedeSaltear)) return null;
+  const enEspera = salteos.filter((s) => s.estado === "vigente");
+  const anteriores = salteos.filter((s) => s.estado !== "vigente");
+  const suyoEnEspera = enEspera.some((s) => propios.has(s.numero));
+  const ofreceSaltear = bloquea && puedeSaltear && !suyoEnEspera;
+  if (salteos.length === 0 && !ofreceSaltear && resultado === null) return null;
 
-  function cerrar() {
-    setAbierto(false);
-    setMotivo("");
-    setFalla(null);
+  function abrir() {
     clave.current = null;
+    setMotivo("");
+    setErrores(SIN_ERRORES);
+    setResultado(null);
+    setAbierta(true);
   }
 
-  async function enviar() {
-    setEnviando(true);
-    setFalla(null);
+  async function enviar(): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ motivo: [motivo, FALTA_MOTIVO_SALTEO] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
     clave.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/salteos-documentacion", {
@@ -85,76 +109,74 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
       exigirSesion(response);
       if (data === undefined) {
         const codigo = codigoDe(error);
+        // Lo que se veía ya no es lo que hay: la ventana se cierra y la ficha se vuelve a leer.
         if (cambioLoVisto(response.status, codigo) || codigo === "salteo_innecesario" || codigo === "salteo_vigente") {
-          cerrar();
-          alCambiar(mensajeDeActo(response.status, error), false);
-          return;
+          setResultado({ texto: mensajeDeActo(response.status, error), ok: false });
+          alCambiar();
+          return "cerrar";
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setFalla(mensajeDeActo(response.status, error));
-        return;
+        return { rechazo: mensajeDeActo(response.status, error) };
       }
-      cerrar();
-      alCambiar(SALTEO_REGISTRADO, true);
+      alRegistrar(data.numero);
+      setResultado({ texto: SALTEO_REGISTRADO, ok: true });
+      alCambiar();
+      return "cerrar";
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else setFalla(SIN_CONEXION);
-    } finally {
-      setEnviando(false);
+      if (e instanceof SinSesion) {
+        aEntrar();
+        return "seguir";
+      }
+      return { rechazo: SIN_CONEXION };
     }
   }
 
+  const idMotivo = `${id}-motivo`;
   return (
     <section aria-labelledby={`${id}-titulo`}>
       <h3 id={`${id}-titulo`}>{TITULO_SALTEO}</h3>
-      {bloquea && puedeSaltear && <p>{EXPLICACION_SALTEO}</p>}
-      {salteos.length > 0 && (
+      {enEspera.length > 0 && (
         <ul className="versiones" aria-label="Salteos">
-          {[...salteos].reverse().map((s) => (
+          {[...enEspera].reverse().map((s) => (
             <li key={s.numero}>{textoSalteo(s)}</li>
           ))}
         </ul>
       )}
-      {bloquea &&
-        puedeSaltear &&
-        (!abierto ? (
-          <div className="acciones">
-            <button type="button" className="secundario peligro" onClick={() => setAbierto(true)}>
-              {SALTEAR}
-            </button>
-          </div>
-        ) : (
-          <form
-            className="formulario"
-            onSubmit={(ev) => {
-              ev.preventDefault();
-              void enviar();
+      {anteriores.length > 0 && (
+        <details className="historial">
+          <summary>Anteriores</summary>
+          <ul className="versiones" aria-label="Salteos anteriores">
+            {[...anteriores].reverse().map((s) => (
+              <li key={s.numero}>{textoSalteo(s)}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <ResultadoDelActo resultado={resultado} alOtroActo={() => setResultado(null)} />
+      {ofreceSaltear && (
+        <button type="button" className="secundario peligro" onClick={abrir}>
+          {SALTEAR}
+        </button>
+      )}
+      {abierta && (
+        <VentanaDeFormulario titulo={SALTEAR} textoEnviar={CONFIRMAR_SALTEO} peligro alEnviar={enviar} alCerrar={() => setAbierta(false)}>
+          <p id={`${id}-ayuda`}>{EXPLICACION_SALTEO}</p>
+          <label htmlFor={idMotivo}>{MOTIVO_SALTEO}</label>
+          <textarea
+            id={idMotivo}
+            data-foco
+            value={motivo}
+            maxLength={LARGO_MOTIVO_SALTEO}
+            {...marcaDe(idMotivo, errores.motivo, `${id}-ayuda`)}
+            onChange={(ev) => {
+              clave.current = null;
+              setErrores((actuales) => sinElDe(actuales, "motivo"));
+              setMotivo(ev.target.value);
             }}
-          >
-            <label htmlFor={`${id}-motivo`}>{MOTIVO_SALTEO}</label>
-            <textarea
-              id={`${id}-motivo`}
-              value={motivo}
-              maxLength={LARGO_MOTIVO_SALTEO}
-              required
-              disabled={enviando}
-              onChange={(ev) => setMotivo(ev.target.value)}
-            />
-            {falla !== null && (
-              <p role="alert" className="aviso-error">
-                {falla}
-              </p>
-            )}
-            <div className="acciones">
-              <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
-                {CONFIRMAR_SALTEO}
-              </button>
-              <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
-                Cancelar
-              </button>
-            </div>
-          </form>
-        ))}
+          />
+          <ErrorDeCampo idCampo={idMotivo} mensaje={errores.motivo} />
+        </VentanaDeFormulario>
+      )}
     </section>
   );
 }
