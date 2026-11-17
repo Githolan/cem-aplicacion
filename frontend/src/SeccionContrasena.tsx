@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
@@ -6,18 +6,19 @@ import { useListoHastaOtroActo } from "./listoHastaOtroActo";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
+import { ErrorDeCampo, type ErroresDeCampo, marcaDe, sinElDe, SIN_ERRORES } from "./ErrorDeCampo";
 import { CODIGO_ENTRAR_DE_NUEVO, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
-// Sección "Contraseña" de /cuenta: si la persona tiene una y desde cuándo, y el formulario para
+// Sección "Contraseña" de /cuenta: si la persona tiene una y desde cuándo, y la ventana para
 // definirla o cambiarla (`PUT /api/v1/auth/contrasena`, con X-CSRF-Token). El backend decide: con
 // el segundo factor activo pide haberlo verificado en esta sesión en los últimos 10 minutos (403
-// `segundo_factor_requerido`), y la sección lo pide acá mismo y repite el pedido sin perder lo
-// escrito; sin él, cambiar una existente pide la actual (403 `contrasena_actual_invalida`).
+// `segundo_factor_requerido`), y la sección lo pide encima de la ventana y repite el pedido sin
+// perder lo escrito; sin él, cambiar una existente pide la actual (403 `contrasena_actual_invalida`).
 // Cambiarla cierra las sesiones de los otros dispositivos y siempre avisa por correo.
-// El formulario empieza plegado detrás de un botón (pedido del propietario, 17-10-2026): quien
-// acaba de definirla no tiene por qué ver tres campos vacíos cada vez que entra a /cuenta, y el
-// navegador no autocompleta la actual en un campo que nadie pidió. Se pliega de nuevo al guardar
-// o al cancelar, y el foco va al primer campo al abrir y vuelve al botón al cerrar.
+//
+// Informe de fricción: los campos van en una ventana propia (CTA-01); al guardar se cierra y el
+// «Listo» queda en la tarjeta, sin el botón de volver a cambiarla mientras se ve (CTA-02).
 
 export type EstadoContrasena = components["schemas"]["EstadoContrasena"];
 type Guardada = components["schemas"]["ContrasenaGuardada"];
@@ -45,10 +46,6 @@ export function largoContrasena(valor: string): number {
   return Math.min([...valor].length, [...valor.normalize("NFKC")].length);
 }
 
-type Aviso =
-  | { tipo: "ok"; texto: string }
-  | { tipo: "error"; texto: string }
-
 /** Respuesta de error con el cuerpo uniforme (`Error`), para leer su código y su mensaje. */
 function campoDe(error: unknown, campo: "codigo" | "mensaje"): string | undefined {
   return typeof error === "object" && error !== null && campo in error
@@ -71,120 +68,101 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
   const [actual, setActual] = useState("");
   const [nueva, setNueva] = useState("");
   const [repetida, setRepetida] = useState("");
-  const [corta, setCorta] = useState(false);
-  const [distintas, setDistintas] = useState(false);
-  const [enviando, setEnviando] = useState(false);
-  const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  const [abierta, setAbierta] = useState(false);
+  const [listo, setListo] = useState<string | null>(null);
   // El «Listo» de la contraseña se va al empezar otro acto en otra tarjeta (AC-41).
   const tarjeta = useRef<HTMLElement | null>(null);
-  useListoHastaOtroActo(tarjeta, () => setAviso((actual) => (actual?.tipo === "ok" ? null : actual)));
-  const [abierto, setAbierto] = useState(false);
-  const [pidiendoCodigo, setPidiendoCodigo] = useState(false);
-  // `null`: todavía no se abrió ni se cerró, y el foco queda donde estaba.
-  const [foco, setFoco] = useState<"campo" | "boton" | null>(null);
-  const primerCampo = useRef<HTMLInputElement>(null);
-  const botonAbrir = useRef<HTMLButtonElement>(null);
-
+  useListoHastaOtroActo(tarjeta, () => setListo(null));
+  // El «Listo» toma el foco: el botón que abrió la ventana no está mientras se ve (CTA-02).
+  const textoListo = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
-    if (foco === "campo") primerCampo.current?.focus();
-    if (foco === "boton") botonAbrir.current?.focus();
-  }, [foco, abierto, pidiendoCodigo]);
-
-  function vaciar() {
-    setActual("");
-    setNueva("");
-    setRepetida("");
-    setCorta(false);
-    setDistintas(false);
-  }
-
-  function abrir() {
-    setAviso(null);
-    setAbierto(true);
-    setFoco("campo");
-  }
-
-  function cerrar() {
-    vaciar();
-    setAbierto(false);
-    setFoco("boton");
-  }
+    if (listo !== null) textoListo.current?.focus();
+  }, [listo]);
+  // Con la verificación pedida, la ventana espera la respuesta de la hoja de confirmar.
+  const [confirmando, setConfirmando] = useState<((verificado: boolean) => void) | null>(null);
 
   // Sin segundo factor, cambiar una existente pide la actual; con él, la verificación reciente.
   const pideActual = estado.definida && !segundoFactor;
 
-  function guardar(evento: FormEvent<HTMLFormElement>) {
-    evento.preventDefault();
-    const esCorta = largoContrasena(nueva) < LARGO_MINIMO_CONTRASENA;
-    const sonDistintas = nueva !== repetida;
-    setCorta(esCorta);
-    setDistintas(!esCorta && sonDistintas);
-    if (esCorta || sonDistintas) return;
-    enviar();
+  function abrir() {
+    setActual("");
+    setNueva("");
+    setRepetida("");
+    setErrores(SIN_ERRORES);
+    setListo(null);
+    setAbierta(true);
   }
 
-  function enviar() {
-    setEnviando(true);
-    setAviso(null);
-    void api
-      .PUT("/api/v1/auth/contrasena", {
-        body: { contrasena_nueva: nueva, contrasena_actual: pideActual ? actual : null },
-        headers: encabezadoCsrf(),
-      })
-      .then(({ data, error, response }) => {
-        if (data !== undefined) {
-          cerrar();
-          const cerradas =
-            data.sesiones_cerradas === 0
-              ? ""
-              : data.sesiones_cerradas === 1
-                ? " Se cerró 1 sesión en otro dispositivo."
-                : ` Se cerraron ${data.sesiones_cerradas} sesiones en otros dispositivos.`;
-          setAviso({
-            tipo: "ok",
-            texto: `${estado.definida ? "Listo: la contraseña quedó cambiada." : "Listo: la contraseña quedó definida."}${cerradas} Llega un aviso por correo.`,
-          });
-          alGuardar(data);
-          return;
-        }
-        if (response.status === ESTADO_SIN_SESION) {
-          sinSesion();
-          return;
-        }
-        const codigo = campoDe(error, "codigo");
-        if (codigo === CODIGO_REQUERIDO) setPidiendoCodigo(true);
-        else if (codigo === CODIGO_ACTUAL_INVALIDA)
-          setAviso({ tipo: "error", texto: "La contraseña actual no es correcta." });
-        else if (codigo === CODIGO_DEBIL)
-          // El backend explica la regla (largo y que no sea el correo): se muestra tal cual.
-          setAviso({ tipo: "error", texto: campoDe(error, "mensaje") ?? SIN_CONEXION });
-        // La primera contraseña pide una entrada reciente: lo resuelve la hoja, y lo escrito queda.
-        else if (codigo === CODIGO_ENTRAR_DE_NUEVO) setAviso(null);
-        else if (codigo === CODIGO_CSRF)
-          setAviso({ tipo: "error", texto: "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso." });
-        else if (response.status === ESTADO_DEMASIADOS)
-          setAviso({ tipo: "error", texto: "Hubo demasiados intentos. Reintentar en un rato." });
-        else setAviso({ tipo: "error", texto: mensajeDeFalla(response.status, codigo) });
-      })
-      .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
-      .finally(() => setEnviando(false));
+  function pedirVerificacion(): Promise<boolean> {
+    return new Promise((resolver) => setConfirmando(() => resolver));
+  }
+
+  async function guardar(): Promise<FinDeEnvio> {
+    const faltan: Record<string, string> = {};
+    if (pideActual && actual === "") faltan.actual = "Falta escribir la contraseña actual.";
+    if (largoContrasena(nueva) < LARGO_MINIMO_CONTRASENA)
+      faltan.nueva = `Le faltan caracteres: tiene que tener al menos ${LARGO_MINIMO_CONTRASENA}.`;
+    else if (nueva !== repetida) faltan.repetida = "Las dos contraseñas no coinciden.";
+    if (Object.keys(faltan).length > 0) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    // El pedido se repite una vez si hizo falta confirmar la identidad: lo escrito sigue en la ventana.
+    for (;;) {
+      let respuesta;
+      try {
+        respuesta = await api.PUT("/api/v1/auth/contrasena", {
+          body: { contrasena_nueva: nueva, contrasena_actual: pideActual ? actual : null },
+          headers: encabezadoCsrf(),
+        });
+      } catch {
+        return { rechazo: SIN_CONEXION };
+      }
+      const { data, error, response } = respuesta;
+      if (data !== undefined) {
+        const cerradas =
+          data.sesiones_cerradas === 0
+            ? ""
+            : data.sesiones_cerradas === 1
+              ? " Se cerró 1 sesión en otro dispositivo."
+              : ` Se cerraron ${data.sesiones_cerradas} sesiones en otros dispositivos.`;
+        setListo(
+          `${estado.definida ? "Listo: la contraseña quedó cambiada." : "Listo: la contraseña quedó definida."}${cerradas} Llega un aviso por correo.`,
+        );
+        alGuardar(data);
+        return "cerrar";
+      }
+      if (response.status === ESTADO_SIN_SESION) {
+        sinSesion();
+        return "seguir";
+      }
+      const codigo = campoDe(error, "codigo");
+      if (codigo === CODIGO_REQUERIDO) {
+        const verificado = await pedirVerificacion();
+        setConfirmando(null);
+        if (verificado) continue;
+        return "seguir";
+      }
+      if (codigo === CODIGO_ACTUAL_INVALIDA) {
+        setErrores({ actual: "La contraseña actual no es correcta." });
+        return "seguir";
+      }
+      // El backend explica la regla (largo y que no sea el correo): se muestra tal cual, junto al campo.
+      if (codigo === CODIGO_DEBIL) {
+        setErrores({ nueva: campoDe(error, "mensaje") ?? SIN_CONEXION });
+        return "seguir";
+      }
+      // La primera contraseña pide una entrada reciente: lo resuelve la hoja de entrar, y lo escrito queda.
+      if (codigo === CODIGO_ENTRAR_DE_NUEVO) return "seguir";
+      if (codigo === CODIGO_CSRF) return { rechazo: "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso." };
+      if (response.status === ESTADO_DEMASIADOS) return { rechazo: "Hubo demasiados intentos. Reintentar en un rato." };
+      return { rechazo: mensajeDeFalla(response.status, codigo) };
+    }
   }
 
   const ayuda = `${id}-ayuda`;
-  const describeNueva = [ayuda, corta ? `${id}-corta` : null].filter(Boolean).join(" ");
-
-  // Lo escrito vive en esta sección: al volver del pedido sigue en los campos.
-  if (pidiendoCodigo)
-    return (
-      <PedirCodigo
-        acto="guardar la contraseña"
-        alVerificar={() => {
-          setPidiendoCodigo(false);
-          enviar();
-        }}
-        alCancelar={() => setPidiendoCodigo(false)}
-      />
-    );
+  const titulo = estado.definida ? "Cambiar la contraseña" : "Definir una contraseña";
 
   return (
     <section ref={tarjeta} aria-labelledby={`${id}-titulo`} className="tarjeta">
@@ -196,85 +174,83 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
             : "Contraseña definida."
           : "Sin contraseña todavía: se entra con el código o el enlace que llega por correo."}
       </p>
-      {!abierto && (
-        <button type="button" className="secundario" ref={botonAbrir} aria-expanded={false} aria-controls={`${id}-formulario`} onClick={abrir}>
-          {estado.definida ? "Cambiar la contraseña" : "Definir una contraseña"}
+      {/* Mientras está el «Listo» no se ofrece cambiarla de nuevo (CTA-02). */}
+      {listo === null && (
+        <button type="button" className="secundario" onClick={abrir}>
+          {titulo}
         </button>
       )}
-      {abierto && estado.definida && (
-        <p>Al cambiarla se cierran las sesiones de los otros dispositivos.</p>
-      )}
-      {abierto && (
-      <form id={`${id}-formulario`} className="formulario" onSubmit={guardar} noValidate>
-        {/* Para que el gestor de contraseñas sepa de qué cuenta es: no se ve ni se edita. */}
-        <input type="email" name="username" autoComplete="username" value={correo} readOnly hidden />
-        {pideActual && (
-          <>
-            <label htmlFor={`${id}-actual`}>Contraseña actual</label>
-            <CampoContrasena
-              ref={primerCampo}
-              id={`${id}-actual`}
-              autoComplete="current-password"
-              required
-              maxLength={LARGO_MAXIMO_CONTRASENA}
-              value={actual}
-              onChange={(e) => setActual(e.target.value)}
-            />
-          </>
-        )}
-        <label htmlFor={`${id}-nueva`}>{estado.definida ? "Contraseña nueva" : "Contraseña"}</label>
-        <CampoContrasena
-          ref={pideActual ? undefined : primerCampo}
-          id={`${id}-nueva`}
-          autoComplete="new-password"
-          required
-          minLength={LARGO_MINIMO_CONTRASENA}
-          maxLength={LARGO_MAXIMO_CONTRASENA}
-          aria-invalid={corta}
-          aria-describedby={describeNueva}
-          value={nueva}
-          onChange={(e) => setNueva(e.target.value)}
-        />
-        <p id={ayuda}>
-          Al menos {LARGO_MINIMO_CONTRASENA} caracteres, y que no sea el correo de la cuenta. Una frase de
-          varias palabras sirve.
-        </p>
-        {corta && (
-          <p id={`${id}-corta`} className="aviso-error">
-            Le faltan caracteres: tiene que tener al menos {LARGO_MINIMO_CONTRASENA}.
-          </p>
-        )}
-        <label htmlFor={`${id}-repetida`}>Repetir la contraseña</label>
-        <CampoContrasena
-          id={`${id}-repetida`}
-          autoComplete="new-password"
-          required
-          maxLength={LARGO_MAXIMO_CONTRASENA}
-          aria-invalid={distintas}
-          aria-describedby={distintas ? `${id}-distintas` : undefined}
-          value={repetida}
-          onChange={(e) => setRepetida(e.target.value)}
-        />
-        {distintas && (
-          <p id={`${id}-distintas`} className="aviso-error">
-            Las dos contraseñas no coinciden.
-          </p>
-        )}
-        <div className="acciones">
-          <button type="submit" disabled={enviando}>
-            {estado.definida ? "Guardar la contraseña nueva" : "Guardar la contraseña"}
-          </button>
-          <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
-            Cancelar
-          </button>
-        </div>
-      </form>
-      )}
       <div role="status" aria-live="polite">
-        {enviando && <p>Guardando…</p>}
-        {aviso?.tipo === "ok" && <p className="aviso-ok">{aviso.texto}</p>}
-        {aviso?.tipo === "error" && <p className="aviso-error">{aviso.texto}</p>}
+        {listo !== null && (
+          <p ref={textoListo} tabIndex={-1} className="aviso-ok">
+            {listo}
+          </p>
+        )}
       </div>
+      {abierta && (
+        <VentanaDeFormulario
+          titulo={titulo}
+          textoEnviar={estado.definida ? "Guardar la contraseña nueva" : "Guardar la contraseña"}
+          alEnviar={guardar}
+          alCerrar={() => setAbierta(false)}
+        >
+          {estado.definida && <p>Al cambiarla se cierran las sesiones de los otros dispositivos.</p>}
+          {/* Para que el gestor de contraseñas sepa de qué cuenta es: no se ve ni se edita. */}
+          <input type="email" name="username" autoComplete="username" value={correo} readOnly hidden />
+          {pideActual && (
+            <>
+              <label htmlFor={`${id}-actual`}>Contraseña actual</label>
+              <CampoContrasena
+                id={`${id}-actual`}
+                data-foco
+                autoComplete="current-password"
+                maxLength={LARGO_MAXIMO_CONTRASENA}
+                value={actual}
+                {...marcaDe(`${id}-actual`, errores.actual)}
+                onChange={(e) => {
+                  setActual(e.target.value);
+                  setErrores((anteriores) => sinElDe(anteriores, "actual"));
+                }}
+              />
+              <ErrorDeCampo idCampo={`${id}-actual`} mensaje={errores.actual} />
+            </>
+          )}
+          <label htmlFor={`${id}-nueva`}>{estado.definida ? "Contraseña nueva" : "Contraseña"}</label>
+          <CampoContrasena
+            id={`${id}-nueva`}
+            data-foco={pideActual ? undefined : true}
+            autoComplete="new-password"
+            maxLength={LARGO_MAXIMO_CONTRASENA}
+            value={nueva}
+            {...marcaDe(`${id}-nueva`, errores.nueva, ayuda)}
+            onChange={(e) => {
+              setNueva(e.target.value);
+              setErrores((anteriores) => sinElDe(anteriores, "nueva"));
+            }}
+          />
+          <p id={ayuda}>
+            Al menos {LARGO_MINIMO_CONTRASENA} caracteres, y que no sea el correo de la cuenta. Una frase de varias palabras
+            sirve.
+          </p>
+          <ErrorDeCampo idCampo={`${id}-nueva`} mensaje={errores.nueva} />
+          <label htmlFor={`${id}-repetida`}>Repetir la contraseña</label>
+          <CampoContrasena
+            id={`${id}-repetida`}
+            autoComplete="new-password"
+            maxLength={LARGO_MAXIMO_CONTRASENA}
+            value={repetida}
+            {...marcaDe(`${id}-repetida`, errores.repetida)}
+            onChange={(e) => {
+              setRepetida(e.target.value);
+              setErrores((anteriores) => sinElDe(anteriores, "repetida"));
+            }}
+          />
+          <ErrorDeCampo idCampo={`${id}-repetida`} mensaje={errores.repetida} />
+        </VentanaDeFormulario>
+      )}
+      {confirmando !== null && (
+        <PedirCodigo acto="guardar la contraseña" alVerificar={() => confirmando(true)} alCancelar={() => confirmando(false)} />
+      )}
     </section>
   );
 }

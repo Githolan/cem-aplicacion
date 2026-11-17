@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { esIphone, escucharInstalacion, reiniciarInstalacion } from "./instalacion";
+import { ESPERA_INSTALACION_MS } from "./Instalar";
 
 const AGENTE_ANDROID =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36";
@@ -89,6 +90,8 @@ afterEach(() => {
   act(() => reiniciarInstalacion());
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  localStorage.clear();
 });
 
 describe("página /instalar", () => {
@@ -117,6 +120,34 @@ describe("página /instalar", () => {
     expect(screen.getByText("Instalando…")).toBeTruthy();
     expect(screen.queryByText(NO_SE_INSTALO)).toBeNull();
     expect(screen.getByRole("heading", INSTALAR)).toBeTruthy();
+  });
+
+  it("ACC-07: con el botón del navegador, solo el título y el botón, sin explicación ni «Cómo instalarla»", () => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+    ofrecerInstalacion();
+
+    expect(screen.getByRole("button", { name: "Instalar la aplicación" })).toBeTruthy();
+    expect(screen.queryByText("Tocar el botón y confirmar.")).toBeNull();
+    expect(screen.queryByText(/ninguna tienda/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Cómo instalarla" })).toBeNull();
+  });
+
+  it("ACC-07: si el navegador aceptó y nunca avisa que terminó, sigue igual a /entrar con el aviso", async () => {
+    vi.stubGlobal("fetch", backend("sin_sesion"));
+    simularNavegador(AGENTE_ANDROID);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    montar();
+    ofrecerInstalacion("accepted");
+    await tocarInstalar();
+    expect(screen.getByText("Instalando…")).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(ESPERA_INSTALACION_MS - 1));
+    // Control: antes del plazo sigue esperando.
+    expect(screen.getByRole("heading", INSTALAR)).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.getByText(/Ya está instalada/)).toBeTruthy();
   });
 
   it("si la persona cancela, lo dice y sigue en /instalar", async () => {
@@ -269,29 +300,55 @@ describe("página /instalar", () => {
   });
 });
 
-describe("enlace en el inicio", () => {
-  it("lleva a /instalar y se oculta si la aplicación ya está instalada", async () => {
+describe("enlace en el inicio (INI-10)", () => {
+  it("en un iPhone lleva a /instalar y se oculta si la aplicación ya está instalada", async () => {
     vi.stubGlobal("fetch", backend("con_sesion"));
-    simularNavegador(AGENTE_ANDROID);
+    simularNavegador(AGENTE_IPHONE);
     montar("/");
     const enlace = await screen.findByRole("link", ENLACE_INSTALAR);
     expect(enlace.getAttribute("href")).toBe("/instalar");
     cleanup();
 
-    simularNavegador(AGENTE_ANDROID, true);
+    simularNavegador(AGENTE_IPHONE, true);
     montar("/");
     await screen.findByRole("heading", INICIO);
     expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
   });
 
+  it("en un teléfono cuyo navegador no la puede instalar con un botón no aparece; con la oferta, sí", async () => {
+    vi.stubGlobal("fetch", backend("con_sesion"));
+    simularNavegador(AGENTE_ANDROID);
+    montar("/");
+    await screen.findByRole("heading", INICIO);
+    expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
+
+    ofrecerInstalacion();
+    expect(screen.getByRole("link", ENLACE_INSTALAR).getAttribute("href")).toBe("/instalar");
+  });
+
+  it("«Ahora no» lo saca en este dispositivo, también en la próxima visita", async () => {
+    vi.stubGlobal("fetch", backend("con_sesion"));
+    simularNavegador(AGENTE_IPHONE);
+    montar("/");
+    await screen.findByRole("link", ENLACE_INSTALAR);
+    fireEvent.click(screen.getByRole("button", { name: "Ahora no" }));
+    expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend("sin_sesion"));
+    montar("/entrar");
+    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
+  });
+
   it("también está en /entrar, y ahí se oculta igual si la aplicación ya está instalada", async () => {
     vi.stubGlobal("fetch", backend("sin_sesion"));
-    simularNavegador(AGENTE_ANDROID);
+    simularNavegador(AGENTE_IPHONE);
     montar("/entrar");
     expect(screen.getByRole("link", ENLACE_INSTALAR).getAttribute("href")).toBe("/instalar");
     cleanup();
 
-    simularNavegador(AGENTE_ANDROID, true);
+    simularNavegador(AGENTE_IPHONE, true);
     montar("/entrar");
     expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
     expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();

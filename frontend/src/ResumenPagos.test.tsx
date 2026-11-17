@@ -112,6 +112,11 @@ function abrir(entrada: string | { pathname: string; state: unknown } = "/") {
 
 const tarjeta = () => screen.findByRole("region", { name: "Pagos" });
 const selector = () => screen.findByRole("combobox", { name: "Edificio" });
+/** Ya llegó la bandeja de ese edificio y se dibujó lo que dependía de ella. */
+async function bandejaLeida(simulado: ReturnType<typeof backend>, consorcio: string) {
+  await waitFor(() => expect(pedidosA(simulado, bandejaDe(consorcio))).toBeGreaterThan(0));
+  await new Promise((r) => setTimeout(r));
+}
 const filaDePagos = () => screen.findByRole("link", { name: "Pagos", description: /./ });
 
 beforeEach(() => {
@@ -184,15 +189,18 @@ describe("Pagos en el inicio de quien revisa", () => {
     expect((await within(await tarjeta()).findByText("cosa para hacer", { exact: false })).textContent).toBe("1 cosa para hacer");
   });
 
-  it("AC-01: sin nada para hacer no hay tarjeta ni «Ver los pagos»: Pagos queda como una fila más", async () => {
-    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos("esperando") } }));
+  it("INI-03: sin nada para hacer no hay tarjeta, ni fila de Pagos, ni «Para hacer»", async () => {
+    const simulado = backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos("esperando") } });
+    vi.stubGlobal("fetch", simulado);
     abrir();
 
-    const fila = await filaDePagos();
-    expect(fila.getAttribute("href")).toBe("/pagos");
-    expect(within(fila).getByText("Nada pendiente.")).toBeTruthy();
+    await bandejaLeida(simulado, C1);
     expect(screen.queryByRole("link", { name: "Ver los pagos" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Pagos" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+    expect(screen.queryByText("Nada pendiente.")).toBeNull();
+    // Control: la pestaña «Pagos» del menú sigue llevando a la bandeja.
+    expect(within(screen.getByRole("navigation")).getByRole("link", { name: "Pagos" }).getAttribute("href")).toBe("/pagos");
   });
 
   it("si no se pudo leer lo dice y deja reintentar, sin inventar un cero", async () => {
@@ -251,10 +259,13 @@ describe("Pagos en el inicio de quien prepara", () => {
 
 describe("inicio sin textos fijos (tanda 1, 12-11-2026)", () => {
   it("AC-04: quien prepara, sin pendientes, no tiene el aviso fijo de que la aplicación no mueve dinero", async () => {
-    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: conElementos() } }));
+    const simulado = backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: conElementos() } });
+    vi.stubGlobal("fetch", simulado);
     const { container } = abrir();
 
-    expect(await within(await filaDePagos()).findByText("Nada pendiente.")).toBeTruthy();
+    await bandejaLeida(simulado, C1);
+    // INI-03: sin pendientes, tampoco la fila de Pagos.
+    expect(screen.queryByRole("link", { name: "Pagos", description: /./ })).toBeNull();
     expect(screen.queryByText(/no mueve dinero/)).toBeNull();
     expect(container.querySelector(".aviso-info")).toBeNull();
   });
@@ -266,7 +277,7 @@ describe("inicio sin textos fijos (tanda 1, 12-11-2026)", () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: acciones }, bandejas: { [C1]: conElementos("para_aprobar") } }));
     abrir();
 
-    await screen.findByRole("link", { name: "Contactos de emergencia" });
+    await screen.findByRole("link", { name: /Contactos de emergencia/ });
     expect(screen.queryByText(/Estamos construyendo/)).toBeNull();
   });
 });
@@ -277,7 +288,7 @@ describe("quien no ve Pagos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
 
-    await screen.findByRole("link", { name: "Contactos de emergencia" });
+    await screen.findByRole("link", { name: /Contactos de emergencia/ });
     expect(screen.queryByRole("combobox", { name: "Edificio" })).toBeNull();
     expect(pedidosA(simulado, bandejaDe(C1))).toBe(0);
     expect(pedidosA(simulado, bandejaDe(C2))).toBe(0);
@@ -297,6 +308,8 @@ describe("selector de edificio del inicio", () => {
     abrir();
 
     const opciones = within(await selector()).getAllByRole("option");
+    // INI-07: el selector va junto a Pagos, que es lo único que cambia.
+    expect(screen.getByRole("region", { name: "Para hacer" }).contains(await selector())).toBe(true);
     expect(opciones.map((o) => o.textContent)).toEqual(["Edificio Azul", "Edificio Verde"]);
   });
 
@@ -335,6 +348,24 @@ describe("selector de edificio del inicio", () => {
 
     expect(within(await tarjeta()).getByText("Edificio Azul")).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Edificio" })).toBeNull();
+  });
+
+  it("con dos edificios, Pagos queda con el selector aunque el elegido no tenga nada: es la forma de ver el otro", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        consorcios: [AZUL, VERDE],
+        acciones: { [C1]: ADMINISTRA, [C2]: ADMINISTRA },
+        bandejas: { [C1]: conElementos(), [C2]: conElementos("para_pagar") },
+      }),
+    );
+    abrir();
+
+    expect(await within(await filaDePagos()).findByText("Nada pendiente.")).toBeTruthy();
+    fireEvent.change(await selector(), { target: { value: C2 } });
+    expect(await screen.findByText("1 cosa para hacer")).toBeTruthy();
+    // La fila abre Pagos en ese edificio.
+    expect((await filaDePagos()).getAttribute("href")).toBe("/pagos");
   });
 });
 
@@ -455,7 +486,7 @@ describe("D-39: en la PC, el inicio de administración muestra solo lo que hay p
       expect(within(principal).queryByRole("link", { name: nombre })).toBeNull();
   });
 
-  it("control: en tablet y teléfono, los grupos de siempre", async () => {
+  it("control: en tablet y teléfono, «Para hacer» y las pantallas de Gestión, sin repetir las pestañas", async () => {
     conAncho(false);
     vi.stubGlobal(
       "fetch",
@@ -464,15 +495,20 @@ describe("D-39: en la PC, el inicio de administración muestra solo lo que hay p
     abrir();
     expect(await screen.findByRole("link", { name: "Mandatos y decisiones" })).toBeTruthy();
     await screen.findByRole("link", { name: "Pagos para aclarar (de quien dejó de administrar)" });
-    expect(titulosDeGrupo()).toEqual(["Personas y mandatos", "Edificio", "Dinero"]);
-    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+    expect(titulosDeGrupo()).toEqual(["Para hacer", "Gestión"]);
+    // Documentos, Contactos y Pagos tienen pestaña: no se repiten (INI-02).
+    const gestion = within(screen.getByRole("region", { name: "Gestión" }));
+    for (const nombre of [/Documentos/, /Contactos/, /^Pagos$/]) expect(gestion.queryByRole("link", { name: nombre })).toBeNull();
   });
 
-  it("control: en la PC, quien no prepara órdenes (Consejo) conserva su inicio", async () => {
+  it("decisión 5: en la PC, también quien no prepara órdenes (Consejo) ve solo lo pendiente", async () => {
     conAncho(true);
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: [...CONSEJO, "mandatos.ver"] }, bandejas: { [C1]: conElementos("para_aprobar") } }));
     abrir();
-    expect(await screen.findByRole("link", { name: "Mandatos y decisiones" })).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+    const grupo = within(await screen.findByRole("region", { name: "Para hacer" }));
+    expect(await grupo.findByRole("region", { name: "Pagos" })).toBeTruthy();
+    expect(within(screen.getByRole("main")).queryByRole("link", { name: "Mandatos y decisiones" })).toBeNull();
+    // Control: la barra lateral sí la tiene.
+    expect(within(screen.getByRole("navigation")).getByRole("link", { name: "Mandatos y decisiones" })).toBeTruthy();
   });
 });

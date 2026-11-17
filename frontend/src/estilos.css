@@ -2101,3 +2101,31 @@ a.fila-registro:hover {
 .resumen-inicio__enlace .resumen-inicio__edificio {
   display: block;
 }
+
+
+/* Fricción 17-11, tanda 9 */
+/* Lo plegado (otras formas de entrar en la hoja, «Acerca de la aplicación»): el resumen se toca. */
+.otras-formas,
+.pie-version {
+  margin-top: var(--space-4);
+}
+
+.otras-formas summary,
+.pie-version summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+/* Cuenta: una fila por sesión, el dispositivo y el último uso a la izquierda y «Cerrar» a la derecha
+   (CTA-03); en un teléfono angosto el botón baja. */
+.sesiones.compactas li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}

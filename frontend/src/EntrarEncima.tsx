@@ -9,7 +9,8 @@ import { Hoja } from "./Hoja";
 import { salirDeLaCuenta } from "./sesion";
 import { comprobarSesion, faltaConocerSesion, olvidarRecuperada, olvidarSesion, salidas, useEstadoEncima } from "./sesionEncima";
 
-// La hoja de entrar encima (`sesionEncima.ts`) y el aviso de que se sigue donde se estaba. En /entrar
+// La hoja de entrar encima (`sesionEncima.ts`) y el aviso de que se sigue donde se estaba. En la hoja,
+// el correo de la sesión va como texto y las otras formas plegadas (informe de fricción, ACC-05). En /entrar
 // no hace falta: la persona ya está entrando, y al terminar se suelta lo que esperaba.
 
 /** Inicio y entrar ya preguntan por la sesión; las otras se usan sin ella: no hay nada que conservar. */
@@ -62,7 +63,7 @@ function HojaEntrar({ correo }: { correo: string }) {
   return (
     <Hoja titulo="La sesión venció" encima>
       <p>Hay que entrar de nuevo para seguir. Lo escrito queda acá.</p>
-      <FormasDeEntrar correo={escrito ?? correo} alCambiarCorreo={setEscrito} alEntrar={seguir} />
+      <FormasDeEntrar correo={escrito ?? correo} alCambiarCorreo={setEscrito} alEntrar={seguir} enHoja />
       {falla !== null && (
         <>
           <p className="aviso-error" role="alert">

@@ -28,6 +28,10 @@ import {
 // Informe de fricción (tanda 7): quitar una llave pide confirmarlo en una hoja (AC-14). Si en la
 // lista ya hay una llave con el nombre de este equipo, no se invita a agregarlo otra vez: puede ser
 // otro navegador del mismo equipo, que la usa igual (AC-12).
+//
+// Tanda 9: qué es la llave se explica solo mientras la cuenta no tiene ninguna (CTA-11), y que ya
+// funciona en este dispositivo se dice una sola vez, acá (CTA-10). El botón «Agregar este
+// dispositivo» no lleva una frase que lo repita.
 
 type Llave = components["schemas"]["LlaveResumen"];
 
@@ -141,14 +145,15 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Pro
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
       <h2 id={`${id}-titulo`}>Llave de acceso</h2>
-      <p>
-        Se confirma con el PIN, la huella o la cara de este dispositivo, sin escribir códigos y sin
-        instalar nada.
-      </p>
+      {llaves !== null && llaves.length === 0 && (
+        <p>
+          Se confirma con el PIN, la huella o la cara de este dispositivo, sin escribir códigos y sin
+          instalar nada.
+        </p>
+      )}
       {enEste && (
         <p className="aviso-ok">
-          La llave ya funciona en este dispositivo. No hace falta nada más: cuando una acción lo
-          pida, se confirma ahí mismo.
+          La llave ya funciona en este dispositivo: cuando una acción lo pida, se confirma ahí mismo.
         </p>
       )}
       {listo !== null && <p className="aviso-ok">{listo}</p>}
@@ -187,9 +192,6 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Pro
       )}
       {conSuNombre && (
         <p>Si este equipo es «{nombreDeEste}», no hace falta hacer nada: la llave se confirma al usarla.</p>
-      )}
-      {llaves !== null && llaves.length > 0 && !enEste && !conSuNombre && (
-        <p>Si este dispositivo no está en la lista, agregarlo.</p>
       )}
       {llaves !== null && !enEste && (
         <button type="button" className={conSuNombre ? "secundario" : undefined} onClick={activar} disabled={enviando}>

@@ -66,7 +66,7 @@ function seccion() {
 
 function pedir(correo: string) {
   fireEvent.change(seccion().getByLabelText("Correo"), { target: { value: correo } });
-  const formulario = seccion().getByRole("button", { name: "Enviar el código" }).closest("form");
+  const formulario = seccion().getByRole("button", { name: "Enviar" }).closest("form");
   if (formulario === null) throw new Error("el botón no está en un formulario");
   fireEvent.submit(formulario);
 }
@@ -119,11 +119,12 @@ describe("pedir el enlace para entrar", () => {
     expect(window.location.href).not.toContain(CORREO);
   });
 
-  it("explica que el código sirve en cualquier dispositivo y el enlace solo en este navegador", () => {
+  it("ACC-04: sin párrafo de explicación: el correo y el botón «Enviar»", () => {
     vi.stubGlobal("fetch", backend());
     abrir();
-    expect(seccion().getByText(/código de 6 números para entrar desde cualquier dispositivo/)).toBeTruthy();
-    expect(seccion().getByText(/un enlace, que sirve solo en este dispositivo y en este navegador/)).toBeTruthy();
+    expect(seccion().queryByText(/para entrar desde cualquier dispositivo/)).toBeNull();
+    expect(seccion().getByRole("button", { name: "Enviar" })).toBeTruthy();
+    expect(seccion().queryByText(/un enlace, que sirve solo en este dispositivo y en este navegador/)).toBeNull();
   });
 
   it.each([
@@ -169,7 +170,7 @@ describe("pedir el enlace para entrar", () => {
     vi.stubGlobal("fetch", backend(aceptado, () => Response.json({})));
     abrir(`/entrar#token=${TOKEN}`);
     expect(screen.queryByRole("heading", { name: "Pedir un código para entrar" })).toBeNull();
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Pedir un código para entrar" })).toBeNull();
     cleanup();

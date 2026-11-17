@@ -12,8 +12,11 @@ import { useIrTrasEntrar } from "./sesion";
 // deja la cookie del desafío (5 minutos, cinco intentos) y responde `falta_segundo_factor`; acá
 // se pide el código de la aplicación o uno de recuperación y se completa con `/segundo-factor`
 // desde el mismo navegador. Sin cuenta, sin contraseña o con una incorrecta, el backend responde
-// lo mismo (401 `credenciales_invalidas`) y la página también. Diseño provisorio: el definitivo
-// llega con G3.
+// lo mismo (401 `credenciales_invalidas`) y la página también.
+//
+// Informe de fricción: sin el párrafo que repite el título y con el botón corto (ACC-04); el paso
+// del código queda en su etiqueta y la hora límite. El código espera el botón, como en
+// EntrarConCodigo (WCAG 3.2.2).
 
 const ESTADO_INVALIDO = 400;
 const ESTADO_RECHAZADO = 401;
@@ -44,10 +47,14 @@ interface Props {
   correo: string;
   alCambiarCorreo: (correo: string) => void;
   /** Sin esto, terminar sigue al inicio. */
-  alEntrar?: (aviso: string) => void;
+  alEntrar?: () => void;
+  /** El correo de la sesión vencida: va como texto, sin campo. */
+  correoFijo?: boolean;
+  /** Dentro de una hoja: sin tarjeta. */
+  enHoja?: boolean;
 }
 
-export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props) {
+export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar, correoFijo = false, enHoja = false }: Props) {
   const id = useId();
   const [contrasena, setContrasena] = useState("");
   const [codigo, setCodigo] = useState("");
@@ -89,7 +96,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
         setEstado("listo");
         if (data.estado === "sesion_abierta") {
           recordarFormaDeEntrar("contrasena");
-          terminarEntrada("Listo: sesión abierta.");
+          terminarEntrada();
         } else {
           setCodigo("");
           setPaso({ tipo: "codigo", venceEn: data.vence_en });
@@ -113,6 +120,10 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
       setEstado("formato_codigo");
       return;
     }
+    completarCon(limpio);
+  }
+
+  function completarCon(limpio: string) {
     setEstado("enviando");
     void api
       .POST("/api/v1/auth/contrasena/segundo-factor", { body: { codigo: limpio } })
@@ -121,7 +132,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
           setCodigo("");
           setEstado("listo");
           recordarFormaDeEntrar("contrasena");
-          terminarEntrada("Listo: sesión abierta.");
+          terminarEntrada();
         } else if (response.status === ESTADO_RECHAZADO) volverALaContrasena("vencida");
         else if (response.status === ESTADO_INVALIDO) setEstado("codigo_invalido");
         else setEstado(fallo(response.status, error));
@@ -132,21 +143,32 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
   const titulo = <h2 id={`${id}-titulo`}>Entrar con contraseña</h2>;
 
   return (
-    <section aria-labelledby={`${id}-titulo`} className="tarjeta">
+    <section aria-labelledby={`${id}-titulo`} className={enHoja ? undefined : "tarjeta"}>
       {titulo}
       {paso.tipo === "contrasena" ? (
         <>
-          <p>Con una contraseña definida en Cuenta, se entra con el correo y esa contraseña.</p>
           <form className="formulario" onSubmit={entrar}>
-            <label htmlFor={`${id}-correo`}>Correo</label>
-            <input
-              id={`${id}-correo`}
-              type="email"
-              autoComplete="username"
-              required
-              value={correo}
-              onChange={(e) => alCambiarCorreo(e.target.value)}
-            />
+            {correoFijo ? (
+              <>
+                {/* Para que el gestor de contraseñas sepa de qué cuenta es: no se ve ni se edita. */}
+                <input type="email" name="username" autoComplete="username" value={correo} readOnly hidden />
+                <p>
+                  Correo: <strong>{correo}</strong>
+                </p>
+              </>
+            ) : (
+              <>
+                <label htmlFor={`${id}-correo`}>Correo</label>
+                <input
+                  id={`${id}-correo`}
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={correo}
+                  onChange={(e) => alCambiarCorreo(e.target.value)}
+                />
+              </>
+            )}
             <label htmlFor={`${id}-contrasena`}>Contraseña</label>
             <CampoContrasena
               id={`${id}-contrasena`}
@@ -157,17 +179,13 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
               onChange={(e) => setContrasena(e.target.value)}
             />
             <button type="submit" disabled={estado === "enviando"}>
-              Entrar con la contraseña
+              Entrar
             </button>
           </form>
         </>
       ) : (
         <>
-          <p>
-            La contraseña es correcta. Como la confirmación con código está activada, falta el código
-            de seis números de la aplicación de autenticación, o uno de los códigos de recuperación.
-            Hay tiempo hasta las {FORMATO_HORA.format(new Date(paso.venceEn))}.
-          </p>
+          <p>Hay tiempo hasta las {FORMATO_HORA.format(new Date(paso.venceEn))}.</p>
           <form className="formulario" onSubmit={completar} noValidate>
             <label htmlFor={`${id}-codigo`}>Código de la aplicación o de recuperación</label>
             <input

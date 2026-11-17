@@ -57,7 +57,9 @@ test.describe("modo lectura ampliada", () => {
     test(`esquema ${esquema}: apagado AA; prendido AAA, 125 % de letra y botones grandes`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: esquema });
       await page.goto("/");
-      await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+      // Con el servicio funcionando no hay punto de estado (INI-09): se espera el menú.
+      await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+      await expect(page.getByRole("img", { name: "El servicio no funciona" })).toHaveCount(0);
       await expect(boton(page)).toHaveAttribute("aria-pressed", "false");
       await sinFaltasDeAccesibilidad(page);
       const antes = await tamanios(page);

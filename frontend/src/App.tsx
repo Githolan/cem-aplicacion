@@ -9,7 +9,7 @@ import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
 import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { api } from "./api/cliente";
-import { cumpleEnAlguno, Exige, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
+import { cumpleEnAlguno, Exige, ofreceEnAlguno, REQUISITOS, useConsultaDeAcciones } from "./permisos";
 import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EntrarEncima } from "./EntrarEncima";
@@ -17,12 +17,8 @@ import { PuntoServicio, useFallaDelServicio } from "./EstadoServicio";
 import { ElegirConsorcio } from "./egresos/ElegirConsorcio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
-import {
-  AutorizacionesProveedores,
-  RUTA_AUTORIZACIONES_PROVEEDORES,
-  TITULO_AUTORIZACIONES_PROVEEDORES,
-} from "./egresos/AutorizacionesProveedores";
-import { ConsultaProveedores, RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./egresos/ConsultaProveedores";
+import { AutorizacionesProveedores, RUTA_AUTORIZACIONES_PROVEEDORES } from "./egresos/AutorizacionesProveedores";
+import { ConsultaProveedores, RUTA_CONSULTA_PROVEEDORES } from "./egresos/ConsultaProveedores";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
 import { Icono, type NombreIcono } from "./Iconos";
 import { EnlaceInstalar, Instalar } from "./Instalar";
@@ -32,7 +28,7 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
-import { Navegacion, PersonaEnCabecera, useNavegacion } from "./Navegacion";
+import { DE_ADMINISTRACION, Navegacion, PersonaEnCabecera, useNavegacion } from "./Navegacion";
 import { CircuitoPagos } from "./pagos/CircuitoPagos";
 import { ConsultaPagos } from "./pagos/ConsultaPagos";
 import { Cotejo } from "./pagos/Cotejo";
@@ -40,8 +36,8 @@ import { PrepararOrden } from "./pagos/PrepararOrden";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS, RUTA_SIN_EXPLICAR } from "./pagos/rutas";
 import { SinExplicar } from "./pagos/SinExplicar";
 import { Padron, RUTA_PADRON } from "./Padron";
-import { Panel, RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
-import { RUTA_SOLICITUDES, Solicitudes, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
+import { Panel, RUTA_PANEL } from "./panel/Panel";
+import { RUTA_SOLICITUDES, Solicitudes } from "./fiscalizacion/Solicitudes";
 import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { CONSULTA_AL_LADO, useAncho } from "./pagos/useAncho";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
@@ -51,129 +47,27 @@ import { DETALLE_VINCULOS_SIN_LECTURA, textoVinculosPorConfirmar, useVinculosPor
 interface EnlaceDeInicio {
   ruta: string;
   texto: string;
+  /** Solo lo pendiente («3 vínculos esperan confirmación»): nada fijo (INI-05, C8G-16). */
   detalle?: string;
   icono: NombreIcono;
-  requisito: Requisito;
-  /** No se ofrece a quien ya cumple esto (tiene otra pantalla que lo cubre). */
-  salvo?: Requisito;
+  /** El edificio con el que se abre la pantalla (`state.consorcio`). */
+  consorcio?: string;
 }
 
-interface GrupoDeInicio {
-  titulo: string;
-  enlaces: readonly EnlaceDeInicio[];
-  /** Lleva «Pagos para aclarar» cuando quedó algo de quien dejó de administrar. */
-  conPorAclarar?: boolean;
-}
-
-const GRUPOS_DE_INICIO: readonly GrupoDeInicio[] = [
-  {
-    titulo: "Personas y mandatos",
-    enlaces: [
-      {
-        ruta: RUTA_INVITACIONES,
-        texto: "Invitar a una persona",
-        detalle: "Invitación de un solo uso a una unidad",
-        icono: "invitar",
-        requisito: REQUISITOS.invitaciones,
-      },
-      {
-        ruta: RUTA_MANDATOS,
-        texto: "Mandatos y decisiones",
-        detalle: "Quién administra y qué se decidió",
-        icono: "balanza",
-        requisito: REQUISITOS.mandatos,
-      },
-      {
-        ruta: RUTA_PADRON,
-        texto: "Padrón del edificio",
-        detalle: "Confirmar o finalizar vínculos",
-        icono: "personas",
-        requisito: REQUISITOS.padron,
-      },
-      {
-        ruta: RUTA_AUTORIZACIONES_PROVEEDORES,
-        texto: TITULO_AUTORIZACIONES_PROVEEDORES,
-        detalle: "Autorizar a un habitante a ver los proveedores y sus seguros",
-        icono: "proveedor",
-        requisito: REQUISITOS.autorizarProveedores,
-      },
-    ],
-  },
-  {
-    titulo: "Edificio",
-    enlaces: [
-      {
-        ruta: RUTA_CONTACTOS,
-        texto: "Contactos de emergencia",
-        detalle: "Lista de emergencia del edificio",
-        icono: "telefono",
-        requisito: REQUISITOS.contactos,
-      },
-      {
-        ruta: RUTA_DOCUMENTOS,
-        texto: "Documentos del edificio",
-        detalle: "Cargar y consultar documentos",
-        icono: "carpeta",
-        requisito: REQUISITOS.documentos,
-      },
-      {
-        ruta: RUTA_CONSULTA_PROVEEDORES,
-        texto: TITULO_CONSULTA_PROVEEDORES,
-        detalle: "Seguros, habilitaciones y lo que exige la ley",
-        icono: "proveedor",
-        requisito: REQUISITOS.consultaProveedores,
-        salvo: REQUISITOS.proveedores,
-      },
-    ],
-  },
-  {
-    titulo: "Dinero",
-    conPorAclarar: true,
-    enlaces: [
-      { ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera", requisito: REQUISITOS.pagos },
-      {
-        ruta: RUTA_LIQUIDACION,
-        texto: "Liquidación (borrador)",
-        detalle: "Simular el reparto por período",
-        icono: "calculadora",
-        requisito: REQUISITOS.liquidacion,
-      },
-      {
-        ruta: RUTA_PANEL,
-        texto: TITULO_PANEL,
-        detalle: "Órdenes por estado, lo pagado y las facturas que faltan",
-        icono: "grafico",
-        requisito: REQUISITOS.panel,
-      },
-      {
-        ruta: RUTA_SOLICITUDES,
-        texto: TITULO_SOLICITUDES,
-        detalle: "Pedir documentación a la administración, con plazo",
-        icono: "documento",
-        requisito: REQUISITOS.panel,
-      },
-    ],
-  },
-];
-
-const ENLACES_DE_INICIO = GRUPOS_DE_INICIO.flatMap((g) => g.enlaces);
-
-/** Desde 1025 px la barra lateral ya lista los destinos (D-39, decisión 3 del propietario del
- * 14-11-2026): el inicio de quien prepara órdenes muestra solo lo pendiente. En teléfono y tablet,
- * los grupos de siempre. */
-const PARA_HACER: GrupoDeInicio = {
-  titulo: "Para hacer",
-  conPorAclarar: true,
-  enlaces: ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_PAGOS),
-};
+// El inicio muestra solo lo pendiente, para todos los roles (decisión 5 del informe de fricción del
+// 17-11-2026, que extiende D-39): Pagos con lo que hay para hacer, los vínculos que esperan
+// confirmación y los pagos para aclarar. Lo que ya está en el menú no se repite (INI-01, INI-02). En
+// el teléfono y la tablet las pantallas de Gestión no tienen pestaña: el inicio las lista, sin
+// descripción fija (INI-05, C8G-16).
 
 // El nombre del enlace es solo su título: el detalle lo acompaña como descripción.
-function FilaDeInicio({ enlace }: { enlace: Pick<EnlaceDeInicio, "ruta" | "texto" | "detalle" | "icono"> }) {
+function FilaDeInicio({ enlace }: { enlace: EnlaceDeInicio }) {
   const id = useId();
   return (
     <li>
       <Link
         to={enlace.ruta}
+        state={enlace.consorcio === undefined ? undefined : { consorcio: enlace.consorcio }}
         className="fila-inicio"
         aria-labelledby={`${id}-titulo`}
         aria-describedby={enlace.detalle === undefined ? undefined : `${id}-detalle`}
@@ -229,29 +123,65 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
   const pagos = useResumenPagos(porEdificio);
   const vinculos = useVinculosPorConfirmar(porEdificio);
   const servicio = useFallaDelServicio(sesion === "con_sesion");
-  const alLado = useAncho(CONSULTA_AL_LADO);
+  // Desde 1025 px la barra lateral ya lista las pantallas: el inicio no las repite.
+  const conBarra = useAncho(CONSULTA_AL_LADO);
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
   if (sesion === "consultando") return <p role="status">Cargando…</p>;
-  // Sin saber qué puede la persona, solo lo que le sirve igual: los contactos guardados.
-  const enlaces =
-    porEdificio === null
-      ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
-      : ENLACES_DE_INICIO.filter((e) => ofreceEnAlguno(porEdificio, e.requisito, e.salvo));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
-  // En el «Para hacer» de la computadora, el Padrón entra si hay vínculos esperando (G-26) o si no
-  // se pudo saber: un número desconocido no es «nada pendiente» (Codex en #245).
-  const paraHacer: GrupoDeInicio =
-    vinculos.falla !== null || (vinculos.cantidad !== null && vinculos.cantidad > 0)
-      ? { ...PARA_HACER, enlaces: [...PARA_HACER.enlaces, ...ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_PADRON)] }
-      : PARA_HACER;
-  const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [paraHacer] : GRUPOS_DE_INICIO;
-  const detalleDe = (e: EnlaceDeInicio): EnlaceDeInicio => {
-    if (e.ruta === RUTA_PAGOS) return { ...e, detalle: pagos.detalle };
-    if (e.ruta !== RUTA_PADRON) return e;
-    if (vinculos.falla !== null) return { ...e, detalle: DETALLE_VINCULOS_SIN_LECTURA };
-    if (vinculos.cantidad !== null && vinculos.cantidad > 0) return { ...e, detalle: textoVinculosPorConfirmar(vinculos.cantidad) };
-    return e;
-  };
+
+  // Pagos: la tarjeta de quien revisa (con algo para hacer, o mientras se sabe), o la fila de quien
+  // prepara cuando hay algo. Con más de un edificio, el selector va junto a Pagos, que es lo único
+  // que cambia (INI-07), y Pagos queda aunque ese edificio no tenga nada: es la forma de ver otro.
+  const varios = pagos.edificios.length > 1;
+  const tarjetaPagos = pagos.enTarjeta && edificio !== undefined;
+  const filaPagos =
+    !pagos.enTarjeta && edificio !== undefined && (pagos.falla !== null || (pagos.cantidad ?? 0) > 0 || varios);
+  // El Padrón entra si hay vínculos esperando (G-26) o si no se pudo saber: un número desconocido no
+  // es «nada pendiente» (Codex en #245).
+  const padron =
+    porEdificio !== null &&
+    ofreceEnAlguno(porEdificio, REQUISITOS.padron) &&
+    (vinculos.falla !== null || (vinculos.cantidad ?? 0) > 0);
+  const pendientes: EnlaceDeInicio[] = [
+    ...(filaPagos
+      ? [{ ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera" as const, detalle: pagos.detalle, consorcio: pagos.consorcio }]
+      : []),
+    ...(padron
+      ? [
+          {
+            ruta: RUTA_PADRON,
+            texto: "Padrón del edificio",
+            icono: "personas" as const,
+            detalle: vinculos.falla !== null ? DETALLE_VINCULOS_SIN_LECTURA : textoVinculosPorConfirmar(vinculos.cantidad ?? 0),
+          },
+        ]
+      : []),
+    ...(porAclarar.data === true
+      ? [{ ruta: RUTA_POR_ACLARAR, texto: "Pagos para aclarar (de quien dejó de administrar)", icono: "billetera" as const }]
+      : []),
+  ];
+  const hayParaHacer = tarjetaPagos || pendientes.length > 0;
+
+  // En el teléfono y la tablet, las pantallas de Gestión (sin pestaña) que no estén ya en «Para
+  // hacer». Sin saber qué alcanza la persona el menú queda corto: los contactos guardados le sirven.
+  const gestion: EnlaceDeInicio[] =
+    porEdificio === null
+      ? falla === null
+        ? []
+        : [{ ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", icono: "telefono" }]
+      : conBarra
+        ? []
+        : DE_ADMINISTRACION.flatMap((d) => {
+            // Una entrada con `opciones` (Proveedores, MEN-05) lleva a la primera pantalla que la persona alcanza.
+            const ruta =
+              d.opciones !== undefined
+                ? d.opciones.find((o) => cumpleEnAlguno(porEdificio, o.requisito))?.ruta
+                : d.requisito !== undefined && ofreceEnAlguno(porEdificio, d.requisito, d.salvo)
+                  ? d.ruta
+                  : undefined;
+            return ruta === undefined || pendientes.some((p) => p.ruta === ruta) ? [] : [{ ruta, texto: d.texto, icono: d.icono }];
+          });
+
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y la
   // tarjeta de Pagos. Vuelve a pedir solo lo que falló.
   const fallaDePagos = pagos.enTarjeta && pagos.falla !== null;
@@ -271,19 +201,13 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
   return (
     <>
       {barra !== null && createPortal(<PuntoServicio />, barra)}
-      <h1>Consorcio en mano</h1>
+      {/* La marca ya está en la cabecera o en la barra lateral (INI-04). */}
+      <h1 className="solo-lector">Consorcio en mano</h1>
       {porEdificio?.size === 0 && (
-        <section className="resumen-inicio" aria-label="Edificio">
-          <div className="resumen-inicio__arriba">
-            <span>Edificio</span>
-            <span className="resumen-inicio__estado resumen-inicio__estado--neutro">Sin edificio</span>
-          </div>
-          <p>
-            Esta cuenta todavía no participa de ningún edificio.
-            {invitaciones.data?.length === 0 &&
-              " Para sumarse hay que abrir el enlace de la invitación que llegó por correo."}
-          </p>
-        </section>
+        <p className="tarjeta">
+          Esta cuenta todavía no participa de ningún edificio.
+          {invitaciones.data?.length === 0 && " Para sumarse hay que abrir el enlace de la invitación que llegó por correo."}
+        </p>
       )}
       {!enLaTarjeta && (
         <div className="tarjeta">
@@ -306,45 +230,45 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
-      <ElegirConsorcio
-        pantalla={{ tipo: "lista", consorcios: pagos.edificios }}
-        consorcio={pagos.consorcio}
-        elegir={pagos.setConsorcio}
-        deshabilitado={false}
-      />
-      {pagos.enTarjeta && edificio !== undefined && (
-        <TarjetaPagos
-          cantidad={pagos.cantidad}
-          falla={pagos.falla}
-          reintentar={fallaDePagos && enLaTarjeta ? botonReintentar : null}
-          edificio={pagos.conSelector ? null : edificio.nombre}
-        />
-      )}
       <div className="grupos-inicio">
-        {grupos.map((g) => {
-          const propios = g.enlaces.filter((e) => enlaces.includes(e) && !(pagos.enTarjeta && e.ruta === RUTA_PAGOS));
-          const aclarar = g.conPorAclarar === true && porAclarar.data === true;
-          if (propios.length === 0 && !aclarar) return null;
-          return (
-            <section key={g.titulo} aria-label={g.titulo}>
-              <h2 className="titulo-seccion">{g.titulo}</h2>
+        {hayParaHacer && (
+          <section aria-label="Para hacer">
+            <h2 className="titulo-seccion">Para hacer</h2>
+            {(tarjetaPagos || filaPagos) && (
+              <ElegirConsorcio
+                pantalla={{ tipo: "lista", consorcios: pagos.edificios }}
+                consorcio={pagos.consorcio}
+                elegir={pagos.setConsorcio}
+                deshabilitado={false}
+              />
+            )}
+            {tarjetaPagos && (
+              <TarjetaPagos
+                cantidad={pagos.cantidad}
+                falla={pagos.falla}
+                reintentar={fallaDePagos && enLaTarjeta ? botonReintentar : null}
+                edificio={pagos.conSelector ? null : edificio.nombre}
+              />
+            )}
+            {pendientes.length > 0 && (
               <ul className="filas-inicio">
-                {propios.map((e) => (
-                  <FilaDeInicio key={e.ruta} enlace={detalleDe(e)} />
+                {pendientes.map((e) => (
+                  <FilaDeInicio key={e.ruta} enlace={e} />
                 ))}
-                {aclarar && (
-                  <FilaDeInicio
-                    enlace={{
-                      ruta: RUTA_POR_ACLARAR,
-                      texto: "Pagos para aclarar (de quien dejó de administrar)",
-                      icono: "billetera",
-                    }}
-                  />
-                )}
               </ul>
-            </section>
-          );
-        })}
+            )}
+          </section>
+        )}
+        {gestion.length > 0 && (
+          <section aria-label="Gestión">
+            {porEdificio !== null && <h2 className="titulo-seccion">Gestión</h2>}
+            <ul className="filas-inicio">
+              {gestion.map((e) => (
+                <FilaDeInicio key={e.ruta} enlace={e} />
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
       <EnlaceInstalar />
     </>
@@ -354,7 +278,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
 // Una ruta que esta versión no conoce puede ser de una versión más nueva (un enlace del correo,
 // abierto con la aplicación vieja en caché). Si hay una versión nueva esperando, se aplica sola en
 // la misma URL completa, en vez de dejar a la persona en "No encontramos". En las rutas conocidas
-// la versión nueva sigue esperando el botón del aviso (documento 13, §14.4).
+// la versión nueva espera el botón del aviso o el próximo cambio de pantalla (MEN-07).
 function NoEncontrada() {
   const { hayVersionNueva, actualizar } = useVersion();
   useEffect(() => {

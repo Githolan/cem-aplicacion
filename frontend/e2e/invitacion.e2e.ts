@@ -207,8 +207,9 @@ test.describe("invitación", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     await expect(page.getByText(AVISO)).toHaveCount(0);
-    await page.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }).click();
-    await expect(page).toHaveURL(/\/instalar$/);
+    // El enlace de instalar ya no está en un teléfono sin el botón del navegador (INI-10): por Cuenta.
+    await page.getByRole("link", { name: "Cuenta", exact: true }).click();
+    await expect(page).toHaveURL(/\/cuenta$/);
     await page.goBack();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     await expect(page.getByText(AVISO)).toHaveCount(0);

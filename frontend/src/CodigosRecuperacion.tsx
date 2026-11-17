@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useAvisoAlSalir } from "./avisoAlSalir";
 
@@ -6,6 +6,10 @@ import { useAvisoAlSalir } from "./avisoAlSalir";
 // guardarlos como archivo (informe de fricción, AC-18: en un teléfono, anotar diez códigos a mano
 // invita a tocar «Códigos guardados: seguir» sin guardarlos). Quien los muestra no los suelta hasta «Ya los
 // guardé». Los usan la página del segundo factor, Cuenta y la hoja de confirmar un acto.
+//
+// Informe de fricción, tanda 9 (CTA-13): hecha la copia o la descarga, su botón se reemplaza por el
+// resultado y el foco pasa a «Códigos guardados: seguir», que queda como único botón principal. La
+// hoja no avanza sola: los códigos se muestran una sola vez.
 
 export type MedioActivado = "aplicacion" | "llave";
 
@@ -28,7 +32,6 @@ function guardarComoArchivo(codigos: string[]) {
   setTimeout(() => URL.revokeObjectURL(url), ESPERA_LIBERAR_MS);
 }
 
-type Resultado = { texto: string; ok: boolean } | null;
 
 interface Props {
   codigos: string[];
@@ -37,20 +40,26 @@ interface Props {
 }
 
 export function CodigosRecuperacion({ codigos, medio, alGuardar }: Props) {
-  const [resultado, setResultado] = useState<Resultado>(null);
+  const [copia, setCopia] = useState<"sin_copiar" | "copiados" | "fallo">("sin_copiar");
+  const [guardado, setGuardado] = useState(false);
+  const seguir = useRef<HTMLButtonElement>(null);
   useAvisoAlSalir(true);
 
   function copiar() {
-    setResultado(null);
+    setCopia("sin_copiar");
     navigator.clipboard.writeText(codigos.join("\n")).then(
-      () => setResultado({ texto: "Copiados. Pegarlos en un lugar seguro.", ok: true }),
-      () => setResultado({ texto: "No se pudieron copiar. Guardarlos como archivo o anotarlos.", ok: false }),
+      () => {
+        setCopia("copiados");
+        seguir.current?.focus();
+      },
+      () => setCopia("fallo"),
     );
   }
 
   function guardar() {
     guardarComoArchivo(codigos);
-    setResultado({ texto: "El archivo se guardó en las descargas de este dispositivo.", ok: true });
+    setGuardado(true);
+    seguir.current?.focus();
   }
 
   return (
@@ -68,18 +77,28 @@ export function CodigosRecuperacion({ codigos, medio, alGuardar }: Props) {
           </li>
         ))}
       </ul>
-      <div className="acciones-pantalla">
-        <button type="button" className="secundario" onClick={copiar}>
-          Copiar los códigos
-        </button>
-        <button type="button" className="secundario" onClick={guardar}>
-          Guardar como archivo
-        </button>
+      <div role="status" aria-live="polite" className="acciones-pantalla">
+        {copia === "copiados" ? (
+          <p className="aviso-ok">Copiados. Pegarlos en un lugar seguro.</p>
+        ) : (
+          <button type="button" className="secundario" onClick={copiar}>
+            Copiar los códigos
+          </button>
+        )}
+        {guardado ? (
+          <p className="aviso-ok">Archivo guardado en las descargas de este dispositivo.</p>
+        ) : (
+          <button type="button" className="secundario" onClick={guardar}>
+            Guardar como archivo
+          </button>
+        )}
       </div>
-      <div role="status" aria-live="polite">
-        {resultado !== null && <p className={resultado.ok ? "aviso-ok" : "aviso-error"}>{resultado.texto}</p>}
-      </div>
-      <button type="button" data-foco onClick={alGuardar}>
+      {copia === "fallo" && (
+        <p className="aviso-error" role="alert">
+          No se pudieron copiar. Guardarlos como archivo o anotarlos.
+        </p>
+      )}
+      <button ref={seguir} type="button" data-foco onClick={alGuardar}>
         Códigos guardados: seguir
       </button>
     </>

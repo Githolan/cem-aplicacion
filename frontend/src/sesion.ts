@@ -69,10 +69,11 @@ export function useIrAlInicio(): (aviso: string) => void {
   return (aviso) => navegar(RUTA_INICIO, { replace: true, state: { aviso } });
 }
 
-/** Después de entrar: adonde iba la persona, si un 401 la sacó de ahí; si no, el inicio. */
-export function useIrTrasEntrar(): (aviso: string) => void {
+/** Después de entrar: adonde iba la persona, si un 401 la sacó de ahí; si no, el inicio. Sin
+ * aviso: la pantalla a la que se llega ya dice que se entró (informe de fricción, ACC-06). */
+export function useIrTrasEntrar(): () => void {
   const navegar = useNavigate();
-  return (aviso) => navegar(tomarAdondeIba() ?? RUTA_INICIO, { replace: true, state: { aviso } });
+  return () => navegar(tomarAdondeIba() ?? RUTA_INICIO, { replace: true });
 }
 
 /**

@@ -46,6 +46,8 @@ async function abrirContrasena(pagina: Page) {
   await pagina.getByRole("button", { name: "Entrar con contraseña" }).click();
 }
 const seccionCuenta = (pagina: Page) => pagina.getByRole("region", { name: "Contraseña" });
+/** La ventana para cambiar la contraseña (CTA-01): va encima de la pantalla, fuera de la sección. */
+const ventanaContrasena = (pagina: Page) => pagina.getByRole("dialog", { name: "Cambiar la contraseña" });
 
 /** Errores de la página y violaciones de la CSP, que el navegador informa como eventos. */
 function vigilarErrores(pagina: Page): string[] {
@@ -112,7 +114,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
     const entrada = page.waitForRequest((r) => new URL(r.url()).pathname === ENTRAR);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
 
     const pedido = await entrada;
     expect(pedido.method()).toBe("POST");
@@ -125,7 +127,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     expect(respuesta?.headers()["cache-control"]).toBe("no-store");
 
     await expect(seccion.getByRole("status")).toContainText("El servicio no está disponible");
-    await expect(seccion.getByRole("button", { name: "Entrar con la contraseña" })).toBeEnabled();
+    await expect(seccion.getByRole("button", { name: "Entrar", exact: true })).toBeEnabled();
     expect(page.url()).not.toContain("frase");
     await sinFaltasDeAccesibilidad(page);
     // La consola informa el 503 del recurso y el 401 de la sesión; errores de la página, ninguno.
@@ -143,7 +145,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
     await seccion.getByLabel("Código de la aplicación o de recuperación").fill("042 917");
     const paso = page.waitForRequest((r) => new URL(r.url()).pathname === PASO);
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
@@ -198,7 +200,7 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
 
     const campo = seccion.getByLabel("Código de la aplicación o de recuperación");
     await expect(campo).toBeFocused();
@@ -208,8 +210,9 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     await campo.fill("k7m2q-x9p4t");
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(page.getByText("Listo: sesión abierta.")).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
+    // ACC-06: sin aviso de sesión abierta: la pantalla a la que se llega ya lo dice.
+    await expect(page.getByText("Listo: sesión abierta.")).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
     expect(cuerpos).toEqual({ [ENTRAR]: { correo: CORREO, contrasena: CONTRASENA }, [PASO]: { codigo: "k7m2q-x9p4t" } });
     expect(page.url()).not.toContain("frase");
@@ -227,7 +230,7 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
 
     await expect(seccion.getByRole("status")).toContainText("El correo o la contraseña no son correctos.");
     await sinFaltasDeAccesibilidad(page);
@@ -270,22 +273,20 @@ async function simularCuenta(pagina: Page, baseURL: string, respuestaPut: { stat
   return puts;
 }
 
-/** El formulario empieza plegado: el botón lo abre y deja el foco en el primer campo. */
+/** Los campos van en una ventana (CTA-01): el botón la abre y deja el foco en el primer campo. */
 async function desplegar(pagina: Page) {
-  const seccion = seccionCuenta(pagina);
-  const boton = seccion.getByRole("button", { name: "Cambiar la contraseña" });
-  await expect(boton).toHaveAttribute("aria-expanded", "false");
-  await expect(seccion.getByLabel("Contraseña nueva")).toHaveCount(0);
+  const boton = seccionCuenta(pagina).getByRole("button", { name: "Cambiar la contraseña" });
+  await expect(ventanaContrasena(pagina)).toHaveCount(0);
   await boton.click();
-  await expect(seccion.getByLabel("Contraseña nueva")).toBeFocused();
+  await expect(ventanaContrasena(pagina).getByLabel("Contraseña nueva")).toBeFocused();
 }
 
 async function cambiar(pagina: Page) {
-  const seccion = seccionCuenta(pagina);
-  if ((await seccion.getByLabel("Contraseña nueva").count()) === 0) await desplegar(pagina);
-  await seccion.getByLabel("Contraseña nueva").fill(NUEVA);
-  await seccion.getByLabel("Repetir la contraseña").fill(NUEVA);
-  await seccion.getByRole("button", { name: "Guardar la contraseña nueva" }).click();
+  const ventana = ventanaContrasena(pagina);
+  if ((await ventana.count()) === 0) await desplegar(pagina);
+  await ventana.getByLabel("Contraseña nueva").fill(NUEVA);
+  await ventana.getByLabel("Repetir la contraseña").fill(NUEVA);
+  await ventana.getByRole("button", { name: "Guardar la contraseña nueva" }).click();
 }
 
 test.describe("contraseña en /cuenta (API simulada)", () => {
@@ -301,13 +302,16 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     const seccion = seccionCuenta(page);
     await expect(seccion.getByText(/Último cambio: 10 de octubre de 2026/)).toBeVisible();
     await desplegar(page);
-    await expect(seccion.getByLabel("Contraseña nueva")).toHaveAttribute("autocomplete", "new-password");
+    await expect(ventanaContrasena(page).getByLabel("Contraseña nueva")).toHaveAttribute("autocomplete", "new-password");
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
     await cambiar(page);
 
+    await expect(ventanaContrasena(page)).toHaveCount(0);
+    // CTA-02: el «Listo» queda en la tarjeta con el foco, sin el botón de volver a cambiarla.
     await expect(seccion.getByRole("status")).toContainText("Listo: la contraseña quedó cambiada.");
-    await expect(seccion.getByRole("button", { name: "Cambiar la contraseña" })).toBeFocused();
+    await expect(seccion.getByText(/Listo: la contraseña quedó cambiada/)).toBeFocused();
+    await expect(seccion.getByRole("button", { name: "Cambiar la contraseña" })).toHaveCount(0);
     expect(puts).toEqual([{ csrf: CSRF, cuerpo: { contrasena_nueva: NUEVA, contrasena_actual: null } }]);
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
@@ -348,7 +352,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.goto("/cuenta");
     await cambiar(page);
 
-    await expect(seccionCuenta(page).getByRole("status")).toContainText("La página quedó abierta mucho tiempo");
+    await expect(ventanaContrasena(page).getByRole("alert")).toContainText("La página quedó abierta mucho tiempo");
     expect(puts.map((p) => p.csrf)).toEqual([null]);
   });
 });

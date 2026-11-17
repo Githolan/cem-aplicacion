@@ -2,11 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router";
+import { Link, MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { AvisoVersion } from "./AvisoVersion";
+import { AvisoVersion, VersionAlCambiarDePantalla } from "./AvisoVersion";
 import type { Salud } from "./api/cliente";
 import { manifiesto } from "./manifiesto";
 import { NOMBRE_MODO_LECTURA } from "./ModoLectura";
@@ -70,12 +70,20 @@ function montar(ruta = "/", version: Version = SIN_VERSION_NUEVA) {
         <QueryClientProvider client={consultas}>
           <MemoryRouter initialEntries={[ruta]}>
             <App />
+            <VersionAlCambiarDePantalla />
           </MemoryRouter>
           <AvisoVersion />
         </QueryClientProvider>
       </ContextoVersion.Provider>
     </StrictMode>,
   );
+}
+
+/** El inicio ya leyó /health (y lo que dependa de esa lectura ya se dibujó). */
+async function saludLeida() {
+  const simulado = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  await vi.waitFor(() => expect(caminosDe(simulado)).toContain("/health"));
+  await new Promise((r) => setTimeout(r));
 }
 
 afterEach(() => {
@@ -85,13 +93,14 @@ afterEach(() => {
 });
 
 describe("página de inicio", () => {
-  it("muestra el estado del backend leído de /health", async () => {
+  it("lee /health y, mientras el servicio funciona, no muestra ningún punto ni aviso (INI-09)", async () => {
     const pedido = backend();
     vi.stubGlobal("fetch", pedido);
 
     montar();
 
-    expect(await screen.findByRole("img", { name: "El servicio funciona" })).toBeTruthy();
+    await saludLeida();
+    expect(screen.queryByRole("img", { name: /El servicio/ })).toBeNull();
     // La versión queda al pie de Cuenta: el inicio no la muestra.
     expect(screen.queryByText("0849ee9")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -111,7 +120,7 @@ describe("página de inicio", () => {
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
     vi.stubGlobal("fetch", backend());
     const { container } = montar();
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
 
     // jsdom no calcula estilos: el contraste se mide en el navegador, no aquí.
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -137,7 +146,7 @@ describe("/ decide por la sesión", () => {
     montar();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
   });
 
@@ -151,7 +160,7 @@ describe("/ decide por la sesión", () => {
     montar();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(caminosDe(pedido)).toContain(RUTA_SESION);
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
   });
@@ -215,6 +224,9 @@ describe("inicio sin edificios", () => {
 
     const texto = await screen.findByText(SIN_EDIFICIO);
     await vi.waitFor(() => expect(texto.textContent).toMatch(PARA_SUMARTE));
+    // Un solo renglón: sin el rótulo «Edificio» ni la marca «Sin edificio» (INI-08).
+    expect(screen.queryByText("Sin edificio")).toBeNull();
+    expect(screen.queryByLabelText("Edificio")).toBeNull();
     expect(screen.getByRole("link", { name: "Cuenta" })).toBeTruthy();
   });
 
@@ -224,7 +236,7 @@ describe("inicio sin edificios", () => {
     montar();
 
     await vi.waitFor(() => expect(caminosDe(pedido)).toContain("/api/v1/consorcios/c1/mis-acciones"));
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(screen.queryByText(SIN_EDIFICIO)).toBeNull();
   });
 
@@ -266,7 +278,7 @@ describe("versión nueva (documento 13, §14.4)", () => {
 
     const { container } = montar("/", { hayVersionNueva: true, actualizar });
 
-    await screen.findByRole("img", { name: "El servicio funciona" });
+    await saludLeida();
     expect(screen.getByRole("alert").textContent).toContain("Hay una versión nueva");
     expect(actualizar).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
@@ -288,6 +300,36 @@ describe("versión nueva (documento 13, §14.4)", () => {
     expect(pedido).not.toHaveBeenCalled();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+
+  it("MEN-07: al pasar a otra pantalla se aplica sola; mientras se queda, espera", async () => {
+    vi.stubGlobal("fetch", backend());
+    const actualizar = vi.fn();
+
+    montar("/instalar", { hayVersionNueva: true, actualizar });
+    expect(actualizar).not.toHaveBeenCalled();
+
+    fireEvent.click(within(screen.getByRole("banner")).getByRole("link", { name: "Consorcio en Mano" }));
+
+    await vi.waitFor(() => expect(actualizar).toHaveBeenCalledOnce());
+  });
+
+  it("MEN-07: si la navegación trae un «Listo», espera al cambio siguiente para no borrarlo", () => {
+    const actualizar = vi.fn();
+    render(
+      <ContextoVersion.Provider value={{ hayVersionNueva: true, actualizar }}>
+        <MemoryRouter initialEntries={["/a"]}>
+          <VersionAlCambiarDePantalla />
+          <Link to="/b" state={{ aviso: "Listo: se guardó." }}>con aviso</Link>
+          <Link to="/c">sin aviso</Link>
+        </MemoryRouter>
+      </ContextoVersion.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "con aviso" }));
+    expect(actualizar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("link", { name: "sin aviso" }));
+    expect(actualizar).toHaveBeenCalledOnce();
   });
 
   it("sin versión nueva, una ruta desconocida no actualiza nada", () => {

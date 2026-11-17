@@ -212,17 +212,16 @@ describe("inicio por rol", () => {
   const MANDATOS = "Mandatos y decisiones";
   const PADRON = "Padrón del edificio";
   const CONTACTOS = "Contactos de emergencia";
-  const DOCUMENTOS = "Documentos del edificio";
-  const PAGOS = "Pagos";
+  const PROVEEDORES = "Proveedores";
   const LIQUIDACION = "Liquidación (borrador)";
-  const TODOS = [INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS, LIQUIDACION];
 
+  /** Las filas del inicio (decisión 5: solo lo pendiente y, en el teléfono, las pantallas de Gestión). */
   async function enlaces() {
     await screen.findByRole("link", { name: MI_CUENTA });
-    await screen.findByRole("link", { name: CONTACTOS });
+    await screen.findByRole("link", { name: /Contactos de emergencia/ });
     await screen.findByRole("heading", INICIO);
     await new Promise((r) => setTimeout(r));
-    return TODOS.filter((t) => screen.queryAllByRole("link", { name: t }).length > 0);
+    return Array.from(screen.getByRole("main").querySelectorAll(".fila-inicio__titulo"), (t) => t.textContent);
   }
 
   const VECINO = ["consorcios.mis", "consorcios.mis_acciones", "contactos.ver", "padron.ver_propio", "unidades.listar"];
@@ -237,28 +236,47 @@ describe("inicio por rol", () => {
     "contactos.gestionar", "invitaciones.crear", "egresos.preparar_orden", "egresos.ejecutar_pago", "liquidacion.preparar",
   ];
 
-  it("el vecino ve solo sus contactos", async () => {
+  // Pagos, Documentos y Contactos están en las pestañas: el inicio no los repite (INI-02). Sin nada
+  // pendiente, solo quedan las pantallas de Gestión, que en el teléfono no tienen pestaña.
+  it("el vecino no tiene nada pendiente ni pantallas de Gestión: el inicio queda sin filas", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: VECINO }));
     abrirApp();
-    expect(await enlaces()).toEqual([CONTACTOS]);
+    expect(await enlaces()).toEqual([]);
   });
 
   it("el Consejo ve lo que fiscaliza y no lo de la administración", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: CONSEJO }));
     abrirApp();
-    expect(await enlaces()).toEqual([MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS]);
+    expect(await enlaces()).toEqual([MANDATOS, PADRON]);
   });
 
   it("la administración ve lo que opera y no lo del Consejo", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: ADMINISTRADOR }));
     abrirApp();
-    expect(await enlaces()).toEqual([INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS, LIQUIDACION]);
+    expect(await enlaces()).toEqual([INVITAR, MANDATOS, PADRON, PROVEEDORES, LIQUIDACION]);
   });
 
   it("los enlaces son la suma de los edificios: Consejo en uno, vecino en otro", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: VECINO, [C2]: CONSEJO }));
     abrirApp();
-    expect(await enlaces()).toEqual([MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS]);
+    expect(await enlaces()).toEqual([MANDATOS, PADRON]);
+  });
+
+  it("las filas no llevan una descripción fija que anuncie comandos (INI-05, C8G-16)", async () => {
+    vi.stubGlobal("fetch", backend({ [C1]: CONSEJO }));
+    abrirApp();
+    await enlaces();
+    expect(screen.getByRole("main").querySelectorAll(".fila-inicio__detalle")).toHaveLength(0);
+    expect(screen.queryByText("Confirmar o finalizar vínculos")).toBeNull();
+  });
+
+  it("en la PC, con la barra lateral a la vista, el inicio no repite el menú (INI-01)", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    vi.stubGlobal("fetch", backend({ [C1]: ADMINISTRADOR }));
+    abrirApp();
+    expect(await enlaces()).toEqual([]);
+    // Control: las mismas pantallas siguen en la barra lateral.
+    expect(screen.getByRole("navigation").textContent).toContain(MANDATOS);
   });
 
   it.each<[string, Record<string, Respuesta>]>([
@@ -371,7 +389,8 @@ describe("si el inicio no pudo saber qué alcanza", () => {
 describe("el edificio elegido", () => {
   const AMBOS = ["padron.ver", "documentos.ver"];
   const MARCA = { name: "Consorcio en Mano" };
-  const DOCUMENTOS = { name: "Documentos del edificio" };
+  // La pestaña del menú: el inicio no repite Documentos (INI-02).
+  const DOCUMENTOS = { name: "Documentos" };
 
   async function elegirElVerde() {
     fireEvent.change(await screen.findByLabelText("Edificio"), { target: { value: C2 } });

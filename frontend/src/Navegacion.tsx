@@ -60,7 +60,7 @@ const PRINCIPALES: readonly Destino[] = [
 ];
 
 // Solo en la barra lateral de la PC: en el teléfono y la tablet se llega desde el inicio.
-const DE_ADMINISTRACION: readonly Destino[] = [
+export const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_INVITACIONES, texto: "Invitar a una persona", icono: "invitar", requisito: REQUISITOS.invitaciones },
   { ruta: RUTA_MANDATOS, texto: "Mandatos y decisiones", icono: "balanza", requisito: REQUISITOS.mandatos },
   { ruta: RUTA_PADRON, texto: "Padrón del edificio", icono: "personas", requisito: REQUISITOS.padron },

@@ -25,7 +25,6 @@ const SALUD = { estado: "ok", version: "0.1.0", sha_imagen: "x", sha_contratos: 
 const CONFIRMA = ["padron.ver", "padron.confirmar_vinculo"];
 const SOLO_VE = ["padron.ver"];
 const PREPARA = ["egresos.preparar_orden"];
-const DETALLE_DE_SIEMPRE = "Confirmar o finalizar vínculos";
 
 const padronDe = (id: string) => `/api/v1/consorcios/${id}/padron`;
 const filas = (sinConfirmar: number, confirmadas: number) => () =>
@@ -137,17 +136,24 @@ describe("inicio: vínculos que esperan confirmación (G-26)", () => {
     expect(await filaDelPadron("7 vínculos esperan confirmación")).toBeTruthy();
   });
 
-  it("sin ninguno esperando, la fila dice lo de siempre", async () => {
-    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONFIRMA }, padrones: { [C1]: filas(0, 4) } }));
+  it("sin ninguno esperando, el Padrón queda como pantalla de Gestión, sin descripción fija (INI-05)", async () => {
+    const simulado = backend({ acciones: { [C1]: CONFIRMA }, padrones: { [C1]: filas(0, 4) } });
+    vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await filaDelPadron(DETALLE_DE_SIEMPRE)).toBeTruthy();
+    await vi.waitFor(() => expect(pedidosA(simulado, padronDe(C1))).toBeGreaterThan(0));
+    const gestion = within(await screen.findByRole("region", { name: "Gestión" }));
+    const fila = await gestion.findByRole("link", { name: "Padrón del edificio" });
+    expect(fila.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
   });
 
-  it("quien solo ve el padrón no recibe la cuenta ni la pide", async () => {
+  it("quien solo ve el padrón no recibe la cuenta ni la pide, ni una descripción con comandos que no tiene (C8G-16)", async () => {
     const simulado = backend({ acciones: { [C1]: SOLO_VE }, padrones: { [C1]: filas(3, 0) } });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await filaDelPadron(DETALLE_DE_SIEMPRE)).toBeTruthy();
+    const gestion = within(await screen.findByRole("region", { name: "Gestión" }));
+    expect((await gestion.findByRole("link", { name: "Padrón del edificio" })).getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByText("Confirmar o finalizar vínculos")).toBeNull();
     expect(pedidosA(simulado, padronDe(C1))).toBe(0);
   });
 
@@ -186,14 +192,15 @@ describe("inicio: vínculos que esperan confirmación (G-26)", () => {
     expect(await grupo.findByRole("link", { name: "Padrón del edificio", description: "2 vínculos esperan confirmación" })).toBeTruthy();
   });
 
-  it("control: en la PC, sin vínculos esperando, «Para hacer» no lo trae", async () => {
+  it("control: en la PC, sin vínculos esperando ni nada más, no hay «Para hacer» ni Padrón en el inicio", async () => {
     conAncho(true);
     const simulado = backend({ acciones: { [C1]: [...PREPARA, ...CONFIRMA] }, padrones: { [C1]: filas(0, 2) } });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const grupo = within(await screen.findByRole("region", { name: "Para hacer" }));
-    await grupo.findByRole("link", { name: "Pagos" });
     await vi.waitFor(() => expect(pedidosA(simulado, padronDe(C1))).toBeGreaterThan(0));
-    expect(grupo.queryByRole("link", { name: "Padrón del edificio" })).toBeNull();
+    await vi.waitFor(() => expect(pedidosA(simulado, `/api/v1/consorcios/${C1}/pagos/bandeja`)).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r));
+    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+    expect(within(screen.getByRole("main")).queryByRole("link", { name: "Padrón del edificio" })).toBeNull();
   });
 });

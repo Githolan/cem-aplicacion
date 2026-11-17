@@ -137,10 +137,12 @@ afterEach(() => {
 });
 
 describe("página /contactos", () => {
-  it("el inicio tiene el enlace a los contactos", async () => {
+  // La pestaña del menú: el inicio no la repite (informe de fricción, INI-02).
+  it("el menú tiene el enlace a los contactos", async () => {
     vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Contactos de emergencia" })).getAttribute("href")).toBe("/contactos");
+    const menu = within(await screen.findByRole("navigation"));
+    expect((await menu.findByRole("link", { name: /Contactos de emergencia/ })).getAttribute("href")).toBe("/contactos");
   });
 
   it("muestra la lista con su fecha, guarda la copia y nunca pide la lista de gestión", async () => {

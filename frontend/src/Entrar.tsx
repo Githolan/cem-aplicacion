@@ -117,7 +117,7 @@ export function Entrar() {
         if (error === undefined) {
           olvidarToken();
           recordarFormaDeEntrar("correo");
-          terminarEntrada("Listo: sesión abierta.");
+          terminarEntrada();
         } else if (response.status === ESTADO_ENLACE_INVALIDO || response.status === ESTADO_TOKEN_MAL_FORMADO) {
           olvidarToken();
           setEstado({ tipo: "rechazado" });
