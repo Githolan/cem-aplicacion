@@ -2050,3 +2050,19 @@ p.persona-cabecera {
     background: var(--accent-tint);
   }
 }
+
+/* Fricción 17-11, tanda 9 */
+/* Lo plegado (otras formas de entrar en la hoja, «Acerca de la aplicación»): el resumen se toca. */
+.otras-formas,
+.pie-version {
+  margin-top: var(--space-4);
+}
+
+.otras-formas summary,
+.pie-version summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--accent);
+  cursor: pointer;
+}

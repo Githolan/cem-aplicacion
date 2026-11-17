@@ -458,11 +458,13 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     expect(aceptaciones).toHaveLength(2);
     expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: "Beto Estudio" });
 
-    // A otra pantalla: el aviso se va. Y de vuelta al inicio (pasando por /entrar) no reaparece.
-    fireEvent.click(screen.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }));
-    expect(await screen.findByRole("heading", { name: /Instalar Consorcio en Mano/ })).toBeTruthy();
+    // Con otra navegación el aviso se va y no reaparece.
+    // El enlace de instalar ya no está en un teléfono que no la puede instalar con un botón (INI-10):
+    // se pasa por Cuenta y se vuelve con la marca de la cabecera.
+    fireEvent.click(await screen.findByRole("link", { name: "Cuenta" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Cuenta" })).toBeTruthy();
     expect(screen.queryByText(AVISO)).toBeNull();
-    fireEvent.click(screen.getByRole("link", { name: "Seguir sin instalar" }));
+    fireEvent.click(within(screen.getByRole("banner")).getByRole("link", { name: "Consorcio en Mano" }));
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByText(AVISO)).toBeNull();
   });

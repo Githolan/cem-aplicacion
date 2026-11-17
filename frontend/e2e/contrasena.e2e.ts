@@ -112,7 +112,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
     const entrada = page.waitForRequest((r) => new URL(r.url()).pathname === ENTRAR);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
 
     const pedido = await entrada;
     expect(pedido.method()).toBe("POST");
@@ -125,7 +125,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     expect(respuesta?.headers()["cache-control"]).toBe("no-store");
 
     await expect(seccion.getByRole("status")).toContainText("El servicio no está disponible");
-    await expect(seccion.getByRole("button", { name: "Entrar con la contraseña" })).toBeEnabled();
+    await expect(seccion.getByRole("button", { name: "Entrar", exact: true })).toBeEnabled();
     expect(page.url()).not.toContain("frase");
     await sinFaltasDeAccesibilidad(page);
     // La consola informa el 503 del recurso y el 401 de la sesión; errores de la página, ninguno.
@@ -143,7 +143,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
     await seccion.getByLabel("Código de la aplicación o de recuperación").fill("042 917");
     const paso = page.waitForRequest((r) => new URL(r.url()).pathname === PASO);
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
@@ -198,7 +198,7 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
 
     const campo = seccion.getByLabel("Código de la aplicación o de recuperación");
     await expect(campo).toBeFocused();
@@ -208,8 +208,9 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     await campo.fill("k7m2q-x9p4t");
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(page.getByText("Listo: sesión abierta.")).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
+    // ACC-06: sin aviso de sesión abierta: la pantalla a la que se llega ya lo dice.
+    await expect(page.getByText("Listo: sesión abierta.")).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
     expect(cuerpos).toEqual({ [ENTRAR]: { correo: CORREO, contrasena: CONTRASENA }, [PASO]: { codigo: "k7m2q-x9p4t" } });
     expect(page.url()).not.toContain("frase");
@@ -227,7 +228,7 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
-    await seccion.getByRole("button", { name: "Entrar con la contraseña" }).click();
+    await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
 
     await expect(seccion.getByRole("status")).toContainText("El correo o la contraseña no son correctos.");
     await sinFaltasDeAccesibilidad(page);

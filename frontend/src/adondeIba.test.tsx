@@ -17,7 +17,7 @@ function Donde() {
 function Entrada() {
   const ir = useIrTrasEntrar();
   return (
-    <button type="button" onClick={() => ir("Listo")}>
+    <button type="button" onClick={() => ir()}>
       Entrar
     </button>
   );

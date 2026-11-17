@@ -26,7 +26,7 @@ test.describe("pedir el enlace para entrar", () => {
     await expect(seccion.getByText(/código de 6 números para entrar desde cualquier dispositivo/)).toBeVisible();
     await seccion.getByLabel("Correo").fill(CORREO);
     const pedido = page.waitForRequest((r) => new URL(r.url()).pathname === RUTA);
-    await seccion.getByRole("button", { name: "Enviar el código" }).click();
+    await seccion.getByRole("button", { name: "Enviar", exact: true }).click();
 
     const enviado = await pedido;
     expect(enviado.method()).toBe("POST");
@@ -49,7 +49,7 @@ test.describe("pedir el enlace para entrar", () => {
     const campo = seccion.getByLabel("Correo");
     await campo.fill(CORREO_SIN_DOMINIO);
     const pedido = page.waitForRequest((r) => new URL(r.url()).pathname === RUTA);
-    await seccion.getByRole("button", { name: "Enviar el código" }).click();
+    await seccion.getByRole("button", { name: "Enviar", exact: true }).click();
 
     const respuesta = await (await pedido).response();
     expect(respuesta?.status()).toBe(422);
@@ -65,11 +65,13 @@ test.describe("pedir el enlace para entrar", () => {
     await page.goto("/entrar");
     const seccion = page.getByRole("region", { name: "Pedir un código para entrar" });
     await seccion.getByLabel("Correo").fill(`  ${CORREO} `);
-    await seccion.getByRole("button", { name: "Enviar el código" }).click();
+    await seccion.getByRole("button", { name: "Enviar", exact: true }).click();
 
     const codigo = page.getByRole("region", { name: "Escribir el código del correo" });
     await expect(codigo.getByText(mensaje)).toBeVisible();
-    await expect(codigo.getByLabel("Correo")).toHaveValue(CORREO);
+    // ACC-03: el correo del pedido va como texto, sin el campo.
+    await expect(codigo.getByText(CORREO)).toBeVisible();
+    await expect(codigo.getByLabel("Correo")).toHaveCount(0);
     // El correo ya está: el foco va a lo que falta, y el código se envía recién con el botón.
     await expect(codigo.getByLabel(/^Código de 6 números/)).toBeFocused();
     await expect(seccion).toHaveCount(0);

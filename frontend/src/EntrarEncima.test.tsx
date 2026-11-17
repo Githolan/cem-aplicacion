@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -248,7 +248,12 @@ describe("entrar encima", () => {
     tocar("Leer");
     expect(await screen.findByRole("heading", { name: HOJA })).toBeTruthy();
     expect(screen.getByText("sin leer")).toBeTruthy();
-    expect((screen.getByLabelText("Correo") as HTMLInputElement).value).toBe(SESION.correo);
+    // ACC-05: el correo de la sesión va como texto, sin campo ni tarjetas, y las otras formas plegadas.
+    const hoja = within(screen.getByRole("dialog", { name: HOJA }));
+    expect(hoja.getByText(SESION.correo)).toBeTruthy();
+    expect(hoja.queryByLabelText("Correo")).toBeNull();
+    expect(screen.getByRole("dialog", { name: HOJA }).querySelector(".tarjeta")).toBeNull();
+    expect(screen.getByRole("dialog", { name: HOJA }).querySelector("details.otras-formas")).toBeTruthy();
 
     await entrarConCodigo();
 

@@ -139,7 +139,7 @@ function escribirCorreo(forma: { name: string }, correo: string) {
 
 function pedirElEnlace(correo: string) {
   escribirCorreo(PEDIR, correo);
-  fireEvent.submit(within(screen.getByRole("region", PEDIR)).getByRole("button", { name: "Enviar el código" }).closest("form")!);
+  fireEvent.submit(within(screen.getByRole("region", PEDIR)).getByRole("button", { name: "Enviar" }).closest("form")!);
 }
 
 afterEach(() => {
@@ -158,7 +158,7 @@ describe("página /entrar", () => {
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(window.location.hash).toBe("");
     expect(window.location.href).not.toContain(TOKEN);
@@ -198,7 +198,7 @@ describe("página /entrar", () => {
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
     vi.stubGlobal("fetch", backend());
     const { container } = abrir(`/entrar#token=${TOKEN}`);
-    await screen.findByText("Listo: sesión abierta.");
+    await screen.findByRole("heading", INICIO);
     await screen.findByRole("heading", INICIO);
 
     // jsdom no calcula estilos: el contraste se mide en el navegador (e2e), no aquí.
@@ -233,7 +233,7 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
     vi.stubGlobal("fetch", pedido);
     const { container } = abrir("/entrar");
 
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     await screen.findByRole("heading", INICIO);
     const [canje, ...otros] = postsDe(pedido);
     expect(otros).toEqual([]);
@@ -263,7 +263,7 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    await screen.findByText("Listo: sesión abierta.");
+    await screen.findByRole("heading", INICIO);
     const [canje] = postsDe(pedido);
     expect(await canje!.json()).toEqual({ token: TOKEN });
   });
@@ -358,7 +358,7 @@ describe("un canje que falla por algo que no es el enlace", () => {
     fireEvent.click(screen.getByRole("button", REINTENTAR));
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     const canjes = canjesDe(pedido);
     expect(canjes).toHaveLength(2);
     expect(await canjes[1]?.json()).toEqual({ token: TOKEN });
@@ -501,7 +501,7 @@ describe("página /entrar: estados de pantalla mínima (documento 08, §13.1)", 
     expect(screen.queryByRole("region", { name: "Otras formas de entrar" })).toBeNull();
     soltar();
 
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByText("Entrando…")).toBeNull();
   });
 });
@@ -601,12 +601,14 @@ describe("/entrar: una forma por vez", () => {
     abrir("/entrar");
     const enlace = within(screen.getByRole("region", PEDIR));
     fireEvent.change(enlace.getByLabelText("Correo"), { target: { value: `  ${CORREO} ` } });
-    fireEvent.submit(enlace.getByRole("button", { name: "Enviar el código" }).closest("form")!);
+    fireEvent.submit(enlace.getByRole("button", { name: "Enviar" }).closest("form")!);
 
     const codigo = within(await screen.findByRole("region", CODIGO));
     expect(formasVisibles()).toEqual([CODIGO.name]);
     expect(codigo.getByText(MENSAJE)).toBeTruthy();
-    expect((codigo.getByLabelText("Correo") as HTMLInputElement).value).toBe(CORREO);
+    // ACC-03: el correo del pedido va como texto, con «Cambiar»; sin el campo.
+    expect(codigo.getByText(CORREO)).toBeTruthy();
+    expect(codigo.queryByLabelText("Correo")).toBeNull();
     expect(postsDe(pedido).map((p) => new URL(p.url).pathname)).toEqual([RUTA_ENLACE]);
   });
 
@@ -680,8 +682,9 @@ describe("informe de fricción, tanda 7: acceso", () => {
 
     expect(formaVisible()).toEqual([PEDIR.name]);
     const pedir = within(screen.getByRole("region", PEDIR));
-    expect(pedir.getByRole("button", { name: "Enviar el código" })).toBeTruthy();
-    expect(pedir.getByText(/El mismo correo trae un enlace, que sirve solo en este dispositivo/)).toBeTruthy();
+    expect(pedir.getByRole("button", { name: "Enviar" })).toBeTruthy();
+    // ACC-04: sin el párrafo que explica el código y el enlace.
+    expect(pedir.queryByText(/El mismo correo trae un enlace/)).toBeNull();
   });
 
   it("AC-28: después de pedirlo dice qué hacer si no llega, sin otro pedido que distinga si hay cuenta", async () => {
@@ -692,6 +695,9 @@ describe("informe de fricción, tanda 7: acceso", () => {
 
     const codigo = within(await screen.findByRole("region", CODIGO));
     expect(codigo.getByText(MENSAJE)).toBeTruthy();
+    // ACC-04: el párrafo queda detrás de «No llegó el correo».
+    expect(codigo.queryByText(/la cuenta se crea con la invitación/)).toBeNull();
+    fireEvent.click(codigo.getByRole("button", { name: "No llegó el correo" }));
     expect(codigo.getByText(/la cuenta se crea con la invitación que envía la administración del edificio/)).toBeTruthy();
     // El aviso sale de la página, igual para todos: el único pedido es el del código, cuyo 202 no cambia.
     expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([RUTA_ENLACE]);
@@ -731,5 +737,39 @@ describe("informe de fricción, tanda 7: acceso", () => {
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(window.localStorage.getItem(CLAVE_FORMA)).toBe("correo");
+  });
+});
+
+describe("informe de fricción, tanda 9: acceso", () => {
+  it("ACC-02: «Enviar otro código» repite el pedido con el mismo correo y deja la pantalla en el código", async () => {
+    const pedido = backend();
+    vi.stubGlobal("fetch", pedido);
+    abrir("/entrar");
+    pedirElEnlace(CORREO);
+    const codigo = within(await screen.findByRole("region", CODIGO));
+    // Control: no es un botón fijo; aparece detrás de «No llegó el correo».
+    expect(codigo.queryByRole("button", { name: "Enviar otro código" })).toBeNull();
+
+    fireEvent.click(codigo.getByRole("button", { name: "No llegó el correo" }));
+    fireEvent.click(codigo.getByRole("button", { name: "Enviar otro código" }));
+
+    await vi.waitFor(() => expect(postsDe(pedido).filter((p) => new URL(p.url).pathname === RUTA_ENLACE)).toHaveLength(2));
+    const [, segundo] = postsDe(pedido).filter((p) => new URL(p.url).pathname === RUTA_ENLACE);
+    expect(await segundo!.json()).toEqual({ correo: CORREO });
+    expect(await screen.findByRole("region", CODIGO)).toBeTruthy();
+    expect(screen.queryByRole("region", PEDIR)).toBeNull();
+  });
+
+  it("ACC-03: «Cambiar» vuelve a pedir el código con el correo escrito", async () => {
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    pedirElEnlace(CORREO);
+    const codigo = within(await screen.findByRole("region", CODIGO));
+
+    fireEvent.click(codigo.getByRole("button", { name: "Cambiar" }));
+
+    const pedir = within(screen.getByRole("region", PEDIR));
+    expect((pedir.getByLabelText("Correo") as HTMLInputElement).value).toBe(CORREO);
+    expect(screen.queryByRole("region", CODIGO)).toBeNull();
   });
 });
