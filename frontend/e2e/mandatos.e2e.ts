@@ -156,22 +156,28 @@ test.describe("mandatos", () => {
     await page.getByRole("link", { name: "Mandatos y decisiones" }).click();
 
     await expect(page.getByText("Estudio Sur, Administración externa")).toBeVisible();
-    await expect(page.getByText("20123456786")).toBeVisible();
+    // MAN-07: la fila es un renglón; el CUIT va en la ficha.
+    await expect(page.getByText("20123456786")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
-    // Con el detalle abierto (y su formulario de baja) tampoco hay desplazamiento horizontal.
-    // La fila entera abre el detalle (comentario 21).
+    // Con la ficha abierta (y la ventana de la baja encima) tampoco hay desplazamiento horizontal.
+    // La fila entera abre solo su ficha (comentarios 21 y 35).
     await page.getByRole("button", { name: /^Estudio Sur, Administración externa/ }).click();
-    // La baja se despliega a pedido (G-44).
-    await page.getByRole("button", { name: "Dar de baja…" }).click();
-    await expect(page.getByRole("heading", { level: 3, name: "Dar de baja" })).toBeVisible();
-    await page.getByLabel("Causa").selectOption("remocion");
+    const ficha = page.getByRole("dialog", { name: "Estudio Sur, Administración externa" });
+    await expect(ficha.getByText("20123456786")).toBeVisible();
+    // La baja se abre en su ventana (comentario 36).
+    await ficha.getByRole("button", { name: "Dar de baja…" }).click();
+    const baja = page.getByRole("dialog", { name: "Dar de baja el mandato de Estudio Sur" });
+    await expect(baja).toBeVisible();
+    await baja.getByLabel("Causa").selectOption("remocion");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    await baja.getByRole("button", { name: "Cancelar" }).click();
+    await ficha.getByRole("button", { name: "Cerrar" }).click();
 
     // Formularios para el teléfono (UX móvil, CEM): textos largos en textarea, la huella en una
     // línea y el botón de envío a todo el ancho, con 44 px de alto.
     await page.getByRole("button", { name: "Registrar una decisión" }).click();
-    const decision = page.getByRole("region", { name: "Registrar una decisión" });
+    const decision = page.getByRole("dialog", { name: "Registrar una decisión" });
     await expect(decision.locator("textarea")).toHaveCount(2);
     await expect(decision.getByLabel("Qué se decidió")).toHaveAttribute("rows", "4");
     await expect(decision.getByLabel("Dónde consta (libro, acta y folio)")).toHaveAttribute("rows", "2");
@@ -190,9 +196,10 @@ test.describe("mandatos", () => {
     const tipoAncho = await decision.getByLabel("Tipo").boundingBox();
     expect(registrarAncho?.width ?? Infinity).toBeLessThan((tipoAncho?.width ?? 0) - 1);
     await page.setViewportSize({ width: 360, height: 740 });
+    await decision.getByRole("button", { name: "Cancelar" }).click();
 
     await page.getByRole("button", { name: "Dar de alta un mandato" }).click();
-    const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
+    const alta = page.getByRole("dialog", { name: "Dar de alta un mandato" });
     await expect(alta.getByLabel("Decisión que lo respalda").locator(`option[value="${D_PROPIA}"]`)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_EQUIPO);
@@ -224,8 +231,10 @@ test.describe("mandatos", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/mandatos");
     await page.getByRole("button", { name: /^Estudio Sur, Administración externa/ }).click();
-    await expect(page.getByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeFocused();
-    await page.getByRole("button", { name: "Dar de baja…" }).click();
+    // MAN-01: la ficha se abre sola, en su hoja, con el foco adentro.
+    const ficha = page.getByRole("dialog", { name: "Estudio Sur, Administración externa" });
+    await expect(ficha).toBeFocused();
+    await ficha.getByRole("button", { name: "Dar de baja…" }).click();
     await page.getByLabel("Causa").selectOption("remocion");
     await page.getByLabel("Por qué termina").fill("Remoción por asamblea");
     await expect(page.getByLabel("Asamblea que lo remueve").locator(`option[value="${D_PROPIA}"]`)).toHaveCount(0);
@@ -252,7 +261,7 @@ test.describe("mandatos", () => {
     await page.context().clearCookies();
     await page.goto("/mandatos");
     await page.getByRole("button", { name: "Dar de alta un mandato" }).click();
-    const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
+    const alta = page.getByRole("dialog", { name: "Dar de alta un mandato" });
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_EQUIPO);
     await alta.getByLabel("Desde").fill("2026-11-01");
     await alta.getByRole("button", { name: "Dar de alta" }).click();
