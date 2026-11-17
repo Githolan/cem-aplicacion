@@ -137,9 +137,9 @@ function abrir(ruta = "/cuenta") {
   );
 }
 
-/** El botón «Cerrar esta sesión» de un dispositivo: lo distingue su descripción. */
+/** El botón «Cerrar» de la fila de un dispositivo: lo distingue su descripción. */
 function botonCerrar(dispositivo: string) {
-  return screen.findByRole("button", { name: "Cerrar esta sesión", description: dispositivo });
+  return screen.findByRole("button", { name: "Cerrar", description: dispositivo });
 }
 
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
@@ -183,6 +183,8 @@ describe("página /cuenta", () => {
     vi.stubGlobal("fetch", conSesion({ "GET /health": () => Response.json(salud) }));
     abrir();
     expect(await screen.findByText("0849ee9")).toBeTruthy();
+    // CTA-05: plegada detrás de «Acerca de la aplicación».
+    expect(screen.getByText("0849ee9").closest("details")?.querySelector("summary")?.textContent).toBe("Acerca de la aplicación");
     expect(screen.getByText(/Versión 1\.2\.3 · Contrato 0\.50\.0/)).toBeTruthy();
     cleanup();
 
@@ -219,11 +221,15 @@ describe("página /cuenta", () => {
     expect(actual.getAttribute("aria-current")).toBe("true");
     expect(actual.textContent).toContain("Firefox en Windows (este dispositivo)");
     expect(otra.getAttribute("aria-current")).toBeNull();
-    expect(within(lista).getAllByRole("button", { name: "Cerrar esta sesión" })).toHaveLength(3);
+    // CTA-03: una fila por sesión, con el último uso y sin «Abierta» ni «Vence»; la de este
+    // dispositivo sin «Cerrar», que sería lo mismo que «Salir».
+    expect(within(lista).getAllByRole("button", { name: "Cerrar" })).toHaveLength(2);
+    expect(within(actual).queryByRole("button")).toBeNull();
+    expect(otra.textContent).toContain("último uso");
+    expect(within(lista).queryByText("Abierta")).toBeNull();
+    expect(within(lista).queryByText("Vence")).toBeNull();
     // Cada botón dice de qué sesión es a quien usa un lector de pantalla.
-    expect(
-      within(otra).getByRole("button", { name: "Cerrar esta sesión", description: "Chrome en Android" }),
-    ).toBeTruthy();
+    expect(within(otra).getByRole("button", { name: "Cerrar", description: "Chrome en Android" })).toBeTruthy();
     expect(screen.getByText("No está activado.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Activar la confirmación" }).getAttribute("href")).toBe(
       "/cuenta/segundo-factor",
@@ -305,18 +311,26 @@ describe("página /cuenta", () => {
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 
-  it("cerrar la sesión actual lleva a /entrar", async () => {
-    const simulado = conSesion({ [`POST /api/v1/auth/sesiones/${ACTUAL}/revocar`]: sinCuerpo(204) });
-    vi.stubGlobal("fetch", simulado);
+  it("CTA-03: con solo la sesión de este dispositivo, la tarjeta de sesiones no aparece", async () => {
+    vi.stubGlobal("fetch", conSesion({ "GET /api/v1/auth/sesiones": () => Response.json({ elementos: [SESIONES[0]] }) }));
     abrir();
 
-    fireEvent.click(
-      await botonCerrar("Firefox en Windows (este dispositivo)"),
-    );
+    await enPantalla().findByText("Ana Pérez");
+    expect(screen.queryByRole("heading", { name: "Sesiones abiertas" })).toBeNull();
+    // Control: «Salir» sigue, al final de la página.
+    expect(screen.getByRole("button", { name: "Salir" })).toBeTruthy();
+  });
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    const revocar = pedido(simulado, "POST", `/api/v1/auth/sesiones/${ACTUAL}/revocar`);
-    expect(revocar?.headers.get("X-CSRF-Token")).toBe("abc123");
+  it("CTA-08: lo que se configura va antes que las sesiones, y «Salir» al final", async () => {
+    vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO, CON_CONTRASENA));
+    abrir();
+
+    await enPantalla().findByText("Ana Pérez");
+    const titulos = enPantalla().getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(titulos).toEqual(["Datos de la cuenta", "Confirmación con PIN, huella o código", "Contraseña", "Sesiones abiertas"]);
+    const salir = screen.getByRole("button", { name: "Salir" });
+    const sesiones = screen.getByRole("region", { name: "Sesiones abiertas" });
+    expect(sesiones.compareDocumentPosition(salir) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("si el backend rechaza el cierre (CSRF), lo dice y no saca la sesión", async () => {
@@ -342,8 +356,9 @@ describe("página /cuenta", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cerrar las otras sesiones" }));
 
     expect(await screen.findByText("Listo: se cerraron 2 sesiones en otros dispositivos.")).toBeTruthy();
+    // Solo queda esta: la lista ya no se muestra, y el «Listo» queda en su tarjeta.
     const lista = screen.getByRole("heading", { name: "Sesiones abiertas" }).parentElement!;
-    expect(within(lista).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(lista).queryAllByRole("listitem")).toHaveLength(0);
     // Sin otras sesiones, el botón ya no tiene sentido.
     expect(screen.queryByRole("button", { name: "Cerrar las otras sesiones" })).toBeNull();
     const pedidoOtras = pedido(simulado, "POST", "/api/v1/auth/sesiones/revocar-otras");
@@ -539,20 +554,27 @@ describe("quién tiene la sesión, en la cabecera", () => {
 describe("contraseña en /cuenta", () => {
   const seccion = () => within(screen.getByRole("region", { name: "Contraseña" }));
 
-  /** El formulario empieza plegado: lo abre con su botón si todavía está cerrado. */
+  const TITULO_VENTANA = /^(Cambiar la contraseña|Definir una contraseña)$/;
+  /** Los campos van en su ventana (CTA-01). */
+  const ventana = () => within(screen.getByRole("dialog", { name: TITULO_VENTANA }));
+
+  /** La ventana se abre con el botón de la tarjeta, si todavía no está abierta. */
   function desplegar() {
-    const boton = seccion().queryByRole("button", { name: /^(Cambiar la contraseña|Definir una contraseña)$/ });
-    if (boton !== null) fireEvent.click(boton);
+    if (screen.queryByRole("dialog", { name: TITULO_VENTANA }) !== null) return;
+    // Un clic de verdad deja el foco en el botón: al cerrarse, la ventana se lo devuelve.
+    const boton = seccion().getByRole("button", { name: TITULO_VENTANA });
+    boton.focus();
+    fireEvent.click(boton);
   }
 
-  /** Abre el formulario si hace falta, lo completa y lo manda; `actual` solo si el campo está. */
+  /** Abre la ventana si hace falta, la completa y la manda; `actual` solo si el campo está. */
   function completar(nueva: string, repetida = nueva, actual?: string) {
     desplegar();
     if (actual !== undefined)
-      fireEvent.change(seccion().getByLabelText("Contraseña actual"), { target: { value: actual } });
-    fireEvent.change(seccion().getByLabelText(/^Contraseña( nueva)?$/), { target: { value: nueva } });
-    fireEvent.change(seccion().getByLabelText("Repetir la contraseña"), { target: { value: repetida } });
-    const formulario = seccion()
+      fireEvent.change(ventana().getByLabelText("Contraseña actual"), { target: { value: actual } });
+    fireEvent.change(ventana().getByLabelText(/^Contraseña( nueva)?$/), { target: { value: nueva } });
+    fireEvent.change(ventana().getByLabelText("Repetir la contraseña"), { target: { value: repetida } });
+    const formulario = ventana()
       .getByRole("button", { name: /^Guardar la contraseña( nueva)?$/ })
       .closest("form");
     if (formulario === null) throw new Error("el botón no está en un formulario");
@@ -575,16 +597,16 @@ describe("contraseña en /cuenta", () => {
     abrir();
 
     expect(await screen.findByText(/Sin contraseña todavía/)).toBeTruthy();
-    const definir = seccion().getByRole("button", { name: "Definir una contraseña" });
-    expect(definir.getAttribute("aria-expanded")).toBe("false");
-    expect(seccion().queryByLabelText("Contraseña")).toBeNull();
+    expect(seccion().getByRole("button", { name: "Definir una contraseña" })).toBeTruthy();
+    // CTA-01: los campos no están en la página, sino en una ventana propia.
+    expect(screen.queryByLabelText("Contraseña", { selector: "input" })).toBeNull();
     desplegar();
-    expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
-    const campo = seccion().getByLabelText("Contraseña");
-    expect(document.activeElement).toBe(campo);
+    expect(ventana().queryByLabelText("Contraseña actual")).toBeNull();
+    const campo = ventana().getByLabelText("Contraseña");
+    await waitFor(() => expect(document.activeElement).toBe(campo));
     expect(campo.getAttribute("autocomplete")).toBe("new-password");
     expect(campo.getAttribute("type")).toBe("password");
-    expect(seccion().getByLabelText("Repetir la contraseña").getAttribute("autocomplete")).toBe("new-password");
+    expect(ventana().getByLabelText("Repetir la contraseña").getAttribute("autocomplete")).toBe("new-password");
     completar(NUEVA);
 
     expect(await screen.findByText("Listo: la contraseña quedó definida. Llega un aviso por correo.")).toBeTruthy();
@@ -593,9 +615,16 @@ describe("contraseña en /cuenta", () => {
     if (put === undefined) throw new Error("no hubo PUT");
     expect(put.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(await put.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: null });
-    // Guardada, el formulario se pliega y el foco vuelve al botón, que ahora es el de cambiarla.
-    expect(seccion().queryByLabelText("Contraseña nueva")).toBeNull();
-    expect(document.activeElement).toBe(seccion().getByRole("button", { name: "Cambiar la contraseña" }));
+    // Guardada, la ventana se cierra y el «Listo» queda en la tarjeta con el foco, sin el botón de
+    // volver a cambiarla mientras se ve (CTA-02).
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const listo = seccion().getByText(/^Listo: la contraseña quedó definida/);
+    await waitFor(() => expect(document.activeElement).toBe(listo));
+    expect(seccion().queryByRole("button", { name: "Cambiar la contraseña" })).toBeNull();
+    // Control: con otro acto de la página el «Listo» se va y el botón vuelve.
+    fireEvent.click(within(screen.getByRole("banner")).getByRole("button"));
+    expect(screen.queryByText(/^Listo: la contraseña/)).toBeNull();
+    expect(seccion().getByRole("button", { name: "Cambiar la contraseña" })).toBeTruthy();
   });
 
   it("la primera contraseña con una sesión vieja (403 reautenticacion_requerida) no pisa lo escrito: lo pide la hoja", async () => {
@@ -606,11 +635,11 @@ describe("contraseña en /cuenta", () => {
     desplegar();
     completar(NUEVA);
 
-    await waitFor(() => expect(seccion().getByRole("button", { name: /^Guardar la contraseña/ })).toHaveProperty("disabled", false));
-    expect(seccion().queryByText(ENTRAR_DE_NUEVO)).toBeNull();
-    expect(seccion().queryByText(/Hay que revisar la conexión/)).toBeNull();
-    expect(seccion().queryByText(/Listo:/)).toBeNull();
-    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
+    await waitFor(() => expect(ventana().getByRole("button", { name: /^Guardar la contraseña/ })).toHaveProperty("disabled", false));
+    expect(screen.queryByText(ENTRAR_DE_NUEVO)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
+    expect(screen.queryByText(/Listo:/)).toBeNull();
+    expect((ventana().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
   });
 
   it("control: otro rechazo no ofrece volver a entrar", async () => {
@@ -619,8 +648,8 @@ describe("contraseña en /cuenta", () => {
     await screen.findByText(/Sin contraseña todavía/);
     completar(NUEVA);
 
-    expect(await seccion().findByText(/La página quedó abierta mucho tiempo/)).toBeTruthy();
-    expect(seccion().queryByRole("link", { name: "Volver a entrar" })).toBeNull();
+    expect(await ventana().findByText(/La página quedó abierta mucho tiempo/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Volver a entrar" })).toBeNull();
   });
 
   it("sin segundo factor, cambiarla pide la actual; cierra las otras sesiones y las saca de la lista", async () => {
@@ -637,10 +666,10 @@ describe("contraseña en /cuenta", () => {
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
     expect(seccion().queryByText(/se cierran las sesiones de los otros dispositivos/)).toBeNull();
     desplegar();
-    const actual = seccion().getByLabelText("Contraseña actual");
+    const actual = ventana().getByLabelText("Contraseña actual");
     expect(actual.getAttribute("autocomplete")).toBe("current-password");
-    expect(document.activeElement).toBe(actual);
-    expect(seccion().getByText(/se cierran las sesiones de los otros dispositivos/)).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(actual));
+    expect(ventana().getByText(/se cierran las sesiones de los otros dispositivos/)).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
     completar(NUEVA, NUEVA, ANTERIOR);
 
@@ -654,7 +683,9 @@ describe("contraseña en /cuenta", () => {
     expect(await put?.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: ANTERIOR });
     expect(screen.queryByText("Chrome en Android")).toBeNull();
     expect(screen.queryByText("Safari en iPhone")).toBeNull();
-    expect(screen.getByText("Firefox en Windows")).toBeTruthy();
+    // Queda solo esta sesión: la tarjeta de sesiones ya no hace falta (CTA-03).
+    expect(screen.queryByRole("list", { name: /sesiones/i })).toBeNull();
+    expect(enPantalla().queryByText("Firefox en Windows")).toBeNull();
   });
 
   it("una corta o dos distintas no salen y se explican junto al campo", async () => {
@@ -664,14 +695,14 @@ describe("contraseña en /cuenta", () => {
     await screen.findByText(/Sin contraseña todavía/);
 
     completar("corta 11 ch");
-    const explicacion = seccion().getByText(/tiene que tener al menos 12/);
-    const campo = seccion().getByLabelText("Contraseña");
+    const explicacion = await ventana().findByText(/tiene que tener al menos 12/);
+    const campo = ventana().getByLabelText("Contraseña");
     expect(campo.getAttribute("aria-invalid")).toBe("true");
     expect(campo.getAttribute("aria-describedby")).toContain(explicacion.id);
 
     completar(NUEVA, `${NUEVA}!`);
-    expect(seccion().getByText("Las dos contraseñas no coinciden.")).toBeTruthy();
-    expect(seccion().getByLabelText("Repetir la contraseña").getAttribute("aria-invalid")).toBe("true");
+    expect(await ventana().findByText("Las dos contraseñas no coinciden.")).toBeTruthy();
+    expect(ventana().getByLabelText("Repetir la contraseña").getAttribute("aria-invalid")).toBe("true");
     expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
   });
 
@@ -687,11 +718,11 @@ describe("contraseña en /cuenta", () => {
     await screen.findByText(/Último cambio:/);
 
     desplegar();
-    expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
-    expect(seccion().queryByText(/te vamos a pedir/)).toBeNull();
-    expect(seccion().queryByRole("link")).toBeNull();
+    expect(ventana().queryByLabelText("Contraseña actual")).toBeNull();
+    expect(ventana().queryByText(/te vamos a pedir/)).toBeNull();
+    expect(ventana().queryByRole("link")).toBeNull();
     // Control: el formulario está abierto.
-    expect(seccion().getByLabelText("Contraseña nueva")).toBeTruthy();
+    expect(ventana().getByLabelText("Contraseña nueva")).toBeTruthy();
   });
 
   it("sin la verificación reciente (403) pide el código acá mismo y guarda lo que estaba escrito", async () => {
@@ -740,10 +771,11 @@ describe("contraseña en /cuenta", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Código de la aplicación" })).getByRole("button", { name: "Cancelar" }));
 
-    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
-    expect((seccion().getByLabelText("Repetir la contraseña") as HTMLInputElement).value).toBe(NUEVA);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Código de la aplicación" })).toBeNull());
+    expect((ventana().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
+    expect((ventana().getByLabelText("Repetir la contraseña") as HTMLInputElement).value).toBe(NUEVA);
     expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
   });
 
@@ -768,27 +800,27 @@ describe("contraseña en /cuenta", () => {
     await screen.findByText(/Último cambio:/);
     completar(NUEVA, NUEVA, ANTERIOR);
 
-    expect(await seccion().findByText(mensaje)).toBeTruthy();
-    expect(seccion().queryByText(/Listo:/)).toBeNull();
+    expect(await ventana().findByText(mensaje)).toBeTruthy();
+    expect(screen.queryByText(/Listo:/)).toBeNull();
     // Los campos quedan como estaban, para corregir sin volver a escribir todo.
-    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
+    expect((ventana().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
   });
 
-  it("Cancelar pliega el formulario, borra lo escrito y devuelve el foco al botón", async () => {
+  it("Cancelar cierra la ventana, borra lo escrito y devuelve el foco al botón", async () => {
     const simulado = conSesion({}, TOTP_INACTIVO, CON_CONTRASENA);
     vi.stubGlobal("fetch", simulado);
     abrir();
     await screen.findByText(/Último cambio:/);
 
     desplegar();
-    fireEvent.change(seccion().getByLabelText("Contraseña nueva"), { target: { value: NUEVA } });
-    fireEvent.click(seccion().getByRole("button", { name: "Cancelar" }));
+    fireEvent.change(ventana().getByLabelText("Contraseña nueva"), { target: { value: NUEVA } });
+    fireEvent.click(ventana().getByRole("button", { name: "Cancelar" }));
 
-    expect(seccion().queryByLabelText("Contraseña nueva")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     const cambiar = seccion().getByRole("button", { name: "Cambiar la contraseña" });
-    expect(document.activeElement).toBe(cambiar);
+    await waitFor(() => expect(document.activeElement).toBe(cambiar));
     desplegar();
-    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe("");
+    expect((ventana().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe("");
     expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
   });
 
@@ -802,7 +834,7 @@ describe("contraseña en /cuenta", () => {
     await screen.findByText(/Sin contraseña todavía/);
     completar(NUEVA);
 
-    expect(await seccion().findByText(/No se pudo completar el pedido/)).toBeTruthy();
+    expect(await ventana().findByText(/No se pudo completar el pedido/)).toBeTruthy();
   });
 
   it("si la sesión venció al guardar (401), manda a /entrar", async () => {
@@ -841,7 +873,8 @@ describe("contraseña en /cuenta", () => {
     else if (paso !== null) {
       completar(NUEVA, NUEVA, contrasena.definida && !totp.activo ? ANTERIOR : undefined);
       if (paso === "falta_verificacion") await screen.findByRole("dialog");
-      else if (paso !== "entrar_de_nuevo") await seccion().findByText(paso === "ok" ? /Listo:/ : /actual no es correcta/);
+      else if (paso === "ok") await seccion().findByText(/Listo:/);
+      else if (paso !== "entrar_de_nuevo") await ventana().findByText(/actual no es correcta/);
     }
 
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -957,6 +990,8 @@ describe("informe de fricción, tanda 7", () => {
     expect(await screen.findByText(/Está activado/)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Códigos de recuperación" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Activar con PIN, huella o cara" })).toBeNull();
+    // CTA-04: el «Listo» ya se dijo en la hoja de los códigos: la tarjeta no lo repite.
+    expect(screen.queryByText("Listo: la llave quedó activada.")).toBeNull();
   });
 
   it("AC-21 (revisión de #237): los códigos van en una hoja que deja inerte la aplicación y no se cierra con Escape", async () => {
