@@ -1326,6 +1326,27 @@ describe("página /proveedores (consulta)", () => {
     expect(textoSalteoDeLaVersion(usado)).toContain("SINTETICO: pérdida de gas");
   });
 
+  it("SEG-05: con un salteo que espera su orden no se ofrece otro", async () => {
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([SALTEO]),
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect((await screen.findByRole("list", { name: "Salteos" })).textContent).toBe(textoSalteo(SALTEO));
+    expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
+    expect(screen.queryByText(EXPLICACION_SALTEO)).toBeNull();
+    cleanup();
+    // Control: con el salteo ya usado, se puede registrar otro.
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([{ ...SALTEO, estado: "usado", orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" }]),
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByRole("button", { name: SALTEAR })).toBeTruthy();
+  });
+
   it("sin proveedores.ver la dirección lleva al inicio", async () => {
     vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("contactos.ver") }));
     abrir(RUTA_CONSULTA_PROVEEDORES);

@@ -59,7 +59,9 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
   const [enviando, setEnviando] = useState(false);
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
-  const bloquea = modo === "bloquear" && hayFaltantes;
+  // Con un salteo que espera su orden no se ofrece otro: la API lo rechaza (`salteo_vigente`) (SEG-05).
+  const esperaSuOrden = salteos.some((s) => s.estado === "vigente");
+  const bloquea = modo === "bloquear" && hayFaltantes && !esperaSuOrden;
   if (salteos.length === 0 && !(bloquea && puedeSaltear)) return null;
 
   function cerrar() {
