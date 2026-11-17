@@ -317,7 +317,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
           cantidad={pagos.cantidad}
           falla={pagos.falla}
           reintentar={fallaDePagos && enLaTarjeta ? botonReintentar : null}
-          edificio={edificio.nombre}
+          edificio={pagos.conSelector ? null : edificio.nombre}
         />
       )}
       <div className="grupos-inicio">

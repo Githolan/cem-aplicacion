@@ -13,14 +13,14 @@ import {
   TEXTO_ESPERA_PARA_GUARDAR, TEXTO_FALTA_OBLIGATORIO, TEXTO_LEIDA, TEXTO_LEIDA_CON_DIFERENCIAS, TEXTO_LEYENDO,
   TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR, textoNoCoincide,
 } from "../CargaConLectura";
-import { TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
+import { importe, TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
 import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
 import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables, textoMonedaAjena } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
 import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTOS } from "./SubirFactura";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, MARCA_REPETIDA, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
 import { TEXTO_ACCION, TITULO_PLEGADAS } from "./textosDeAcciones";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
@@ -358,44 +358,48 @@ describe("bandeja", () => {
     const { container } = abrir("/pagos");
     const pagar = await screen.findByRole("region", { name: /^Para pagar/ });
     expect(within(pagar).getByRole("link").getAttribute("href")).toBe(`/pagos/${O1}`);
-    expect(within(pagar).getByRole("link").textContent).toContain("Ver la cuenta para pagar");
     expect(screen.getByRole("region", { name: /^Para aprobar/ }).textContent).toContain("Ascensores Ficticios SA");
     expect(screen.queryByRole("region", { name: /^Para conciliar/ })).toBeNull();
     expect(screen.queryByText("Nada pendiente.")).toBeNull();
-    expect(screen.queryByText("Al día")).toBeNull();
     expect(container.textContent).not.toContain(CUENTA);
     await sinFaltasDeAccesibilidad(container);
   });
 
-  // Cada fila de la tabla que va a una lista: la fila dice el verbo de su acción principal (el mismo
-  // texto que el botón, P-09) y, si no tiene, el del paso.
+  // BAN-04 (fricción 17-11): la fila es la del Padrón: proveedor; concepto, fecha e importe. El verbo
+  // y el estado ya los dice el título del grupo. BAN-05: lo que espera a otra persona no está.
   const FILAS_EN_LISTA = TABLA.filas.flatMap((f) =>
     f.lista === null || f.paso === null ? [] : [[`${f.situacion}/${f.paso}`, f.paso, f.lista, f.principal] as const],
   );
-  it.each(FILAS_EN_LISTA)("%s dice su verbo", async (_, paso, grupo, principal) => {
+  it.each(FILAS_EN_LISTA)("%s: una fila compacta sin el verbo, y nada si espera a otra persona", async (_, paso, grupo, principal) => {
     const verbo = principal === null ? VERBO[paso] : TEXTO_ACCION[principal];
     vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento(paso, grupo, { principal })) }));
     abrir("/pagos");
-    expect((await screen.findByRole("link", { name: new RegExp(verbo) })).getAttribute("href")).toBe(`/pagos/${O1}`);
+    if (grupo === "esperando") {
+      expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
+      expect(screen.queryByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeNull();
+      return;
+    }
+    const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
+    expect(fila.getAttribute("href")).toBe(`/pagos/${O1}`);
+    expect(fila.textContent).toBe(`Limpieza Ficticia SRL Limpieza de octubre · ${fechaCorta("2026-10-30T12:00:00Z")} · ${importe(1_500_000, "ARS")}`);
+    expect(fila.textContent).not.toContain(verbo);
   });
 
-  it("sin nada pendiente lo dice, y lo que espera a otra persona no cuenta como pendiente", async () => {
+  it("BAN-05: lo que espera a otra persona no está en la bandeja, ni plegado", async () => {
     vi.stubGlobal("fetch", backend({
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("espera_conciliar", "esperando", { le_toca_a: "consejo" })),
     }));
     abrir("/pagos");
     expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
-    const plegado = screen.getByText("Esperando a otra persona (1)").closest("details") as HTMLElement;
-    expect(plegado.textContent).toContain("Falta conciliar");
-    expect(plegado.textContent).toContain("Le toca al Consejo.");
+    expect(screen.queryByText(/Esperando a otra persona/)).toBeNull();
+    expect(screen.queryByText("Le toca al Consejo.")).toBeNull();
   });
 
-  it("control: sin nada, tampoco aparece «Esperando a otra persona»", async () => {
+  it("BAN-06: sin nada, una sola línea «Nada pendiente.», sin «Al día»", async () => {
     vi.stubGlobal("fetch", backend({}));
     abrir("/pagos");
     expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
-    expect(screen.queryByText(/Esperando a otra persona/)).toBeNull();
-    expect(screen.getByText("Al día")).toBeTruthy();
+    expect(screen.queryByText("Al día")).toBeNull();
   });
 
   it("«Preparar una orden» y «Proveedores» se ven con `egresos.preparar_orden`", async () => {
@@ -488,68 +492,55 @@ describe("bandeja", () => {
 describe("el ancho de la pantalla", () => {
   const CON_UNA = { [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("pagar", "para_pagar")), [`GET ${BASE}/pagos/${O1}`]: () => Response.json(PAGAR) };
 
-  it("en PC la primera orden se abre al lado de la bandeja, como título de segundo nivel", async () => {
+  // Decisión 1 del informe de fricción del 17-11-2026: en todos los anchos, la ficha sola.
+  it("FIC-13, BAN-02: en PC, entrar a Pagos no abre ninguna ficha sola", async () => {
     ancho(true);
-    vi.stubGlobal("fetch", backend(CON_UNA));
-    const { container } = abrir("/pagos");
-    expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1, name: "Pagos" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Ver la cuenta para pagar/ }).getAttribute("aria-current")).toBe("true");
-    expect(container.querySelector(".circuito-pagos--al-lado")).not.toBeNull();
-  });
-
-  it("en PC la orden abierta sola queda fija aunque la bandeja se reordene, y la cuenta sigue a la vista", async () => {
-    ancho(true);
-    let actual = PAGAR;
-    let reordenada = false;
-    const OTRA = elemento("pagar", "para_pagar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
-    const api = backend({
-      [`GET ${BASE}/pagos/bandeja`]: () =>
-        reordenada ? bandejaCon(OTRA, elemento("subir_comprobante", "para_pagar"))() : bandejaCon(elemento("pagar", "para_pagar"), OTRA)(),
-      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(actual),
-      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => {
-        actual = { ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion() };
-        reordenada = true;
-        return Response.json({ id: O1, version: 1 });
-      },
-      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => {
-        actual = SUBIR;
-        return Response.json(CUENTA_DEL_ACTO);
-      },
-    });
+    const api = backend(CON_UNA);
     vi.stubGlobal("fetch", api);
     abrir("/pagos");
-    fireEvent.click(await boton("Ver la cuenta para pagar"));
-    expect(await screen.findByText(CUENTA)).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByRole("link", { name: /Pagar|Subir|comprobante/i })[0]?.textContent).toContain("Ascensores"));
-    expect(screen.getByText(CUENTA)).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
-    expect(lugar()).toBe("/pagos");
+    await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(0);
+    expect(screen.queryByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeNull();
   });
 
-  it("en PC, al terminar el acto se suelta, y la primera de la bandeja nueva se abre recién con «Seguir con lo pendiente»", async () => {
+  it("FIC-13, BAN-01: en PC la fila abre la ficha sola, con «Volver a Pagos» y sin la bandeja", async () => {
+    ancho(true);
+    vi.stubGlobal("fetch", backend(CON_UNA));
+    abrir("/pagos");
+    fireEvent.click(await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
+    expect(lugar()).toBe(`/pagos/${O1}`);
+    expect(screen.getAllByRole("link", { name: "Volver a Pagos" })).toHaveLength(1);
+    expect(screen.queryByRole("heading", { level: 1, name: "Pagos" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeNull();
+  });
+
+  it("BAN-03 (decisión 2): en PC, terminado un acto, queda solo el «Listo» arriba de la bandeja y no se abre otra", async () => {
     ancho(true);
     let terminado = false;
-    const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
-    vi.stubGlobal("fetch", backend({
+    const api = backend({
       [`GET ${BASE}/pagos/bandeja`]: () =>
-        (terminado ? bandejaCon(elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })) : bandejaCon(elemento("aprobar", "para_aprobar")))(),
+        (terminado
+          ? bandejaCon(elemento("aprobar", "para_aprobar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" }))
+          : bandejaCon(elemento("aprobar", "para_aprobar"), elemento("aprobar", "para_aprobar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })))(),
       [`GET ${BASE}/pagos/${O1}`]: () => Response.json(APROBAR),
-      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
       [REVISION]: () => Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
       [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => {
         terminado = true;
         return Response.json({ id: O1, version: 1 }, { status: 201 });
       },
-    }));
-    abrir("/pagos");
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
     const aprobar = (await boton("Aprobar la orden")) as HTMLButtonElement;
     await waitFor(() => expect(aprobar.disabled).toBe(false));
     fireEvent.click(aprobar);
-    expect(await screen.findByRole("region", { name: "Lo que pasó con la orden" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeNull();
-    fireEvent.click(await boton("Seguir con lo pendiente (1)"));
-    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+    expect(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Lo que pasó con la orden" })).toBeNull();
+    sinBoton(/Seguir con lo pendiente/);
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O2}`)).toHaveLength(0);
   });
 
   it("en PC, después del acto, elegir otra fila la abre y deja atrás lo que pasó con la anterior", async () => {
@@ -593,7 +584,8 @@ describe("el ancho de la pantalla", () => {
       target: { files: [new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" })] },
     });
     await waitFor(() => expect(pedidos(api, "POST", ARCHIVO_NUEVO)).toHaveLength(1));
-    fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+    fireEvent.click(screen.getByRole("link", { name: "Volver a Pagos" }));
+    fireEvent.click(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ }));
     await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" });
     const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
     await act(async () => {
@@ -609,10 +601,9 @@ describe("el ancho de la pantalla", () => {
   it("control: en tablet y teléfono la bandeja no abre ninguna ficha", async () => {
     const api = backend(CON_UNA);
     vi.stubGlobal("fetch", api);
-    const { container } = abrir("/pagos");
-    await screen.findByRole("link", { name: /Ver la cuenta para pagar/ });
+    abrir("/pagos");
+    await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
     expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(0);
-    expect(container.querySelector(".circuito-pagos--al-lado")).toBeNull();
   });
 
   it("en tablet y teléfono la ficha va aparte, con la salida a la bandeja y sin leerla", async () => {
@@ -891,7 +882,9 @@ describe("pagar", () => {
     const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
     fireEvent.click(verla);
     await screen.findByRole("alert");
-    expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
+    // La ficha va sola (decisión 1 del 17-11): la bandeja se lee al volver, ya con la orden cambiada.
+    fireEvent.click(screen.getByRole("link", { name: "Volver a Pagos" }));
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas));
   });
 
   it("la cuenta no está antes del acto y el botón avisa qué deja registrado", async () => {
@@ -2477,23 +2470,23 @@ describe("preparar, enviar y renovar", () => {
       ["la lectura dice en qué quedó", (l) => l.soltar(Response.json(VUELTA_A_REVISION))],
       ["la lectura falla", (l) => l.soltar(error("sin_servicio", 503))],
       ["se cae la red", (l) => l.fallar(new TypeError("sin red"))],
-    ])("si mientras se lee en qué quedó se abrió otra orden, esa queda y la bandeja se relee: %s", async (_, terminarLectura) => {
+    ])("si mientras se lee en qué quedó se abrió otra orden, esa queda: %s", async (_, terminarLectura) => {
       ancho(true);
       const { api, lectura } = conLecturaColgada({
         [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("volver_a_pagar", "para_preparar"), FILA_OTRA),
         [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA_ORDEN),
       });
       await enviarYQuedarLeyendo(api);
-      fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+      // La ficha va sola (decisión 1 del 17-11): la otra orden se abre desde la bandeja.
+      fireEvent.click(screen.getByRole("link", { name: "Volver a Pagos" }));
+      fireEvent.click(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ }));
       expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
-      const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
       await act(async () => {
         terminarLectura(lectura);
         await new Promise((r) => setTimeout(r, 20));
       });
       expect(lugar()).toBe(`/pagos/${O2}`);
       expect(screen.queryByText(/^Listo:/)).toBeNull();
-      expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
     });
 
     it("si mientras se lee en qué quedó se cambió de edificio, la ficha abierta en el otro queda", async () => {
@@ -2713,16 +2706,16 @@ describe("aprobar y rechazar", () => {
     await listoParaAprobar();
     fireEvent.click(await boton("Aprobar la orden"));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(1));
-    fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+    // La ficha va sola (decisión 1 del 17-11): la otra orden se abre desde la bandeja.
+    fireEvent.click(screen.getByRole("link", { name: "Volver a Pagos" }));
+    fireEvent.click(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ }));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
-    const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
     await act(async () => {
       soltar(Response.json({ id: O1, version: 1 }, { status: 201 }));
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(lugar()).toBe(`/pagos/${O2}`);
     expect(screen.queryByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeNull();
-    expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
   });
 
   it("si la orden cambió entre la ficha y la revisión, la ficha se relee y deja aprobar", async () => {
@@ -3043,7 +3036,7 @@ describe("consultar pagos", () => {
   const FILA = {
     orden_id: O1, proveedor: "Limpieza Ficticia SRL", concepto: "Limpieza de octubre", importe_centavos: 1_500_000, moneda: "ARS", estado: "pagada",
     situacion: "pagada", numero_operacion: "0001234567", fecha_operacion: "2026-10-31", actualizada_en: "2026-11-01T12:00:00Z",
-    creada_en: "2026-10-30T12:00:00Z", estado_visible: "pagada",
+    creada_en: "2026-10-30T12:00:00Z", estado_visible: "pagada", importe_pagado_centavos: null,
   };
   const parametros = (p: Request | undefined) => new URL((p as Request).url).searchParams;
 
@@ -3053,13 +3046,11 @@ describe("consultar pagos", () => {
     const { container } = abrir("/pagos/consulta");
     const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
     expect(fila.getAttribute("href")).toBe(`/pagos/${O1}`);
-    const celdas = within(screen.getByRole("table", { name: "Pagos" }));
-    expect(celdas.getByRole("columnheader", { name: "Operación" })).toBeTruthy();
-    expect(celdas.getByRole("cell", { name: "0001234567" })).toBeTruthy();
-    // Cada fila dice su estado y su fecha, apilados (decisiones 5 y 11, P-07).
-    expect(celdas.getByRole("columnheader", { name: "Estado y fecha" })).toBeTruthy();
-    const estado = celdas.getByText(fechaCorta("2026-10-30T12:00:00Z")).closest("td") as HTMLElement;
-    expect(estado.textContent).toContain(NOMBRE_ESTADO.pagada);
+    // CNS-02: la fila compacta del Padrón, sin tabla: proveedor; estado, fecha e importe en un renglón.
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Pagos" })).getAllByRole("listitem")).toHaveLength(1);
+    expect(fila.textContent).toBe(`Limpieza Ficticia SRL ${NOMBRE_ESTADO.pagada} · ${fechaCorta("2026-10-30T12:00:00Z")} · ${importe(1_500_000, "ARS")}`);
+    expect(fila.textContent).not.toContain("0001234567");
     await sinFaltasDeAccesibilidad(container);
 
     fireEvent.change(screen.getByLabelText(/número de operación/), { target: { value: "Limpieza" } });
@@ -3069,6 +3060,38 @@ describe("consultar pagos", () => {
     await waitFor(() => expect(parametros(pedidos(api, "GET", `${BASE}/pagos/consulta`).at(-1)).get("filtro")).toBe("no_se_pagaron"));
     expect(parametros(pedidos(api, "GET", `${BASE}/pagos/consulta`).at(-1)).get("busqueda")).toBe("Limpieza");
     expect(screen.getByRole("button", { name: "No se pagaron" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("CNS-01: la ficha abierta desde la consulta va sola y vuelve a la consulta con lo buscado y el filtro", async () => {
+    const api = backend({
+      [`GET ${BASE}/pagos/consulta`]: () => Response.json({ elementos: [FILA], siguiente: null }),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha({ orden: orden({ estado: "pagada" }), situacion: "pagada", paso: null, le_toca_a: null })),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/consulta");
+    fireEvent.change(await screen.findByLabelText(/número de operación/), { target: { value: "Limpieza" } });
+    fireEvent.click(await boton("Buscar"));
+    fireEvent.click(await boton("Pagados"));
+    await waitFor(() => expect(parametros(pedidos(api, "GET", `${BASE}/pagos/consulta`).at(-1)).get("filtro")).toBe("pagados"));
+    fireEvent.click(await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: "Pagos" })).toBeNull();
+    const volver = screen.getByRole("link", { name: "Volver a Consultar pagos" });
+    expect(volver.getAttribute("href")).toBe("/pagos/consulta?busqueda=Limpieza&filtro=pagados");
+    const antes = pedidos(api, "GET", `${BASE}/pagos/consulta`).length;
+    fireEvent.click(volver);
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/consulta`).length).toBeGreaterThan(antes));
+    const ultimo = parametros(pedidos(api, "GET", `${BASE}/pagos/consulta`).at(-1));
+    expect([ultimo.get("busqueda"), ultimo.get("filtro")]).toEqual(["Limpieza", "pagados"]);
+    expect((screen.getByLabelText(/número de operación/) as HTMLInputElement).value).toBe("Limpieza");
+    expect(screen.getByRole("button", { name: "Pagados" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("control CNS-01: abierta desde la bandeja, la ficha vuelve a Pagos", async () => {
+    abrirFicha(PAGAR);
+    await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
+    expect(screen.getByRole("link", { name: "Volver a Pagos" }).getAttribute("href")).toBe("/pagos");
+    expect(screen.queryByRole("link", { name: "Volver a Consultar pagos" })).toBeNull();
   });
 
   it("«Ver más» suma la página siguiente y, sin más, desaparece", async () => {
@@ -3996,7 +4019,7 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
   const OTRO_BORRADOR: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA", aprobada_por: [] })] };
   const FILA_O2 = elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
 
-  /** PC, dos borradores en la bandeja: se envía el primero, que la pantalla abrió sola. */
+  /** PC, dos borradores en la bandeja: se envía el primero, desde su ficha. */
   function dosBorradoresEnPC() {
     ancho(true);
     let enviada = false;
@@ -4013,38 +4036,36 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
       },
     });
     vi.stubGlobal("fetch", api);
-    abrir("/pagos");
+    abrir(`/pagos/${O1}`);
     return api;
   }
 
-  it("P-01: en PC, después de enviar, no se abre otra orden sola: queda el «Listo» de esa orden", async () => {
-    dosBorradoresEnPC();
-    await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
+  // P-01 (12-11) sigue: en PC no se abre ninguna orden sola. Decisión 2 del 17-11 (BAN-03): sin el
+  // panel de lo que pasó con la orden; solo el «Listo» arriba de la bandeja.
+  it("BAN-03: en PC, después de enviar, el «Listo» va arriba de la bandeja, sin panel y sin abrir otra orden", async () => {
+    const api = dosBorradoresEnPC();
     fireEvent.click(await boton("Enviar a aprobar"));
-    const listo = await screen.findByRole("region", { name: "Lo que pasó con la orden" });
-    expect(await within(listo).findByText("Esperando aprobación")).toBeTruthy();
-    expect(within(listo).getByText("Le toca al Consejo.")).toBeTruthy();
-    expect(within(listo).getByText(/Limpieza Ficticia SRL/)).toBeTruthy();
-    // Ninguna ficha de otra orden, y ningún «Enviar a aprobar» hasta que la persona elija.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    sinBoton("Enviar a aprobar");
-    expect(screen.queryByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeNull();
+    expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
     expect(lugar()).toBe("/pagos");
+    expect(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Lo que pasó con la orden" })).toBeNull();
+    sinBoton(/Seguir con lo pendiente/);
+    sinBoton("Enviar a aprobar");
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O2}`)).toHaveLength(0);
   });
 
-  it("P-01: «Seguir con lo pendiente» recién ahí abre la siguiente", async () => {
+  it("BAN-03: la fila de la bandeja abre la siguiente, y el «Listo» se va", async () => {
     dosBorradoresEnPC();
     fireEvent.click(await boton("Enviar a aprobar"));
-    fireEvent.click(await boton("Seguir con lo pendiente (1)"));
+    await screen.findByText(/^Listo: la orden quedó esperando aprobación/);
+    fireEvent.click(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ }));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O2}`);
     expect(await boton("Enviar a aprobar")).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Lo que pasó con la orden" })).toBeNull();
+    expect(screen.queryByText(/^Listo: la orden quedó esperando aprobación/)).toBeNull();
   });
 
-  it("P-01: en PC, sin nada más pendiente, el «Listo» lo dice y no ofrece seguir", async () => {
+  it("BAN-03: en PC, sin nada más pendiente, el «Listo» y «Nada pendiente.»", async () => {
     ancho(true);
     let enviada = false;
     vi.stubGlobal("fetch", backend({
@@ -4056,35 +4077,35 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
         return Response.json({ id: O1, version: 1 });
       },
     }));
-    abrir("/pagos");
+    abrir(`/pagos/${O1}`);
     fireEvent.click(await boton("Enviar a aprobar"));
-    expect(await screen.findByText("No queda nada pendiente.")).toBeTruthy();
+    expect(await screen.findByText(/^Listo: la orden quedó esperando aprobación/)).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
     sinBoton(/Seguir con lo pendiente/);
   });
 
-  it("P-01: en PC, después de conciliar, la siguiente para conciliar tampoco se abre sola", async () => {
+  it("BAN-03: en PC, después de conciliar, la siguiente para conciliar no se abre sola", async () => {
     ancho(true);
     let conciliado = false;
-    const OTRA: Ficha = { ...CONCILIAR, orden: orden({ id: O2, estado: "en_verificacion" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
-    vi.stubGlobal("fetch", backend({
+    const api = backend({
       [`GET ${BASE}/pagos/bandeja`]: () =>
         (conciliado
           ? bandejaCon(elemento("conciliar", "para_conciliar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" }))
           : bandejaCon(elemento("conciliar", "para_conciliar"), elemento("conciliar", "para_conciliar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })))(),
-      [`GET ${BASE}/pagos/${O1}`]: () =>
-        Response.json(conciliado ? ficha({ situacion: "pagada", paso: null, le_toca_a: null, orden: orden({ estado: "pagada" }) }) : CONCILIAR),
-      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(CONCILIAR),
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`]: () => {
         conciliado = true;
         return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
       },
-    }));
-    abrir("/pagos");
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
     fireEvent.click(await boton("Está bien: conciliar"));
-    expect(await screen.findByText("No hay nada más que hacer con ella.")).toBeTruthy();
+    expect(await screen.findByText(/^Listo: quedó conciliado/)).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+    expect(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
     sinBoton("Está bien: conciliar");
-    fireEvent.click(await boton("Seguir con lo pendiente (1)"));
-    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O2}`)).toHaveLength(0);
   });
 
   it("P-12: el aviso después de enviar dice en qué quedó, sin «franja»", async () => {
@@ -4245,35 +4266,7 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
 
 // Hallazgos P2 de Codex sobre el PR #235 (f5d2ec0).
 describe("tanda 1 de fricción: revisión de Codex", () => {
-  const O3 = "35353535-3535-4535-8535-353535353535";
   const ENVIO_O1 = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
-
-  it("en PC, después de enviar un borrador, «Seguir con lo pendiente» abre el otro borrador y no el pago que va primero", async () => {
-    ancho(true);
-    let enviada = false;
-    const PAGO_O3 = elemento("pagar", "para_pagar", { orden_id: O3, proveedor: "Pinturas Ficticias SA" });
-    const BORRADOR_O2 = elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
-    const OTRO_BORRADOR: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA", aprobada_por: [] })] };
-    vi.stubGlobal("fetch", backend({
-      [`GET ${BASE}/pagos/bandeja`]: () =>
-        (enviada
-          ? bandejaCon(PAGO_O3, BORRADOR_O2, elemento("espera_aprobar", "esperando", { le_toca_a: "consejo" }))
-          : bandejaCon(PAGO_O3, elemento("enviar", "para_preparar"), BORRADOR_O2))(),
-      [`GET ${BASE}/pagos/${O1}`]: () =>
-        Response.json(enviada ? { ...BORRADOR, orden: orden({ estado: "en_revision" }), situacion: "en_revision", paso: "espera_aprobar", le_toca_a: "consejo", puede_enviar: false } : BORRADOR),
-      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRO_BORRADOR),
-      [`GET ${BASE}/pagos/${O3}`]: () => Response.json({ ...PAGAR, orden: orden({ id: O3 }), versiones: [version({ razon_social: "Pinturas Ficticias SA" })] }),
-      [`POST ${ENVIO_O1}`]: () => {
-        enviada = true;
-        return Response.json({ id: O1, version: 1 });
-      },
-    }));
-    abrir(`/pagos/${O1}`);
-    fireEvent.click(await boton("Enviar a aprobar"));
-    fireEvent.click(await boton("Seguir con lo pendiente (2)"));
-    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
-    expect(lugar()).toBe(`/pagos/${O2}`);
-  });
 
   it("si se sale de «Preparar una orden» mientras se envía y la red cae, no vuelve a la orden", async () => {
     let soltar: (e: Error) => void = () => undefined;
@@ -4310,7 +4303,7 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
   const marcas = () =>
     within(screen.getByRole("list", { name: "Por dónde va la orden" })).getAllByRole("listitem").map((li) => li.getAttribute("data-estado"));
 
-  it("cada fila dice su fecha y su estado (decisiones 5 y 11)", async () => {
+  it("cada fila dice su fecha; el estado ya lo dice el grupo (decisión 5; BAN-04)", async () => {
     vi.stubGlobal("fetch", backend({
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("pagar", "para_pagar", { creada_en: "2026-11-09T15:00:00Z" })),
     }));
@@ -4318,16 +4311,18 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
     const fecha = within(fila).getByText(fechaCorta("2026-11-09T15:00:00Z"));
     expect(fecha.getAttribute("dateTime")).toBe("2026-11-09T15:00:00Z");
-    expect(fila.textContent).toContain(NOMBRE_ESTADO.lista_para_pagar);
+    expect(fila.textContent).not.toContain(NOMBRE_ESTADO.lista_para_pagar);
   });
 
-  it("una orden parecida a otra lo avisa con la fecha y el estado de la otra, sin frenar (decisión 5, P-02)", async () => {
+  it("una orden parecida a otra lleva una marca corta en la fila y el aviso completo en la ficha, sin frenar (decisión 5, P-02; BAN-04)", async () => {
     const otra = { orden_id: O2, creada_en: "2026-11-02T15:00:00Z", estado_visible: "pagada" as const };
     vi.stubGlobal("fetch", backend({
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("enviar", "para_preparar", { posible_duplicada_de: otra })),
     }));
     abrir("/pagos");
-    expect(await screen.findByText(textoRepetida(fechaCorta(otra.creada_en), "pagada"))).toBeTruthy();
+    const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
+    expect(within(fila).getByText(MARCA_REPETIDA)).toBeTruthy();
+    expect(screen.queryByText(textoRepetida(fechaCorta(otra.creada_en), "pagada"))).toBeNull();
     cleanup();
     abrirFicha({ ...BORRADOR, posible_duplicada_de: otra });
     const nota = await screen.findByText(/^Hay otra orden del mismo proveedor/);
@@ -4350,13 +4345,46 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     abrir("/pagos");
     const aviso = await screen.findByText(/^Se rechazó la orden de Plomería Ficticia SRL/);
     expect(aviso.closest("[role=status]")?.textContent).toContain("Falta la factura");
-    expect(screen.getByRole("link", { name: PREPARAR_OTRA })).toBeTruthy();
+    expect(screen.getByRole("button", { name: PREPARAR_OTRA })).toBeTruthy();
     expect(screen.getByText("Nada pendiente.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: /^Para preparar/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: ENTENDIDO }));
     await waitFor(() => expect(screen.queryByText(/^Se rechazó la orden/)).toBeNull());
     const [post] = pedidos(simulado, "POST", RECHAZO_VISTO);
     expect(post?.headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("BAN-08: «Preparar otra orden» también da el rechazo por visto y lleva a preparar con el proveedor", async () => {
+    let vista = false;
+    const simulado = backend({
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: vista ? [] : [AVISO], por_cotejar: 0, sin_explicar: 0 }),
+      [`POST ${RECHAZO_VISTO}`]: () => {
+        vista = true;
+        return Response.json({ orden_id: O2 });
+      },
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/pagos");
+    fireEvent.click(await boton(PREPARAR_OTRA));
+    await waitFor(() => expect(lugar()).toBe("/pagos/nueva"));
+    expect(pedidos(simulado, "POST", RECHAZO_VISTO)).toHaveLength(1);
+    fireEvent.click(await screen.findByRole("link", { name: "Volver a Pagos" }));
+    await screen.findByText("Nada pendiente.");
+    expect(screen.queryByText(/^Se rechazó la orden/)).toBeNull();
+  });
+
+  it("control BAN-08: si no se pudo dar por visto, no sale de la bandeja y lo dice", async () => {
+    const simulado = backend({
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [AVISO], por_cotejar: 0, sin_explicar: 0 }),
+      [`POST ${RECHAZO_VISTO}`]: () => error("error_interno", 500),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/pagos");
+    fireEvent.click(await boton(PREPARAR_OTRA));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
   });
 
   it("un borrador viejo va plegado y no cuenta como pendiente (decisión 4, P-04)", async () => {
@@ -4461,45 +4489,58 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     expect(screen.queryByText("Nada pendiente.")).toBeNull();
   });
 
-  it("«Para cotejar» aparece solo si hay pagos por cotejar, con su cantidad (decisión 6, P-24)", async () => {
+  it("«Para cotejar» aparece solo si hay pagos por cotejar: una fila con su cantidad que lleva al cotejo (decisión 6, P-24; BAN-07)", async () => {
     vi.stubGlobal("fetch", backend({
       [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 3, sin_explicar: 0 }),
     }));
     abrir("/pagos");
-    const grupo = await screen.findByRole("region", { name: TITULO_GRUPO.para_cotejar });
-    expect(grupo.textContent).toContain("3");
-    expect(within(grupo).getByRole("link", { name: TEXTO_ACCION.cotejar }).getAttribute("href")).toBe("/pagos/cotejo");
+    const fila = await screen.findByRole("link", { name: `${TITULO_GRUPO.para_cotejar} 3 pagos` });
+    expect(fila.getAttribute("href")).toBe("/pagos/cotejo");
+    expect(screen.queryByRole("link", { name: TEXTO_ACCION.cotejar })).toBeNull();
     expect(screen.queryByText("Nada pendiente.")).toBeNull();
     cleanup();
     vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon() }));
     abrir("/pagos");
     expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: TEXTO_ACCION.cotejar })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Para cotejar/ })).toBeNull();
   });
 
-  it.each([
-    ["aprobar", "para_aprobar", APROBAR],
-    ["pagar", "para_pagar", PAGAR],
-    ["enviar", "para_preparar", BORRADOR],
-  ] as const)("P-09: el verbo de la fila de %s es el botón principal de la ficha", async (paso, grupo, laFicha) => {
-    ancho(false);
+  it("BAN-07: lo que el extracto no explica es una fila para quien coteja, sin el texto fijo; la administración lo consulta abajo", async () => {
+    const conSinExplicar = () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 2, marcados_no_es_pago: 1 });
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: conSinExplicar }));
+    abrir("/pagos");
+    const fila = await screen.findByRole("link", { name: "Lo que el extracto no explica 2 débitos" });
+    expect(fila.getAttribute("href")).toBe("/pagos/extracto-sin-explicar");
+    expect(screen.queryByText(/ningún pago explica/)).toBeNull();
+    expect(screen.queryByText(/Marcados como que no son/)).toBeNull();
+    cleanup();
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: conSinExplicar, [`GET ${BASE}/mis-acciones`]: alcanza("egresos.preparar_orden") }));
+    abrir("/pagos");
+    expect((await screen.findByRole("link", { name: "Lo que el extracto no explica (2)" })).getAttribute("href")).toBe("/pagos/extracto-sin-explicar");
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
+  });
+
+  it("control BAN-07: con solo marcas vigentes, la salida a esa pantalla sigue, sin el texto largo de las marcas", async () => {
     vi.stubGlobal("fetch", backend({
-      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento(paso, grupo)),
-      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(laFicha),
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0, marcados_no_es_pago: 2 }),
+    }));
+    abrir("/pagos");
+    expect((await screen.findByRole("link", { name: "Lo que el extracto no explica" })).getAttribute("href")).toBe("/pagos/extracto-sin-explicar");
+    expect(screen.queryByText(/Marcados como que no son/)).toBeNull();
+  });
+
+  it("BAN-04: la fila no repite el verbo; el botón principal está en la ficha", async () => {
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar")),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(APROBAR),
       [REVISION]: () =>
-        Response.json({ orden: laFicha.orden, versiones: laFicha.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+        Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
     }));
     abrir("/pagos");
     const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
-    const verbo = fila.querySelector(".fila-pago__verbo")?.textContent;
-    expect(verbo).toBeTruthy();
+    expect(fila.textContent).not.toContain(TEXTO_ACCION.aprobar);
     fireEvent.click(fila);
-    const principal = await waitFor(() => {
-      const b = document.querySelector<HTMLButtonElement>("button[data-tipo=principal]");
-      if (b === null) throw new Error("sin principal todavía");
-      return b;
-    });
-    expect(principal.textContent).toBe(verbo);
+    expect(await boton(TEXTO_ACCION.aprobar)).toBeTruthy();
   });
 
   it("«No se pagó» se cierra sin pagar con un motivo (decisión 12, P-04)", async () => {

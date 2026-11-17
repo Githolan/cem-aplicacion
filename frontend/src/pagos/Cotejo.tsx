@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { CSV } from "../archivos";
@@ -6,23 +6,61 @@ import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { type Aviso, ENCABEZADO_IDEMPOTENCIA, ESTADO, fechaLegible, importe, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
+import {
+  type Aviso,
+  ENCABEZADO_IDEMPOTENCIA,
+  ESTADO,
+  fechaLegible,
+  importe,
+  mensajeDeActo,
+  mensajeDeError,
+  sinLaFalla,
+  sinPisarLoHecho,
+} from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, monedasDe, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
+import { Hoja } from "../Hoja";
 import { REQUISITOS } from "../permisos";
 import { SubirArchivo } from "../SubirArchivo";
+import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { CargandoPagos } from "./CargandoPagos";
+import { FilaEnlace } from "./FilaEnlace";
 import { MONEDAS } from "./FormularioOrden";
 import { RUTA_PAGOS, RUTA_SIN_EXPLICAR, rutaFicha } from "./rutas";
-import { EJEMPLO_EXTRACTO, TITULO_SIN_EXPLICAR, VER_SIN_EXPLICAR } from "./textos";
-import { useActo } from "./useActo";
+import {
+  COMPARAR,
+  DESHACER_COTEJO,
+  EJEMPLO_EXTRACTO,
+  FALTA_ARCHIVO_EXTRACTO,
+  FALTA_MOTIVO_DESHACER,
+  NOMBRE_MONEDA,
+  SUBIR_EXTRACTO,
+  textoLosCotejaOtra,
+  textoLosDeshaceOtra,
+  textoMarcarCotejados,
+  textoTopeTildes,
+  TILDAR_PAGOS,
+  VER_LO_YA_COTEJADO,
+  VER_SIN_EXPLICAR,
+} from "./textos";
+import { type Acto, useActo } from "./useActo";
 
 // `/pagos/cotejo`: cotejar con el banco, a mano o con el extracto (§10). Cotejar no cambia la orden
 // ni mueve dinero. Quién coteja cada pago lo decide el servidor (`puede_cotejar`): el archivo se
 // lee, se compara y se guarda allá, y acá solo se elige qué columna es cada dato.
+//
+// Informe de fricción del 17-11-2026 (tanda 6): la pantalla es la lista de lo que falta cotejar
+// (COT-01). El extracto se sube en su ventana, con las columnas como segundo paso de la misma
+// ventana y sin volver a pedir la moneda (COT-02, COT-03); el resultado se mira en una hoja que se
+// cierra con «Listo» (COT-04). Lo que esta cuenta no puede cotejar ni deshacer va en una línea al
+// pie, no en la lista (COT-05). Lo ya cotejado se pide aparte, en filas compactas, y «Deshacer el
+// cotejo» está en la ficha de cada uno, con el motivo en su ventana (COT-06). Ningún botón apagado
+// porque falta algo (C8P-11, C8P-15, C8P-16).
 
 type Elemento = components["schemas"]["PagoPorCotejar"];
 type Cotejado = components["schemas"]["PagoCotejado"];
@@ -32,24 +70,24 @@ type Resultado = components["schemas"]["ResultadoCotejo"];
 type Signo = components["schemas"]["SignoExtracto"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[]; siguiente: string | null };
-type Extracto =
-  | { tipo: "sin_archivo" }
-  | { tipo: "leyendo" }
-  | { tipo: "columnas"; archivo: File; vista: Vista }
-  | { tipo: "resultado"; archivo: File; vista: Vista; resultado: Resultado };
+/** Qué columna es cada dato, mientras se elige. */
+type Valores = { fecha: string; importe: string; numero: string; signo: Signo };
+/** La ventana de subir el extracto: primero el archivo y, si el servidor no reconoce las columnas, cuáles son. */
+type Subida = { paso: "archivo" } | { paso: "columnas"; archivo: File; vista: Vista; valores: Valores };
 
 const TIPO_CSV = "text/csv";
 const SIN_NUMERO = "";
+const LARGO_MOTIVO = 300;
 /** Las respuestas que se resuelven eligiendo otras columnas. */
 const VUELVE_A_ELEGIR = new Set(["columnas_no_encontradas", "columnas_sin_elegir", "extracto_sin_movimientos"]);
 const SIGNOS: readonly { valor: Signo; texto: string }[] = [
   { valor: "con_signo", texto: "Con signo menos, en una columna de importes" },
   { valor: "sin_signo", texto: "Sin signo, en una columna solo de débitos" },
 ];
+const FALTA_FECHA = "Falta elegir la columna de la fecha.";
+const FALTA_IMPORTE = "Falta elegir la columna del importe.";
 
 const cantidad = (n: number, una: string, varias: string) => (n === 1 ? una : `${n} ${varias}`);
-
-/** «2026-11-05» a «05/11/2026». */
 
 const detalle = (numero: string | null, fecha: string, nombre: string) =>
   numero === null ? fechaLegible(fecha) : `${nombre} ${numero} · ${fechaLegible(fecha)}`;
@@ -57,12 +95,24 @@ const detalle = (numero: string | null, fecha: string, nombre: string) =>
 /** La columna que parece ser ese dato, para no empezar de cero. */
 const parecida = (columnas: string[], patron: RegExp) => columnas.find((c) => patron.test(c)) ?? "";
 
+/** Lo guardado del edificio y, si no, lo que el servidor reconoció por el nombre o lo que se parece. */
+function valoresDe({ columnas, columnas_guardadas: guardadas, columnas_reconocidas: reconocidas, signo_sugerido: sugerido }: Vista): Valores {
+  const previas = guardadas ?? reconocidas;
+  return {
+    fecha: previas?.fecha ?? parecida(columnas, /fecha/i),
+    importe: previas?.importe ?? parecida(columnas, /importe|d[eé]bito|monto/i),
+    numero: previas?.numero_operacion ?? parecida(columnas, /operaci[oó]n|referencia|comprobante/i),
+    signo: previas?.signo ?? sugerido,
+  };
+}
+
 export function Cotejo() {
   const elegido = useConsorcio(REQUISITOS.cotejo);
   return <CotejoDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
 function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+  const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [avisoLectura, setAvisoLectura] = useState<Aviso | null>(null);
   const [despues, setDespues] = useState<string | null>(null);
@@ -72,10 +122,21 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   /** La del extracto que se va a subir. El archivo no la dice; sin leer la lista, manda la guardada. */
   const [moneda, setMoneda] = useState<string | null>(null);
   const [tildados, setTildados] = useState<ReadonlySet<string>>(new Set());
-  const [extracto, setExtracto] = useState<Extracto>({ tipo: "sin_archivo" });
+  const [subida, setSubida] = useState<Subida | null>(null);
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  /** Un rechazo que llega después de pedir el código, con la ventana todavía abierta. */
+  const [tardio, setTardio] = useState<string | null>(null);
+  const [resultado, setResultado] = useState<Resultado | null>(null);
   const [cotejos, setCotejos] = useState(0);
+  const primerBoton = useRef<HTMLButtonElement | null>(null);
   const acto = useActo(aEntrar);
-  const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
+  const { enviando, aviso, setAviso, pendiente, setPendiente } = acto;
+  const conPantalla = pantalla.tipo === "lista" && consorcio !== "";
+  /** Como en la orden (P-14): la moneda se pregunta solo si el edificio opera en más de una. */
+  const ofrecidas = conPantalla ? MONEDAS.filter((m) => monedasDe(pantalla, consorcio).includes(m)) : [];
+  const conCampoMoneda = ofrecidas.length > 1;
+  const monedaDelExtracto = conCampoMoneda ? (moneda ?? ofrecidas[0] ?? null) : (ofrecidas[0] ?? moneda);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -132,6 +193,38 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
     setVuelta((v) => v + 1);
   }
 
+  /**
+   * Un acto hecho desde una ventana: su rechazo queda en la ventana y no arriba de la pantalla. Si
+   * pide el código, la ventana sigue abierta debajo y el reintento termina por su cuenta (lo que
+   * salga mal ahí se dice en la ventana, con `tardio`).
+   */
+  async function enVentana<T>(a: Acto<T>): Promise<FinDeEnvio> {
+    let fin: FinDeEnvio = "seguir";
+    let primera = true;
+    const fallo = (texto: string) => {
+      setAviso(null);
+      if (primera) fin = { rechazo: texto };
+      else setTardio(texto);
+    };
+    await acto.hacer({
+      ...a,
+      alTerminar: (data) => {
+        fin = "cerrar";
+        a.alTerminar(data);
+      },
+      alFallar: (estado, codigo, error) => {
+        fallo(mensajeDeActo(estado, error));
+        a.alFallar?.(estado, codigo, error);
+      },
+      alNoLlegar: () => {
+        fallo(SIN_CONEXION);
+        a.alNoLlegar?.();
+      },
+    });
+    primera = false;
+    return fin;
+  }
+
   function guardarTildados() {
     const pagos = [...tildados];
     void acto.hacer({
@@ -155,9 +248,24 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
     });
   }
 
-  function comparar(archivo: File, vista: Vista, columnas: Columnas | null): Promise<void> {
-    return acto.hacer({
-      quePide: [archivo.name, archivo.size, archivo.lastModified, columnas, moneda],
+  function abrirSubida() {
+    setAviso(null);
+    setArchivo(null);
+    setErrores(SIN_ERRORES);
+    setTardio(null);
+    setSubida({ paso: "archivo" });
+  }
+
+  function cerrarSubida() {
+    setSubida(null);
+    setArchivo(null);
+    setErrores(SIN_ERRORES);
+    setTardio(null);
+  }
+
+  function comparar(elegido: File, vista: Vista, columnas: Columnas | null): Promise<FinDeEnvio> {
+    return enVentana({
+      quePide: [elegido.name, elegido.size, elegido.lastModified, columnas, monedaDelExtracto],
       nombre: "comparar el extracto",
       pedir: (clave) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/pagos/cotejo/extracto", {
@@ -166,31 +274,33 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
             path: { consorcio_id: consorcio },
             header: { [ENCABEZADO_IDEMPOTENCIA]: clave },
             // Sin elegir, el servidor usa las columnas guardadas del edificio.
-            query: columnas ?? (moneda === null ? {} : { moneda }),
+            query: columnas ?? (monedaDelExtracto === null ? {} : { moneda: monedaDelExtracto }),
           },
           // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
-          body: archivo as unknown as string,
+          body: elegido as unknown as string,
           bodySerializer: (cuerpo) => cuerpo,
         }),
-      alTerminar: (resultado) => {
-        setExtracto({ tipo: "resultado", archivo, vista, resultado });
+      alTerminar: (r) => {
+        cerrarSubida();
+        setResultado(r);
         setCotejos((c) => c + 1);
         releer();
       },
       alFallar: (_, codigo) => {
-        setExtracto(codigo !== undefined && VUELVE_A_ELEGIR.has(codigo) ? { tipo: "columnas", archivo, vista } : { tipo: "sin_archivo" });
+        if (codigo !== undefined && VUELVE_A_ELEGIR.has(codigo)) {
+          setSubida((s) => (s?.paso === "columnas" ? s : { paso: "columnas", archivo: elegido, vista, valores: valoresDe(vista) }));
+        }
       },
     });
   }
 
-  /** El tipo y el tamaño ya los controló `SubirArchivo` al elegirlo. */
-  async function elegirArchivo(archivo: File) {
-    setAviso(null);
-    setExtracto({ tipo: "leyendo" });
-    const falla = (texto: string) => {
-      setExtracto({ tipo: "sin_archivo" });
-      setAviso({ texto, ok: false });
-    };
+  /** El primer paso: el archivo (y la moneda). El tipo y el tamaño ya los controló `SubirArchivo`. */
+  async function enviarArchivo(): Promise<FinDeEnvio> {
+    if (archivo === null) {
+      setErrores({ archivo: FALTA_ARCHIVO_EXTRACTO });
+      return "seguir";
+    }
+    setTardio(null);
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/pagos/cotejo/columnas", {
         headers: { ...encabezadoCsrf(), "Content-Type": TIPO_CSV },
@@ -199,34 +309,46 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
         bodySerializer: (cuerpo) => cuerpo,
       });
       exigirSesion(response);
-      if (!montado.current) return;
-      if (data === undefined) falla(mensajeDeError(response.status, codigoDe(error)));
-      // Sin columnas guardadas ni reconocidas por su nombre, se pregunta (P-23); si no, se compara
-      // enseguida, y «Elegir otras columnas» sigue en el resultado.
-      else if (data.columnas_guardadas === null && data.columnas_reconocidas === null) setExtracto({ tipo: "columnas", archivo, vista: data });
-      else {
-        const reconocidas = data.columnas_guardadas === null ? data.columnas_reconocidas : null;
-        await comparar(archivo, data, reconocidas === null ? null : { ...reconocidas, moneda: moneda ?? reconocidas.moneda });
-        // Sin respuesta, o esperando el código: lo que siga lo dice el aviso o el reintento.
-        setExtracto((x) => (x.tipo === "leyendo" ? { tipo: "sin_archivo" } : x));
+      if (data === undefined) return { rechazo: mensajeDeError(response.status, codigoDe(error)) };
+      // Sin columnas guardadas ni reconocidas por su nombre, se pregunta (P-23); si no, se compara enseguida.
+      if (data.columnas_guardadas === null && data.columnas_reconocidas === null) {
+        setSubida({ paso: "columnas", archivo, vista: data, valores: valoresDe(data) });
+        return "seguir";
       }
+      const reconocidas = data.columnas_guardadas === null ? data.columnas_reconocidas : null;
+      return await comparar(archivo, data, reconocidas === null ? null : { ...reconocidas, moneda: monedaDelExtracto ?? reconocidas.moneda });
     } catch (e: unknown) {
-      if (!montado.current) return;
-      if (e instanceof SinSesion) aEntrar();
-      else falla(SIN_CONEXION);
+      if (!(e instanceof SinSesion)) return { rechazo: SIN_CONEXION };
+      aEntrar();
+      return "seguir";
     }
   }
 
-  function alternar(id: string) {
-    setTildados((t) => {
-      const nuevos = new Set(t);
-      if (!nuevos.delete(id) && (maximo === null || t.size < maximo)) nuevos.add(id);
-      return nuevos;
+  /** El segundo paso: qué columna es cada dato. La moneda es la que ya se eligió. */
+  function enviarColumnas(paso: Extract<Subida, { paso: "columnas" }>): Promise<FinDeEnvio> | FinDeEnvio {
+    const { fecha, importe: monto, numero, signo } = paso.valores;
+    const faltan = faltaCompletar({ fecha: [fecha, FALTA_FECHA], importe: [monto, FALTA_IMPORTE] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    setTardio(null);
+    return comparar(paso.archivo, paso.vista, {
+      fecha,
+      importe: monto,
+      numero_operacion: numero === SIN_NUMERO ? null : numero,
+      signo,
+      moneda: monedaDelExtracto ?? "",
     });
   }
 
-  function deshacer(pago: string, motivo: string, alListo: () => void) {
-    void acto.hacer({
+  function cambiarValor(campo: keyof Valores, valor: string) {
+    setSubida((s) => (s?.paso === "columnas" ? { ...s, valores: { ...s.valores, [campo]: valor } } : s));
+    setErrores((e) => sinElDe(e, campo));
+  }
+
+  function deshacer(pago: string, motivo: string, alListo: () => void): Promise<FinDeEnvio> {
+    return enVentana({
       quePide: ["anular-cotejo", pago, motivo],
       nombre: "deshacer el cotejo",
       pedir: (clave) =>
@@ -236,18 +358,26 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           body: { motivo },
         }),
       alTerminar: () => {
-        setAviso({ texto: "Listo: el cotejo se deshizo. Queda en la historia y el pago vuelve a lo que falta cotejar.", ok: true });
+        setAviso({ texto: "Listo: el cotejo se deshizo y el pago vuelve a lo que falta cotejar.", ok: true });
         alListo();
         releer();
       },
-      alFallar: (estado) => {
-        if (estado === ESTADO.conflicto || estado === ESTADO.noEncontrado) alListo();
+      alFallar: (estado, _, error) => {
+        // El pago ya cambió: la ficha se cierra y el motivo se dice arriba.
+        if (estado === ESTADO.conflicto || estado === ESTADO.noEncontrado) {
+          setAviso({ texto: mensajeDeActo(estado, error), ok: false });
+          alListo();
+        }
       },
     });
   }
 
   const siguiente = lectura.tipo === "ok" ? lectura.siguiente : null;
-  const conPantalla = pantalla.tipo === "lista" && consorcio !== "";
+  const rechazoTardio = tardio !== null && (
+    <p className="aviso-error" role="alert">
+      {tardio}
+    </p>
+  );
 
   return (
     <>
@@ -269,38 +399,18 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           alCancelar={() => setPendiente(null)}
         />
       )}
-      {/* Mientras se pide el código, lo tildado y el archivo siguen montados: el reintento no los pierde. */}
+      {/* Mientras se pide el código, lo tildado sigue montado: el reintento no lo pierde. */}
       {conPantalla && (
         <div className="cotejo" hidden={pendiente !== null}>
-          <div>
-            {extracto.tipo === "columnas" ? (
-              <ElegirColumnas
-                vista={extracto.vista}
-                enviando={enviando}
-                moneda={moneda}
-                alComparar={(columnas) => void comparar(extracto.archivo, extracto.vista, columnas)}
-                alVolver={() => setExtracto({ tipo: "sin_archivo" })}
-              />
-            ) : extracto.tipo === "resultado" ? (
-              <ResultadoDelExtracto
-                r={extracto.resultado}
-                consorcio={consorcio}
-                alElegirColumnas={() => setExtracto({ tipo: "columnas", archivo: extracto.archivo, vista: extracto.vista })}
-                alOtroArchivo={() => setExtracto({ tipo: "sin_archivo" })}
-              />
-            ) : (
-              <SubirExtracto
-                tope={tope}
-                ocupado={enviando || extracto.tipo === "leyendo"}
-                moneda={moneda}
-                alCambiarMoneda={setMoneda}
-                alElegir={(archivo) => void elegirArchivo(archivo)}
-              />
-            )}
-            {(extracto.tipo === "leyendo" || (enviando && extracto.tipo === "columnas")) && <p role="status">Leyendo el extracto…</p>}
-          </div>
-          <section className="tarjeta" aria-labelledby="cotejo-a-mano">
-            <h2 id="cotejo-a-mano">O marcar a mano</h2>
+          <p className="salidas-pago salidas-pago--arriba">
+            <button type="button" onClick={abrirSubida}>
+              {SUBIR_EXTRACTO}
+            </button>
+          </p>
+          <section aria-labelledby={`${id}-falta`}>
+            <h2 id={`${id}-falta`} className="titulo-grupo">
+              Lo que falta cotejar
+            </h2>
             {lectura.tipo === "cargando" && <CargandoPagos />}
             {lectura.tipo === "sin_servicio" && (
               <FallaDeLectura
@@ -319,7 +429,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
                 tildados={tildados}
                 maximo={maximo}
                 enviando={enviando}
-                alternar={alternar}
+                setTildados={setTildados}
                 alGuardar={guardarTildados}
               />
             )}
@@ -340,129 +450,131 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
             )}
           </section>
           {/* Después de cotejar, lo leído quedó viejo: vuelve a pedirse. */}
-          <YaCotejados key={cotejos} consorcio={consorcio} enviando={enviando} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer} />
+          <YaCotejados key={cotejos} consorcio={consorcio} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer} />
         </div>
       )}
+      {/* Una sola ventana para los dos pasos: el rechazo que lleva a elegir las columnas queda a la vista. */}
+      {subida !== null && (
+        <VentanaDeFormulario
+          titulo={subida.paso === "archivo" ? SUBIR_EXTRACTO : "¿Qué es cada columna?"}
+          textoEnviar={subida.paso === "archivo" ? SUBIR_EXTRACTO : COMPARAR}
+          alEnviar={() => (subida.paso === "archivo" ? enviarArchivo() : enviarColumnas(subida))}
+          alCerrar={cerrarSubida}
+        >
+          {subida.paso === "columnas" && <CamposColumnas vista={subida.vista} valores={subida.valores} errores={errores} cambiar={cambiarValor} />}
+          {subida.paso === "archivo" && conCampoMoneda && monedaDelExtracto !== null && (
+            <>
+              <label htmlFor={`${id}-moneda`}>Moneda del extracto</label>
+              <select id={`${id}-moneda`} data-foco value={monedaDelExtracto} onChange={(e) => setMoneda(e.target.value)}>
+                {ofrecidas.map((m) => (
+                  <option key={m} value={m}>
+                    {NOMBRE_MONEDA[m] ?? m}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          {subida.paso === "archivo" && (
+            <>
+              <SubirArchivo
+                de="del extracto"
+                tipos={[CSV]}
+                tope={tope}
+                reemplaza={archivo !== null}
+                elegido={archivo?.name ?? null}
+                refPrimero={
+                  conCampoMoneda
+                    ? undefined
+                    : (b) => {
+                        primerBoton.current = b;
+                      }
+                }
+                alElegir={(elegido) => {
+                  setArchivo(elegido);
+                  setErrores((e) => sinElDe(e, "archivo"));
+                }}
+              />
+              <ErrorDeCampo idCampo={`${id}-archivo`} mensaje={errores.archivo} />
+              <details className="historial">
+                <summary>Ver el ejemplo</summary>
+                <pre className="ejemplo-extracto">{EJEMPLO_EXTRACTO}</pre>
+              </details>
+            </>
+          )}
+          {rechazoTardio}
+        </VentanaDeFormulario>
+      )}
+      {resultado !== null && <ResultadoDelExtracto r={resultado} consorcio={consorcio} alCerrar={() => setResultado(null)} />}
     </>
   );
 }
 
-type PropsSubir = { tope: number | null; ocupado: boolean; moneda: string | null; alCambiarMoneda: (moneda: string) => void; alElegir: (archivo: File) => void };
+type PropsColumnas = {
+  vista: Vista;
+  valores: Valores;
+  errores: ErroresDeCampo;
+  cambiar: (campo: keyof Valores, valor: string) => void;
+};
 
-function SubirExtracto({ tope, ocupado, moneda, alCambiarMoneda, alElegir }: PropsSubir) {
+function CamposColumnas({ vista, valores, errores, cambiar }: PropsColumnas) {
   const id = useId();
-  return (
-    <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
-      <h2 id={`${id}-titulo`}>Subir el extracto</h2>
-      {moneda !== null && (
-        <div className="formulario">
-          <label htmlFor={`${id}-moneda`}>Moneda del extracto</label>
-          <select id={`${id}-moneda`} value={moneda} disabled={ocupado} onChange={(e) => alCambiarMoneda(e.target.value)}>
-            {MONEDAS.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
-          <p>El archivo del banco no la dice: un débito solo coincide con un pago en la misma moneda.</p>
-        </div>
-      )}
-      <SubirArchivo de="del extracto" tipos={[CSV]} tope={tope} deshabilitada={ocupado} alElegir={alElegir} />
-      <details className="historial">
-        <summary>Ver el ejemplo</summary>
-        <p>La primera línea trae los nombres de las columnas y cada una de las demás, un movimiento:</p>
-        <pre className="ejemplo-extracto">{EJEMPLO_EXTRACTO}</pre>
-      </details>
-    </section>
-  );
-}
-
-type PropsColumnas = { vista: Vista; enviando: boolean; moneda: string | null; alComparar: (c: Columnas) => void; alVolver: () => void };
-
-function ElegirColumnas({ vista, enviando, moneda: monedaSugerida, alComparar, alVolver }: PropsColumnas) {
-  const id = useId();
-  const { columnas, muestra, columnas_guardadas: guardadas, columnas_reconocidas: reconocidas, signo_sugerido: sugerido } = vista;
-  /** Lo guardado del edificio y, si no, lo que el servidor reconoció por el nombre. */
-  const previas = guardadas ?? reconocidas;
-  const [fecha, setFecha] = useState(previas?.fecha ?? parecida(columnas, /fecha/i));
-  const [monto, setMonto] = useState(previas?.importe ?? parecida(columnas, /importe|d[eé]bito|monto/i));
-  const [numero, setNumero] = useState(previas?.numero_operacion ?? parecida(columnas, /operaci[oó]n|referencia|comprobante/i));
-  const [signo, setSigno] = useState<Signo>(previas?.signo ?? sugerido);
-  const [moneda, setMoneda] = useState(monedaSugerida ?? guardadas?.moneda ?? "");
+  const { columnas, muestra } = vista;
   const ejemplo = (columna: string) => muestra[columnas.indexOf(columna)] ?? "";
-  const primeraFila = [fecha, monto, numero].filter((c) => c !== "").map(ejemplo);
-
-  function enviar(evento: FormEvent) {
-    evento.preventDefault();
-    alComparar({ fecha, importe: monto, numero_operacion: numero === SIN_NUMERO ? null : numero, signo, moneda });
-  }
-
+  const primeraFila = [valores.fecha, valores.importe, valores.numero].filter((c) => c !== "").map(ejemplo);
   const opciones = columnas.map((c) => (
     <option key={c} value={c}>
       {c}
     </option>
   ));
   return (
-    <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
-      <h2 id={`${id}-titulo`}>¿Qué es cada columna?</h2>
+    <>
       <p>Queda guardado para este edificio.</p>
-      <form className="formulario" onSubmit={enviar}>
-        <label htmlFor={`${id}-fecha`}>Fecha</label>
-        <select id={`${id}-fecha`} required value={fecha} onChange={(e) => setFecha(e.target.value)}>
-          <option value="">Elegir una columna</option>
-          {opciones}
-        </select>
-        <label htmlFor={`${id}-importe`}>Importe</label>
-        <select id={`${id}-importe`} required value={monto} onChange={(e) => setMonto(e.target.value)}>
-          <option value="">Elegir una columna</option>
-          {opciones}
-        </select>
-        <label htmlFor={`${id}-numero`}>Número de operación</label>
-        <select id={`${id}-numero`} value={numero} onChange={(e) => setNumero(e.target.value)}>
-          <option value={SIN_NUMERO}>No tiene: comparar por importe y fecha</option>
-          {opciones}
-        </select>
-        <label htmlFor={`${id}-moneda`}>Moneda del extracto</label>
-        <select id={`${id}-moneda`} required value={moneda} onChange={(e) => setMoneda(e.target.value)}>
-          {MONEDAS.map((m) => (
-            <option key={m}>{m}</option>
-          ))}
-        </select>
-        <label htmlFor={`${id}-signo`}>Cómo figuran los pagos</label>
-        <select id={`${id}-signo`} value={signo} onChange={(e) => setSigno(e.target.value as Signo)}>
-          {SIGNOS.map((s) => (
-            <option key={s.valor} value={s.valor}>
-              {s.texto}
-            </option>
-          ))}
-        </select>
-        {primeraFila.length > 0 && <p>Primera fila: {primeraFila.join(" · ")}</p>}
-        <div className="acciones">
-          <button type="submit" disabled={enviando}>
-            Comparar
-          </button>
-          <button type="button" className="secundario" disabled={enviando} onClick={alVolver}>
-            Elegir otro archivo
-          </button>
-        </div>
-      </form>
-    </section>
+      <label htmlFor={`${id}-fecha`}>Fecha</label>
+      <select id={`${id}-fecha`} data-foco value={valores.fecha} {...marcaDe(`${id}-fecha`, errores.fecha)} onChange={(e) => cambiar("fecha", e.target.value)}>
+        <option value="">Elegir una columna</option>
+        {opciones}
+      </select>
+      <ErrorDeCampo idCampo={`${id}-fecha`} mensaje={errores.fecha} />
+      <label htmlFor={`${id}-importe`}>Importe</label>
+      <select id={`${id}-importe`} value={valores.importe} {...marcaDe(`${id}-importe`, errores.importe)} onChange={(e) => cambiar("importe", e.target.value)}>
+        <option value="">Elegir una columna</option>
+        {opciones}
+      </select>
+      <ErrorDeCampo idCampo={`${id}-importe`} mensaje={errores.importe} />
+      <label htmlFor={`${id}-numero`}>Número de operación</label>
+      <select id={`${id}-numero`} value={valores.numero} onChange={(e) => cambiar("numero", e.target.value)}>
+        <option value={SIN_NUMERO}>No tiene: comparar por importe y fecha</option>
+        {opciones}
+      </select>
+      <label htmlFor={`${id}-signo`}>Cómo figuran los pagos</label>
+      <select id={`${id}-signo`} value={valores.signo} onChange={(e) => cambiar("signo", e.target.value)}>
+        {SIGNOS.map((s) => (
+          <option key={s.valor} value={s.valor}>
+            {s.texto}
+          </option>
+        ))}
+      </select>
+      {primeraFila.length > 0 && <p>Primera fila: {primeraFila.join(" · ")}</p>}
+    </>
   );
 }
 
 type PropsCotejados = {
   consorcio: string;
-  enviando: boolean;
   aEntrar: () => void;
   avisar: (aviso: Aviso) => void;
-  deshacer: (pago: string, motivo: string, alListo: () => void) => void;
+  deshacer: (pago: string, motivo: string, alListo: () => void) => Promise<FinDeEnvio>;
 };
 
 /** Se lee cuando alguien lo pide: deshacer es la excepción, no la tarea de la pantalla. */
-function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCotejados) {
+function YaCotejados({ consorcio, aEntrar, avisar, deshacer }: PropsCotejados) {
   const id = useId();
   const [elementos, setElementos] = useState<Cotejado[] | null>(null);
   const [siguiente, setSiguiente] = useState<string | null>(null);
-  const [elegido, setElegido] = useState<string | null>(null);
+  const fichas = useFichas<string>();
+  const [deshaciendo, setDeshaciendo] = useState(false);
   const [motivo, setMotivo] = useState("");
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
 
   function leer(despues: string | null) {
     void api
@@ -481,74 +593,114 @@ function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCo
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : avisar({ texto: SIN_CONEXION, ok: false })));
   }
 
-  function listo() {
-    setElegido(null);
+  function cerrarVentana() {
+    setDeshaciendo(false);
     setMotivo("");
+    setErrores(SIN_ERRORES);
+  }
+
+  /** Hecho (o el pago ya cambió): se cierran la ventana y la ficha, y la lista se vuelve a leer. */
+  function listo() {
+    cerrarVentana();
+    fichas.cerrar(false);
     leer(null);
   }
 
-  function enviar(evento: FormEvent, pago: string) {
-    evento.preventDefault();
-    deshacer(pago, motivo.trim(), listo);
+  if (elementos === null) {
+    return (
+      <p className="salidas-pago">
+        <button type="button" className="secundario" onClick={() => leer(null)}>
+          {VER_LO_YA_COTEJADO}
+        </button>
+      </p>
+    );
   }
 
+  const propios = elementos.filter((e) => e.puede_cotejar);
+  const ajenos = elementos.length - propios.length;
+  const abierto = propios.find((e) => e.pago_id === fichas.abierta);
+
   return (
-    <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
-      <h2 id={`${id}-titulo`}>Lo ya cotejado</h2>
-      {elementos === null && (
-        <div className="formulario">
-          <button type="button" className="secundario" onClick={() => leer(null)}>
-            Ver lo ya cotejado
-          </button>
-        </div>
-      )}
-      {elementos !== null && elementos.length === 0 && <p>Todavía no hay pagos cotejados.</p>}
-      {elementos !== null && elementos.length > 0 && (
-        <ul className="tildes-pago" aria-label="Lo ya cotejado">
-          {elementos.map((e) => (
+    <section aria-labelledby={`${id}-titulo`}>
+      <h2 id={`${id}-titulo`} className="titulo-grupo">
+        Lo ya cotejado
+      </h2>
+      {elementos.length === 0 && <p>Todavía no hay pagos cotejados.</p>}
+      {propios.length > 0 && (
+        <ul className="filas-registro" aria-label="Lo ya cotejado">
+          {propios.map((e) => (
             <li key={e.pago_id}>
-              <div className="tilde-pago">
-                <span className="tilde-pago__datos">
-                  <span className="fila-pago__arriba">
-                    <strong>{e.proveedor}</strong>
-                    <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
-                  </span>
-                  <span>{detalle(e.numero_operacion, e.fecha_operacion, "Operación")}</span>
-                  {!e.puede_cotejar && <span>Lo deshace otra persona del Consejo: esta cuenta participó de este pago.</span>}
-                </span>
-              </div>
-              {e.puede_cotejar && elegido !== e.pago_id && (
-                <div className="formulario">
-                  <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setElegido(e.pago_id)}>
-                    Deshacer el cotejo de {e.proveedor}
-                  </button>
-                </div>
-              )}
-              {elegido === e.pago_id && (
-                <form className="formulario" onSubmit={(evento) => enviar(evento, e.pago_id)}>
-                  <label htmlFor={`${id}-motivo`}>Por qué se deshace</label>
-                  <textarea id={`${id}-motivo`} required maxLength={300} rows={3} value={motivo} disabled={enviando} onChange={(evento) => setMotivo(evento.target.value)} />
-                  <p>No se borra: queda en la historia. Al subir de nuevo el extracto no se vuelve a tildar solo.</p>
-                  <div className="acciones">
-                    <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
-                      Deshacer el cotejo
-                    </button>
-                    <button type="button" className="secundario" disabled={enviando} onClick={() => setElegido(null)}>
-                      Cancelar
-                    </button>
-                  </div>
-                </form>
-              )}
+              <FilaDeRegistro
+                titulo={e.proveedor}
+                resumen={`${detalle(e.numero_operacion, e.fecha_operacion, "Operación")} · ${importe(e.importe_centavos, e.moneda)}`}
+                alAbrir={() => fichas.abrir(e.pago_id)}
+                refFila={fichas.refFila(e.pago_id)}
+                abierta={fichas.abierta === e.pago_id}
+              />
             </li>
           ))}
         </ul>
       )}
+      {ajenos > 0 && <p className="comando-no-disponible">{textoLosDeshaceOtra(ajenos)}</p>}
       {siguiente !== null && (
         <div className="formulario">
           <button type="button" className="secundario" onClick={() => leer(siguiente)}>
             Ver más cotejados
           </button>
         </div>
+      )}
+      {abierto !== undefined && (
+        <FichaDeRegistro
+          titulo={abierto.proveedor}
+          datos={[
+            { etiqueta: "Importe", valor: importe(abierto.importe_centavos, abierto.moneda) },
+            { etiqueta: "Fecha", valor: fechaLegible(abierto.fecha_operacion) },
+            ...(abierto.numero_operacion === null ? [] : [{ etiqueta: "Número de operación", valor: abierto.numero_operacion }]),
+          ]}
+          alCerrar={() => fichas.cerrar()}
+          ventana={
+            deshaciendo && (
+              <VentanaDeFormulario
+                titulo={DESHACER_COTEJO}
+                textoEnviar={DESHACER_COTEJO}
+                peligro
+                alCerrar={cerrarVentana}
+                alEnviar={() => {
+                  const faltan = faltaCompletar({ motivo: [motivo, FALTA_MOTIVO_DESHACER] });
+                  if (hayErrores(faltan)) {
+                    setErrores(faltan);
+                    return "seguir";
+                  }
+                  return deshacer(abierto.pago_id, motivo.trim(), listo);
+                }}
+              >
+                <label htmlFor={`${id}-motivo`}>Por qué se deshace</label>
+                <textarea
+                  id={`${id}-motivo`}
+                  data-foco
+                  maxLength={LARGO_MOTIVO}
+                  rows={3}
+                  value={motivo}
+                  {...marcaDe(`${id}-motivo`, errores.motivo)}
+                  onChange={(e) => {
+                    setMotivo(e.target.value);
+                    setErrores((x) => sinElDe(x, "motivo"));
+                  }}
+                />
+                <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={errores.motivo} />
+              </VentanaDeFormulario>
+            )
+          }
+        >
+          <p className="ficha-registro__acciones">
+            <Link to={rutaFicha(abierto.orden_id)} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+              Ver la orden
+            </Link>
+            <button type="button" className="secundario peligro" onClick={() => setDeshaciendo(true)}>
+              {DESHACER_COTEJO}
+            </button>
+          </p>
+        </FichaDeRegistro>
       )}
     </section>
   );
@@ -587,34 +739,27 @@ function TituloConTotal({ texto, total }: { texto: string; total: number }) {
   );
 }
 
-type PropsResultado = { r: Resultado; consorcio: string; alElegirColumnas: () => void; alOtroArchivo: () => void };
+type PropsResultado = { r: Resultado; consorcio: string; alCerrar: () => void };
 
-function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }: PropsResultado) {
-  const id = useId();
+/** Lo que dejó el extracto, en una hoja que se cierra con «Listo»: la pantalla vuelve a la lista. */
+function ResultadoDelExtracto({ r, consorcio, alCerrar }: PropsResultado) {
   const pendientes = pendientesDelExtracto(r);
-  const nadaParaMirar = r.total_aca_no_banco === 0 && r.total_banco_no_aca === 0 && pendientes.length === 0;
   return (
-    <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
-      <h2 id={`${id}-titulo`}>
-        Extracto del {fechaLegible(r.desde)} al {fechaLegible(r.hasta)}
-      </h2>
+    <Hoja titulo={`Extracto del ${fechaLegible(r.desde)} al ${fechaLegible(r.hasta)}`} alEscapar={alCerrar}>
       <Resumen r={r} />
       {r.ya_cotejados > 0 && <p>{cantidad(r.ya_cotejados, "1 ya estaba cotejado", "ya estaban cotejados")}.</p>}
-      {nadaParaMirar && <p>No hay nada para mirar.</p>}
       {r.total_aca_no_banco > 0 && (
         <>
           <TituloConTotal texto="Están acá y no en el banco" total={r.total_aca_no_banco} />
-          <ul className="filas-pago">
+          <ul className="filas-registro">
             {r.aca_no_banco.map((p) => (
               <li key={p.pago_id}>
-                <Link to={rutaFicha(p.orden_id)} state={{ consorcio }} className="fila-pago fila-pago--con-borde">
-                  <span className="fila-pago__arriba">
-                    <strong>{p.proveedor}</strong>
-                    <span className="fila-pago__importe">{importe(p.importe_centavos, p.moneda)}</span>
-                  </span>
-                  <span>{detalle(p.numero_operacion, p.fecha_operacion, "Operación")}</span>
-                  <span className="fila-pago__verbo">Ver el pago</span>
-                </Link>
+                <FilaEnlace
+                  a={rutaFicha(p.orden_id)}
+                  estadoNavegacion={{ consorcio }}
+                  titulo={p.proveedor}
+                  resumen={`${detalle(p.numero_operacion, p.fecha_operacion, "Operación")} · ${importe(p.importe_centavos, p.moneda)}`}
+                />
               </li>
             ))}
           </ul>
@@ -628,11 +773,9 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
             {r.banco_no_aca.map((m, i) => (
               <li key={`${m.fecha}-${m.importe_centavos}-${m.numero_operacion}-${i}`} className="fila-pago fila-pago--con-borde">
                 <span className="fila-pago__arriba">
-                  <strong>Débito sin registrar</strong>
+                  <strong>{detalle(m.numero_operacion, m.fecha, "Referencia")}</strong>
                   <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
                 </span>
-                <span>{detalle(m.numero_operacion, m.fecha, "Referencia")}</span>
-                <span className="fila-pago__nota">Queda en «{TITULO_SIN_EXPLICAR}», que también ve la administración.</span>
               </li>
             ))}
           </ul>
@@ -656,17 +799,12 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
           </ul>
         </>
       )}
-      <div className="formulario">
-        <div className="acciones">
-          <button type="button" onClick={alOtroArchivo}>
-            Subir otro extracto
-          </button>
-          <button type="button" className="secundario" onClick={alElegirColumnas}>
-            Elegir otras columnas
-          </button>
-        </div>
+      <div className="acciones">
+        <button type="button" data-foco onClick={alCerrar}>
+          Listo
+        </button>
       </div>
-    </section>
+    </Hoja>
   );
 }
 
@@ -676,55 +814,71 @@ type PropsTildar = {
   /** Cuántos entran en un pedido: más, la API los rechaza. */
   maximo: number | null;
   enviando: boolean;
-  alternar: (id: string) => void;
+  setTildados: (cambio: (t: ReadonlySet<string>) => ReadonlySet<string>) => void;
   alGuardar: () => void;
 };
 
-function ATildar({ elementos, tildados, maximo, enviando, alternar, alGuardar }: PropsTildar) {
-  const lleno = maximo !== null && tildados.size >= maximo;
-  const hayQuienPuede = elementos.some((e) => e.puede_cotejar);
-  function enviar(evento: FormEvent) {
-    evento.preventDefault();
-    alGuardar();
+/** Solo los pagos que esta cuenta puede cotejar; los demás, contados en una línea al pie (COT-05). */
+function ATildar({ elementos, tildados, maximo, enviando, setTildados, alGuardar }: PropsTildar) {
+  /** La fila donde se tocó una casilla de más: ahí se dice el tope, y la casilla no se tilda (C8P-11). */
+  const [topeEn, setTopeEn] = useState<string | null>(null);
+  const propios = elementos.filter((e) => e.puede_cotejar);
+  const ajenos = elementos.length - propios.length;
+
+  function tocar(pago: string) {
+    if (!tildados.has(pago) && maximo !== null && tildados.size >= maximo) {
+      setTopeEn(pago);
+      return;
+    }
+    setTopeEn(null);
+    setTildados((t) => {
+      const nuevos = new Set(t);
+      if (!nuevos.delete(pago)) nuevos.add(pago);
+      return nuevos;
+    });
   }
+
   return (
-    <form onSubmit={enviar}>
-      <ul className="tildes-pago" aria-label="Lo que falta cotejar">
-        {elementos.map((e) => {
-          const fila = (
-            <>
-              <span className="fila-pago__arriba">
-                <strong>{e.proveedor}</strong>
-                <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
-              </span>
-              <span>{detalle(e.numero_operacion, e.fecha_operacion, "Operación")}</span>
-            </>
-          );
-          return (
+    <form
+      onSubmit={(evento) => {
+        evento.preventDefault();
+        alGuardar();
+      }}
+    >
+      {propios.length > 0 && (
+        <ul className="tildes-pago" aria-label="Lo que falta cotejar">
+          {propios.map((e) => (
             <li key={e.pago_id}>
-              {e.puede_cotejar ? (
-                <label className="tilde-pago">
-                  <input type="checkbox" checked={tildados.has(e.pago_id)} disabled={enviando || (lleno && !tildados.has(e.pago_id))} onChange={() => alternar(e.pago_id)} />
-                  <span className="tilde-pago__datos">{fila}</span>
-                </label>
-              ) : (
-                <div className="tilde-pago">
-                  <span className="tilde-pago__datos">
-                    {fila}
-                    <span>Lo coteja otra persona del Consejo: esta cuenta participó de este pago.</span>
+              <label className="tilde-pago">
+                <input type="checkbox" checked={tildados.has(e.pago_id)} disabled={enviando} onChange={() => tocar(e.pago_id)} />
+                <span className="tilde-pago__datos">
+                  <span className="fila-pago__arriba">
+                    <strong>{e.proveedor}</strong>
+                    <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
                   </span>
-                </div>
+                  <span>{detalle(e.numero_operacion, e.fecha_operacion, "Operación")}</span>
+                </span>
+              </label>
+              {topeEn === e.pago_id && maximo !== null && (
+                <p role="status" className="comando-no-disponible">
+                  {textoTopeTildes(maximo)}
+                </p>
               )}
             </li>
-          );
-        })}
-      </ul>
-      {lleno && <p role="status">Se marcan hasta {maximo} por vez: primero estos, y después los demás.</p>}
-      {hayQuienPuede && (
+          ))}
+        </ul>
+      )}
+      {ajenos > 0 && <p className="comando-no-disponible">{textoLosCotejaOtra(ajenos)}</p>}
+      {/* Sin nada tildado no hay botón: se dice qué falta (C8P-16). */}
+      {propios.length > 0 && (
         <div className="formulario">
-          <button className="secundario" type="submit" disabled={enviando || tildados.size === 0}>
-            Marcar como cotejados
-          </button>
+          {tildados.size === 0 ? (
+            <p className="comando-no-disponible">{TILDAR_PAGOS}</p>
+          ) : (
+            <button className="secundario" type="submit" disabled={enviando}>
+              {textoMarcarCotejados(tildados.size)}
+            </button>
+          )}
         </div>
       )}
     </form>

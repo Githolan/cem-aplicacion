@@ -56,6 +56,8 @@ export function useResumenPagos(porEdificio: ReadonlyMap<string, readonly string
         : `${cantidad} ${cosas(cantidad)} para hacer`;
   return {
     edificios,
+    /** Con dos o más edificios el inicio muestra el selector «Edificio» (`ElegirConsorcio`). */
+    conSelector: edificios.length > 1,
     consorcio,
     setConsorcio,
     /** Quien revisa y no prepara tiene Pagos como tarjeta; quien prepara, como fila entre las demás.
@@ -73,28 +75,35 @@ export function useResumenPagos(porEdificio: ReadonlyMap<string, readonly string
 type Props = Pick<ReturnType<typeof useResumenPagos>, "cantidad" | "falla"> & {
   /** El único «Reintentar» del Inicio, cuando lo único que falló es esta tarjeta (AC-08). */
   reintentar: ReactNode;
-  edificio: string;
+  /** El edificio, solo si no está a la vista el selector «Edificio», que ya lo dice (INI-06). */
+  edificio: string | null;
 };
 
+/** «Pagos — N cosas para hacer»: la tarjeta entera lleva a la bandeja, sin una marca «Para hacer»
+ * que repita la cifra ni un botón aparte (BAN-09, INI-06). */
 export function TarjetaPagos({ cantidad, falla, reintentar, edificio }: Props) {
   return (
     <section className="resumen-inicio" aria-label="Pagos">
-      <div className="resumen-inicio__arriba">
-        <span>Pagos</span>
-        {cantidad !== null && cantidad > 0 && <span className="resumen-inicio__estado">Para hacer</span>}
-      </div>
+      <Link to={RUTA_PAGOS} className="resumen-inicio__enlace">
+        <span className="resumen-inicio__arriba">Pagos</span>
+        {cantidad !== null && cantidad > 0 && (
+          <>
+            {" "}
+            <span className="resumen-inicio__cuenta">
+              <span className="resumen-inicio__cifra">{cantidad}</span> {cosas(cantidad)} para hacer
+            </span>
+          </>
+        )}
+        {edificio !== null && (
+          <>
+            {" "}
+            <span className="resumen-inicio__edificio">{edificio}</span>
+          </>
+        )}
+      </Link>
       {cantidad === null && falla === null && <p role="status">Cargando…</p>}
       {falla !== null && <p role="alert" className="aviso-error">{falla}</p>}
       {falla !== null && reintentar}
-      {cantidad !== null && cantidad > 0 && (
-        <p>
-          <span className="resumen-inicio__cifra">{cantidad}</span> {cosas(cantidad)} para hacer
-        </p>
-      )}
-      <p className="resumen-inicio__edificio">{edificio}</p>
-      <Link to={RUTA_PAGOS} className="resumen-inicio__accion">
-        Ver los pagos
-      </Link>
     </section>
   );
 }
