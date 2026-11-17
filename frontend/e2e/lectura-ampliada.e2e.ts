@@ -429,7 +429,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
   {
     ruta: "/panel",
     url: "/panel",
-    cargada: ["Facturas faltantes", "Gasto pagado por rubro"],
+    cargada: ["Facturas faltantes (1)", "Gasto pagado por rubro"],
     api: {
       "GET /api/v1/me/consorcios": [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       "GET /api/v1/consorcios/11111111-1111-4111-8111-111111111111/panel": {
