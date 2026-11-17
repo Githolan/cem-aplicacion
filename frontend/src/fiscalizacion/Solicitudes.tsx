@@ -585,6 +585,8 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
         </>
       ),
     });
+    // La huella del texto emitido queda a la vista: el propietario la quiere (17-11-2026, deja de lado SOL-08 en esto).
+    if (s.huella_texto !== null && s.huella_texto !== undefined) datos.push({ etiqueta: "Huella SHA-256", valor: s.huella_texto });
   }
   if (s.envio) {
     const { documento_id: documento, version_documento_id: version } = s.envio;

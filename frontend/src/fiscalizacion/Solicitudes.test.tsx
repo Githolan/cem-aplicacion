@@ -440,7 +440,9 @@ describe("solicitudes formales", () => {
     vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [PENDIENTE, RESPONDIDA] }) }));
     abrir();
     const pendiente = await abrirFicha(2);
-    expect(pendiente.queryByText(/Huella|SHA-256/)).toBeNull();
+    // La huella del texto emitido sigue a la vista (decisión del propietario, 17-11-2026).
+    expect(pendiente.getByText("Huella SHA-256")).toBeTruthy();
+    expect(pendiente.getByText("a".repeat(64))).toBeTruthy();
     expect(pendiente.getByText("Marta Ficticia (esta cuenta), Eva Ficticia")).toBeTruthy();
     // El plazo, solo en días: desde cuándo corre ya lo dice la situación (SOL-07).
     expect(pendiente.getByText("15 días")).toBeTruthy();
