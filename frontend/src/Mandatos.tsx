@@ -871,11 +871,15 @@ export function Mandatos() {
   const asambleaBajaElegida = asambleas.length === 1 ? (asambleas[0]?.id ?? "") : decisionBaja;
   const asambleaRevisionElegida = asambleas.length === 1 ? (asambleas[0]?.id ?? "") : decisionRevision;
   const elegibles = candidatos.tipo === "ok" ? candidatos.elementos.filter((c) => c.persona_id !== yo) : [];
-  // FL-MAN-01: con una administración vigente o futura sin fecha de fin, cualquier «Desde» choca: no se
-  // ofrece otra administración. Se sabe con la lista de mandatos ya leída.
+  // FL-MAN-01: con una administración que ya rige y no tiene fecha de fin, cualquier «Desde» de hoy en
+  // adelante choca: no se ofrece otra administración. Una que empieza más adelante deja nombrar otra
+  // que termine antes (Codex en app #259): ese caso lo resuelven las fechas (`administracionQueChoca`).
+  const hoy = hoyDelDispositivo();
   const administracionSinFin =
     mandatos.tipo === "ok"
-      ? mandatos.elementos.find((m) => ES_ADMINISTRACION.has(m.tipo) && OCUPAN_SUS_FECHAS.has(m.estado) && m.vigente_hasta === null)
+      ? mandatos.elementos.find(
+          (m) => ES_ADMINISTRACION.has(m.tipo) && OCUPAN_SUS_FECHAS.has(m.estado) && m.vigente_hasta === null && m.vigente_desde <= hoy,
+        )
       : undefined;
   // FL-MAN-09: el alta ofrece solo los tipos que se pueden dar. El Consejo y la administración piden
   // una persona con vínculo confirmado; la administración, además, que no haya otra sin fecha de fin.

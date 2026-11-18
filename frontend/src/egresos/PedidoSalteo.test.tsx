@@ -129,6 +129,29 @@ describe("el pedido desde el formulario de la orden", () => {
     expect(screen.queryByRole("button", { name: PEDIR_SALTEO })).toBeNull();
   });
 
+  it("enviado el pedido de uno, al elegir otro proveedor bloqueado vuelve el botón para ese (Codex en app #259)", async () => {
+    const P2 = "33333333-3333-4333-8333-333333333333";
+    const otro = { ...PROVEEDOR, id: P2, cuit: "20000000002", razon_social: "Electricidad Ficticia SA" };
+    const api = backend({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ ...LISTA, elementos: [PROVEEDOR, otro], documentacion_faltante: [P1, P2] }),
+      [`GET ${BASE}/proveedores/${P2}`]: () => Response.json({ ...FICHA, proveedor: otro, faltantes: [{ ...FALTANTE, proveedor_id: P2 }] }),
+      [`POST ${RUTA_PEDIR}`]: () => Response.json(pedido(), { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    fireEvent.click(await screen.findByRole("button", { name: PEDIR_SALTEO }));
+    const ventana = await screen.findByRole("dialog");
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO_PEDIDO), { target: { value: "Pérdida de gas en el palier" } });
+    fireEvent.change(within(ventana).getByLabelText(IMPORTE_PEDIDO), { target: { value: "15000" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: ENVIAR_PEDIDO }));
+    expect(await screen.findByText(PEDIDO_ENVIADO)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: PEDIR_SALTEO })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P2 } });
+    expect(await screen.findByRole("button", { name: PEDIR_SALTEO })).toBeTruthy();
+    expect(screen.queryByText(PEDIDO_ENVIADO)).toBeNull();
+  });
+
   it("con un pedido propio que espera, no se ofrece otro: se ve su estado", async () => {
     vi.stubGlobal("fetch", backend({ [`GET ${RUTA_PEDIDOS}`]: () => Response.json({ elementos: [pedido()] }) }));
     abrir("/pagos/nueva");

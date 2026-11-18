@@ -858,7 +858,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
             <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={aSuFicha(elegido)} />
             {lectura.vencidoSinUsar.has(elegido.id) && <p className="aviso-pendiente" role="note">{SALTEO_VENCIDO_SIN_USAR}</p>}
             {/* Pregunta 3 del propietario (18-11-2026, tanda 9): el salteo se le pide al Consejo desde acá. */}
-            <PedidoDeSalteo consorcio={consorcio} proveedor={elegido} monedas={monedas}
+            {/* Con la clave del proveedor, lo enviado para uno no queda al elegir otro (Codex en app #259). */}
+            <PedidoDeSalteo key={elegido.id} consorcio={consorcio} proveedor={elegido} monedas={monedas}
               inicial={{ importe: datos.importe, moneda: datos.moneda }} aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
           </>
         )}

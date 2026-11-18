@@ -693,6 +693,26 @@ describe("página /mandatos", () => {
     expect(await esperarFicha("Estudio Sur, Administración externa")).toBeTruthy();
   });
 
+  it("FL-MAN-01: una administración sin fecha de fin que empieza más adelante deja nombrar otra que termine antes (Codex en app #259)", async () => {
+    const futura = { ...en(MANDATOS.elementos, 1), vigente_desde: "2099-12-01", vigente_hasta: null };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: () => Response.json({ elementos: [en(MANDATOS.elementos, 0), futura] }) }));
+    abrir();
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    expect(within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"))).toContain(
+      "administrador_externo",
+    );
+    expect(within(alta).queryByText(/^Ya hay una administración sin fecha de fin/)).toBeNull();
+    fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+    fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2099-01-01" } });
+    // Sin «Hasta» se pisa con la futura: lo dicen las fechas.
+    expect(within(alta).getByText(/^Ya hay una administración en esas fechas: Estudio Sur/)).toBeTruthy();
+    // Control: terminando antes de que empiece, no choca y se piden sus datos.
+    fireEvent.change(within(alta).getByLabelText("Hasta (opcional; ese día ya no rige)"), { target: { value: "2099-12-01" } });
+    expect(within(alta).queryByText(/^Ya hay una administración/)).toBeNull();
+    expect(within(alta).getByLabelText("Razón social o nombre")).toBeTruthy();
+  });
+
   it("FL-MAN-01: con otra administración con fecha de fin, una administración pide primero las fechas; si chocan, nada más", async () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
