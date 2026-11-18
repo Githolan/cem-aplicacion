@@ -118,6 +118,10 @@ const TEXTO_ESTADO_MANDATO: Record<EstadoMandato, string> = {
   error_carga: "Anulado por error de carga",
 };
 
+/** Lo que falta resolver en un mandato, dicho en la fila (FL-MAN-10). */
+const EN_REVISION = "En revisión";
+const SIN_CUENTA = "Sin cuenta asociada";
+
 /** Los que ya no rigen ni van a regir: van plegados en «Mandatos anteriores» (D-34). */
 const YA_NO_RIGEN: ReadonlySet<EstadoMandato> = new Set(["terminado", "dado_de_baja", "error_carga"]);
 const MANDATOS_ANTERIORES = "Mandatos anteriores";
@@ -210,8 +214,19 @@ export const ALTA_SIN_DECISION_USABLE = "Para dar de alta un mandato falta una d
 /** Lo mismo, para quien registra decisiones y todavía no hay ninguna. */
 export const ALTA_SIN_DECISIONES =
   "Para dar de alta un mandato falta una decisión registrada. Se registra con «Registrar una decisión», y el alta la da otra persona del Consejo o de la administración.";
-/** El «Listo» de la decisión: quién da el alta después se dice una sola vez, acá (G-42, MAN-13). */
-export const LISTO_DECISION = "Listo: la decisión quedó registrada. El alta que respalda la da otra persona del Consejo o de la administración.";
+/** C8G-02 y FL-MAN-09: por qué el alta no ofrece el Consejo ni la administración. */
+export const ALTA_SIN_NADIE =
+  "Para dar un mandato del Consejo o de administración hace falta una persona con un vínculo confirmado en este edificio, y todavía nadie lo tiene. Los vínculos se confirman en el Padrón del edificio.";
+export const ALTA_SIN_NADIE_MAS =
+  "Para dar un mandato del Consejo o de administración hace falta otra persona con un vínculo confirmado en este edificio: nadie se da un mandato a sí mismo. Los vínculos se confirman en el Padrón del edificio.";
+/** El «Listo» de la decisión (FL-DEC-03): quién da el alta lo dice la línea de «falta una decisión
+ * registrada por otra persona», y no toda decisión respalda un alta. */
+export const LISTO_DECISION = "Listo: la decisión quedó registrada.";
+/** El «Listo» de la decisión que esperó a su acta en revisión (decisión 6 del propietario, FL-DEC-01). */
+export const LISTO_DECISION_CON_ACTA = "Listo: el acta pasó la revisión del antivirus y la decisión quedó registrada con ella.";
+/** Mientras espera al acta en revisión, en lugar del botón principal (FL-DEC-01). */
+export const DECISION_ESPERA_EL_ACTA =
+  "La decisión se registra sola, con el acta, cuando el antivirus termine de revisarla. Si se cierra esta ventana antes, no se registra.";
 
 /** Lo que falta completar en cada ventana (decisión 4: el botón queda activo y marca el campo). */
 const FALTA = {
@@ -265,6 +280,11 @@ const POR_CODIGO: Record<string, string> = {
 
 /** La marca de la fila del mandato que se acaba de dar de alta (G-44). */
 export const RECIEN_DADO_DE_ALTA = "Recién dado de alta";
+
+/** C8G-03 y FL-MAN-08: por qué la baja no ofrece la remoción por asamblea; va en la ficha del mandato. */
+export const REMOCION_SIN_ASAMBLEA =
+  "Para darlo de baja por remoción hace falta una asamblea registrada por otra persona del Consejo o de la administración, y todavía no hay ninguna que esta cuenta pueda usar.";
+const REMOCION_SIN_DECISIONES = "No se pudieron consultar las decisiones: sin ellas no se ofrece la remoción por asamblea.";
 
 /** Lo que pasa al desasociar la cuenta de la administración externa (G-40, P1-c): va en su ventana. */
 export const AYUDA_DESASOCIAR =
@@ -355,7 +375,8 @@ type Detalle = { tipo: "mandato"; datos: MandatoDetalle } | { tipo: "decision"; 
 /** La ficha abierta: su título sale de la fila, y los datos llegan con el detalle. */
 type FichaAbierta = { tipo: "mandato" | "decision"; id: string; titulo: string };
 
-type Aviso = { texto: string; ok: boolean };
+/** `invitar`: el «Listo» del alta de una administración externa trae el paso que sigue (FL-MAN-06). */
+type Aviso = { texto: string; ok: boolean; invitar?: FichaAbierta };
 
 type Clave = MutableRefObject<string | null>;
 
@@ -501,6 +522,11 @@ export function Mandatos() {
   /** El archivo subido que el antivirus todavía revisa: cuando queda disponible, se elige. */
   const [actaEnRevision, setActaEnRevision] = useState<{ documento: string; version: string; titulo: string } | null>(null);
   const [estadoActa, setEstadoActa] = useState<{ texto: string; ok: boolean } | null>(null);
+  /** Decisión 6 del propietario (FL-DEC-01): con el acta en revisión, «Registrar decisión» no manda la
+   * decisión sin ella; espera, y la registra sola cuando el acta queda elegida. El ref lo lee la
+   * respuesta del antivirus, que llega después del dibujo en que se pidió. */
+  const [esperaElActa, setEsperaElActa] = useState(false);
+  const esperandoActa = useRef(false);
   const claveCrearActa = useRef<string | null>(null);
   const claveSubirActa = useRef<string | null>(null);
   const textoActa = useRef<HTMLParagraphElement | null>(null);
@@ -619,9 +645,9 @@ export function Mandatos() {
   }, [mandatoNuevo, mandatos]);
 
   /** El aviso de la página, con el foco: lo da un acto que cerró su ventana o la ficha. */
-  function avisar(texto: string, ok: boolean) {
+  function avisar(texto: string, ok: boolean, invitar?: FichaAbierta) {
     alAviso.current = true;
-    setAviso({ texto, ok });
+    setAviso({ texto, ok, invitar });
   }
 
   /** Vuelve a pedir las listas: lo escrito en los formularios no se toca. */
@@ -646,6 +672,8 @@ export function Mandatos() {
   function cambiar<T>(clave: Clave, fijar: (v: T) => void, campo?: string) {
     return (v: T) => {
       clave.current = null;
+      // Lo que espera al acta es lo que estaba escrito: un cambio deja de esperar (FL-DEC-01).
+      if (clave === claveDecision) esperarElActa(false);
       // Lo que se corrige deja de estar marcado (G-49).
       if (campo !== undefined) setErrores((e) => (e === null ? e : { ...e, campos: sinElDe(e.campos, campo) }));
       fijar(v);
@@ -716,7 +744,17 @@ export function Mandatos() {
     }
   }
 
-  function registrarDecision(): FinDeEnvio | Promise<FinDeEnvio> {
+  function esperarElActa(espera: boolean) {
+    esperandoActa.current = espera;
+    setEsperaElActa(espera);
+  }
+
+  /**
+   * «Registrar decisión». Con un acta subida acá que el antivirus todavía revisa, no se manda: queda
+   * esperando y la registra `registrarConElActa` cuando el acta queda elegida (decisión 6, FL-DEC-01).
+   * `huellaDelActa`: la del acta que acaba de pasar la revisión.
+   */
+  function registrarDecision(huellaDelActa?: string): FinDeEnvio | Promise<FinDeEnvio> {
     if (
       faltan("decision", {
         fecha: [fechaDecision, FALTA.fecha],
@@ -725,9 +763,17 @@ export function Mandatos() {
       })
     )
       return "seguir";
-    // La huella de la versión disponible del acta elegida: así la decisión la cita (`0089`).
+    if (huellaDelActa === undefined && actaEnRevision !== null) {
+      esperarElActa(true);
+      return "seguir";
+    }
+    // La huella de la versión disponible del acta elegida: así la decisión la cita (`0089`). Un acta
+    // elegida que ya no está disponible no se cambia en silencio por «sin acta».
     const acta = actasElegibles.find((d) => d.id === actaElegida);
-    const actaParaEnviar = acta === undefined ? null : (disponibleDe(acta)?.sha256 ?? null);
+    const huellaElegida = acta === undefined ? undefined : disponibleDe(acta)?.sha256;
+    if (huellaDelActa === undefined && actaElegida !== "" && huellaElegida === undefined)
+      return { rechazo: POR_CODIGO.documento_invalido as string };
+    const actaParaEnviar = huellaDelActa ?? huellaElegida ?? null;
     return pedirActo(
       claveDecision,
       "decision",
@@ -760,16 +806,47 @@ export function Mandatos() {
         setActaSubida(false);
         setActaEnRevision(null);
         setEstadoActa(null);
-        // La decisión queda en la lista; el «Listo» dice quién da el alta (G-42).
+        esperarElActa(false);
+        // La decisión queda en la lista (FL-DEC-03: quién da el alta lo dice la línea de la página).
         setVentana(null);
-        avisar(LISTO_DECISION, true);
+        avisar(huellaDelActa === undefined ? LISTO_DECISION : LISTO_DECISION_CON_ACTA, true);
         return "cerrar";
       },
     );
   }
 
-  const externo = tipoMandato === "administrador_externo";
+  /** El acta que esperaba la decisión pasó la revisión: la decisión se registra sola, con ella. Un
+   * rechazo queda junto al campo «Acta» y vuelve el botón principal (FL-DEC-01). */
+  async function registrarConElActa(huella: string) {
+    esperarElActa(false);
+    const fin = await registrarDecision(huella);
+    if (typeof fin === "object")
+      avisarActa(`El acta pasó la revisión del antivirus, pero la decisión no se registró. ${fin.rechazo}`, false, true);
+  }
+
+  const listaDecisiones = decisiones.tipo === "ok" ? decisiones.elementos : [];
+  // A15: quien registró una decisión no la usa para dar de alta ni para remover. Las del equipo no lo
+  // activan. Solo los selectores: la ficha y la lista siguen mostrando todas.
+  const usables = listaDecisiones.filter((d) => !d.registrada_por_vos);
+  const asambleas = usables.filter((d) => d.tipo === "asamblea");
+  // FL-MAN-05: con una sola decisión (o asamblea) que se pueda usar, ya va elegida.
+  const decisionAltaElegida = usables.length === 1 ? (usables[0]?.id ?? "") : decisionAlta;
+  const asambleaBajaElegida = asambleas.length === 1 ? (asambleas[0]?.id ?? "") : decisionBaja;
+  const asambleaRevisionElegida = asambleas.length === 1 ? (asambleas[0]?.id ?? "") : decisionRevision;
   const elegibles = candidatos.tipo === "ok" ? candidatos.elementos.filter((c) => c.persona_id !== yo) : [];
+  // FL-MAN-01: con una administración vigente o futura sin fecha de fin, cualquier «Desde» choca: no se
+  // ofrece otra administración. Se sabe con la lista de mandatos ya leída.
+  const administracionSinFin =
+    mandatos.tipo === "ok"
+      ? mandatos.elementos.find((m) => ES_ADMINISTRACION.has(m.tipo) && OCUPAN_SUS_FECHAS.has(m.estado) && m.vigente_hasta === null)
+      : undefined;
+  // FL-MAN-09: el alta ofrece solo los tipos que se pueden dar. El Consejo y la administración piden
+  // una persona con vínculo confirmado; la administración, además, que no haya otra sin fecha de fin.
+  const tiposPosibles = TIPOS_MANDATO.filter(
+    (t) => (t === "administrador_externo" || elegibles.length > 0) && !(ES_ADMINISTRACION.has(t) && administracionSinFin !== undefined),
+  );
+  const tipoAlta: TipoMandato | undefined = tiposPosibles.includes(tipoMandato) ? tipoMandato : tiposPosibles[0];
+  const externo = tipoAlta === "administrador_externo";
   // Saber quién mira puede llegar después de la lista: lo elegido nunca es alguien que no se ofrece.
   const personaElegida = elegibles.some((c) => c.persona_id === persona) ? persona : (elegibles[0]?.persona_id ?? "");
 
@@ -777,13 +854,15 @@ export function Mandatos() {
     if (
       faltan("alta", {
         ...(externo ? { nombre: [nombre, FALTA.nombre] as const, cuit: [cuit, FALTA.cuit] as const } : {}),
-        decision_id: [decisionAlta, FALTA.decisionAlta],
+        decision_id: [decisionAltaElegida, FALTA.decisionAlta],
         desde: [desde, FALTA.desde],
       })
     )
       return "seguir";
     // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
     if (externo && cuitConError(cuit)) return "seguir";
+    // Sin ningún tipo posible la ventana no se ofrece (FL-MAN-09).
+    if (tipoAlta === undefined) return "seguir";
     const nombreAlta = externo ? nombre.trim() : (elegibles.find((c) => c.persona_id === personaElegida)?.nombre ?? "");
     return pedirActo(
       claveAlta,
@@ -793,14 +872,14 @@ export function Mandatos() {
           params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           headers: encabezadoCsrf(),
           body: {
-            tipo: tipoMandato,
-            decision_id: decisionAlta,
+            tipo: tipoAlta,
+            decision_id: decisionAltaElegida,
             desde,
             hasta: hasta === "" ? null : hasta,
             persona_id: externo ? null : personaElegida,
             nombre: externo ? nombre.trim() : null,
             cuit: externo ? cuit : null,
-            matricula: tipoMandato === "miembro_consejo" || matricula.trim() === "" ? null : matricula.trim(),
+            matricula: tipoAlta === "miembro_consejo" || matricula.trim() === "" ? null : matricula.trim(),
           },
         }),
       (datos) => {
@@ -815,7 +894,12 @@ export function Mandatos() {
         setHasta("");
         // G-44: el «Listo» con lo que pasó, sin abrir la ficha (que ofrecería deshacerlo).
         setVentana(null);
-        avisar(`Listo: el mandato de ${nombreAlta} quedó dado de alta y ya está en la lista.`, true);
+        // FL-MAN-06: para que la administración externa entre, lo que sigue es invitarla.
+        const invitarla =
+          externo && puede("mandatos.asociar_persona") && puede("mandatos.ver_asociaciones")
+            ? { tipo: "mandato" as const, id: datos.id, titulo: tituloDeMandato({ nombre: nombreAlta, tipo: "administrador_externo" }) }
+            : undefined;
+        avisar(`Listo: el mandato de ${nombreAlta} quedó dado de alta y ya está en la lista.`, true, invitarla);
         // G-44: su fila queda resaltada y a la vista cuando llega la lista nueva.
         setMandatoNuevo(datos.id);
         return "cerrar";
@@ -874,7 +958,7 @@ export function Mandatos() {
     if (
       faltan("baja", {
         descripcion: [descripcionBaja, FALTA.descripcionBaja],
-        ...(remocion ? { decision_id: [decisionBaja, FALTA.asambleaBaja] as const } : { instrumento: [instrumento, FALTA.instrumento] as const }),
+        ...(remocion ? { decision_id: [asambleaBajaElegida, FALTA.asambleaBaja] as const } : { instrumento: [instrumento, FALTA.instrumento] as const }),
       })
     ) {
       setConfirmarBaja(false);
@@ -898,7 +982,7 @@ export function Mandatos() {
           body: {
             causa,
             descripcion: descripcionBaja.trim(),
-            decision_id: remocion ? decisionBaja : null,
+            decision_id: remocion ? asambleaBajaElegida : null,
             instrumento: remocion ? null : instrumento.trim(),
           },
         }),
@@ -935,6 +1019,13 @@ export function Mandatos() {
     setErrores(null);
     setFicha(abierta);
     fichas.abrir(abierta.id);
+  }
+
+  /** FL-MAN-06: desde el «Listo» del alta, la ficha de la administración nueva con su invitación abierta. */
+  function invitarLaNueva(nueva: FichaAbierta) {
+    abrirFicha(nueva);
+    setAccionFicha("invitar");
+    pedirMandato(nueva.id);
   }
 
   function verMandato(mandato: Mandato) {
@@ -1027,10 +1118,14 @@ export function Mandatos() {
         }
         setActas({ tipo: "ok", elementos: data.documentos });
         const nueva = elegir === undefined ? undefined : data.documentos.find((d) => d.id === elegir);
-        if (nueva !== undefined && nueva.categoria === CATEGORIA_ACTAS && disponibleDe(nueva) !== undefined) {
+        const disponible = nueva !== undefined && nueva.categoria === CATEGORIA_ACTAS ? disponibleDe(nueva) : undefined;
+        if (nueva !== undefined && disponible !== undefined) {
+          // Leído antes de `cambiar`, que deja de esperar: elegir el acta no es un cambio de la persona.
+          const laEsperaba = esperandoActa.current;
           cambiar(claveDecision, setActaElegida, "sha256")(nueva.id);
           setActaEnRevision(null);
-          avisarActa(`Listo: el acta «${nueva.titulo}» pasó la revisión del antivirus y quedó elegida.`, true);
+          if (laEsperaba) void registrarConElActa(disponible.sha256);
+          else avisarActa(`Listo: el acta «${nueva.titulo}» pasó la revisión del antivirus y quedó elegida.`, true);
         }
       })
       .catch((e: unknown) => {
@@ -1050,6 +1145,8 @@ export function Mandatos() {
 
   /** «Cancelar» o Escape: lo escrito queda para la próxima vez que se abra. */
   function cerrarVentana() {
+    // Cerrada la ventana, la decisión que esperaba al acta no se registra (FL-DEC-01).
+    esperarElActa(false);
     setErrores(null);
     setVentana(null);
   }
@@ -1058,6 +1155,16 @@ export function Mandatos() {
   function avisarActa(texto: string, ok: boolean, enfocar = false) {
     if (enfocar) alEstadoActa.current = true;
     setEstadoActa({ texto, ok });
+  }
+
+  /** «Subir el acta»: el acta queda en Documentos con la fecha del acto, así que primero la fecha (FL-DEC-02). */
+  function abrirSubidaActa() {
+    if (fechaDecision === "") {
+      setErrores({ accion: "decision", campos: { fecha: FALTA.fecha } });
+      document.getElementById(`${id}-fecha-decision`)?.focus();
+      return;
+    }
+    setSubeActa(true);
   }
 
   function cerrarSubidaActa() {
@@ -1118,15 +1225,15 @@ export function Mandatos() {
     }
   }
 
-  /** Primer paso: el documento en «Actas y decisiones», con la fecha del acto (o la de hoy si todavía
-   * no se cargó). Devuelve su id o cómo sigue la ventana. */
+  /** Primer paso: el documento en «Actas y decisiones», con la fecha del acto, que «Subir el acta» pide
+   * antes de abrir su ventana (FL-DEC-02). Devuelve su id o cómo sigue la ventana. */
   /** El id del acta creada, o cómo termina la ventana: «seguir» no es un id (Codex en #257, mismo caso que Documentos). */
   async function crearActa(titulo: string, generacion: number): Promise<{ creada: string } | { fin: FinDeEnvio }> {
     claveCrearActa.current ??= crypto.randomUUID();
     const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos", {
       headers: encabezadoCsrf(),
       params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveCrearActa.current } },
-      body: { categoria: CATEGORIA_ACTAS, titulo, fecha: fechaDecision === "" ? hoyDelDispositivo() : fechaDecision },
+      body: { categoria: CATEGORIA_ACTAS, titulo, fecha: fechaDecision },
     });
     exigirSesion(response);
     if (generacion !== generacionActa.current) return { fin: "seguir" };
@@ -1200,7 +1307,15 @@ export function Mandatos() {
           setActaEnRevision(null);
           // Es el único caso en que se vuelve a ofrecer subir un acta para esta decisión (MAN-05).
           setActaSubida(false);
-          avisarActa(`El archivo del acta «${cual.titulo}» no pasó la revisión del antivirus y no se puede usar: hay que subir otro.`, false);
+          // La decisión que lo esperaba no se registra: vuelve su botón, y se decide con otra acta o sin ella.
+          const laEsperaba = esperandoActa.current;
+          esperarElActa(false);
+          avisarActa(
+            `El archivo del acta «${cual.titulo}» no pasó la revisión del antivirus y no se puede usar: hay que subir otro.${
+              laEsperaba ? " La decisión no se registró." : ""
+            }`,
+            false,
+          );
         }
       })
       .catch((e: unknown) => {
@@ -1364,7 +1479,7 @@ export function Mandatos() {
   function mantener(mandato: MandatoDetalle): FinDeEnvio | Promise<FinDeEnvio> {
     if (
       faltan("revision", {
-        decision_id: [decisionRevision, FALTA.asambleaRevision],
+        decision_id: [asambleaRevisionElegida, FALTA.asambleaRevision],
         eficaz_desde: [eficazDesde, FALTA.eficazDesde],
       })
     )
@@ -1376,7 +1491,7 @@ export function Mandatos() {
         api.POST("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision", {
           params: { path: { consorcio_id: consorcio, mandato_id: mandato.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           headers: encabezadoCsrf(),
-          body: { decision_id: decisionRevision, eficaz_desde: eficazDesde },
+          body: { decision_id: asambleaRevisionElegida, eficaz_desde: eficazDesde },
         }),
       (datos) => {
         limpiarRevision();
@@ -1396,6 +1511,7 @@ export function Mandatos() {
     setActaSubida(false);
     setActaEnRevision(null);
     setEstadoActa(null);
+    esperarElActa(false);
     setMandatoNuevo(null);
     limpiarInvitacion();
     limpiarRevision();
@@ -1413,11 +1529,6 @@ export function Mandatos() {
 
   // El alta pide elegir a quién (`candidatos`) y qué decisión la respalda: sin una de las dos no se puede dar.
   const ofreceAlta = puede("mandatos.alta") && candidatos.tipo !== "sin_permiso" && decisiones.tipo !== "sin_permiso";
-  const listaDecisiones = decisiones.tipo === "ok" ? decisiones.elementos : [];
-  // A15: quien registró una decisión no la usa para dar de alta ni para remover. Las del equipo no lo
-  // activan. Solo los selectores: la ficha y la lista siguen mostrando todas.
-  const usables = listaDecisiones.filter((d) => !d.registrada_por_vos);
-  const asambleas = usables.filter((d) => d.tipo === "asamblea");
   // C8G-03: la remoción se ofrece solo con una asamblea que se pueda usar, sabida con la lista leída.
   const ofreceRemocion = decisiones.tipo === "ok" && asambleas.length > 0;
   const textoDecision = (d: Decision) => `${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}: ${d.descripcion}`;
@@ -1443,8 +1554,13 @@ export function Mandatos() {
   const anteriores = listaDeMandatos.filter((m) => YA_NO_RIGEN.has(m.estado));
   // G-42: sin una decisión que se pueda usar, el paso que sigue es registrarla (la registra una
   // persona y da el alta otra); con alguna, el alta.
-  const altaListaParaDar = ofreceAlta && candidatos.tipo === "ok" && decisiones.tipo === "ok" && usables.length > 0;
-  const nadaAbierto = ventana === null && ficha === null;
+  const altaConDecision = ofreceAlta && candidatos.tipo === "ok" && decisiones.tipo === "ok" && usables.length > 0;
+  // FL-MAN-09: sin ningún tipo que se pueda dar, en lugar del botón, por qué.
+  const altaListaParaDar = altaConDecision && tiposPosibles.length > 0;
+  const altaSinTipos = altaConDecision && tiposPosibles.length === 0;
+  const invitarLaDelAviso = aviso?.invitar;
+  // Un solo principal: con el «Invitar a la administración» del «Listo» (FL-MAN-06), los de arriba van secundarios.
+  const nadaAbierto = ventana === null && ficha === null && invitarLaDelAviso === undefined;
   const conMensaje = aviso !== null || pantalla.tipo !== "lista" || listasCargando;
   // Hasta tres listas pueden caerse a la vez: cada botón dice de qué sección es.
   const consultarDeNuevo = (seccion: string) => (
@@ -1452,13 +1568,18 @@ export function Mandatos() {
       Consultar de nuevo
     </button>
   );
+  const resumenDeFila = (m: Mandato) => {
+    const falta = loQueFalta(m);
+    if (falta === undefined || loResuelveQuienMira(m)) return m.estado === "pendiente_revision" ? undefined : estadoCorto(m);
+    return m.estado === "pendiente_revision" ? falta : `${estadoCorto(m)} · ${falta}`;
+  };
   const filaDeMandato = (m: Mandato) => (
     // G-44: la del mandato recién dado de alta se resalta y lo dice en palabras (no solo con el color).
     <li key={m.id} ref={m.id === mandatoNuevo ? filaNueva : undefined} className={m.id === mandatoNuevo ? "fila-nueva" : undefined}>
       <FilaDeRegistro
         titulo={tituloDeMandato(m)}
-        resumen={m.estado === "pendiente_revision" ? undefined : estadoCorto(m)}
-        estado={estadoQuePideAlgo(m)}
+        resumen={resumenDeFila(m)}
+        estado={loResuelveQuienMira(m) ? loQueFalta(m) : undefined}
         alAbrir={() => verMandato(m)}
         refFila={fichas.refFila(m.id)}
         deshabilitada={enviando}
@@ -1496,6 +1617,13 @@ export function Mandatos() {
         {aviso !== null && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
+          </p>
+        )}
+        {invitarLaDelAviso !== undefined && (
+          <p>
+            <button type="button" disabled={enviando} onClick={() => invitarLaNueva(invitarLaDelAviso)}>
+              Invitar a la administración
+            </button>
           </p>
         )}
       </div>
@@ -1583,7 +1711,7 @@ export function Mandatos() {
 
           {registraDecisiones && ventana === "decision" && ventanaDecision()}
           {registraDecisiones && ventana === "decision" && subeActa && ventanaActa()}
-          {altaListaParaDar && ventana === "alta" && ventanaAlta()}
+          {altaListaParaDar && ventana === "alta" && tipoAlta !== undefined && ventanaAlta(tipoAlta)}
           {ficha !== null && fichaAbierta(ficha)}
         </>
       )}
@@ -1598,11 +1726,18 @@ export function Mandatos() {
     return `${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}`;
   }
 
-  /** Lo único de la fila que pide hacer algo: un mandato en revisión o una administración sin cuenta. */
-  function estadoQuePideAlgo(m: Mandato): string | undefined {
-    if (m.estado === "pendiente_revision") return "En revisión";
-    if (m.tipo === "administrador_externo" && !m.con_cuenta && ESTADOS_CON_INVITACION.includes(m.estado)) return "Sin cuenta asociada";
+  /** Un mandato en revisión o una administración sin cuenta: lo que alguien tiene que resolver. */
+  function loQueFalta(m: Mandato): string | undefined {
+    if (m.estado === "pendiente_revision") return EN_REVISION;
+    if (m.tipo === "administrador_externo" && !m.con_cuenta && ESTADOS_CON_INVITACION.includes(m.estado)) return SIN_CUENTA;
     return undefined;
+  }
+
+  /** FL-MAN-10: lo que falta se destaca como etiqueta solo para quien puede resolverlo; para el resto
+   * va en el resumen de la fila, sin destacar. */
+  function loResuelveQuienMira(m: Mandato): boolean {
+    if (m.estado === "pendiente_revision") return puede("mandatos.resolver_revision") || puede("mandatos.baja");
+    return puede("mandatos.asociar_persona");
   }
 
   /** Los dos botones de arriba; en lugar del alta que no se puede dar, qué falta (C8G-01). */
@@ -1634,6 +1769,7 @@ export function Mandatos() {
         {sinDecisionUsable && (
           <ComandoNoDisponible motivo={registraDecisiones && listaDecisiones.length === 0 ? ALTA_SIN_DECISIONES : ALTA_SIN_DECISION_USABLE} />
         )}
+        {altaSinTipos && tiposQueFaltan()}
         {altaCaida && candidatos.tipo === "sin_servicio" && (
           <>
             <p id={`${id}-alta-caida`}>No se pudo consultar quiénes pueden recibir un mandato: sin eso no se puede dar un alta.</p>
@@ -1647,7 +1783,13 @@ export function Mandatos() {
   /** «Registrar una decisión», en su ventana (MAN-03); el acta se sube en otra, encima (MAN-04). */
   function ventanaDecision() {
     return (
-      <VentanaDeFormulario titulo="Registrar una decisión" textoEnviar="Registrar decisión" alEnviar={registrarDecision} alCerrar={cerrarVentana}>
+      <VentanaDeFormulario
+        titulo="Registrar una decisión"
+        textoEnviar="Registrar decisión"
+        alEnviar={() => registrarDecision()}
+        alCerrar={cerrarVentana}
+        sinEnviar={esperaElActa}
+      >
         <label htmlFor={`${id}-tipo-decision`}>Tipo</label>
         <select
           id={`${id}-tipo-decision`}
@@ -1668,6 +1810,8 @@ export function Mandatos() {
           id={`${id}-fecha-decision`}
           {...marcaDe(`${id}-fecha-decision`, errorEn("decision", "fecha"))}
           type="date"
+          // FL-DEC-04: se registran actos ya tomados (`fecha_futura`).
+          max={hoyDelDispositivo()}
           value={fechaDecision}
           onChange={(e) => cambiar(claveDecision, setFechaDecision, "fecha")(e.target.value)}
         />
@@ -1730,7 +1874,7 @@ export function Mandatos() {
         {/* MAN-05: subida un acta para esta decisión, no se ofrece otra (salvo que la rechace el antivirus). */}
         {cargaDocumentos && actas?.tipo === "ok" && !actaSubida && actaEnRevision === null && (
           <p>
-            <button type="button" className="secundario" onClick={() => setSubeActa(true)}>
+            <button type="button" className="secundario" onClick={abrirSubidaActa}>
               Subir el acta
             </button>
           </p>
@@ -1741,9 +1885,9 @@ export function Mandatos() {
             {estadoActa.texto}
           </p>
         )}
-        {actaEnRevision !== null && antivirusTarda && (
-          <p>El antivirus está tardando: se sigue consultando. La decisión se puede registrar sin el acta.</p>
-        )}
+        {/* FL-DEC-01: con el acta en revisión, la decisión espera; no se invita a registrarla sin ella. */}
+        {actaEnRevision !== null && esperaElActa && <p>{DECISION_ESPERA_EL_ACTA}</p>}
+        {actaEnRevision !== null && antivirusTarda && <p>El antivirus está tardando: se sigue consultando.</p>}
       </>
     );
   }
@@ -1781,7 +1925,7 @@ export function Mandatos() {
 
   /** La administración que choca con el alta (C8G-05): con la lista a la vista, se sabe antes de enviar. */
   function administracionQueChoca(): Mandato | undefined {
-    if (!ES_ADMINISTRACION.has(tipoMandato) || desde === "") return undefined;
+    if (tipoAlta === undefined || !ES_ADMINISTRACION.has(tipoAlta) || desde === "") return undefined;
     return listaDeMandatos.find(
       (m) =>
         ES_ADMINISTRACION.has(m.tipo) &&
@@ -1791,54 +1935,124 @@ export function Mandatos() {
     );
   }
 
-  /** «Dar de alta un mandato», en su ventana (MAN-03). */
-  function ventanaAlta() {
-    // C8G-02: sin nadie a quien dárselo, solo el tipo y dónde se resuelve.
-    const sinNadie = !externo && elegibles.length === 0;
-    const choca = sinNadie ? undefined : administracionQueChoca();
+  /** Por qué faltan tipos en el selector del alta (FL-MAN-09), con dónde se resuelve cada uno. */
+  function tiposQueFaltan() {
+    return (
+      <>
+        {/* C8G-02: sin nadie a quien dárselo, el Consejo y la administración no se ofrecen. */}
+        {elegibles.length === 0 && (
+          <ComandoNoDisponible
+            motivo={candidatos.tipo === "ok" && candidatos.elementos.length === 0 ? ALTA_SIN_NADIE : ALTA_SIN_NADIE_MAS}
+            resolver={puede("padron.ver") ? { texto: "Ir al Padrón", a: RUTA_PADRON } : undefined}
+          />
+        )}
+        {/* FL-MAN-01: con otra administración sin fecha de fin, no se piden los datos de una nueva. */}
+        {administracionSinFin !== undefined && (
+          <>
+            <ComandoNoDisponible
+              motivo={`Ya hay una administración sin fecha de fin: ${administracionSinFin.nombre}, desde el ${dia(
+                administracionSinFin.vigente_desde,
+              )}. Para dar otra administración, antes hay que darla de baja desde su ficha.`}
+            />
+            <p>
+              <button
+                type="button"
+                className="secundario"
+                disabled={enviando}
+                onClick={() => {
+                  cerrarVentana();
+                  verMandato(administracionSinFin);
+                }}
+              >
+                Abrir su ficha
+              </button>
+            </p>
+          </>
+        )}
+      </>
+    );
+  }
+
+  /** «Dar de alta un mandato», en su ventana (MAN-03), con solo los tipos que se pueden dar (FL-MAN-09). */
+  function ventanaAlta(tipo: TipoMandato) {
+    const choca = administracionQueChoca();
+    // FL-MAN-01: si otra administración ocupa fechas, una administración pide primero las fechas, y si
+    // chocan queda solo el impedimento (C9).
+    const fechasPrimero =
+      ES_ADMINISTRACION.has(tipo) && listaDeMandatos.some((m) => ES_ADMINISTRACION.has(m.tipo) && OCUPAN_SUS_FECHAS.has(m.estado));
     return (
       <VentanaDeFormulario
         titulo="Dar de alta un mandato"
         textoEnviar="Dar de alta"
         alEnviar={darDeAlta}
         alCerrar={cerrarVentana}
-        sinEnviar={sinNadie || choca !== undefined}
+        sinEnviar={choca !== undefined}
       >
         <label htmlFor={`${id}-tipo-mandato`}>Tipo de mandato</label>
         <select
           id={`${id}-tipo-mandato`}
           data-foco
           {...marcaDe(`${id}-tipo-mandato`, errorEn("alta", "tipo"))}
-          value={tipoMandato}
+          value={tipo}
           onChange={(e) => cambiar(claveAlta, setTipoMandato, "tipo")(e.target.value as TipoMandato)}
         >
-          {TIPOS_MANDATO.map((t) => (
+          {tiposPosibles.map((t) => (
             <option key={t} value={t}>
               {TEXTO_TIPO_MANDATO[t]}
             </option>
           ))}
         </select>
         <ErrorDeCampo idCampo={`${id}-tipo-mandato`} mensaje={errorEn("alta", "tipo")} />
-        {sinNadie ? (
-          <ComandoNoDisponible
-            motivo={
-              candidatos.tipo === "ok" && candidatos.elementos.length === 0
-                ? "Nadie tiene todavía un vínculo confirmado en este edificio: sin él no se puede dar el mandato. Los vínculos se confirman en el Padrón del edificio."
-                : "Nadie más tiene un vínculo confirmado en este edificio, y nadie se da un mandato a sí mismo. Los vínculos se confirman en el Padrón del edificio."
-            }
-            resolver={puede("padron.ver") ? { texto: "Ir al Padrón", a: RUTA_PADRON } : undefined}
-          />
-        ) : (
-          camposDelAlta(choca)
-        )}
+        {tiposQueFaltan()}
+        {fechasPrimero && camposDeFechas(choca)}
+        {!(fechasPrimero && choca !== undefined) && camposDelAlta(tipo)}
+        {!fechasPrimero && camposDeFechas(choca)}
       </VentanaDeFormulario>
     );
   }
 
-  function camposDelAlta(choca: Mandato | undefined) {
+  function camposDeFechas(choca: Mandato | undefined) {
     return (
       <>
-        {externo ? (
+        <label htmlFor={`${id}-desde`}>Desde</label>
+        <input
+          id={`${id}-desde`}
+          {...marcaDe(`${id}-desde`, errorEn("alta", "desde"))}
+          type="date"
+          value={desde}
+          onChange={(e) => cambiar(claveAlta, setDesde, "desde")(e.target.value)}
+        />
+        <ErrorDeCampo idCampo={`${id}-desde`} mensaje={errorEn("alta", "desde")} />
+        <label htmlFor={`${id}-hasta`}>Hasta (opcional; ese día ya no rige)</label>
+        <input
+          id={`${id}-hasta`}
+          {...marcaDe(`${id}-hasta`, errorEn("alta", "hasta"), `${id}-vigencia-vacia`)}
+          type="date"
+          min={desde === "" ? undefined : desde}
+          value={hasta}
+          onChange={(e) => cambiar(claveAlta, setHasta, "hasta")(e.target.value)}
+        />
+        <ErrorDeCampo idCampo={`${id}-hasta`} mensaje={errorEn("alta", "hasta")} />
+        <p id={`${id}-vigencia-vacia`} aria-live="polite">
+          {hasta !== "" &&
+            hasta === desde &&
+            "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
+        </p>
+        {choca !== undefined && (
+          <ComandoNoDisponible
+            motivo={`Ya hay una administración en esas fechas: ${choca.nombre}, desde el ${dia(choca.vigente_desde)}${
+              choca.vigente_hasta ? ` hasta el ${dia(choca.vigente_hasta)}` : ""
+            }. Para dar esta alta hay que darla de baja desde su ficha o cambiar las fechas.`}
+          />
+        )}
+      </>
+    );
+  }
+
+  function camposDelAlta(tipo: TipoMandato) {
+    return (
+      <>
+        {tipo === "administrador_externo" ? (
           <>
             <label htmlFor={`${id}-nombre`}>Razón social o nombre</label>
             <input
@@ -1872,7 +2086,7 @@ export function Mandatos() {
             <ErrorDeCampo idCampo={`${id}-persona`} mensaje={errorEn("alta", "persona_id")} />
           </>
         )}
-        {tipoMandato !== "miembro_consejo" && (
+        {tipo !== "miembro_consejo" && (
           <>
             <label htmlFor={`${id}-matricula`}>Matrícula (opcional)</label>
             <input
@@ -1891,10 +2105,10 @@ export function Mandatos() {
         <select
           id={`${id}-decision-alta`}
           {...marcaDe(`${id}-decision-alta`, errorEn("alta", "decision_id"))}
-          value={decisionAlta}
+          value={decisionAltaElegida}
           onChange={(e) => cambiar(claveAlta, setDecisionAlta, "decision_id")(e.target.value)}
         >
-          <option value="">Elegir la decisión</option>
+          {usables.length !== 1 && <option value="">Elegir la decisión</option>}
           {usables.map((d) => (
             <option key={d.id} value={d.id}>
               {recortar(textoDecision(d))}
@@ -1902,37 +2116,6 @@ export function Mandatos() {
           ))}
         </select>
         <ErrorDeCampo idCampo={`${id}-decision-alta`} mensaje={errorEn("alta", "decision_id")} />
-        <label htmlFor={`${id}-desde`}>Desde</label>
-        <input
-          id={`${id}-desde`}
-          {...marcaDe(`${id}-desde`, errorEn("alta", "desde"))}
-          type="date"
-          value={desde}
-          onChange={(e) => cambiar(claveAlta, setDesde, "desde")(e.target.value)}
-        />
-        <ErrorDeCampo idCampo={`${id}-desde`} mensaje={errorEn("alta", "desde")} />
-        <label htmlFor={`${id}-hasta`}>Hasta (opcional; ese día ya no rige)</label>
-        <input
-          id={`${id}-hasta`}
-          {...marcaDe(`${id}-hasta`, errorEn("alta", "hasta"), `${id}-vigencia-vacia`)}
-          type="date"
-          min={desde === "" ? undefined : desde}
-          value={hasta}
-          onChange={(e) => cambiar(claveAlta, setHasta, "hasta")(e.target.value)}
-        />
-        <ErrorDeCampo idCampo={`${id}-hasta`} mensaje={errorEn("alta", "hasta")} />
-        <p id={`${id}-vigencia-vacia`} aria-live="polite">
-          {hasta !== "" &&
-            hasta === desde &&
-            "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
-        </p>
-        {choca !== undefined && (
-          <ComandoNoDisponible
-            motivo={`Ya hay una administración en esas fechas: ${choca.nombre}, desde el ${dia(choca.vigente_desde)}${
-              choca.vigente_hasta ? ` hasta el ${dia(choca.vigente_hasta)}` : ""
-            }. Para dar esta alta hay que darla de baja desde su ficha o cambiar las fechas.`}
-          />
-        )}
       </>
     );
   }
@@ -2147,6 +2330,13 @@ export function Mandatos() {
         {resuelveRevision && !m.es_propio && !sinCondicion && asambleas.length === 0 && (
           <ComandoNoDisponible motivo="Para mantenerlo hace falta una asamblea registrada por otra persona, y no hay ninguna que esta cuenta pueda usar." />
         )}
+        {/* C8G-03 y FL-MAN-08: sin una asamblea que se pueda usar, la remoción no se ofrece; lo dice la
+            ficha, con el paso que falta, y no la ventana de la baja que se abre por otra causa. */}
+        {daBaja && !m.es_propio && m.estado !== "terminado" && !ofreceRemocion && (decisiones.tipo === "ok" || decisiones.tipo === "sin_servicio") && (
+          <ComandoNoDisponible
+            motivo={decisiones.tipo === "sin_servicio" ? REMOCION_SIN_DECISIONES : REMOCION_SIN_ASAMBLEA}
+          />
+        )}
         {propiosQueNoVan.length > 0 && (
           <ComandoNoDisponible
             motivo={`Este mandato es de esta cuenta: ${propiosQueNoVan.join(" o ")} lo hace otra persona del Consejo o de la administración.`}
@@ -2167,7 +2357,7 @@ export function Mandatos() {
   function ventanaDeLaFicha(m: MandatoDetalle, accion: AccionDeFicha, enCurso: InvitacionMandato | undefined) {
     if (accion === "baja") return ventanaBaja(m);
     if (accion === "revision") return ventanaRevision(m);
-    if (accion === "invitar") return ventanaInvitar(m);
+    if (accion === "invitar") return admiteInvitacion(m) && invitacionEnCurso() === undefined && ventanaInvitar(m);
     if (accion === "retirar_invitacion")
       return (
         enCurso !== undefined && (
@@ -2213,16 +2403,6 @@ export function Mandatos() {
               ))}
             </select>
             <ErrorDeCampo idCampo={`${id}-causa`} mensaje={errorEn("baja", "causa")} />
-            {/* C8G-03: sin una asamblea que se pueda usar, la remoción no se ofrece y se dice por qué. */}
-            {!ofreceRemocion && (
-              <ComandoNoDisponible
-                motivo={
-                  decisiones.tipo === "sin_servicio"
-                    ? "No se pudieron consultar las decisiones: sin ellas no se ofrece la remoción por asamblea."
-                    : "La remoción por asamblea pide una asamblea registrada por otra persona, y no hay ninguna que esta cuenta pueda usar."
-                }
-              />
-            )}
           </>
         )}
         <label htmlFor={`${id}-descripcion-baja`}>Por qué termina</label>
@@ -2243,10 +2423,10 @@ export function Mandatos() {
             <select
               id={`${id}-decision-baja`}
               {...marcaDe(`${id}-decision-baja`, errorEn("baja", "decision_id"))}
-              value={decisionBaja}
+              value={asambleaBajaElegida}
               onChange={(e) => cambiarBaja(setDecisionBaja, "decision_id")(e.target.value)}
             >
-              <option value="">Elegir la asamblea</option>
+              {asambleas.length !== 1 && <option value="">Elegir la asamblea</option>}
               {asambleas.map((d) => (
                 <option key={d.id} value={d.id}>
                   {recortar(textoDecision(d))}
@@ -2283,6 +2463,9 @@ export function Mandatos() {
 
   /** «Mantener el mandato», en su ventana (MAN-06), con la explicación que sirve para decidir (MAN-10). */
   function ventanaRevision(m: MandatoDetalle) {
+    const hoy = hoyDelDispositivo();
+    const fechaAsamblea = asambleas.find((d) => d.id === asambleaRevisionElegida)?.fecha;
+    const minimoEficaz = fechaAsamblea !== undefined && fechaAsamblea > hoy ? fechaAsamblea : hoy;
     return (
       <VentanaDeFormulario titulo="Mantener el mandato" textoEnviar="Mantener el mandato" alEnviar={() => mantener(m)} alCerrar={cerrarAccionFicha}>
         <p>{CAUSA_REVISION}</p>
@@ -2291,10 +2474,10 @@ export function Mandatos() {
           id={`${id}-decision-revision`}
           data-foco
           {...marcaDe(`${id}-decision-revision`, errorEn("revision", "decision_id"))}
-          value={decisionRevision}
+          value={asambleaRevisionElegida}
           onChange={(e) => cambiar(claveRevision, setDecisionRevision, "decision_id")(e.target.value)}
         >
-          <option value="">Elegir la asamblea</option>
+          {asambleas.length !== 1 && <option value="">Elegir la asamblea</option>}
           {asambleas.map((d) => (
             <option key={d.id} value={d.id}>
               {recortar(textoDecision(d))}
@@ -2307,6 +2490,8 @@ export function Mandatos() {
           id={`${id}-eficaz-desde`}
           {...marcaDe(`${id}-eficaz-desde`, errorEn("revision", "eficaz_desde"))}
           type="date"
+          // FL-DEC-04: hoy o después, y no antes de la asamblea elegida (`eficaz_desde_invalida`).
+          min={minimoEficaz}
           value={eficazDesde}
           onChange={(e) => cambiar(claveRevision, setEficazDesde, "eficaz_desde")(e.target.value)}
         />
