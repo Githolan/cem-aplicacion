@@ -32,13 +32,16 @@ type Props = {
   nota?: string;
   /** El archivo ya elegido o subido, en palabras: con esto, solo su nombre y «Cambiar el archivo». */
   elegido?: string | null;
+  /** Ya hay un archivo aunque no se sepa su nombre (uno subido antes): solo «Cambiar el archivo».
+   * Sin esto, lo decide `elegido`. */
+  conArchivo?: boolean;
   /** Para llevar el foco al primer botón al abrir un formulario. Con esto, el primer botón lleva
    * también `data-foco`: dentro de una `Hoja` (una `VentanaDeFormulario`), el foco entra ahí. */
   refPrimero?: (boton: HTMLButtonElement | null) => void;
   alElegir: (archivo: File) => void;
 };
 
-export function SubirArchivo({ titulo, de, tipos, tope, reemplaza = false, deshabilitada = false, nota, elegido, refPrimero, alElegir }: Props) {
+export function SubirArchivo({ titulo, de, tipos, tope, reemplaza = false, deshabilitada = false, nota, elegido, conArchivo: hayArchivo, refPrimero, alElegir }: Props) {
   const id = useId();
   const [encima, setEncima] = useState(false);
   const [problema, setProblema] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export function SubirArchivo({ titulo, de, tipos, tope, reemplaza = false, desha
   const [cambiando, setCambiando] = useState(false);
   /** A dónde va el foco cuando el botón tocado deja de estar (abrir o cerrar las opciones). */
   const foco = useRef<"opciones" | "cambiar" | null>(null);
-  const conArchivo = elegido != null;
+  const conArchivo = hayArchivo ?? elegido != null;
   const opciones = !conArchivo || cambiando;
   const imagenes = tipos.filter((t) => t.imagen);
   const conFotos = imagenes.length > 0;
@@ -140,7 +143,7 @@ export function SubirArchivo({ titulo, de, tipos, tope, reemplaza = false, desha
         </>
       )}
       <input ref={archivo} type="file" hidden accept={aceptar(tipos)} aria-label={`Archivo ${de}`} disabled={deshabilitada} onChange={cambio} />
-      {conArchivo && <p className="archivo-elegido">Elegido: {elegido}</p>}
+      {elegido != null && <p className="archivo-elegido">Elegido: {elegido}</p>}
       {opciones ? (
         <div className="subir-archivo__botones">
           {conFotos && (

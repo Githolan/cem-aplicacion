@@ -104,6 +104,8 @@ export function PagosPorAclarar() {
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [otraCosa, setOtraCosa] = useState(false);
   const [archivo, setArchivo] = useState<File | null>(null);
+  /** El nombre del último archivo que entró desde esta ventana; la API no informa el del comprobante. */
+  const [subido, setSubido] = useState<string | null>(null);
   /** Por qué no se subió el archivo: dentro de la ventana, junto a la carga. */
   const [fallaSubida, setFallaSubida] = useState<string | null>(null);
   /** Lo que no se pudo actualizar con una ventana abierta: sigue a la vista con lo escrito. */
@@ -356,6 +358,7 @@ export function PagosPorAclarar() {
         }
         claveArchivo.current = null;
         sinArchivo.current = null;
+        setSubido(elegido.name);
         setArchivo(null);
         setVuelta((v) => v + 1);
         return;
@@ -376,6 +379,7 @@ export function PagosPorAclarar() {
       setRegistro({ ...REGISTRO_VACIO, moneda: p.moneda });
       setOtraCosa(false);
       setArchivo(null);
+      setSubido(null);
       setFallaSubida(null);
       claveCarga.current = null;
       claveArchivo.current = null;
@@ -436,8 +440,12 @@ export function PagosPorAclarar() {
             {fallaSubida}
           </p>
         )}
-        <SubirArchivo titulo={p.comprobante_id == null ? "Subir el comprobante" : "Cambiar el comprobante"} de="del comprobante"
+        {/* DOC-16: con el comprobante subido (o elegido y subiéndose), un solo «Cambiar el archivo»; si el
+            antivirus lo rechazó, las formas de elegir a la vista, porque hay que subir otro. */}
+        <SubirArchivo titulo={p.comprobante_id == null ? "Subir el comprobante" : "Comprobante de la transferencia"} de="del comprobante"
           tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={p.comprobante_id != null} deshabilitada={enviando}
+          elegido={archivo?.name ?? subido}
+          conArchivo={archivo !== null || (p.comprobante_id != null && p.comprobante_estado !== "rechazado")}
           refPrimero={conFoco ? () => undefined : undefined}
           alElegir={(elegido) => {
             claveArchivo.current = null;
