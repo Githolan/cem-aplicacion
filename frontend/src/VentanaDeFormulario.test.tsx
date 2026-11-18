@@ -221,4 +221,23 @@ describe("VentanaDeFormulario sin el botón principal (tanda 3, C8G-02 y C8G-05)
     fireEvent.click(within(screen.getByRole("dialog", { name: "Dar de alta un mandato" })).getByRole("button", { name: "Dar de alta" }));
     expect(alEnviar).toHaveBeenCalledTimes(1);
   });
+
+  it("su envío no llega al formulario de la pantalla de atrás (Codex en app #259)", async () => {
+    // La ventana va por un portal, pero los eventos de React suben por el árbol de componentes: sin
+    // cortarlo, pedir el salteo desde la orden también guardaba la orden.
+    const deAtras = vi.fn((e: React.FormEvent) => e.preventDefault());
+    const alEnviar = vi.fn(async (): Promise<FinDeEnvio> => "seguir");
+    render(
+      <form onSubmit={deAtras}>
+        <VentanaDeFormulario titulo="Pedir el salteo" textoEnviar="Pedir" alEnviar={alEnviar} alCerrar={() => undefined}>
+          <p>Contenido</p>
+        </VentanaDeFormulario>
+      </form>,
+    );
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("dialog", { name: "Pedir el salteo" })).getByRole("button", { name: "Pedir" }));
+    });
+    expect(alEnviar).toHaveBeenCalledTimes(1);
+    expect(deAtras).not.toHaveBeenCalled();
+  });
 });

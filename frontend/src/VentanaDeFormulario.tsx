@@ -86,6 +86,9 @@ export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, c
 
   async function enviar(evento: FormEvent) {
     evento.preventDefault();
+    // La ventana va por un portal, pero en React el evento sube por el árbol de componentes: sin
+    // cortarlo, su envío llegaría al formulario de la pantalla de atrás (Codex en app #259).
+    evento.stopPropagation();
     if (sinEnviar) return;
     setEnviando(true);
     setRechazo(null);
