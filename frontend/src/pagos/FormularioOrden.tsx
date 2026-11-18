@@ -30,6 +30,7 @@ import {
 } from "../egresos/comun";
 import { ComandoNoDisponible } from "../ComandoNoDisponible";
 import { FallaDeLectura } from "../egresos/EstadoPantalla";
+import { PedidoDeSalteo } from "../egresos/PedidoSalteo";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { exigirSesion, type MonedasDelEdificio, SinSesion } from "../egresos/useConsorcio";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
@@ -841,7 +842,12 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         {marca("proveedor")}
         {elegido !== undefined && inactivo && <ComandoNoDisponible motivo={PROVEEDOR_INACTIVO} resolver={aSuFicha(elegido)} />}
         {elegido !== undefined && !inactivo && salteoDelElegido === "sin_salteo" && (
-          <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={aSuFicha(elegido)} />
+          <>
+            <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={aSuFicha(elegido)} />
+            {/* Pregunta 3 del propietario (18-11-2026, tanda 9): el salteo se le pide al Consejo desde acá. */}
+            <PedidoDeSalteo consorcio={consorcio} proveedor={elegido} monedas={monedas}
+              inicial={{ importe: datos.importe, moneda: datos.moneda }} aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
+          </>
         )}
         {elegido !== undefined && !inactivo && salteoDelElegido === "salteo_propio" && (
           <ComandoNoDisponible motivo={SALTEO_PROPIO} resolver={aSuFicha(elegido)} />

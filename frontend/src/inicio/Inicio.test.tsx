@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { NADA_PENDIENTE } from "./Inicio";
-import { DETALLE_SALTEO, DETALLE_SIN_LECTURA, textoPagos, textoSolicitudes } from "./pendientes";
+import { DETALLE_SIN_LECTURA, PREPARAR_LA_ORDEN, textoPagos, textoSalteoHasta, textoSolicitudes, TITULO_PEDIDO_SALTEO } from "./pendientes";
 
 // El inicio como única bandeja (decisión 9 del 18-11-2026; FL-PAD-01, FL-AVI-01 a FL-AVI-05,
 // FL-INI-01, FL-SAL-01 parte 1): una fila por cada pendiente que le toca a quien mira y por edificio,
@@ -85,6 +85,9 @@ const listaProveedores = (extra: object = {}) => ({
   documentacion_por_vencer: [],
   salteo_de_quien_prepara: [],
   modo_exigencia: "bloquear",
+  vence_salteo: [],
+  salteo_vencido_sin_usar: [],
+  autoriza_por_persona: true,
   ...extra,
 });
 
@@ -122,6 +125,7 @@ function backend({
     if (camino.endsWith("/proveedores")) return Response.json(listaProveedores());
     if (camino.endsWith("/mandatos")) return Response.json({ elementos: [] });
     if (camino.endsWith("/contactos/gestion")) return Response.json({ elementos: [] });
+    if (camino.endsWith("/pedidos-salteo")) return Response.json({ elementos: [] });
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
   });
 }
@@ -323,14 +327,42 @@ describe("Solicitudes formales (FL-AVI-01, FL-AVI-02)", () => {
 });
 
 describe("Proveedores de quien prepara (FL-SAL-01 parte 1, FL-AVI-05)", () => {
-  it("el salteo que espera su orden tiene su fila, que abre «Preparar una orden»", async () => {
+  it("el salteo que espera su orden (el pedido atendido) tiene su fila, que abre «Preparar la orden» y dice hasta cuándo", async () => {
+    const VENCE = "2026-11-19T15:00:00Z";
     const lista = () =>
-      Response.json(listaProveedores({ elementos: [proveedor(P1, "Ascensores Sur"), proveedor(P2, "Limpieza Norte")], con_salteo: [P1], documentacion_faltante: [P1] }));
+      Response.json(
+        listaProveedores({
+          elementos: [proveedor(P1, "Ascensores Sur"), proveedor(P2, "Limpieza Norte")],
+          con_salteo: [P1],
+          documentacion_faltante: [P1],
+          vence_salteo: [{ proveedor_id: P1, vence_en: VENCE }],
+        }),
+      );
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: PREPARA }, otras: { [ruta(C1, "proveedores")]: lista } }));
     abrir();
-    const salteo = await fila("Preparar una orden", `Ascensores Sur: ${DETALLE_SALTEO}`);
+    const salteo = await fila(PREPARAR_LA_ORDEN, `Ascensores Sur: ${textoSalteoHasta(VENCE)}`);
     expect(salteo.getAttribute("href")).toBe("/pagos/nueva");
     expect(await fila("Proveedores", "1 proveedor con documentación vencida o faltante")).toBeTruthy();
+  });
+
+  it("al Consejo que saltea, cada pedido pendiente de otra persona le aparece y abre la ficha del proveedor", async () => {
+    const pedido = (numero: number, estado: string, propio: boolean) => ({
+      numero, proveedor_id: P1, razon_social: "Ascensores Sur", motivo: "Pérdida de gas", importe_centavos: 1_500_000, moneda: "ARS",
+      pedido_en: "2026-11-18T12:00:00Z", pedido_por_nombre: "LAB Admin", propio, estado, salteo_numero: null, salteo_vence_en: null,
+    });
+    const pedidos = () => Response.json({ elementos: [pedido(3, "pendiente", false), pedido(2, "pendiente", true), pedido(1, "atendido", false)] });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ["egresos.saltear_documentacion", "proveedores.ver"] }, otras: { [ruta(C1, "pedidos-salteo")]: pedidos } }));
+    abrir();
+    const enlace = await fila(TITULO_PEDIDO_SALTEO, /^Ascensores Sur: .+15\.000,00 · LAB Admin$/);
+    expect(enlace.getAttribute("href")).toBe("/proveedores");
+    // Uno solo: el propio y el atendido no le tocan.
+    expect((await paraHacer()).getAllByRole("link", { name: TITULO_PEDIDO_SALTEO })).toHaveLength(1);
+  });
+
+  it("control: sin pedidos que esperen, el Consejo no tiene filas de salteo", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ["egresos.saltear_documentacion", "proveedores.ver"] } }));
+    abrir();
+    expect(await screen.findByText(NADA_PENDIENTE)).toBeTruthy();
   });
 
   it("control: sin salteo ni documentación vencida o faltante no hay filas de proveedores", async () => {

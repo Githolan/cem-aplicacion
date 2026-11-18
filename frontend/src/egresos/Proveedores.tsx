@@ -52,7 +52,7 @@ import { datosDelProveedor, FichaDelProveedor } from "./FichaDelProveedor";
 import { ofreceEnAlguno, REQUISITOS, useAccionesPorEdificio, usePuede } from "../permisos";
 import { RUTA_NUEVA, RUTA_PAGOS } from "../pagos/rutas";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
+import { exigirSesion, monedasDe, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /egresos/proveedores (pantalla 1, aprobada el 30-10-2026; app 0048 y 0049): la lista con
 // la cuenta enmascarada, la ficha con la historia de versiones, el alta y el cambio. Cambiar la
@@ -827,6 +827,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         puedeCambiar
         puedeCargar={f.puede_cargar_documentacion}
         puedeSaltear={puede("egresos.saltear_documentacion")}
+        pedirConMonedas={monedasDe(pantalla, consorcio)}
         ocupada={enviando}
         aEntrar={aEntrar}
         alCambiar={() => {

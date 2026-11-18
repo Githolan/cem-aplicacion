@@ -250,6 +250,8 @@ function backend(respuestas: Respuestas) {
     [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
     // Antes de guardar se mira si hay una orden parecida (decisión 4 del 13-11): por defecto, no.
     [`GET ${BASE}/pagos/parecida`]: () => Response.json({ parecida: null }),
+    // Los pedidos de salteo al Consejo (tanda 9): por defecto, ninguno.
+    [`GET ${BASE}/pedidos-salteo`]: () => Response.json({ elementos: [] }),
   };
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;

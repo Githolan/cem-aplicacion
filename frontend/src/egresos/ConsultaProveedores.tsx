@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
@@ -37,6 +37,9 @@ import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 // Informe de fricción, tanda 4: la ficha es la misma de la gestión, en una hoja sobre la lista
 // (CPR-01), sin lo que no tiene valor ni el estado «Activo» (CPR-02). «Quién ve los proveedores» se
 // abre desde acá (MEN-05).
+//
+// Flujos 18-11, tanda 9: el pedido de salteo del inicio del Consejo llega con `state.abrir`: la ficha
+// de ese proveedor se abre sola, con el pedido a la vista y el botón del salteo.
 
 type ProveedorConsulta = components["schemas"]["ProveedorConsulta"];
 type Ficha = components["schemas"]["FichaProveedorConsulta"];
@@ -55,12 +58,30 @@ type Lectura =
       faltante: ReadonlySet<string>;
     };
 
-export function ConsultaProveedores() {
-  const elegido = useConsorcio(REQUISITOS.consultaProveedores);
-  return <DelEdificio key={elegido.consorcio} {...elegido} />;
+/** La ficha que se pidió abrir al llegar (desde el inicio), y de qué edificio. */
+function aAbrir(estado: unknown): { consorcio: string; abrir: string } | null {
+  if (typeof estado !== "object" || estado === null) return null;
+  const { abrir, consorcio } = estado as Record<string, unknown>;
+  return typeof abrir === "string" && typeof consorcio === "string" ? { consorcio, abrir } : null;
 }
 
-function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+export function ConsultaProveedores() {
+  const elegido = useConsorcio(REQUISITOS.consultaProveedores);
+  // Se lee una vez, al llegar: después el `state` se borra.
+  const llegada = useRef(aAbrir(useLocation().state));
+  const abrir = llegada.current?.consorcio === elegido.consorcio ? llegada.current.abrir : null;
+  return <DelEdificio key={elegido.consorcio} {...elegido} abrirAlLlegar={abrir} />;
+}
+
+function DelEdificio({
+  pantalla,
+  consorcio,
+  setConsorcio,
+  aEntrar,
+  aInicio,
+  reintentar,
+  abrirAlLlegar,
+}: ReturnType<typeof useConsorcio> & { abrirAlLlegar: string | null }) {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<Ficha | null>(null);
@@ -120,6 +141,18 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
   }
+
+  // La llegada, una vez leída la lista: se abre la ficha pedida, si está en este edificio.
+  const llegadaAtendida = useRef(false);
+  const atenderLlegada = useRef<(proveedores: readonly ProveedorConsulta[]) => void>(() => undefined);
+  atenderLlegada.current = (proveedores) => {
+    if (llegadaAtendida.current) return;
+    llegadaAtendida.current = true;
+    if (abrirAlLlegar !== null && proveedores.some((p) => p.id === abrirAlLlegar)) verFicha({ id: abrirAlLlegar });
+  };
+  useEffect(() => {
+    if (lectura.tipo === "ok") atenderLlegada.current(lectura.proveedores);
+  }, [lectura]);
 
   function reintentarLectura() {
     setAviso(sinLaFalla);

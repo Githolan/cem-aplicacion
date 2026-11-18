@@ -24,6 +24,7 @@ import {
   usePendientesMandatos,
   usePendientesPadron,
   usePendientesPagos,
+  usePendientesPedidosSalteo,
   usePendientesProveedores,
   usePendientesSolicitudes,
 } from "./pendientes";
@@ -100,6 +101,7 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
   const fuentes: Fuente[] = [
     usePendientesPagos(comunes),
     usePendientesProveedores(comunes),
+    usePendientesPedidosSalteo(comunes),
     usePendientesSolicitudes(comunes),
     usePendientesPadron(comunes),
     usePendientesMandatos(comunes),

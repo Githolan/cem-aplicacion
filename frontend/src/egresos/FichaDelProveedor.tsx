@@ -59,6 +59,8 @@ type Props = {
   puedeCargar: boolean;
   /** Lo que la configuración deja saltear (solo para mostrar: decide la API). */
   puedeSaltear: boolean;
+  /** Quien prepara órdenes pide el salteo al Consejo (tanda 9): las monedas del edificio. */
+  pedirConMonedas?: readonly [string, ...string[]];
   /** Los botones de las acciones de quien gestiona. */
   acciones?: ReactNode;
   /** La historia de versiones (solo gestión). */
@@ -79,6 +81,7 @@ export function FichaDelProveedor({
   puedeCambiar,
   puedeCargar,
   puedeSaltear,
+  pedirConMonedas,
   acciones,
   historia,
   ventana,
@@ -115,6 +118,7 @@ export function FichaDelProveedor({
         modo={ficha.configuracion.modo_exigencia}
         hayFaltantes={ficha.faltantes.length > 0}
         puedeSaltear={puedeSaltear}
+        pedir={pedirConMonedas === undefined || p.estado !== "activo" ? null : { monedas: pedirConMonedas, razonSocial: p.razon_social }}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />

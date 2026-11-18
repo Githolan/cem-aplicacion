@@ -2,7 +2,7 @@ import { useQueries } from "@tanstack/react-query";
 
 import { api } from "../api/cliente";
 import { RUTA_CONTACTOS } from "../Contactos";
-import { ESTADO, fechaLegible, RUTA_PROVEEDORES } from "../egresos/comun";
+import { ESTADO, fechaLegible, importe, momento, RUTA_CONSULTA_PROVEEDORES, RUTA_PROVEEDORES } from "../egresos/comun";
 import { codigoDe, mensajeDeFalla } from "../fallas";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "../fiscalizacion/Solicitudes";
 import type { NombreIcono } from "../Iconos";
@@ -244,7 +244,10 @@ export function textoDocumentacion(cantidad: number): string {
   return `${plural(cantidad, "proveedor", "proveedores")} con documentación vencida o faltante`;
 }
 
-export const DETALLE_SALTEO = "tiene un salteo por urgencia";
+/** FL-SAL-01 (tanda 9): hasta cuándo sirve el salteo que espera su orden (`vence_salteo`, app 0110). */
+export const textoSalteoHasta = (vence: string) => `salteo por urgencia hasta el ${momento(vence)}`;
+/** El paso que sigue para quien prepara: con el salteo (pedido y atendido, o no), la orden. */
+export const PREPARAR_LA_ORDEN = "Preparar la orden";
 
 export function usePendientesProveedores({ porEdificio, edificios }: Comunes): Fuente {
   const varios = edificios.length > 1;
@@ -258,23 +261,63 @@ export function usePendientesProveedores({ porEdificio, edificios }: Comunes): F
       exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/proveedores", { params: { path: { consorcio_id: consorcio } } })),
     filas: (lista, edificio) => {
       const activos = lista.elementos.filter((p) => p.estado === "activo");
-      // El salteo vigente que sirve para una orden de quien mira: la fila abre «Preparar una orden»
-      // con ese proveedor. Hasta cuándo vale no lo dice la lista (falta `vence_en`, tanda 8).
+      // El salteo vigente que sirve para una orden de quien mira (también el que atendió su pedido al
+      // Consejo): la fila abre «Preparar la orden» con ese proveedor y dice hasta cuándo sirve.
+      const vence = new Map(lista.vence_salteo.map((v) => [v.proveedor_id, v.vence_en]));
       const salteos = activos
         .filter((p) => lista.con_salteo.includes(p.id))
-        .map((p) =>
-          fila(
-            { ruta: RUTA_NUEVA, icono: "billetera", detalle: `${p.razon_social}: ${DETALLE_SALTEO}` },
-            "Preparar una orden",
+        .map((p) => {
+          const hasta = vence.get(p.id);
+          return fila(
+            { ruta: RUTA_NUEVA, icono: "billetera", detalle: hasta === undefined ? p.razon_social : `${p.razon_social}: ${textoSalteoHasta(hasta)}` },
+            PREPARAR_LA_ORDEN,
             edificio,
             varios,
             { proveedor: p.id },
-          ),
-        );
+          );
+        });
       const conFaltas = activos.filter((p) => lista.documentacion_vencida.includes(p.id) || lista.documentacion_faltante.includes(p.id)).length;
       return [...salteos, ...(conFaltas === 0 ? [] : [fila({ ...base, detalle: textoDocumentacion(conFaltas) }, "Proveedores", edificio, varios)])];
     },
     siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, "Proveedores", edificio, varios),
+  });
+}
+
+// --- Pedidos de salteo, para el Consejo que saltea (pregunta 3 del propietario, tanda 9) ----------
+
+const SALTEA: Requisito = [["egresos.saltear_documentacion"]];
+export const TITULO_PEDIDO_SALTEO = "Pedido de salteo";
+
+export function usePendientesPedidosSalteo({ porEdificio, edificios }: Comunes): Fuente {
+  const varios = edificios.length > 1;
+  const base = { ruta: RUTA_CONSULTA_PROVEEDORES, icono: "proveedor" } as const;
+  return usePorEdificio({
+    clave: "pedidos-salteo",
+    porEdificio,
+    edificios,
+    requisito: SALTEA,
+    leer: async (consorcio) =>
+      exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/pedidos-salteo", { params: { path: { consorcio_id: consorcio } } })).elementos.filter(
+        // Los que esperan y no pidió quien mira: nadie saltea su propio pedido.
+        (p) => p.estado === "pendiente" && !p.propio,
+      ),
+    // Cada pedido abre la ficha de su proveedor, donde se registra el salteo: la de gestión si quien mira
+    // gestiona proveedores; si no, la de consulta.
+    filas: (pedidos, edificio, alcanzadas) =>
+      pedidos.map((p) =>
+        fila(
+          {
+            ...base,
+            ruta: cumple(alcanzadas, REQUISITOS.proveedores) ? RUTA_PROVEEDORES : RUTA_CONSULTA_PROVEEDORES,
+            detalle: `${p.razon_social}: ${importe(p.importe_centavos, p.moneda)} · ${p.pedido_por_nombre}`,
+          },
+          TITULO_PEDIDO_SALTEO,
+          edificio,
+          varios,
+          { abrir: p.proveedor_id, pedido: String(p.numero) },
+        ),
+      ),
+    siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_PEDIDO_SALTEO, edificio, varios),
   });
 }
 

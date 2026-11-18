@@ -159,6 +159,8 @@ type Respuestas = Record<string, () => Response | Promise<Response>>;
 const CON_SEGUNDO_FACTOR: Respuestas = {
   "GET /api/v1/auth/totp": () =>
     Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
+  // Los pedidos de salteo al Consejo (tanda 9): por defecto, ninguno.
+  [`GET /api/v1/consorcios/${C1}/pedidos-salteo`]: () => Response.json({ elementos: [] }),
 };
 
 /** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
@@ -183,7 +185,7 @@ function pedidos(simulado: ReturnType<typeof vi.fn>, metodo: string, camino: str
     .filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
 }
 
-const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
+const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
 /** Para llegar a «Preparar una orden», que pregunta en qué monedas opera el edificio. */
 const CON_MONEDAS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
 
