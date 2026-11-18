@@ -63,6 +63,8 @@ type Respuestas = Record<string, () => Response | Promise<Response>>;
 const CON_SEGUNDO_FACTOR: Respuestas = {
   "GET /api/v1/auth/totp": () =>
     Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
+  // Los grupos con porcentajes del período (FL-LIQ-01, tanda 9): por omisión, uno.
+  [`GET /api/v1/consorcios/${C1}/liquidaciones/grupos`]: () => Response.json({ periodo: "2026-10-01", elementos: [GRUPO] }),
 };
 
 function backend(respuestas: Respuestas) {
@@ -148,6 +150,25 @@ describe("liquidación (borrador)", () => {
     expect(periodo("2026-10-01")).toBe("octubre de 2026");
   });
 
+  it("FL-LIQ-01 (tanda 9): si el período no tiene grupos con porcentajes, la ventana lo dice y no abre el borrador", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
+      [`GET ${BASE}/liquidaciones/grupos`]: () => Response.json({ periodo: "2026-10-01", elementos: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: ABRIR_UN_BORRADOR }));
+    const ventana = await screen.findByRole("dialog", { name: ABRIR_UN_BORRADOR });
+    expect(await within(ventana).findByText(/no tiene grupos de gasto con porcentajes: sin ellos el borrador no se puede repartir\. Los carga soporte\.$/)).toBeTruthy();
+    expect(within(ventana).queryByRole("button", { name: "Abrir el borrador" })).toBeNull();
+    expect(within(ventana).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+    const [pedido] = pedidos(api, "GET", `${BASE}/liquidaciones/grupos`);
+    expect(new URL((pedido as Request).url).searchParams.get("periodo")).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(0);
+  });
+
   it("abre el borrador, agrega una orden pagada con su grupo, muestra la simulación y la quita", async () => {
     let liquidaciones: unknown[] = [];
     let detalle = SIN_GASTOS;
@@ -177,7 +198,7 @@ describe("liquidación (borrador)", () => {
 
     expect(await screen.findByText("Todavía no hay liquidaciones en este edificio.")).toBeTruthy();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     const [preparar] = pedidos(api, "POST", `${BASE}/liquidaciones`);
     expect(await preparar!.json()).toEqual({ periodo: "2026-10-01" });
@@ -455,7 +476,7 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText(/ya hay un borrador de ese período/)).toBeTruthy();
   });
 
@@ -470,7 +491,7 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
   });
@@ -488,7 +509,7 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(1));
   });
 
@@ -503,13 +524,13 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await screen.findByText(/El servicio no está disponible/);
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(intentos()).toHaveLength(2));
     await screen.findByText(/El servicio no está disponible/);
     await elegirPeriodo("2026", "11");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(intentos()).toHaveLength(3));
     const [primera, segunda, tercera] = intentos().map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
@@ -531,7 +552,7 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
     // FL-LIQ-03: se abre sola la ventana de agregar; «Cancelar» deja el borrador a la vista.
@@ -548,7 +569,7 @@ describe("liquidación (borrador)", () => {
     expect((within(ventana).getByLabelText("Período") as HTMLSelectElement).value)
       .toBe(`${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, "0")}`);
     fireEvent.change(within(ventana).getByLabelText("Período"), { target: { value: "2026-11" } });
-    fireEvent.click(within(ventana).getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
     expect(await pedidos(api, "POST", `${BASE}/liquidaciones`)[1]!.json()).toEqual({ periodo: "2026-11-01" });
   });
@@ -937,7 +958,7 @@ describe("claves retenidas (Codex en #242)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     const ventana = screen.getByRole("dialog", { name: ABRIR_UN_BORRADOR });
     await within(ventana).findByRole("alert");
     fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
@@ -953,7 +974,7 @@ describe("claves retenidas (Codex en #242)", () => {
     await volverALaLista();
     expect(await screen.findByText("Ver descartados (1)")).toBeTruthy();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
     const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones`).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).not.toBe(primera);
@@ -973,9 +994,9 @@ describe("claves retenidas (Codex en #242)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await screen.findByRole("alert");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
     const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones`).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
@@ -1060,7 +1081,7 @@ describe("revisión por flujos del 18-11, tanda 6", () => {
     // Control: con un período que sí la incluye, vuelve el botón y se pide el borrador.
     fireEvent.change(within(ventana).getByLabelText("Período"), { target: { value: "2026-11" } });
     expect(within(ventana).queryByText(/No hay órdenes pagadas/)).toBeNull();
-    fireEvent.click(within(ventana).getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(1));
   });
 
@@ -1069,7 +1090,7 @@ describe("revisión por flujos del 18-11, tanda 6", () => {
     abrir();
     const ventana = await elegirPeriodo("2026", "10");
     expect(within(ventana).queryByText(/No hay órdenes pagadas/)).toBeNull();
-    fireEvent.click(within(ventana).getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
   });
 
@@ -1085,7 +1106,7 @@ describe("revisión por flujos del 18-11, tanda 6", () => {
     }));
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
     expect(await within(borrador).findByText(/Faltan los porcentajes de cada unidad/)).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();

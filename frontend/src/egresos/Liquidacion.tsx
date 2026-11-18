@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
@@ -7,7 +8,7 @@ import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { ErrorDeCampo, type ErroresDeCampo, erroresDe, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
-import { codigoDe, esPasajera, SIN_CONEXION } from "../fallas";
+import { codigoDe, esPasajera, mensajeDeFalla, SIN_CONEXION } from "../fallas";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import {
@@ -26,7 +27,7 @@ import {
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura, Reintentar } from "./EstadoPantalla";
 import { NOMBRE_MONEDA } from "../pagos/textos";
-import { REQUISITOS } from "../permisos";
+import { FallaDeLectura as FallaDeLaLectura, mensajeDeLectura, REQUISITOS, SIN_CACHE } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
 import { useCodigoEnMedio } from "./useCodigoEnMedio";
 import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } from "./useConsorcio";
@@ -61,6 +62,9 @@ type EstadoLiquidacion = Resumen["estado"];
 
 export const RUTA_LIQUIDACION = "/liquidacion";
 export const ABRIR_UN_BORRADOR = "Abrir un borrador";
+/** FL-LIQ-01 (tanda 9, `GET …/liquidaciones/grupos`): sin grupos con porcentajes, el borrador no se reparte. */
+export const textoSinGrupos = (p: string) =>
+  `${conMayuscula(p)} no tiene grupos de gasto con porcentajes: sin ellos el borrador no se puede repartir. Los carga soporte.`;
 export const AGREGAR_GASTOS = "Agregar gastos";
 export const DESCARTAR = "Descartar el borrador";
 
@@ -593,17 +597,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           </details>
         )}
         {ventana === "abrir" && (
-          <VentanaDeFormulario titulo={ABRIR_UN_BORRADOR} textoEnviar="Abrir el borrador" alEnviar={preparar} alCerrar={() => setVentana(null)}
-            sinEnviar={sinOrdenesDelPeriodo}>
-            <label htmlFor={`${id}-periodo`}>Período</label>
-            <select id={`${id}-periodo`} data-foco value={mes} onChange={(e) => setMes(e.target.value)}>
-              {periodosOfrecidos().map((p) => (
-                <option key={p} value={p}>{conMayuscula(periodo(`${p}-01`))}</option>
-              ))}
-            </select>
-            {/* C9: sin órdenes pagadas para liquidar no se abre el borrador; queda el aviso y «Cancelar». */}
-            {sinOrdenesDelPeriodo && <p role="status">No hay órdenes pagadas hasta el fin de {periodo(`${mes}-01`)} para liquidar.</p>}
-          </VentanaDeFormulario>
+          <VentanaAbrir consorcio={consorcio} mes={mes} setMes={setMes} sinOrdenes={sinOrdenesDelPeriodo}
+            nuevo={borradorDe(periodoElegido) === undefined} preparar={preparar} alCerrar={() => setVentana(null)} />
         )}
       </>
     );
@@ -909,5 +904,62 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       )}
       {codigo.hoja}
     </>
+  );
+}
+
+/** La ventana de abrir un borrador (FL-LIQ-01): sin órdenes pagadas, o sin grupos con porcentajes en
+ * el período, no se abre; queda el aviso y «Cancelar» (C9). El borrador que ya existe se abre igual. */
+function VentanaAbrir({
+  consorcio,
+  mes,
+  setMes,
+  sinOrdenes,
+  nuevo,
+  preparar,
+  alCerrar,
+}: {
+  consorcio: string;
+  mes: string;
+  setMes: (mes: string) => void;
+  sinOrdenes: boolean;
+  nuevo: boolean;
+  preparar: () => Promise<FinDeEnvio>;
+  alCerrar: () => void;
+}) {
+  const id = useId();
+  const periodoElegido = `${mes}-01`;
+  const grupos = useQuery({
+    queryKey: ["grupos-liquidacion", consorcio, periodoElegido],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/liquidaciones/grupos", {
+        params: { path: { consorcio_id: consorcio }, query: { periodo: periodoElegido } },
+      });
+      if (data === undefined) throw new FallaDeLaLectura(mensajeDeFalla(response.status, codigoDe(error)));
+      return data.elementos;
+    },
+    enabled: nuevo && !sinOrdenes,
+    ...SIN_CACHE,
+  });
+  const sinGrupos = nuevo && !sinOrdenes && grupos.data !== undefined && grupos.data.length === 0;
+  const consultando = nuevo && !sinOrdenes && grupos.isPending;
+  return (
+    <VentanaDeFormulario titulo={ABRIR_UN_BORRADOR} textoEnviar="Abrir el borrador" alEnviar={preparar} alCerrar={alCerrar}
+      sinEnviar={sinOrdenes || sinGrupos || consultando}>
+      <label htmlFor={`${id}-periodo`}>Período</label>
+      <select id={`${id}-periodo`} data-foco value={mes} onChange={(e) => setMes(e.target.value)}>
+        {periodosOfrecidos().map((p) => (
+          <option key={p} value={p}>{conMayuscula(periodo(`${p}-01`))}</option>
+        ))}
+      </select>
+      {/* C9: sin órdenes pagadas para liquidar no se abre el borrador; queda el aviso y «Cancelar». */}
+      {sinOrdenes && nuevo && <p role="status">No hay órdenes pagadas hasta el fin de {periodo(periodoElegido)} para liquidar.</p>}
+      {consultando && <p role="status">Consultando los grupos de gasto del período…</p>}
+      {sinGrupos && <p role="status">{textoSinGrupos(periodo(periodoElegido))}</p>}
+      {grupos.isError && (
+        <p className="aviso-error" role="alert">
+          No se pudo saber si el período tiene grupos de gasto con porcentajes. {mensajeDeLectura(grupos.error)}
+        </p>
+      )}
+    </VentanaDeFormulario>
   );
 }
