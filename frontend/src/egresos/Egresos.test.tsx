@@ -1511,17 +1511,19 @@ describe("página /proveedores (consulta)", () => {
     orden_id: null,
     version: null,
     usado_en: null,
+    propio: false,
   };
+  const PROPIO = { ...SALTEO, propio: true };
   const SALTEOS = `${BASE}/proveedores/${P1}/salteos-documentacion`;
 
   it("en una urgencia, el Consejo saltea el bloqueo con el motivo, en su ventana, para una orden (SEG-04, SEG-06, C8P-22)", async () => {
     let registrado = false;
     const api = consulta({
       [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
-      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta(registrado ? [SALTEO] : []),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta(registrado ? [PROPIO] : []),
       [`POST ${SALTEOS}`]: () => {
         registrado = true;
-        return Response.json(SALTEO, { status: 201 });
+        return Response.json(PROPIO, { status: 201 });
       },
     });
     vi.stubGlobal("fetch", api);
@@ -1551,6 +1553,26 @@ describe("página /proveedores (consulta)", () => {
     expect(await screen.findByRole("list", { name: "Salteos" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("C8P-03: al volver a abrir la ficha, un salteo propio que espera su orden no ofrece registrar otro (lo dice la API)", async () => {
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([PROPIO]),
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByRole("list", { name: "Salteos" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
+    cleanup();
+    // Control: el mismo salteo, ya usado, no impide registrar otro.
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([{ ...PROPIO, estado: "usado", orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" }]),
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByRole("button", { name: SALTEAR })).toBeTruthy();
   });
 
   it("comentario 40: el salteo de otra persona que espera su orden no esconde el botón; la fecha lleva un solo punto", async () => {

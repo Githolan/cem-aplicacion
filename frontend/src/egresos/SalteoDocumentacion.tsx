@@ -20,8 +20,9 @@ import { exigirSesion, SinSesion } from "./useConsorcio";
 // Informe de fricción, tanda 4: el motivo se pide en una ventana (SEG-04), con el botón siempre
 // activo (C8P-22) y lo que sirve para decidir adentro, no en la ficha (SEG-06); a la vista queda
 // solo el salteo que espera su orden y los demás van plegados (SEG-07). Comentario 40 del
-// propietario (lección 21): quien acaba de registrar un salteo no ve otra vez el botón mientras el
-// suyo espera su orden (la base no le deja registrar otro: `salteo_vigente`).
+// propietario (lección 21) e informe de fricción C8P-03: quien tiene un salteo propio que espera su
+// orden no ve otra vez el botón (la base no le deja registrar otro: `salteo_vigente`). La API dice
+// de cada salteo si es de esta cuenta (`propio`, app 0109), también al volver a abrir la pantalla.
 
 type Salteo = components["schemas"]["SalteoDocumentacion"];
 type Modo = components["schemas"]["ModoExigencia"];
@@ -58,17 +59,12 @@ type Props = {
   hayFaltantes: boolean;
   /** Lo que la configuración del edificio deja saltear. Solo para mostrar: la API y la base deciden. */
   puedeSaltear: boolean;
-  /** Los salteos que registró esta persona desde que abrió la pantalla. La ficha no dice quién
-   * registró cada uno (solo el nombre), así que es lo único que se sabe sin preguntarle al servidor. */
-  propios: ReadonlySet<number>;
-  /** Se registró un salteo: su número, para no ofrecer otro mientras espera su orden. */
-  alRegistrar: (numero: number) => void;
   aEntrar: () => void;
   /** Se registró el salteo, o lo visto ya no es lo que hay: volver a leer la ficha. */
   alCambiar: () => void;
 };
 
-export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hayFaltantes, puedeSaltear, propios, alRegistrar, aEntrar, alCambiar }: Props) {
+export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hayFaltantes, puedeSaltear, aEntrar, alCambiar }: Props) {
   const id = useId();
   const [abierta, setAbierta] = useState(false);
   const [motivo, setMotivo] = useState("");
@@ -78,7 +74,9 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
   const bloquea = modo === "bloquear" && hayFaltantes;
   const enEspera = salteos.filter((s) => s.estado === "vigente");
   const anteriores = salteos.filter((s) => s.estado !== "vigente");
-  const suyoEnEspera = enEspera.some((s) => propios.has(s.numero));
+  /** El que se acaba de registrar, mientras la ficha vuelve a leerse y todavía no lo trae. */
+  const [recien, setRecien] = useState<number | null>(null);
+  const suyoEnEspera = enEspera.some((s) => s.propio) || (recien !== null && !salteos.some((s) => s.numero === recien));
   const ofreceSaltear = bloquea && puedeSaltear && !suyoEnEspera;
   if (salteos.length === 0 && !ofreceSaltear && resultado === null) return null;
 
@@ -118,7 +116,7 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
         if (renovarClave(response.status, codigo)) clave.current = null;
         return { rechazo: mensajeDeActo(response.status, error) };
       }
-      alRegistrar(data.numero);
+      setRecien(data.numero);
       setResultado({ texto: SALTEO_REGISTRADO, ok: true });
       alCambiar();
       return "cerrar";

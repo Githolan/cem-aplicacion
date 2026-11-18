@@ -317,8 +317,6 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [aviso, setAviso] = useState<Aviso | null>(null);
   /** El rechazo del reintento que sigue al código (R10): sale fuera del envío de la ventana. */
   const [rechazoDelReintento, setRechazoDelReintento] = useState<string | null>(null);
-  /** Los salteos que registró esta persona desde que abrió la pantalla (comentario 40). */
-  const [salteosPropios, setSalteosPropios] = useState<ReadonlySet<number>>(new Set());
   const puede = usePuede(consorcio);
   const porEdificio = useAccionesPorEdificio();
   /** Los campos que la API rechazó, con qué hacer en cada uno (tanda 3, P-26). */
@@ -714,8 +712,6 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         puedeCambiar
         puedeCargar={f.puede_cargar_documentacion}
         puedeSaltear={puede("egresos.saltear_documentacion")}
-        salteosPropios={salteosPropios}
-        alRegistrarSalteo={(numero) => setSalteosPropios((propios) => new Set([...propios, numero]))}
         ocupada={enviando}
         aEntrar={aEntrar}
         alCambiar={() => {

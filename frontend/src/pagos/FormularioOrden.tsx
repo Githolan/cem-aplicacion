@@ -51,7 +51,7 @@ import {
   PROVEEDOR_INACTIVO,
   SIN_CAMBIOS,
   SIN_DOCUMENTACION,
-  SIN_DOCUMENTACION_SIN_SABER,
+  SALTEO_PROPIO,
   textoContratoExcedido,
   textoParecidaAntes,
   TITULO_PARECIDA,
@@ -99,12 +99,16 @@ type Lectura =
       /** Los proveedores a los que les falta documentación legal (app 0104) y si eso bloquea (0106). */
       sinDocumentacion: ReadonlySet<string>;
       modo: ModoExigencia;
+      /** Los bloqueados con un salteo por urgencia vigente que le sirve a quien prepara (app 0109). */
+      conSalteo: ReadonlySet<string>;
+      /** Los bloqueados cuyo salteo vigente lo registró quien prepara: la base no lo toma (app 0109). */
+      salteoPropio: ReadonlySet<string>;
     };
 
-/** Si hay un salteo por urgencia que espera la orden del proveedor bloqueado (informe de fricción,
- * C8P-01): sin él la base no deja crear la orden, ni como borrador. Se lee de su ficha, que trae los
- * salteos con el estado que calcula la base. Quién lo registró no se sabe acá (C8P-02, backend). */
-type Salteo = { proveedor: string; estado: "consultando" | "vigente" | "sin_salteo" | "sin_saber" };
+/** Qué pasa con el proveedor bloqueado (informe de fricción, C8P-01 y C8P-02): sin un salteo que le
+ * sirva a quien prepara, la base no deja crear la orden, ni como borrador. Lo dice la lista de
+ * proveedores, con la misma regla que la base (`salteo_de_quien_prepara`). */
+type SalteoDelElegido = "con_salteo" | "salteo_propio" | "sin_salteo";
 
 type Datos = {
   proveedor: string;
@@ -312,7 +316,6 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const [subida, setSubida] = useState<Cargado | null>(null);
   /** Lo obligatorio que faltaba al tocar guardar (decisión 4: el botón siempre activo). */
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
-  const [salteo, setSalteo] = useState<Salteo | null>(null);
   const proveedorElegido = datos?.proveedor ?? "";
   // La base niega solo la versión 1 o una versión que cambia de proveedor (`exigir_documentacion_legal`, app 0104):
   // al modificar una orden sin cambiarle el proveedor no hay bloqueo (Codex en #257).
@@ -323,31 +326,6 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     proveedorElegido !== "" &&
     !mismoProveedorDeLaOrden &&
     lectura.sinDocumentacion.has(proveedorElegido);
-
-  // C8P-01: con el proveedor bloqueado, se mira si un salteo por urgencia espera su orden.
-  useEffect(() => {
-    if (!bloqueado) return;
-    let vigente = true;
-    setSalteo({ proveedor: proveedorElegido, estado: "consultando" });
-    void api
-      .GET("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}", {
-        params: { path: { consorcio_id: consorcio, proveedor_id: proveedorElegido } },
-      })
-      .then(({ data, response }) => {
-        exigirSesion(response);
-        if (!vigente) return;
-        const estado = data === undefined ? "sin_saber" : data.salteos.some((x) => x.estado === "vigente") ? "vigente" : "sin_salteo";
-        setSalteo({ proveedor: proveedorElegido, estado });
-      })
-      .catch((e: unknown) => {
-        if (!vigente) return;
-        if (e instanceof SinSesion) aEntrar();
-        else setSalteo({ proveedor: proveedorElegido, estado: "sin_saber" });
-      });
-    return () => {
-      vigente = false;
-    };
-  }, [bloqueado, consorcio, proveedorElegido, aEntrar]);
 
   useEffect(() => {
     let vigente = true;
@@ -367,6 +345,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
             contratos: contratos.data.elementos,
             sinDocumentacion: new Set(proveedores.data.documentacion_faltante),
             modo: proveedores.data.modo_exigencia,
+            conSalteo: new Set(proveedores.data.con_salteo),
+            salteoPropio: new Set(proveedores.data.salteo_de_quien_prepara),
           });
           return;
         }
@@ -677,9 +657,15 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const elegido = lectura.proveedores.find((p) => p.id === datos.proveedor);
   /** Al modificar, el proveedor de la orden puede estar suspendido o de baja (C8P-06). */
   const inactivo = elegido !== undefined && elegido.estado !== "activo";
-  const salteoDelElegido = bloqueado && salteo?.proveedor === datos.proveedor ? salteo.estado : null;
-  /** Sin salteo, la base no deja crear la orden (ni como borrador): no se ofrece guardar (C8P-01). */
-  const sinSalteo = bloqueado && (salteoDelElegido === "sin_salteo" || salteoDelElegido === "consultando" || salteoDelElegido === null);
+  const salteoDelElegido: SalteoDelElegido | null = !bloqueado
+    ? null
+    : lectura.conSalteo.has(datos.proveedor)
+      ? "con_salteo"
+      : lectura.salteoPropio.has(datos.proveedor)
+        ? "salteo_propio"
+        : "sin_salteo";
+  /** Sin un salteo que le sirva, la base no deja crear la orden (ni como borrador): no se ofrece guardar (C8P-01, C8P-02). */
+  const sinSalteo = bloqueado && salteoDelElegido !== "con_salteo";
   /** Al modificar, sin tocar nada no hay qué guardar (C8P-05). */
   const sinCambios =
     modificar !== undefined &&
@@ -735,11 +721,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         {salteoDelElegido === "sin_salteo" && (
           <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />
         )}
-        {salteoDelElegido === "sin_saber" && (
-          <ComandoNoDisponible motivo={SIN_DOCUMENTACION_SIN_SABER} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />
-        )}
-        {salteoDelElegido === "vigente" && <p className="aviso-pendiente" role="note">{CON_SALTEO}</p>}
-        {salteoDelElegido === "consultando" && <p role="status">Consultando si hay un salteo por urgencia…</p>}
+        {salteoDelElegido === "salteo_propio" && <ComandoNoDisponible motivo={SALTEO_PROPIO} />}
+        {salteoDelElegido === "con_salteo" && <p className="aviso-pendiente" role="note">{CON_SALTEO}</p>}
         <label htmlFor={idImporte}>Importe</label>
         <CampoImporte id={idImporte} valor={datos.importe} deshabilitado={enviando} {...marcaDe(idImporte, errores.importe)}
           alCambiar={(texto) => cambiar("importe", texto)} />

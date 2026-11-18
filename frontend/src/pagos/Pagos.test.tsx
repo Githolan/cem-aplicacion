@@ -25,7 +25,7 @@ import { TEXTO_ACCION, TITULO_PLEGADAS } from "./textosDeAcciones";
 import {
   AVISO_DESHACE_DECLARACION, AVISO_SIN_SALIDA_CAUSA, AVISO_RECLAMO, AVISO_VER_LA_CUENTA_QUEDA, CON_SALTEO, DAR_POR_PAGADO, FALTA_CONCEPTO, FALTA_IMPORTE, FALTA_LA_CUENTA, FALTA_MOTIVO,
   FALTA_PROVEEDOR, IR_A_PROVEEDORES, MARCA_SIN_DOCUMENTACION, PROVEEDOR_INACTIVO, RECLAMAR, SIN_CAMBIOS, SIN_DOCUMENTACION,
-  SIN_DOCUMENTACION_SIN_SABER, textoContratoExcedido, TITULO_PARECIDA,
+  SALTEO_PROPIO, textoContratoExcedido, TITULO_PARECIDA,
 } from "./textos";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
@@ -5059,24 +5059,24 @@ describe("fricción 17-11, tanda 2: preparar una orden", () => {
     [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
     [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [contrato(K1)] }),
   };
-  /** El edificio bloquea y al proveedor le falta documentación legal (app 0104 y 0106). */
-  const BLOQUEADO = {
+  /** El edificio bloquea y al proveedor le falta documentación legal (app 0104 y 0106); la lista
+   * dice si hay un salteo que le sirve a quien prepara, o solo uno suyo (app 0109, C8P-02). */
+  const bloqueado = (salteos: { con_salteo?: string[]; salteo_de_quien_prepara?: string[] } = {}) => ({
     [`GET ${BASE}/proveedores`]: () =>
-      Response.json({ elementos: [proveedor()], documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [], modo_exigencia: "bloquear" }),
+      Response.json({
+        elementos: [proveedor()], documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [],
+        modo_exigencia: "bloquear", con_salteo: [], salteo_de_quien_prepara: [], ...salteos,
+      }),
     [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
-  };
-  const SALTEO_VIGENTE = {
-    numero: 1, proveedor_id: P1, motivo: "SINTETICO: pérdida de gas", registrado_en: "2026-11-17T10:00:00Z",
-    registrado_por_nombre: "Consejera Ficticia", vence_en: "2026-11-18T10:00:00Z", estado: "vigente", orden_id: null, version: null, usado_en: null,
-  };
-  const fichaDelProveedor = (salteos: unknown[]) => () => Response.json({ proveedor: proveedor(), salteos });
+  });
+  const BLOQUEADO = bloqueado();
 
   async function elegirElBloqueado() {
     fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
   }
 
   it("C8P-01: sin salteo, no se ofrece guardar y una línea dice qué falta y dónde se resuelve", async () => {
-    const api = backend({ ...BLOQUEADO, [`GET ${BASE}/proveedores/${P1}`]: fichaDelProveedor([]) });
+    const api = backend(BLOQUEADO);
     vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
     await elegirElBloqueado();
@@ -5087,10 +5087,12 @@ describe("fricción 17-11, tanda 2: preparar una orden", () => {
     sinBoton("Guardar como borrador");
     expect(await boton("Cancelar")).toBeTruthy();
     expect(escrituras(api)).toEqual([]);
+    // La lista ya lo dice: no se lee la ficha del proveedor (C8P-02).
+    expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`)).toEqual([]);
   });
 
-  it("C8P-01 (lección 21 D): con un salteo que espera su orden, se puede preparar y lo dice", async () => {
-    vi.stubGlobal("fetch", backend({ ...BLOQUEADO, [`GET ${BASE}/proveedores/${P1}`]: fichaDelProveedor([SALTEO_VIGENTE]) }));
+  it("C8P-01 (lección 21 D): con un salteo que le sirve a quien prepara, se puede preparar y lo dice", async () => {
+    vi.stubGlobal("fetch", backend(bloqueado({ con_salteo: [P1] })));
     abrir("/pagos/nueva");
     await elegirElBloqueado();
     expect(await screen.findByText(CON_SALTEO)).toBeTruthy();
@@ -5099,12 +5101,16 @@ describe("fricción 17-11, tanda 2: preparar una orden", () => {
     expect(screen.queryByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`))).toBeNull();
   });
 
-  it("C8P-01: si no se puede saber si hay salteo, lo avisa y deja guardar (decide la base)", async () => {
-    vi.stubGlobal("fetch", backend({ ...BLOQUEADO, [`GET ${BASE}/proveedores/${P1}`]: () => error("error_interno", 500) }));
+  it("C8P-02: si el único salteo lo registró quien prepara, no se ofrece guardar y lo dice", async () => {
+    const api = backend(bloqueado({ salteo_de_quien_prepara: [P1] }));
+    vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
     await elegirElBloqueado();
-    expect(await screen.findByText(new RegExp(`^${SIN_DOCUMENTACION_SIN_SABER}`))).toBeTruthy();
-    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    expect(await screen.findByText(SALTEO_PROPIO)).toBeTruthy();
+    sinBoton("Guardar y enviar a aprobar");
+    sinBoton("Guardar como borrador");
+    expect(screen.queryByText(CON_SALTEO)).toBeNull();
+    expect(escrituras(api)).toEqual([]);
   });
 
   it("control C8P-01: en modo «avisar» no se mira el salteo ni se marca el proveedor", async () => {

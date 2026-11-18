@@ -65,8 +65,6 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
-  /** Los salteos que registró esta persona desde que abrió la pantalla (comentario 40). */
-  const [salteosPropios, setSalteosPropios] = useState<ReadonlySet<number>>(new Set());
   const fichas = useFichas<string>();
   const puede = usePuede(consorcio);
 
@@ -186,8 +184,6 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               puedeCambiar={false}
               puedeCargar={false}
               puedeSaltear={puede("egresos.saltear_documentacion")}
-              salteosPropios={salteosPropios}
-              alRegistrarSalteo={(numero) => setSalteosPropios((propios) => new Set([...propios, numero]))}
               aEntrar={aEntrar}
               alCambiar={() => {
                 verFicha(enFicha.proveedor);
