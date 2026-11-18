@@ -324,6 +324,17 @@ export function usePendientesPedidosSalteo({ porEdificio, edificios }: Comunes):
 // --- Mandatos en revisión, para quien puede resolverlos (FL-AVI-05) ---------------------------------
 
 const RESUELVE_REVISION: Requisito = [["mandatos.ver", "mandatos.resolver_revision"]];
+/** FL-MAN-04 (tanda 9): quien aprueba la invitación de la administración, que la ve en la lista. */
+const APRUEBA_INVITACION: Requisito = [["mandatos.ver", "mandatos.ver_asociaciones", "mandatos.aprobar_asociacion"]];
+
+/** Lo que espera a quien mira en Mandatos: los mandatos en revisión y las invitaciones por aprobar. */
+export function textoMandatos(enRevision: number, invitaciones: number): string | null {
+  const partes = [
+    ...(enRevision > 0 ? [plural(enRevision, "mandato en revisión", "mandatos en revisión")] : []),
+    ...(invitaciones > 0 ? [plural(invitaciones, "invitación espera aprobación", "invitaciones esperan aprobación")] : []),
+  ];
+  return partes.length === 0 ? null : partes.join(" · ");
+}
 
 export function usePendientesMandatos({ porEdificio, edificios }: Comunes): Fuente {
   const varios = edificios.length > 1;
@@ -332,15 +343,18 @@ export function usePendientesMandatos({ porEdificio, edificios }: Comunes): Fuen
     clave: "mandatos",
     porEdificio,
     edificios,
-    requisito: RESUELVE_REVISION,
+    requisito: [...RESUELVE_REVISION, ...APRUEBA_INVITACION],
     leer: async (consorcio) =>
-      exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/mandatos", { params: { path: { consorcio_id: consorcio } } })).elementos.filter(
-        (m) => m.estado === "pendiente_revision",
-      ).length,
-    filas: (cantidad, edificio) =>
-      cantidad === 0
-        ? []
-        : [fila({ ...base, detalle: plural(cantidad, "mandato en revisión", "mandatos en revisión") }, "Mandatos y decisiones", edificio, varios)],
+      exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/mandatos", { params: { path: { consorcio_id: consorcio } } })).elementos,
+    filas: (mandatos, edificio, alcanzadas) => {
+      const enRevision = cumple(alcanzadas, RESUELVE_REVISION) ? mandatos.filter((m) => m.estado === "pendiente_revision").length : 0;
+      // Cuatro ojos: la que emitió quien mira la aprueba otra persona.
+      const invitaciones = cumple(alcanzadas, APRUEBA_INVITACION)
+        ? mandatos.filter((m) => m.invitacion === "por_aprobar" && !m.invitacion_emitida_por_mi).length
+        : 0;
+      const detalle = textoMandatos(enRevision, invitaciones);
+      return detalle === null ? [] : [fila({ ...base, detalle }, "Mandatos y decisiones", edificio, varios)];
+    },
     siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, "Mandatos y decisiones", edificio, varios),
   });
 }

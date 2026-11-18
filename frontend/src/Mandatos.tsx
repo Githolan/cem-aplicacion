@@ -121,6 +121,9 @@ const TEXTO_ESTADO_MANDATO: Record<EstadoMandato, string> = {
 /** Lo que falta resolver en un mandato, dicho en la fila (FL-MAN-10). */
 const EN_REVISION = "En revisión";
 const SIN_CUENTA = "Sin cuenta asociada";
+/** FL-MAN-04 (tanda 9, `MandatoResumen.invitacion`): la fila dice el paso que falta de la invitación. */
+export const INVITACION_POR_APROBAR = "Invitación por aprobar";
+export const INVITACION_ENVIADA = "Invitación enviada";
 
 /** Los que ya no rigen ni van a regir: van plegados en «Mandatos anteriores» (D-34). */
 const YA_NO_RIGEN: ReadonlySet<EstadoMandato> = new Set(["terminado", "dado_de_baja", "error_carga"]);
@@ -223,6 +226,11 @@ export const ALTA_SIN_NADIE_MAS =
  * quien hoy cumple la condición. */
 export const CONSEJO_SIN_CANDIDATOS =
   "Para el Consejo de propietarios hace falta una persona con un vínculo de propietario confirmado en este edificio, y hoy nadie más lo tiene. Los vínculos se confirman en el Padrón del edificio.";
+/** FL-MAN-06 (tanda 9): el correo de la administración externa en el alta, para invitarla en el mismo acto. */
+export const CORREO_ALTA = "Correo de la administración (opcional)";
+export const AYUDA_CORREO_ALTA = "Con el correo, el alta la invita a asociar su cuenta; la invitación sale cuando la aprueba otra persona.";
+export const textoListoConInvitacion = (nombre: string) =>
+  `Listo: el mandato de ${nombre} quedó dado de alta y su invitación quedó por aprobar: la aprueba otra persona.`;
 /** El «Listo» de la decisión (FL-DEC-03): quién da el alta lo dice la línea de «falta una decisión
  * registrada por otra persona», y no toda decisión respalda un alta. */
 export const LISTO_DECISION = "Listo: la decisión quedó registrada.";
@@ -312,6 +320,8 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
     sha256: "el acta",
   },
   alta: {
+    correo: "el correo de la administración",
+    referencia: "de dónde sale el correo",
     tipo: "el tipo de mandato",
     nombre: "la razón social o nombre",
     cuit: "el CUIT",
@@ -380,7 +390,7 @@ type Detalle = { tipo: "mandato"; datos: MandatoDetalle } | { tipo: "decision"; 
 type FichaAbierta = { tipo: "mandato" | "decision"; id: string; titulo: string };
 
 /** `invitar`: el «Listo» del alta de una administración externa trae el paso que sigue (FL-MAN-06). */
-type Aviso = { texto: string; ok: boolean; invitar?: FichaAbierta };
+type Aviso = { texto: string; ok: boolean };
 
 type Clave = MutableRefObject<string | null>;
 
@@ -542,6 +552,9 @@ export function Mandatos() {
   // La invitación de la administración externa a asociar su cuenta (G-40; A7, cuatro ojos).
   const [invitaciones, setInvitaciones] = useState<Lectura<InvitacionMandato> | null>(null);
   const [correoInvitacion, setCorreoInvitacion] = useState("");
+  // FL-MAN-06 (tanda 9, `MandatoNuevo.invitacion`): el alta de la administración externa invita en el mismo acto.
+  const [correoAlta, setCorreoAlta] = useState("");
+  const [referenciaAlta, setReferenciaAlta] = useState("");
   const [referenciaInvitacion, setReferenciaInvitacion] = useState("");
   const claveInvitar = useRef<string | null>(null);
   const claveAprobar = useRef<string | null>(null);
@@ -652,9 +665,9 @@ export function Mandatos() {
   }, [mandatoNuevo, mandatos]);
 
   /** El aviso de la página, con el foco: lo da un acto que cerró su ventana o la ficha. */
-  function avisar(texto: string, ok: boolean, invitar?: FichaAbierta) {
+  function avisar(texto: string, ok: boolean) {
     alAviso.current = true;
-    setAviso({ texto, ok, invitar });
+    setAviso({ texto, ok });
   }
 
   /** Vuelve a pedir las listas: lo escrito en los formularios no se toca. */
@@ -856,6 +869,8 @@ export function Mandatos() {
   );
   const tipoAlta: TipoMandato | undefined = tiposPosibles.includes(tipoMandato) ? tipoMandato : tiposPosibles[0];
   const externo = tipoAlta === "administrador_externo";
+  // FL-MAN-06: invitar con el alta pide lo mismo que invitar después (`mandatos.asociar_persona`).
+  const invitaConElAlta = puede("mandatos.asociar_persona");
   const candidatosDelAlta = tipoAlta === undefined ? [] : candidatosDe(tipoAlta);
   // Saber quién mira puede llegar después de la lista: lo elegido nunca es alguien que no se ofrece.
   const personaElegida = candidatosDelAlta.some((c) => c.persona_id === persona) ? persona : (candidatosDelAlta[0]?.persona_id ?? "");
@@ -873,6 +888,9 @@ export function Mandatos() {
     if (externo && cuitConError(cuit)) return "seguir";
     // Sin ningún tipo posible la ventana no se ofrece (FL-MAN-09).
     if (tipoAlta === undefined) return "seguir";
+    // FL-MAN-06: con el correo escrito, el alta emite también la invitación, que queda por aprobar.
+    const conInvitacion = externo && invitaConElAlta && correoAlta.trim() !== "";
+    if (conInvitacion && faltan("alta", { referencia: [referenciaAlta, FALTA.referenciaInvitacion] })) return "seguir";
     const nombreAlta = externo ? nombre.trim() : (candidatosDelAlta.find((c) => c.persona_id === personaElegida)?.nombre ?? "");
     return pedirActo(
       claveAlta,
@@ -890,6 +908,7 @@ export function Mandatos() {
             nombre: externo ? nombre.trim() : null,
             cuit: externo ? cuit : null,
             matricula: tipoAlta === "miembro_consejo" || matricula.trim() === "" ? null : matricula.trim(),
+            ...(conInvitacion ? { invitacion: { correo: correoAlta.trim(), referencia: referenciaAlta.trim() } } : {}),
           },
         }),
       (datos) => {
@@ -902,14 +921,11 @@ export function Mandatos() {
         setDecisionAlta("");
         setDesde("");
         setHasta("");
+        setCorreoAlta("");
+        setReferenciaAlta("");
         // G-44: el «Listo» con lo que pasó, sin abrir la ficha (que ofrecería deshacerlo).
         setVentana(null);
-        // FL-MAN-06: para que la administración externa entre, lo que sigue es invitarla.
-        const invitarla =
-          externo && puede("mandatos.asociar_persona") && puede("mandatos.ver_asociaciones")
-            ? { tipo: "mandato" as const, id: datos.id, titulo: tituloDeMandato({ nombre: nombreAlta, tipo: "administrador_externo" }) }
-            : undefined;
-        avisar(`Listo: el mandato de ${nombreAlta} quedó dado de alta y ya está en la lista.`, true, invitarla);
+        avisar(conInvitacion ? textoListoConInvitacion(nombreAlta) : `Listo: el mandato de ${nombreAlta} quedó dado de alta y ya está en la lista.`, true);
         // G-44: su fila queda resaltada y a la vista cuando llega la lista nueva.
         setMandatoNuevo(datos.id);
         return "cerrar";
@@ -1029,13 +1045,6 @@ export function Mandatos() {
     setErrores(null);
     setFicha(abierta);
     fichas.abrir(abierta.id);
-  }
-
-  /** FL-MAN-06: desde el «Listo» del alta, la ficha de la administración nueva con su invitación abierta. */
-  function invitarLaNueva(nueva: FichaAbierta) {
-    abrirFicha(nueva);
-    setAccionFicha("invitar");
-    pedirMandato(nueva.id);
   }
 
   function verMandato(mandato: Mandato) {
@@ -1568,9 +1577,7 @@ export function Mandatos() {
   // FL-MAN-09: sin ningún tipo que se pueda dar, en lugar del botón, por qué.
   const altaListaParaDar = altaConDecision && tiposPosibles.length > 0;
   const altaSinTipos = altaConDecision && tiposPosibles.length === 0;
-  const invitarLaDelAviso = aviso?.invitar;
-  // Un solo principal: con el «Invitar a la administración» del «Listo» (FL-MAN-06), los de arriba van secundarios.
-  const nadaAbierto = ventana === null && ficha === null && invitarLaDelAviso === undefined;
+  const nadaAbierto = ventana === null && ficha === null;
   const conMensaje = aviso !== null || pantalla.tipo !== "lista" || listasCargando;
   // Hasta tres listas pueden caerse a la vez: cada botón dice de qué sección es.
   const consultarDeNuevo = (seccion: string) => (
@@ -1627,13 +1634,6 @@ export function Mandatos() {
         {aviso !== null && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
-          </p>
-        )}
-        {invitarLaDelAviso !== undefined && (
-          <p>
-            <button type="button" disabled={enviando} onClick={() => invitarLaNueva(invitarLaDelAviso)}>
-              Invitar a la administración
-            </button>
           </p>
         )}
       </div>
@@ -1739,7 +1739,12 @@ export function Mandatos() {
   /** Un mandato en revisión o una administración sin cuenta: lo que alguien tiene que resolver. */
   function loQueFalta(m: Mandato): string | undefined {
     if (m.estado === "pendiente_revision") return EN_REVISION;
-    if (m.tipo === "administrador_externo" && !m.con_cuenta && ESTADOS_CON_INVITACION.includes(m.estado)) return SIN_CUENTA;
+    if (m.tipo === "administrador_externo" && !m.con_cuenta && ESTADOS_CON_INVITACION.includes(m.estado)) {
+      // FL-MAN-04: el paso que falta de la invitación en curso, si quien mira la ve.
+      if (m.invitacion === "por_aprobar") return INVITACION_POR_APROBAR;
+      if (m.invitacion === "pendiente") return INVITACION_ENVIADA;
+      return SIN_CUENTA;
+    }
     return undefined;
   }
 
@@ -1747,6 +1752,9 @@ export function Mandatos() {
    * va en el resumen de la fila, sin destacar. */
   function loResuelveQuienMira(m: Mandato): boolean {
     if (m.estado === "pendiente_revision") return puede("mandatos.resolver_revision") || puede("mandatos.baja");
+    // FL-MAN-04: la aprueba otra persona que la que la emitió (cuatro ojos); la enviada espera a la administración.
+    if (m.invitacion === "por_aprobar") return puede("mandatos.aprobar_asociacion") && !m.invitacion_emitida_por_mi;
+    if (m.invitacion === "pendiente") return false;
     return puede("mandatos.asociar_persona");
   }
 
@@ -2081,6 +2089,26 @@ export function Mandatos() {
             <ErrorDeCampo idCampo={`${id}-nombre`} mensaje={errorEn("alta", "nombre")} />
             <CampoCuit id={`${id}-cuit`} valor={cuit} deshabilitado={enviando} error={errorEn("alta", "cuit")}
               alCambiar={cambiar(claveAlta, setCuit, "cuit")} />
+            {/* FL-MAN-06: el correo invita en el mismo acto; la invitación queda por aprobar por otra persona. */}
+            {invitaConElAlta && (
+              <>
+                <label htmlFor={`${id}-alta-correo`}>{CORREO_ALTA}</label>
+                <input id={`${id}-alta-correo`} {...marcaDe(`${id}-alta-correo`, errorEn("alta", "correo"), `${id}-alta-correo-ayuda`)}
+                  type="email" autoComplete="off" maxLength={LARGO_CORREO} value={correoAlta}
+                  onChange={(e) => cambiar(claveAlta, setCorreoAlta, "correo")(e.target.value)} />
+                <p id={`${id}-alta-correo-ayuda`}>{AYUDA_CORREO_ALTA}</p>
+                <ErrorDeCampo idCampo={`${id}-alta-correo`} mensaje={errorEn("alta", "correo")} />
+                {correoAlta.trim() !== "" && (
+                  <>
+                    <label htmlFor={`${id}-alta-referencia`}>De dónde sale ese correo (contrato, nota u otro)</label>
+                    <TextoDeUnaLinea id={`${id}-alta-referencia`} {...marcaDe(`${id}-alta-referencia`, errorEn("alta", "referencia"))}
+                      rows={FILAS_REFERENCIA} autoComplete="off" maxLength={LARGO_REFERENCIA} value={referenciaAlta}
+                      onValor={cambiar(claveAlta, setReferenciaAlta, "referencia")} />
+                    <ErrorDeCampo idCampo={`${id}-alta-referencia`} mensaje={errorEn("alta", "referencia")} />
+                  </>
+                )}
+              </>
+            )}
           </>
         ) : (
           <>

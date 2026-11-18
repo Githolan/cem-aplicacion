@@ -18,6 +18,10 @@ import {
   AYUDA_DESASOCIAR,
   CAUSA_REVISION,
   ALTA_SIN_NADIE,
+  CORREO_ALTA,
+  INVITACION_ENVIADA,
+  INVITACION_POR_APROBAR,
+  textoListoConInvitacion,
   CONSEJO_SIN_CANDIDATOS,
   DECISION_ESPERA_EL_ACTA,
   LISTO_DECISION,
@@ -2894,35 +2898,73 @@ describe("tanda 11 de fricción en /mandatos", () => {
     });
   });
 
-  it("FL-MAN-06: el «Listo» del alta de una administración externa trae «Invitar a la administración», que abre su invitación", async () => {
-    const externa = {
-      ...DETALLE_AE,
-      id: NUEVO,
-      nombre: "Estudio Norte",
-      vigente_desde: "2027-03-01",
-      vigente_hasta: null,
-      estado: "futuro",
-      con_cuenta: false,
-    };
-    const simulado = conConsejo({
-      [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }),
-      [`GET ${RUTA_MANDATOS}/${NUEVO}`]: () => Response.json(externa),
-      [`GET ${RUTA_MANDATOS}/${NUEVO}/invitaciones`]: () => Response.json({ elementos: [] }),
-    });
-    vi.stubGlobal("fetch", simulado);
-    abrir();
+  /** El alta de una administración externa, con los datos escritos (el correo, si se pasa). */
+  async function altaExterna(correo = "", referencia = "") {
     await cargado();
     const alta = seccion("Dar de alta un mandato");
     fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
     fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2027-03-01" } });
     fireEvent.change(within(alta).getByLabelText("Razón social o nombre"), { target: { value: "Estudio Norte" } });
     fireEvent.change(within(alta).getByLabelText("CUIT (11 números, sin guiones)"), { target: { value: CUIT } });
+    if (correo !== "") fireEvent.change(within(alta).getByLabelText(CORREO_ALTA), { target: { value: correo } });
+    if (referencia !== "") fireEvent.change(within(alta).getByLabelText(/^De dónde sale ese correo/), { target: { value: referencia } });
     fireEvent.click(boton("Dar de alta"));
+  }
+
+  it("FL-MAN-06 (tanda 9): el alta de una administración externa con el correo deja la invitación por aprobar en un solo acto", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO, invitacion_id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await altaExterna("admin@estudio-norte.example", "Contrato SINTETICO, cláusula 3");
+    await screen.findByText(textoListoConInvitacion("Estudio Norte"));
+    const cuerpo = await (pedidos(simulado, "POST", RUTA_MANDATOS)[0] as Request).json();
+    expect(cuerpo.invitacion).toEqual({ correo: "admin@estudio-norte.example", referencia: "Contrato SINTETICO, cláusula 3" });
+    // Ya no hay un segundo paso desde el «Listo».
+    expect(screen.queryByRole("button", { name: "Invitar a la administración" })).toBeNull();
+  });
+
+  it("FL-MAN-06: con el correo y sin de dónde sale, lo marca y no manda nada", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await altaExterna("admin@estudio-norte.example");
+    expect(await screen.findByText("Falta escribir de dónde sale ese correo.")).toBeTruthy();
+    expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(0);
+  });
+
+  it("FL-MAN-06, control: sin el correo, el alta no lleva invitación", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await altaExterna();
     await screen.findByText("Listo: el mandato de Estudio Norte quedó dado de alta y ya está en la lista.");
-    fireEvent.click(screen.getByRole("button", { name: "Invitar a la administración" }));
-    const ventana = await screen.findByRole("dialog", { name: "Invitar a la administración" });
-    expect(within(ventana).getByLabelText("Correo de la administración")).toBeTruthy();
-    expect(screen.getByRole("dialog", { name: "Estudio Norte, Administración externa" })).toBeTruthy();
+    expect(await (pedidos(simulado, "POST", RUTA_MANDATOS)[0] as Request).json()).not.toHaveProperty("invitacion");
+  });
+
+  it("FL-MAN-04: la fila dice el paso de la invitación; la por aprobar se destaca para quien la aprueba y no la emitió", async () => {
+    const conInvitacion = (invitacion: string, porMi: boolean) => () =>
+      Response.json({
+        elementos: MANDATOS.elementos.map((m) => (m.id === M_AE ? { ...m, invitacion, invitacion_emitida_por_mi: porMi } : m)),
+      });
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: conInvitacion("por_aprobar", false) }));
+    abrir();
+    await cargado();
+    let externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__estado")?.textContent).toBe(INVITACION_POR_APROBAR);
+    cleanup();
+    // La emitió quien mira: no la aprueba, va en el resumen sin destacar.
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: conInvitacion("por_aprobar", true) }));
+    abrir();
+    await cargado();
+    externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__estado")).toBeNull();
+    expect(externo.querySelector(".fila-registro__resumen")?.textContent).toBe(`Vigente · ${INVITACION_POR_APROBAR}`);
+    cleanup();
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: conInvitacion("pendiente", false) }));
+    abrir();
+    await cargado();
+    externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__resumen")?.textContent).toBe(`Vigente · ${INVITACION_ENVIADA}`);
   });
 
   it("FL-MAN-06, control: el «Listo» del alta del Consejo no trae la invitación", async () => {

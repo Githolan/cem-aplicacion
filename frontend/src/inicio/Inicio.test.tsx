@@ -406,6 +406,28 @@ describe("otros pendientes (FL-AVI-05)", () => {
     expect((await fila("Mandatos y decisiones", "1 mandato en revisión")).getAttribute("href")).toBe("/mandatos");
   });
 
+  it("FL-MAN-04: la invitación de la administración por aprobar, para quien la aprueba y no la emitió", async () => {
+    const mandatos = () =>
+      Response.json({
+        elementos: [
+          { estado: "vigente", invitacion: "por_aprobar", invitacion_emitida_por_mi: false },
+          { estado: "vigente", invitacion: "por_aprobar", invitacion_emitida_por_mi: true },
+          { estado: "vigente", invitacion: "pendiente", invitacion_emitida_por_mi: false },
+        ],
+      });
+    const aprueba = ["mandatos.ver", "mandatos.ver_asociaciones", "mandatos.aprobar_asociacion"];
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: aprueba }, otras: { [ruta(C1, "mandatos")]: mandatos } }));
+    abrir();
+    expect((await fila("Mandatos y decisiones", "1 invitación espera aprobación")).getAttribute("href")).toBe("/mandatos");
+  });
+
+  it("FL-MAN-04, control: sin aprobar invitaciones, la por aprobar no cuenta", async () => {
+    const mandatos = () => Response.json({ elementos: [{ estado: "pendiente_revision", invitacion: "por_aprobar", invitacion_emitida_por_mi: false }] });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ["mandatos.ver", "mandatos.resolver_revision"] }, otras: { [ruta(C1, "mandatos")]: mandatos } }));
+    abrir();
+    expect(await fila("Mandatos y decisiones", "1 mandato en revisión")).toBeTruthy();
+  });
+
   it("control: quien solo ve los mandatos no pide la lista para el inicio", async () => {
     const simulado = backend({ acciones: { [C1]: ["mandatos.ver"] } });
     vi.stubGlobal("fetch", simulado);
