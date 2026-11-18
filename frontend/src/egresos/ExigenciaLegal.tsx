@@ -27,6 +27,8 @@ export const TITULO_EXIGENCIA = "Lo que exige la ley";
 export const AVISO_FALTA_BLOQUEA =
   "Le falta documentación que exige la ley, o la tiene vencida: no se le pueden preparar órdenes nuevas hasta cargarla. Las órdenes que ya existen siguen su curso.";
 export const AVISO_FALTA_AVISA = "Le falta documentación que exige la ley, o la tiene vencida. Se le puede seguir contratando; queda marcado.";
+/** FL-LEG-08: a quien no cambia los rubros ni saltea, lo que falta, sin lo que pasa con las órdenes. */
+export const AVISO_FALTA_SOLO_LEE = "Le falta documentación que exige la ley, o la tiene vencida:";
 export const AGREGAR_UN_RUBRO = "Agregar un rubro legal";
 export const AGREGAR_RUBRO = "Agregar el rubro";
 export const RUBRO_LEGAL = "Rubro legal";
@@ -61,11 +63,13 @@ type Props = {
   modo: Modo;
   /** Quien prepara órdenes asigna y quita rubros; quien consulta, no. */
   puedeCambiar: boolean;
+  /** Quien saltea el bloqueo necesita saber qué hace la falta; quien solo lee, no (FL-LEG-08). */
+  puedeSaltear: boolean;
   aEntrar: () => void;
   alCambiar: () => void;
 };
 
-export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requisitos, modo, puedeCambiar, aEntrar, alCambiar }: Props) {
+export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requisitos, modo, puedeCambiar, puedeSaltear, aEntrar, alCambiar }: Props) {
   const id = useId();
   const [agregando, setAgregando] = useState(false);
   const [nuevo, setNuevo] = useState("");
@@ -167,7 +171,11 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
       )}
       {faltantes.length > 0 && (
         <>
-          <p className={modo === "bloquear" ? "aviso-error" : "aviso-pendiente"}>{avisoDeFalta(modo)}</p>
+          {puedeCambiar || puedeSaltear ? (
+            <p className={modo === "bloquear" ? "aviso-error" : "aviso-pendiente"}>{avisoDeFalta(modo)}</p>
+          ) : (
+            <p className="aviso-pendiente">{AVISO_FALTA_SOLO_LEE}</p>
+          )}
           <ul className="versiones" aria-label="Lo que falta">
             {faltantes.map((f) => (
               <li key={f.codigo}>

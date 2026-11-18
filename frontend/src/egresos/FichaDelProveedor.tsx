@@ -100,6 +100,7 @@ export function FichaDelProveedor({
         requisitos={ficha.requisitos}
         modo={ficha.configuracion.modo_exigencia}
         puedeCambiar={puedeCambiar}
+        puedeSaltear={puedeSaltear}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />

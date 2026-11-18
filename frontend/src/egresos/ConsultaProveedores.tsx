@@ -179,7 +179,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           {enFicha !== null && (
             <FichaDelProveedor
               consorcio={consorcio}
-              ficha={enFicha}
+              // FL-LEG-08 (decisión 17 del 18-11): la historia de salteos, con nombres y motivos, es
+              // para quien fiscaliza o saltea; el habitante autorizado ve datos, seguros y qué falta.
+              ficha={puede("fiscalizacion.ver_panel", "egresos.saltear_documentacion") ? enFicha : { ...enFicha, salteos: [] }}
               datos={datosDelProveedor(enFicha.proveedor)}
               puedeCambiar={false}
               puedeCargar={false}

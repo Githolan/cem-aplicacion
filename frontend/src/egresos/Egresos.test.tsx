@@ -40,7 +40,7 @@ import {
   textoRetirado,
   TITULO_AUTORIZACIONES_PROVEEDORES,
 } from "./AutorizacionesProveedores";
-import { AGREGAR_RUBRO, AGREGAR_UN_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, FALTA_RUBRO, TITULO_EXIGENCIA } from "./ExigenciaLegal";
+import { AGREGAR_RUBRO, AGREGAR_UN_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, AVISO_FALTA_SOLO_LEE, FALTA_RUBRO, TITULO_EXIGENCIA } from "./ExigenciaLegal";
 import {
   CONFIRMAR_SALTEO,
   EXPLICACION_SALTEO,
@@ -1438,7 +1438,9 @@ describe("página /proveedores (consulta)", () => {
     const ficha = await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" });
     expect(within(ficha).getByText("Vencido el 01/11/2026")).toBeTruthy();
     expect(within(ficha).getByText("Cubre: RC SINTETICA")).toBeTruthy();
-    expect(within(ficha).getByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    // FL-LEG-08: quien no cambia ni saltea ve qué falta, sin lo que pasa con las órdenes.
+    expect(within(ficha).getByText(AVISO_FALTA_SOLO_LEE)).toBeTruthy();
+    expect(within(ficha).queryByText(AVISO_FALTA_BLOQUEA)).toBeNull();
     // Solo lo que tiene valor: sin «Estado: Activo» ni datos vacíos (CPR-02).
     expect(within(ficha).queryByText("Estado")).toBeNull();
     expect(within(ficha).queryByText("Correo")).toBeNull();
@@ -1592,15 +1594,17 @@ describe("página /proveedores (consulta)", () => {
 
   it("sin la acción no se ofrece saltear, y la ficha muestra los salteos que hubo, plegados (SEG-07)", async () => {
     const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
-    vi.stubGlobal("fetch", consulta());
+    // Quien fiscaliza (el Consejo) sin la facultad de saltear.
+    const fiscaliza = { [MIS_ACCIONES]: alcanza("proveedores.ver", "fiscalizacion.ver_panel") };
+    vi.stubGlobal("fetch", consulta(fiscaliza));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
-    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    expect(await screen.findByText(AVISO_FALTA_SOLO_LEE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(screen.queryByRole("heading", { name: TITULO_SALTEO })).toBeNull();
     cleanup();
     // Control: con un salteo ya usado, se ve aunque no se pueda saltear: en «Anteriores», sin la versión.
-    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([usado]) }));
+    vi.stubGlobal("fetch", consulta({ ...fiscaliza, [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([usado]) }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
     // El momento lleva espacios finos (Intl): se compara el texto entero de la fila.
@@ -1611,6 +1615,28 @@ describe("página /proveedores (consulta)", () => {
     expect(screen.queryByRole("list", { name: "Salteos" })).toBeNull();
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(textoSalteoDeLaVersion(usado)).toContain("SINTETICO: pérdida de gas");
+  });
+
+  it("FL-LEG-08: el habitante autorizado no ve la historia de salteos, con nombres y motivos", async () => {
+    const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([SALTEO, usado]) }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    const ficha = await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" });
+    // Ve los datos, los seguros y lo que falta.
+    expect(within(ficha).getByText("Cubre: RC SINTETICA")).toBeTruthy();
+    expect(within(ficha).getByText(AVISO_FALTA_SOLO_LEE)).toBeTruthy();
+    expect(within(ficha).queryByRole("heading", { name: TITULO_SALTEO })).toBeNull();
+    expect(within(ficha).queryByText(/Consejera Ficticia/)).toBeNull();
+    expect(within(ficha).queryByText(/pérdida de gas/)).toBeNull();
+  });
+
+  it("FL-LEG-08, control: quien saltea ve en la ficha qué hace la falta con las órdenes", async () => {
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    expect(screen.queryByText(AVISO_FALTA_SOLO_LEE)).toBeNull();
   });
 
   it("sin proveedores.ver la dirección lleva al inicio", async () => {
