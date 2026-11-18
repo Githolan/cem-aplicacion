@@ -18,6 +18,7 @@ import {
   AYUDA_DESASOCIAR,
   CAUSA_REVISION,
   ALTA_SIN_NADIE,
+  CONSEJO_SIN_CANDIDATOS,
   DECISION_ESPERA_EL_ACTA,
   LISTO_DECISION,
   LISTO_DECISION_CON_ACTA,
@@ -80,7 +81,7 @@ const DECISIONES = {
   ],
 };
 
-const CANDIDATOS = { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"] }] };
+const CANDIDATOS = { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"], habilita_consejo: true, mandatos: [] }] };
 
 function detalleDecision(id: string, registradaPorVos: boolean) {
   const resumen = DECISIONES.elementos.find((d) => d.id === id);
@@ -1455,7 +1456,7 @@ describe("página /mandatos", () => {
 
   describe("a quién se le da el alta", () => {
     const YO = "99999999-9999-4999-8999-999999999999";
-    const YO_CANDIDATO = { persona_id: YO, nombre: "Zoe Mira", unidades: ["3° C"] };
+    const YO_CANDIDATO = { persona_id: YO, nombre: "Zoe Mira", unidades: ["3° C"], habilita_consejo: true, mandatos: [] };
     const PERSONA = "Persona (con vínculo confirmado en el edificio)";
     const opciones = () => within(screen.getByLabelText(PERSONA)).getAllByRole("option").map((o) => o.textContent);
 
@@ -1533,6 +1534,30 @@ describe("página /mandatos", () => {
         "administrador_externo",
       ]);
       expect(within(alta).queryByText(ALTA_SIN_NADIE, { exact: false })).toBeNull();
+    });
+
+    it("pregunta 8: el Consejo se ofrece solo a quien cumple la condición (`habilita_consejo`)", async () => {
+      const INQUILINA = { persona_id: YO.replace(/.$/, "f"), nombre: "Inés Inquilina", unidades: ["2° B"], habilita_consejo: false, mandatos: [] };
+      vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [...CANDIDATOS.elementos, INQUILINA] }) }));
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      const personas = () => within(within(alta).getByLabelText(/^Persona/)).getAllByRole("option").map((o) => o.textContent);
+      expect(personas()).toEqual(["Beto Pérez (1° A)"]);
+      // La administración sí se le puede dar a cualquiera con vínculo confirmado.
+      fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador" } });
+      expect(personas()).toEqual(["Beto Pérez (1° A)", "Inés Inquilina (2° B)"]);
+    });
+
+    it("pregunta 8: si nadie cumple la condición del Consejo, no se ofrece y se dice por qué", async () => {
+      const sinConsejo = { elementos: CANDIDATOS.elementos.map((c) => ({ ...c, habilita_consejo: false })) };
+      vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => Response.json(sinConsejo) }));
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      const tipos = within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"));
+      expect(tipos).toEqual(["administrador", "administrador_externo"]);
+      expect(within(alta).getByText(CONSEJO_SIN_CANDIDATOS, { exact: false })).toBeTruthy();
     });
 
     it("FL-MAN-09: sin candidatos y con una administración sin fecha de fin, no se ofrece el alta y se dice por qué", async () => {

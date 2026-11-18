@@ -219,6 +219,10 @@ export const ALTA_SIN_NADIE =
   "Para dar un mandato del Consejo o de administración hace falta una persona con un vínculo confirmado en este edificio, y todavía nadie lo tiene. Los vínculos se confirman en el Padrón del edificio.";
 export const ALTA_SIN_NADIE_MAS =
   "Para dar un mandato del Consejo o de administración hace falta otra persona con un vínculo confirmado en este edificio: nadie se da un mandato a sí mismo. Los vínculos se confirman en el Padrón del edificio.";
+/** Pregunta 8 del propietario (tanda 9, `habilita_consejo`, app 0110): el Consejo se ofrece solo a
+ * quien hoy cumple la condición. */
+export const CONSEJO_SIN_CANDIDATOS =
+  "Para el Consejo de propietarios hace falta una persona con un vínculo de propietario confirmado en este edificio, y hoy nadie más lo tiene. Los vínculos se confirman en el Padrón del edificio.";
 /** El «Listo» de la decisión (FL-DEC-03): quién da el alta lo dice la línea de «falta una decisión
  * registrada por otra persona», y no toda decisión respalda un alta. */
 export const LISTO_DECISION = "Listo: la decisión quedó registrada.";
@@ -845,13 +849,16 @@ export function Mandatos() {
       : undefined;
   // FL-MAN-09: el alta ofrece solo los tipos que se pueden dar. El Consejo y la administración piden
   // una persona con vínculo confirmado; la administración, además, que no haya otra sin fecha de fin.
+  // Pregunta 8 del propietario (tanda 9): el Consejo, solo a quien hoy cumple la condición.
+  const candidatosDe = (t: TipoMandato) => (t === "miembro_consejo" ? elegibles.filter((c) => c.habilita_consejo) : elegibles);
   const tiposPosibles = TIPOS_MANDATO.filter(
-    (t) => (t === "administrador_externo" || elegibles.length > 0) && !(ES_ADMINISTRACION.has(t) && administracionSinFin !== undefined),
+    (t) => (t === "administrador_externo" || candidatosDe(t).length > 0) && !(ES_ADMINISTRACION.has(t) && administracionSinFin !== undefined),
   );
   const tipoAlta: TipoMandato | undefined = tiposPosibles.includes(tipoMandato) ? tipoMandato : tiposPosibles[0];
   const externo = tipoAlta === "administrador_externo";
+  const candidatosDelAlta = tipoAlta === undefined ? [] : candidatosDe(tipoAlta);
   // Saber quién mira puede llegar después de la lista: lo elegido nunca es alguien que no se ofrece.
-  const personaElegida = elegibles.some((c) => c.persona_id === persona) ? persona : (elegibles[0]?.persona_id ?? "");
+  const personaElegida = candidatosDelAlta.some((c) => c.persona_id === persona) ? persona : (candidatosDelAlta[0]?.persona_id ?? "");
 
   function darDeAlta(): FinDeEnvio | Promise<FinDeEnvio> {
     if (
@@ -866,7 +873,7 @@ export function Mandatos() {
     if (externo && cuitConError(cuit)) return "seguir";
     // Sin ningún tipo posible la ventana no se ofrece (FL-MAN-09).
     if (tipoAlta === undefined) return "seguir";
-    const nombreAlta = externo ? nombre.trim() : (elegibles.find((c) => c.persona_id === personaElegida)?.nombre ?? "");
+    const nombreAlta = externo ? nombre.trim() : (candidatosDelAlta.find((c) => c.persona_id === personaElegida)?.nombre ?? "");
     return pedirActo(
       claveAlta,
       "alta",
@@ -1949,6 +1956,10 @@ export function Mandatos() {
             resolver={puede("padron.ver") ? { texto: "Ir al Padrón", a: RUTA_PADRON } : undefined}
           />
         )}
+        {/* Pregunta 8: hay a quién darle la administración, pero nadie cumple hoy la condición del Consejo. */}
+        {elegibles.length > 0 && candidatosDe("miembro_consejo").length === 0 && (
+          <ComandoNoDisponible motivo={CONSEJO_SIN_CANDIDATOS} resolver={puede("padron.ver") ? { texto: "Ir al Padrón", a: RUTA_PADRON } : undefined} />
+        )}
         {/* FL-MAN-01: con otra administración sin fecha de fin, no se piden los datos de una nueva. */}
         {administracionSinFin !== undefined && (
           <>
@@ -2080,7 +2091,7 @@ export function Mandatos() {
               value={personaElegida}
               onChange={(e) => cambiar(claveAlta, setPersona, "persona_id")(e.target.value)}
             >
-              {elegibles.map((c) => (
+              {candidatosDe(tipo).map((c) => (
                 <option key={c.persona_id} value={c.persona_id}>
                   {recortar(`${c.nombre} (${c.unidades.join(", ")})`)}
                 </option>

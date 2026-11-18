@@ -85,7 +85,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
       if (camino === `${BASE}/mandatos`) return ruta.fulfill({ json: { elementos: [MANDATO_AE] } });
       if (camino === `${BASE}/decisiones`) return ruta.fulfill({ json: { elementos: DECISIONES } });
       if (camino === `${BASE}/mandatos/candidatos`)
-        return ruta.fulfill({ json: { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"] }] } });
+        return ruta.fulfill({ json: { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"], habilita_consejo: true, mandatos: [] }] } });
       // El detalle de la administración externa sin cuenta pide sus invitaciones (G-40), y el
       // formulario de decisión, las actas de Documentos (G-15): acá no hay ninguna.
       if (camino === `${BASE}/mandatos/${M_AE}/invitaciones`) return ruta.fulfill({ json: { elementos: [] } });
