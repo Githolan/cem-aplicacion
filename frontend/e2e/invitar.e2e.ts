@@ -112,11 +112,20 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
   return { envios, retiros };
 }
 
+/** INV-01: invitar se carga en su ventana; si no está abierta (o se cerró al terminar), se abre. */
+async function ventanaDeInvitar(pagina: Page) {
+  const ventana = pagina.getByRole("dialog", { name: "Invitar a una persona" });
+  if (!(await ventana.isVisible())) await pagina.getByRole("button", { name: "Invitar a una persona" }).click();
+  await expect(ventana).toBeVisible();
+  return ventana;
+}
+
 async function invitar(pagina: Page, unidad: string, nombre: string, correo: string) {
-  await pagina.getByLabel("Unidad", { exact: true }).selectOption({ label: unidad });
-  await pagina.getByLabel("Nombre").fill(nombre);
-  await pagina.getByLabel("Correo").fill(correo);
-  await pagina.getByRole("button", { name: "Invitar" }).click();
+  const ventana = await ventanaDeInvitar(pagina);
+  await ventana.getByLabel("Unidad", { exact: true }).selectOption({ label: unidad });
+  await ventana.getByLabel("Nombre").fill(nombre);
+  await ventana.getByLabel("Correo").fill(correo);
+  await ventana.getByRole("button", { name: "Invitar", exact: true }).click();
 }
 
 test.describe("invitar sin sesión", () => {
@@ -143,7 +152,8 @@ test.describe("invitar", () => {
     await page.goto("/");
     await page.getByRole("link", { name: "Invitar a una persona" }).click();
 
-    await expect(page.getByText(/Invitar no acredita el carácter/)).toBeVisible();
+    // INV-03: sin tarjeta fija arriba.
+    await expect(page.getByText(/Invitar no acredita el carácter/)).toHaveCount(0);
     await expect(page.getByText("Beto Pérez, 1° A")).toBeVisible();
     // El correo va en la ficha (comentario 21): ni en la fila ni en la ficha, porque no la creó (P6).
     await expect(page.getByText("beto@ejemplo.com")).toHaveCount(0);
@@ -164,11 +174,12 @@ test.describe("invitar", () => {
     await expect(page.getByText("Carla Gómez, 2° B")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
-    // El botón de envío ocupa todo el ancho del formulario en el teléfono, con 44 px de alto.
-    const boton = await page.getByRole("button", { name: "Invitar" }).boundingBox();
-    const campo = await page.getByLabel("Correo").boundingBox();
+    // El botón de envío de la ventana, con 44 px de alto en el teléfono.
+    const ventana = await ventanaDeInvitar(page);
+    const boton = await ventana.getByRole("button", { name: "Invitar", exact: true }).boundingBox();
     expect(boton?.height).toBeGreaterThanOrEqual(44);
-    expect(Math.abs((boton?.width ?? 0) - (campo?.width ?? -1))).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    await sinFaltasDeAccesibilidad(page);
 
     await invitar(page, "2° B", "Dora Ruiz", "dora@ejemplo.com");
     await expect(page.getByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeVisible();
@@ -209,18 +220,20 @@ test.describe("invitar", () => {
     expect(errores.filter((e) => !e.includes("403"))).toEqual([]);
   });
 
-  test("con Enter en el correo, al terminar el envío el foco va al aviso del resultado", async ({ page, baseURL }) => {
+  test("con Enter en el correo, la ventana se cierra y el foco va al aviso del resultado", async ({ page, baseURL }) => {
     await simularApi(page, baseURL!, "consejo");
     await page.goto("/invitaciones");
-    await page.getByLabel("Unidad", { exact: true }).selectOption({ label: "2° B" });
-    await page.getByLabel("Nombre").fill("Elsa Paz");
-    await page.getByLabel("Correo").fill("elsa@ejemplo.com");
-    await page.getByLabel("Correo").press("Enter");
+    const ventana = await ventanaDeInvitar(page);
+    await ventana.getByLabel("Unidad", { exact: true }).selectOption({ label: "2° B" });
+    await ventana.getByLabel("Nombre").fill("Elsa Paz");
+    await ventana.getByLabel("Correo").fill("elsa@ejemplo.com");
+    await ventana.getByLabel("Correo").press("Enter");
     await expect(page.getByText("Listo: la invitación a Elsa Paz quedó enviada.")).toBeVisible();
+    await expect(ventana).toHaveCount(0);
     await expect(page.getByText("Listo: la invitación a Elsa Paz quedó enviada.")).toBeFocused();
   });
 
-  test("si durante el envío la persona lleva el foco a otro lado, no se lo saca", async ({ page, baseURL }) => {
+  test("mientras viaja la invitación, la ventana no se edita; al terminar se cierra y el foco va al «Listo»", async ({ page, baseURL }) => {
     await simularApi(page, baseURL!, "consejo");
     let soltar: () => void = () => undefined;
     const retenido = new Promise<void>((r) => {
@@ -232,23 +245,15 @@ test.describe("invitar", () => {
       return ruta.fallback();
     });
     await page.goto("/invitaciones");
-    await page.getByLabel("Nombre").fill("Fito Sosa");
-    await page.getByLabel("Correo").fill("fito@ejemplo.com");
-    await page.getByLabel("Correo").press("Enter");
-    await expect(page.getByLabel("Correo")).toBeDisabled();
-    await expect(page.getByLabel("Correo")).not.toBeFocused();
-    // La persona va a otra parte (acá, el título; en la app real, la barra o el lector).
-    const elegido = await page.evaluate(() => {
-      const titulo = document.querySelector("h1") as HTMLElement;
-      titulo.tabIndex = -1;
-      titulo.focus();
-      return document.activeElement?.textContent ?? "";
-    });
-    expect(elegido).toBe("Invitar a una persona");
+    const ventana = await ventanaDeInvitar(page);
+    await ventana.getByLabel("Nombre").fill("Fito Sosa");
+    await ventana.getByLabel("Correo").fill("fito@ejemplo.com");
+    await ventana.getByLabel("Correo").press("Enter");
+    await expect(ventana.getByLabel("Correo")).toBeDisabled();
+    await expect(ventana.getByRole("button", { name: "Cancelar" })).toBeDisabled();
     soltar();
-    await expect(page.getByText("Listo: la invitación a Fito Sosa quedó enviada.")).toBeVisible();
-    expect(await page.evaluate(() => document.activeElement?.textContent ?? "")).toBe(elegido);
-    await expect(page.getByLabel("Correo")).not.toBeFocused();
+    await expect(page.getByText("Listo: la invitación a Fito Sosa quedó enviada.")).toBeFocused();
+    await expect(ventana).toHaveCount(0);
   });
 
   test("retirar pide confirmación y manda el CSRF", async ({ page, baseURL }) => {
@@ -271,7 +276,8 @@ test.describe("invitar", () => {
     await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeVisible();
     await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeFocused();
     // Retirada, deja la vista principal y pasa al historial plegado (sigue en la base y la auditoría).
-    await expect(page.getByText("No hay invitaciones pendientes.")).toBeVisible();
+    // INV-04: sin pendientes no hay aviso; queda el historial plegado.
+    await expect(page.getByRole("list", { name: "Pendientes" })).toHaveCount(0);
     await expect(ficha).toHaveCount(0);
     await expect(fila).toContainText("Retirada");
     await expect(fila).toBeHidden();

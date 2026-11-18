@@ -13,7 +13,9 @@ import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { useActo } from "./useActo";
 
 // `/pagos/nueva`: preparar una orden. Lo normal es guardarla y enviarla a aprobar en un solo acto
-// (decisión del propietario del 12-11-2026); al terminar sigue a su ficha, con lo que pasó.
+// (decisión del propietario del 12-11-2026). Enviada, vuelve a la bandeja con lo que pasó, como los
+// demás actos (informe de fricción, ORD-05): quien prepara ya no tiene nada que hacer en ella. En
+// borrador, o si el envío no salió, sigue a su ficha, que tiene «Enviar a aprobar».
 
 /** Con qué abre: el proveedor recién dado de alta o el de otra orden, y lo que falta de ella; al
  * volver del alta del proveedor de una factura, también su número y la factura ya subida. Todo es
@@ -71,6 +73,8 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
   const creada = useRef<string | null>(null);
   const aLaFicha = (orden: string, texto: string, falla = false) =>
     navegar(rutaFicha(orden), { state: { aviso: texto, falla, consorcio } });
+  const alGuardar = (orden: string, texto: string, quedo: "enviada" | "guardada" | "sin_enviar") =>
+    quedo === "enviada" ? navegar(RUTA_PAGOS, { state: { aviso: texto, consorcio } }) : aLaFicha(orden, texto, quedo === "sin_enviar");
   return (
     <>
       <CabeceraInterna titulo="Preparar una orden" volver={RUTA_PAGOS} destino="Pagos" />
@@ -96,7 +100,7 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
       {pantalla.tipo === "lista" && consorcio !== "" && (
         <div hidden={pendiente !== null}>
           <FormularioOrden consorcio={consorcio} monedas={monedasDe(pantalla, consorcio)} acto={acto} aEntrar={aEntrar} aInicio={aInicio} inicial={inicial}
-            alGuardar={aLaFicha} alCrear={(orden) => (creada.current = orden)}
+            alGuardar={alGuardar} alCrear={(orden) => (creada.current = orden)}
             alCancelar={() => navegar(RUTA_PAGOS, { state: { consorcio } })} />
         </div>
       )}

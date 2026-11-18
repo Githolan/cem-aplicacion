@@ -82,3 +82,21 @@ export function ErrorDeCampo({ idCampo, mensaje }: { idCampo: string; mensaje: s
     </p>
   );
 }
+
+// Lo que falta completar (decisión 4 del informe de fricción, tanda 1): el botón de enviar queda
+// siempre activo; al tocarlo con un campo obligatorio vacío, el campo se marca con su texto y no se
+// manda nada. Uso, dentro del envío (en `VentanaDeFormulario`, `alEnviar` devuelve "seguir"):
+//
+//   const faltan = faltaCompletar({ motivo: [motivo, "Falta escribir el motivo."] });
+//   if (hayErrores(faltan)) { setErrores(faltan); return "seguir"; }
+//
+// El campo lleva `marcaDe(id, errores.motivo)` y debajo `<ErrorDeCampo idCampo={id} mensaje={errores.motivo} />`;
+// al escribir, `sinElDe(errores, "motivo")` saca la marca.
+
+/** Por campo, el valor escrito y qué decir si está vacío (solo espacios cuenta como vacío). */
+export function faltaCompletar(campos: Readonly<Record<string, readonly [valor: string, mensaje: string]>>): ErroresDeCampo {
+  return Object.fromEntries(Object.entries(campos).filter(([, [valor]]) => valor.trim() === "").map(([campo, [, mensaje]]) => [campo, mensaje]));
+}
+
+/** Si hay al menos un campo marcado. */
+export const hayErrores = (errores: ErroresDeCampo) => Object.keys(errores).length > 0;

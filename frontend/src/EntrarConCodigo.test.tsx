@@ -111,7 +111,7 @@ describe("entrar con el código del correo", () => {
     abrirCodigo();
     completar(`  ${CORREO} `, "042 917");
 
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Escribir el código del correo" })).toBeNull();
     const [canje, ...otros] = postsDe(pedido);
@@ -183,7 +183,7 @@ describe("entrar con el código del correo", () => {
     vi.stubGlobal("fetch", backend({ canje: () => Response.json(SESION) }));
     abrir(`/entrar#token=${TOKEN}`);
     expect(screen.queryByRole("heading", { name: "Escribir el código del correo" })).toBeNull();
-    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Escribir el código del correo" })).toBeNull();
     cleanup();

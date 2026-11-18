@@ -2,12 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api, type Salud } from "./api/cliente";
 
-// El estado del servicio (rediseño de pagos, §12): un punto en la barra de Inicio y un aviso chico
-// solo si no funciona. La versión va al pie de Cuenta. La consulta es una sola, compartida.
+// El estado del servicio (rediseño de pagos, §12): un punto en la barra de Inicio y un aviso chico,
+// los dos solo si no funciona (comentario 19 del propietario, INI-09): mientras funciona no hay nada
+// que decir. La versión va al pie de Cuenta, plegada (CTA-05). La consulta es una sola, compartida.
 
-export const TEXTO_FUNCIONA = "El servicio funciona";
 export const TEXTO_NO_FUNCIONA = "El servicio no funciona";
-const TEXTO_CONSULTANDO = "Consultando el servicio";
 const LARGO_SHA_CORTA = 7;
 
 async function consultarSalud(): Promise<Salud> {
@@ -20,12 +19,8 @@ const useSalud = (enabled = true) => useQuery({ queryKey: ["salud"], queryFn: co
 
 export function PuntoServicio() {
   const salud = useSalud();
-  const [clase, nombre] = salud.isError
-    ? ["punto-servicio--mal", TEXTO_NO_FUNCIONA]
-    : salud.isSuccess
-      ? ["punto-servicio--bien", TEXTO_FUNCIONA]
-      : ["", TEXTO_CONSULTANDO];
-  return <span role="img" aria-label={nombre} className={`punto-servicio ${clase}`} />;
+  if (!salud.isError) return null;
+  return <span role="img" aria-label={TEXTO_NO_FUNCIONA} className="punto-servicio punto-servicio--mal" />;
 }
 
 /** Si el servicio no responde. El Inicio lo dice junto con las otras lecturas que fallaron, con
@@ -40,13 +35,17 @@ export function useFallaDelServicio(conSesion: boolean) {
   };
 }
 
+/** Plegado detrás de «Acerca de la aplicación» (CTA-05): sirve para soporte, no para el día a día. */
 export function PieDeVersion() {
   const { data } = useSalud();
   if (data === undefined) return null;
   return (
-    <p className="pie-version">
-      Versión {data.version} · Contrato {data.version_contrato} · Compilación{" "}
-      <code>{data.sha_imagen.slice(0, LARGO_SHA_CORTA)}</code>
-    </p>
+    <details className="pie-version">
+      <summary>Acerca de la aplicación</summary>
+      <p>
+        Versión {data.version} · Contrato {data.version_contrato} · Compilación{" "}
+        <code>{data.sha_imagen.slice(0, LARGO_SHA_CORTA)}</code>
+      </p>
+    </details>
   );
 }

@@ -132,8 +132,8 @@ test.describe("egresos en un teléfono", () => {
 });
 
 // El circuito de pagos: una bandeja y una ficha, con la API simulada desde el navegador. Cada prueba
-// corre en los tres proyectos (escritorio, movil, tablet) con su ancho, sin fijarlo: en PC la ficha
-// se abre al lado y más angosto va aparte. La cuenta completa no está en la página hasta el acto de
+// corre en los tres proyectos (escritorio, movil, tablet) con su ancho, sin fijarlo: la ficha se abre
+// sola, tocando la fila, en todos los anchos. La cuenta completa no está en la página hasta el acto de
 // ejecución (un POST que la API responde con todas las barreras).
 const EJECUCION = "e7777777-7777-4777-8777-777777777777";
 const PAGO = "f8888888-8888-4888-8888-888888888888";
@@ -309,34 +309,36 @@ async function sinDesbordar(pagina: Page) {
   expect(contenido).toBeLessThanOrEqual(ventana);
 }
 
-/** Entra a la bandeja y llega a la ficha: en PC ya está abierta al lado; más angosto, se toca. */
+/** Registrar el pago se hace en su ventana (REG-01): el botón de la ficha la abre. */
+async function abrirElRegistro(pagina: Page, boton: "Subir el comprobante" | "Registrar el pago") {
+  await pagina.getByRole("button", { name: boton, exact: true }).click();
+  await expect(pagina.getByRole("dialog", { name: boton })).toBeVisible();
+}
+
+/** Entra a la bandeja y abre la ficha tocando la fila, en todos los anchos (decisión 1: la ficha va sola). */
 async function abrirLaFicha(pagina: Page) {
   await pagina.goto("/pagos");
   const fila = pagina.getByRole("link", { name: new RegExp(RAZON_LARGA) });
   await expect(fila).toBeVisible();
   expect((await fila.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   await sinDesbordar(pagina);
-  if (anchoDe(pagina) < ANCHO_PC_PX) await fila.click();
+  await fila.click();
 }
 
 test.describe("circuito de pagos", () => {
-  test("en PC la ficha va al lado de la bandeja; más angosto, aparte", async ({ page, baseURL }) => {
+  test("en todos los anchos la ficha se abre sola, con «Volver a Pagos»", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, PARA_PAGAR);
     await page.goto("/pagos");
     const pagar = page.getByRole("button", { name: "Ver la cuenta para pagar" });
     const fila = page.getByRole("link", { name: new RegExp(RAZON_LARGA) });
     await expect(fila).toBeVisible();
-    if (anchoDe(page) >= ANCHO_PC_PX) {
-      await expect(pagar).toBeVisible();
-      const [lista, ficha] = [await fila.boundingBox(), await pagar.boundingBox()];
-      expect(ficha?.x).toBeGreaterThan((lista?.x ?? 0) + (lista?.width ?? 0));
-    } else {
-      await expect(pagar).toHaveCount(0);
-      await fila.click();
-      await expect(pagar).toBeVisible();
-      await expect(fila).toHaveCount(0);
-    }
+    // FIC-13 / BAN-02: la primera orden no se abre sola, tampoco en PC.
+    await expect(pagar).toHaveCount(0);
+    await fila.click();
+    await expect(pagar).toBeVisible();
+    await expect(fila).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Volver a Pagos" })).toBeVisible();
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
@@ -380,6 +382,8 @@ test.describe("circuito de pagos", () => {
     await simularPagos(page, baseURL!, CON_COMPROBANTE);
     await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
+    // El importe se escribe en la ventana de registrar el pago (REG-01).
+    await abrirElRegistro(page, "Registrar el pago");
     const campo = page.getByLabel(/^Importe transferido/);
     await expect(campo).toHaveAttribute("inputmode", "decimal");
     await campo.fill("120000");
@@ -423,7 +427,8 @@ test.describe("circuito de pagos", () => {
     });
     expect(dibujados).toBeGreaterThan(0);
     expect((await trabajador).headers()["content-type"]).toContain("javascript");
-    await expect(page.getByRole("table", { name: "La orden contra lo registrado" }).getByText(CUENTA)).toBeVisible();
+    // La cuenta va como dato suelto: la tabla compara solo lo que puede diferir (FIC-09).
+    await expect(page.getByText(CUENTA)).toBeVisible();
     await expect(page.getByText("0001234567")).toBeVisible();
     await expect(page.getByText(/Marta Ficticia/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Está bien: conciliar" })).toBeVisible();
@@ -436,6 +441,7 @@ test.describe("circuito de pagos", () => {
     const errores = vigilarErrores(page);
     const pedidos = await simularPagos(page, baseURL!, CON_COMPROBANTE);
     await abrirLaFicha(page);
+    await abrirElRegistro(page, "Registrar el pago");
     await page.getByRole("button", { name: "Se transfirió otro importe o a otra cuenta" }).click();
     await page.getByLabel("Número de operación").fill("0001234567");
     await page.getByLabel("Importe que salió del banco").fill("98750");
@@ -456,13 +462,11 @@ test.describe("circuito de pagos", () => {
     await abrirLaFicha(page);
     await expect(page.getByRole("table", { name: "La orden contra lo que salió del banco" })).toBeVisible();
     await expect(page.getByText("SINTETICO: me equivoqué al escribir el importe")).toBeVisible();
-    const dar = page.getByRole("radio", { name: /Dar por pagados/ });
-    await expect(dar).toBeChecked();
-    await page.getByRole("radio", { name: /Reclamar la devolución/ }).check();
-    await expect(dar).not.toBeChecked();
-    // La opción, no el botón, que ahora dice lo mismo (comentario 29).
-    expect((await page.getByText(/Reclamar la devolución: la orden/).boundingBox())?.height).toBeGreaterThan(0);
-    await expect(page.getByRole("button", { name: "Reclamar la devolución", exact: true })).toBeVisible();
+    // Cada camino es un botón con su confirmación (FIC-04): sin grupo de opciones.
+    await expect(page.getByRole("radio")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Dar por pagado lo real", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Reclamar la devolución", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Reclamar la devolución" })).toContainText("La orden queda abierta hasta recuperar la plata.");
     expect(await page.content()).not.toContain(CUENTA);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
@@ -486,6 +490,7 @@ test.describe("circuito de pagos", () => {
     const hechos = await simularPagos(page, baseURL!, SUBIENDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
+    await abrirElRegistro(page, "Subir el comprobante");
     // En todos los anchos, a la vez: soltar, la cámara, la galería y el archivo (comentario 32).
     await expect(page.getByText("Soltar el archivo acá")).toBeVisible();
     await expect(page.getByRole("button", { name: "Sacar una foto" })).toBeVisible();
@@ -513,6 +518,7 @@ test.describe("circuito de pagos", () => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, LEIDO_COINCIDE, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await abrirLaFicha(page);
+    await abrirElRegistro(page, "Registrar el pago");
     await expect(page.getByLabel("Número de operación")).toHaveValue("0048213377");
     // D-25: lo que coincide no se avisa; se avisa solo lo que no coincide o falta.
     await expect(page.getByText(/coinciden con la orden/)).toHaveCount(0);
@@ -527,6 +533,7 @@ test.describe("circuito de pagos", () => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, LEIDO_DISTINTO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await abrirLaFicha(page);
+    await abrirElRegistro(page, "Registrar el pago");
     await expect(page.getByRole("alert").filter({ hasText: "El comprobante dice" })).toContainText("$ 58.000,00");
     await expect(page.getByRole("button", { name: "Registrar el pago" })).toBeHidden();
     const pague = page.getByRole("button", { name: "Se transfirió otro importe o a otra cuenta" });
@@ -544,6 +551,7 @@ test.describe("circuito de pagos", () => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, NO_LEIDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await abrirLaFicha(page);
+    await abrirElRegistro(page, "Registrar el pago");
     await expect(page.getByText("El comprobante no se pudo leer. Hay que completar los datos a mano.")).toBeVisible();
     await expect(page.getByLabel("Número de operación")).toHaveValue("");
     await sinDesbordar(page);

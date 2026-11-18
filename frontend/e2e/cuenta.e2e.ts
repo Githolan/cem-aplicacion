@@ -123,7 +123,8 @@ test.describe("mi cuenta", () => {
     await page.getByRole("link", { name: "Cuenta" }).click();
 
     await expect(page.getByLabel("Datos de la cuenta").getByText("Ana Pérez")).toBeVisible();
-    // La versión pasó del inicio al pie de esta pantalla.
+    // La versión pasó del inicio al pie de esta pantalla, plegada en «Acerca de la aplicación» (CTA-05).
+    await page.getByText("Acerca de la aplicación").click();
     await expect(page.getByText(`Compilación ${SHA_BACKEND.slice(0, LARGO_SHA_CORTA)}`)).toBeVisible();
     await expect(page.getByText(/Está activado/)).toBeVisible();
     await expect(page.locator(".sesiones li[aria-current=true]")).toContainText("(este dispositivo)");
@@ -132,8 +133,11 @@ test.describe("mi cuenta", () => {
 
     const cerrarOtra = page
       .locator(".sesiones li", { hasText: "Firefox en Windows" })
-      .getByRole("button", { name: "Cerrar esta sesión" });
+      .getByRole("button", { name: "Cerrar" });
+    // La descripción del botón es el dispositivo de su fila (como en la prueba de Cuenta.test.tsx);
+    // el último uso se lee en la fila.
     await expect(cerrarOtra).toHaveAccessibleDescription("Firefox en Windows");
+    await expect(page.locator(".sesiones li", { hasText: "Firefox en Windows" })).toContainText("· último uso ");
     await cerrarOtra.click();
     await expect(page.getByText("Listo: se cerró la sesión de Firefox en Windows.")).toBeVisible();
     expect(csrf[`/api/v1/auth/sesiones/${OTRA}/revocar`]).toBe(CSRF);

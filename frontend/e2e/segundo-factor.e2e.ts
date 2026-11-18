@@ -78,8 +78,9 @@ test.describe("segundo factor", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
 
+    // El alta va en su ventana y el código sale solo al sexto número (CTA-09).
+    await expect(page.getByRole("dialog", { name: "Cargar la cuenta en la aplicación" })).toBeVisible();
     await page.getByLabel("Código de la aplicación").fill("042917");
-    await page.getByRole("button", { name: "Activar la aplicación" }).click();
     await expect(page.getByRole("list", { name: "Códigos de recuperación" }).getByRole("listitem")).toHaveCount(10);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);

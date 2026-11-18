@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -24,13 +24,15 @@ import {
   VOLVIO_LA_RED,
   TEXTO_SESION_VENCIDA,
 } from "./comun";
-import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, MARCA_FALTANTE, MARCA_VENCIDA } from "./Proveedores";
-import { AVISO_VENCIDA, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO, SIN_REQUISITO } from "./DocumentacionProveedor";
+import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, FALTA_CUIT, FALTA_RAZON, MARCA_FALTANTE, MARCA_VENCIDA, NO_CAMBIAR_CUENTA, SIN_CAMBIOS_PARA_GUARDAR } from "./Proveedores";
+import { CARGAR, FALTA_VENCIMIENTO, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO, SIN_REQUISITO, TITULO_SECCION } from "./DocumentacionProveedor";
 import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
 import {
+  ACLARACION_RETIRO,
   AUTORIZAR,
   CONFIRMAR_AUTORIZAR,
   CONFIRMAR_RETIRAR,
+  FALTA_MOTIVO,
   MOTIVO,
   RETIRAR,
   RUTA_AUTORIZACIONES_PROVEEDORES,
@@ -38,10 +40,11 @@ import {
   textoRetirado,
   TITULO_AUTORIZACIONES_PROVEEDORES,
 } from "./AutorizacionesProveedores";
-import { AGREGAR_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, SIN_RUBROS } from "./ExigenciaLegal";
+import { AGREGAR_RUBRO, AGREGAR_UN_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, FALTA_RUBRO, TITULO_EXIGENCIA } from "./ExigenciaLegal";
 import {
   CONFIRMAR_SALTEO,
   EXPLICACION_SALTEO,
+  FALTA_MOTIVO_SALTEO,
   MOTIVO_SALTEO,
   SALTEAR,
   SALTEO_REGISTRADO,
@@ -361,7 +364,7 @@ describe("página /egresos/proveedores", () => {
     };
   }
 
-  it("RF50: la lista marca al proveedor con documentación vencida y la ficha lo avisa sin frenar nada", async () => {
+  it("RF50: la lista marca al proveedor con documentación vencida y la ficha lo dice una vez, sin frenar nada (SEG-08)", async () => {
     vi.stubGlobal(
       "fetch",
       conLista({
@@ -385,8 +388,9 @@ describe("página /egresos/proveedores", () => {
     const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
     expect(fila.textContent).toContain(MARCA_VENCIDA);
     fireEvent.click(fila);
-    expect(await screen.findByText(AVISO_VENCIDA)).toBeTruthy();
-    const lista = screen.getByRole("list", { name: "Seguros y habilitaciones" });
+    const lista = await screen.findByRole("list", { name: "Seguros y habilitaciones" });
+    // El vencimiento lo dice la etiqueta del documento; sin otra banda que lo repita (SEG-08).
+    expect(screen.queryByText(/Tiene documentación vencida/)).toBeNull();
     expect(within(lista).getByText("Vencido el 01/11/2026")).toBeTruthy();
     expect(within(lista).getByText("Vigente hasta el 31/03/2027")).toBeTruthy();
     // Lo reemplazado va a la historia, no a la lista; cada una que vale se puede reemplazar.
@@ -413,14 +417,17 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByRole("button", { name: "Agregar un seguro o una habilitación" })).toBeNull();
   });
 
-  it("RF50: sin constancias no marca ni avisa", async () => {
+  it("RF50: sin constancias no marca ni avisa; quien carga ve el título y su botón, sin la frase (SEG-03)", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir("/egresos/proveedores");
     const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
     expect(fila.textContent).not.toContain(MARCA_VENCIDA);
     fireEvent.click(fila);
-    expect(await screen.findByText(SIN_DOCUMENTACION_TEXTO)).toBeTruthy();
-    expect(screen.queryByText(AVISO_VENCIDA)).toBeNull();
+    expect(await screen.findByRole("heading", { name: TITULO_SECCION })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Agregar un seguro o una habilitación" })).toBeTruthy();
+    expect(screen.queryByText(SIN_DOCUMENTACION_TEXTO)).toBeNull();
+    // Sin rubros ni nada que agregar, «Lo que exige la ley» no se dibuja.
+    expect(screen.queryByRole("heading", { name: TITULO_EXIGENCIA })).toBeNull();
   });
 
   it("RF50: reemplazar manda el tipo, la descripción, el vencimiento y la constancia; sin vencimiento no manda nada", async () => {
@@ -442,7 +449,7 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Reemplazar" }));
-    const hoja = await screen.findByRole("dialog");
+    const hoja = await screen.findByRole("dialog", { name: /^Reemplazar/ });
     const poliza = new File(["%PDF-1.4 SINTETICO"], "poliza.pdf", { type: "application/pdf" });
     const subidas = () => api.mock.calls.map(([q]) => q as Request).filter((q) => q.method === "POST");
     // Control: sin la fecha no se manda nada y se dice qué falta.
@@ -465,6 +472,74 @@ describe("página /egresos/proveedores", () => {
     });
     expect(pedido.headers.get("Content-Type")).toBe("application/pdf");
     expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("SEG-10: el archivo elegido antes de completar los datos queda, y «Cargar» lo manda sin elegirlo de nuevo", async () => {
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: () =>
+        Response.json({ proveedor: proveedor(), versiones: [], documentacion: [documentacion()], puede_cargar_documentacion: true, ...EXIGENCIA }),
+      [`POST ${DOCUMENTACION}`]: () =>
+        Response.json({ proveedor_id: P1, constancia_id: O1, documento_id: DOC,
+          archivo: { id: DOC, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: H1 } }, { status: 201 }),  // prettier-ignore
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reemplazar" }));
+    const hoja = await screen.findByRole("dialog", { name: /^Reemplazar/ });
+    const poliza = new File(["%PDF-1.4 SINTETICO"], "poliza.pdf", { type: "application/pdf" });
+    fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), { target: { files: [poliza] } });
+    // Lo que falta se marca junto a su campo, y el archivo queda elegido.
+    const fecha = within(hoja).getByLabelText("Vence el");
+    expect(fecha.getAttribute("aria-invalid")).toBe("true");
+    expect(within(hoja).getByText(FALTA_VENCIMIENTO)).toBeTruthy();
+    expect(within(hoja).getByText("Elegido: poliza.pdf")).toBeTruthy();
+    expect(pedidos(api, "POST", DOCUMENTACION)).toHaveLength(0);
+    // Control: «Cargar» sin la fecha tampoco manda nada.
+    fireEvent.click(within(hoja).getByRole("button", { name: CARGAR }));
+    expect(pedidos(api, "POST", DOCUMENTACION)).toHaveLength(0);
+    fireEvent.change(fecha, { target: { value: "2027-11-01" } });
+    expect(fecha.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(within(hoja).getByRole("button", { name: CARGAR }));
+    expect(await within(hoja).findByText(/Listo: quedó cargado/)).toBeTruthy();
+    expect(new URL(unico(pedidos(api, "POST", DOCUMENTACION)).url).searchParams.get("vence_el")).toBe("2027-11-01");
+  });
+
+  it("SEG-09: cuando el antivirus acepta el archivo, la hoja se cierra sola y la ficha se vuelve a leer", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const ESTADO_VERSION = `${BASE}/documentos/${DOC}/versiones/${DOC}/estado`;
+    let revisado = false;
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: () =>
+        Response.json({ proveedor: proveedor(), versiones: [], puede_cargar_documentacion: true, ...EXIGENCIA,
+          documentacion: revisado ? [documentacion({ estado: "vigente", vence_el: "2027-11-01" })] : [] }),  // prettier-ignore
+      [`POST ${DOCUMENTACION}`]: () =>
+        Response.json({ proveedor_id: P1, constancia_id: O1, documento_id: DOC,
+          archivo: { id: DOC, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: H1 } }, { status: 201 }),  // prettier-ignore
+      [`GET ${ESTADO_VERSION}`]: () => {
+        revisado = true;
+        return Response.json({ id: DOC, estado: "disponible" });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    try {
+      abrir("/egresos/proveedores");
+      fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+      fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
+      const hoja = await screen.findByRole("dialog", { name: "Agregar un seguro o una habilitación" });
+      fireEvent.change(within(hoja).getByLabelText("Qué cubre"), { target: { value: "ART SINTETICA" } });
+      fireEvent.change(within(hoja).getByLabelText("Vence el"), { target: { value: "2027-11-01" } });
+      const archivo = new File(["%PDF-1.4 SINTETICO"], "art.pdf", { type: "application/pdf" });
+      fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), { target: { files: [archivo] } });
+      expect(await within(hoja).findByText(/Listo: quedó cargado/)).toBeTruthy();
+      const lecturas = pedidos(api, "GET", `${BASE}/proveedores/${P1}`).length;
+      await act(() => vi.advanceTimersByTimeAsync(3000));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Agregar un seguro o una habilitación" })).toBeNull());
+      expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`).length).toBeGreaterThan(lecturas);
+      expect(await screen.findByText("Vigente hasta el 01/11/2027")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // RF50 configurable (app 0104): rubros legales, lo que falta, «No vence» y el requisito.
@@ -518,9 +593,14 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByText(AVISO_FALTA_AVISA)).toBeNull();
     const falta = screen.getByRole("list", { name: "Lo que falta" });
     expect(within(falta).getByText(/Responsabilidad civil de la empresa conservadora SINTETICA/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Quitar Ascensores y montacargas" })).toBeTruthy();
-    // Solo se ofrecen los rubros que no tiene.
-    const opciones = within(screen.getByLabelText("Rubro legal")).getAllByRole("option").map((o) => o.textContent);
+    // «Quitar» no repite el rubro que tiene al lado; el nombre completo es para el lector (SEG-02).
+    const quitar = screen.getByRole("button", { name: "Quitar Ascensores y montacargas" });
+    expect(quitar.textContent).toBe("Quitar");
+    // El rubro se agrega en su ventana (SEG-01), y solo se ofrecen los que no tiene.
+    expect(screen.queryByLabelText("Rubro legal")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: AGREGAR_UN_RUBRO }));
+    const ventana = await screen.findByRole("dialog", { name: AGREGAR_UN_RUBRO });
+    const opciones = within(within(ventana).getByLabelText("Rubro legal")).getAllByRole("option").map((o) => o.textContent);
     expect(opciones).toEqual(["Elegir un rubro", "Gas"]);
     await sinFaltasDeAccesibilidad(container);
   });
@@ -533,11 +613,13 @@ describe("página /egresos/proveedores", () => {
     expect(await screen.findByText(AVISO_FALTA_AVISA)).toBeTruthy();
     expect(screen.queryByText(AVISO_FALTA_BLOQUEA)).toBeNull();
     cleanup();
-    // Control: sin rubros ni faltantes.
+    // Control: sin rubros ni faltantes, el título y el botón de agregar, sin una frase que lo diga (SEG-03).
     vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia() }));
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
-    expect(await screen.findByText(SIN_RUBROS)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: AGREGAR_UN_RUBRO })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: TITULO_EXIGENCIA })).toBeTruthy();
+    expect(screen.queryByText(/No tiene rubros legales/)).toBeNull();
     expect(screen.queryByText(AVISO_FALTA_AVISA)).toBeNull();
     expect(screen.queryByText(AVISO_FALTA_BLOQUEA)).toBeNull();
   });
@@ -552,12 +634,20 @@ describe("página /egresos/proveedores", () => {
     vi.stubGlobal("fetch", api);
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
-    const agregar = await screen.findByRole("button", { name: AGREGAR_RUBRO });
-    // Control: sin elegir un rubro no se manda nada.
-    expect((agregar as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Rubro legal"), { target: { value: "gas" } });
+    fireEvent.click(await screen.findByRole("button", { name: AGREGAR_UN_RUBRO }));
+    const ventana = await screen.findByRole("dialog", { name: AGREGAR_UN_RUBRO });
+    const agregar = within(ventana).getByRole("button", { name: AGREGAR_RUBRO });
+    // Control: el botón está activo (C8P-21); sin elegir un rubro, lo marca y no manda nada.
+    expect((agregar as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(agregar);
+    expect(await within(ventana).findByText(FALTA_RUBRO)).toBeTruthy();
+    expect(within(ventana).getByLabelText("Rubro legal").getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(api, "POST", `${RUBROS}/gas`)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Rubro legal"), { target: { value: "gas" } });
     fireEvent.click(agregar);
     await waitFor(() => expect(pedidos(api, "POST", `${RUBROS}/gas`)).toHaveLength(1));
+    // Terminado, la ventana se cierra sola.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: AGREGAR_UN_RUBRO })).toBeNull());
     expect(unico(pedidos(api, "POST", `${RUBROS}/gas`)).headers.get("Idempotency-Key")).toBeTruthy();
     await waitFor(() => expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`).length).toBeGreaterThan(1));
     fireEvent.click(await screen.findByRole("button", { name: "Quitar Ascensores y montacargas" }));
@@ -575,7 +665,7 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
-    const hoja = await screen.findByRole("dialog");
+    const hoja = await screen.findByRole("dialog", { name: "Agregar un seguro o una habilitación" });
     fireEvent.click(within(hoja).getByLabelText("Habilitación"));
     // Solo los requisitos de habilitaciones.
     const opciones = within(within(hoja).getByLabelText("Qué requisito de la ley cubre")).getAllByRole("option").map((o) => o.textContent);
@@ -597,7 +687,7 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
-    const hoja = await screen.findByRole("dialog");
+    const hoja = await screen.findByRole("dialog", { name: "Agregar un seguro o una habilitación" });
     expect(within(hoja).getByLabelText("Vence el")).toBeTruthy();  // control: la hoja está
     expect(within(hoja).queryByLabelText(/No vence/)).toBeNull();
   });
@@ -623,9 +713,13 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cargar el CUIT" }));
+    // En su ventana, sobre la ficha, con el foco en el campo (PRV-02).
+    const ventana = await screen.findByRole("dialog", { name: "Cargar el CUIT de Limpieza Ficticia SRL" });
+    await waitFor(() => expect(document.activeElement).toBe(within(ventana).getByLabelText(/^CUIT/)));
     fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "20000000001" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar el CUIT" }));
-    expect(await screen.findByText(/Listo: el CUIT de/)).toBeTruthy();
+    // Solo lo que se hizo: lo de la orden aprobada lo dice su ficha (PRV-06).
+    expect((await screen.findByText(/Listo: el CUIT de/)).textContent).toBe("Listo: el CUIT de Limpieza Ficticia SRL quedó cargado.");
     const pedido = api.mock.calls.map(([q]) => q as Request).find((q) => q.method === "POST" && new URL(q.url).pathname === CARGA);
     expect(await pedido?.clone().json()).toEqual({ cuit: "20000000001", version_esperada: 1 });
   });
@@ -660,8 +754,32 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByRole("button", { name: /Ver la ficha/ })).toBeNull();
     fireEvent.click(fila);
     expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
     await waitFor(() => expect(document.activeElement?.textContent).toMatch(/^Limpieza Ficticia SRL /));
+  });
+
+  it("PRV-04: la fila no dice «Activo» ni «Cuenta Sin cuenta», y la ficha omite el rubro que no hay", async () => {
+    const sinCuenta = proveedor({ cuenta_ultimos_digitos: null, rubro: null });
+    const suspendido = proveedor({ id: O1, razon_social: "Pintura Ficticia SA", estado: "suspendido" });
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [sinCuenta, suspendido] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuenta, versiones: [], ...SIN_DOCUMENTACION }),
+    }));
+    abrir("/egresos/proveedores");
+    const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
+    expect(fila.textContent).toBe("Limpieza Ficticia SRL 20000000001 · Sin cuenta");
+    // Control: un estado que no es el de siempre sí se dice.
+    expect(screen.getByRole("button", { name: /^Pintura Ficticia SA / }).textContent).toContain("· Suspendido ·");
+    fireEvent.click(fila);
+    const ficha = await screen.findByRole("dialog", { name: "Limpieza Ficticia SRL" });
+    expect(within(ficha).queryByText("Rubro")).toBeNull();
+    expect(within(ficha).queryByText("Estado")).toBeNull();
+    // La cuenta que falta sí: hace falta para pagarle.
+    expect(within(ficha).getByText("Sin cuenta")).toBeTruthy();
+    // Las acciones van enseguida de los datos, antes de las secciones (PRV-01).
+    const cambiar = within(ficha).getByRole("button", { name: "Cambiar los datos" });
+    const seguros = within(ficha).getByRole("heading", { name: TITULO_SECCION });
+    expect(cambiar.compareDocumentPosition(seguros) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("control: un proveedor con CUIT no ofrece cargarlo", async () => {
@@ -705,8 +823,9 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     expect(await screen.findByText("Versiones anteriores")).toBeTruthy();
-    expect(screen.getByText(/^Versión 1,.*Limpieza Vieja SRL/)).toBeTruthy();
-    expect(screen.queryByText(/^Versión 2/)).toBeNull();
+    // Solo la fecha y lo que era distinto, sin el número de versión (PRV-03).
+    expect(screen.getByText(/: Limpieza Vieja SRL$/)).toBeTruthy();
+    expect(screen.queryByText(/Versión [0-9]/)).toBeNull();
   });
 
   it("la lista y la ficha muestran la cuenta enmascarada y nunca la completa", async () => {
@@ -718,12 +837,12 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     await screen.findByLabelText(/^Cuenta destino/);
     // Control: el número completo no aparece en ningún lugar del documento, ni en un campo.
-    expect(container.innerHTML).not.toContain(CUENTA);
+    expect(document.body.innerHTML).not.toContain(CUENTA);
     const cuenta = screen.getByLabelText(/^Cuenta destino/) as HTMLInputElement;
     expect(cuenta.value).toBe("");
     // La cuenta que tiene va dentro del campo (comentario 27), y una sola vez en el formulario.
     expect(cuenta.placeholder).toBe("…1234");
-    expect(screen.getByRole("form", { name: /^Cambiar/ }).textContent).not.toContain("…1234");
+    expect(screen.getByRole("dialog", { name: /^Cambiar/ }).textContent).not.toContain("…1234");
     await sinFaltasDeAccesibilidad(container);
   });
 
@@ -980,12 +1099,81 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText(/^Cuenta destino/), { target: { value: CUENTA_NUEVA } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
-    expect((await screen.findByRole("alert")).textContent).toBe(AVISO_CUENTA);
+    // Una pregunta corta, con el color de lo pendiente y no de un error (PRV-05).
+    const pregunta = await screen.findByText((_, el) => el?.classList.contains("pregunta-cuenta") === true);
+    expect(pregunta.textContent).toContain(AVISO_CUENTA);
+    expect(pregunta.className).toContain("aviso-pendiente");
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`)).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Sí, cambiar la cuenta" }));
     expect(await screen.findByText("Listo: los cambios de Limpieza Ficticia SRL quedaron guardados.")).toBeTruthy();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
     expect(await enviado.json()).toMatchObject({ cuenta_destino: CUENTA_NUEVA, version_esperada: 1, conservar_cuenta: false });
+    // Terminado, la ventana y la ficha se cierran: queda la lista con el resultado.
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("PRV-05: «No» a la pregunta deja la cuenta que tiene y no manda nada", async () => {
+    const simulado = conLista();
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
+    const cuenta = (await screen.findByLabelText(/^Cuenta destino/)) as HTMLInputElement;
+    fireEvent.change(cuenta, { target: { value: CUENTA_NUEVA } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
+    fireEvent.click(await screen.findByRole("button", { name: NO_CAMBIAR_CUENTA }));
+    expect(cuenta.value).toBe("");
+    expect(screen.queryByRole("button", { name: NO_CAMBIAR_CUENTA })).toBeNull();
+    expect(screen.getByRole("button", { name: "Guardar los cambios" })).toBeTruthy();
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`)).toHaveLength(0);
+  });
+
+  it("C8P-07: guardar sin cambiar nada no le pregunta al servidor y dice que no hay cambios", async () => {
+    const simulado = conLista({
+      [`POST ${BASE}/proveedores/${P1}/versiones`]: () => Response.json({ id: P1, version: 2 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
+    const guardar = await screen.findByRole("button", { name: "Guardar los cambios" });
+    expect((guardar as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(guardar);
+    expect((await screen.findByRole("alert")).textContent).toBe(SIN_CAMBIOS_PARA_GUARDAR);
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`)).toHaveLength(0);
+    // Control: con un cambio, sale.
+    fireEvent.change(screen.getByLabelText("Rubro (opcional)"), { target: { value: "otro rubro" } });
+    fireEvent.click(guardar);
+    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`)).toHaveLength(1));
+  });
+
+  it("decisión 4: el alta sin CUIT ni razón social marca los dos campos y no manda nada", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () => Response.json({ id: P1, version: 1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    const ventana = await screen.findByRole("dialog", { name: "Alta de un proveedor" });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Dar de alta el proveedor" }));
+    expect(await within(ventana).findByText(FALTA_CUIT)).toBeTruthy();
+    expect(within(ventana).getByText(FALTA_RAZON)).toBeTruthy();
+    expect(within(ventana).getByLabelText("Razón social").getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(0);
+    // Al escribir, la marca de ese campo se va.
+    fireEvent.change(within(ventana).getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    expect(within(ventana).queryByText(FALTA_RAZON)).toBeNull();
+    expect(within(ventana).getByText(FALTA_CUIT)).toBeTruthy();
+  });
+
+  it("MEN-05: «Quién ve los proveedores» se abre desde la pantalla de gestión", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir("/egresos/proveedores");
+    const enlace = await screen.findByRole("link", { name: "Quién ve los proveedores" });
+    expect(enlace.getAttribute("href")).toBe("/proveedores/quien-los-ve");
   });
 
   it("con el campo de cuenta vacío se conserva la cuenta y no hay aviso", async () => {
@@ -1165,6 +1353,7 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     }));
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
     fireEvent.change(screen.getByLabelText(/Razón social/), { target: { value: "Nuevo SRL" } });
     fireEvent.submit(screen.getByLabelText(/Razón social/).closest("form") as HTMLFormElement);
     expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
@@ -1243,30 +1432,71 @@ describe("página /proveedores (consulta)", () => {
     expect(fila.textContent).toContain(MARCA_VENCIDA);
     expect(fila.textContent).toContain(MARCA_FALTANTE);
     expect(fila.textContent).not.toContain("Cuenta");
+    // «Activo» es lo esperado: no se dice (CPR-02).
+    expect(fila.textContent).not.toContain("Activo");
     fireEvent.click(fila);
-    expect(await screen.findByText("Vencido el 01/11/2026")).toBeTruthy();
-    expect(screen.getByText("Cubre: RC SINTETICA")).toBeTruthy();
-    expect(screen.getByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    const ficha = await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" });
+    expect(within(ficha).getByText("Vencido el 01/11/2026")).toBeTruthy();
+    expect(within(ficha).getByText("Cubre: RC SINTETICA")).toBeTruthy();
+    expect(within(ficha).getByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    // Solo lo que tiene valor: sin «Estado: Activo» ni datos vacíos (CPR-02).
+    expect(within(ficha).queryByText("Estado")).toBeNull();
+    expect(within(ficha).queryByText("Correo")).toBeNull();
+    expect(within(ficha).getByText("SINTETICO")).toBeTruthy(); // control: el teléfono, que sí está
     // Solo lee: ni cargar, ni reemplazar, ni cambiar los rubros.
     for (const nombre of [/Agregar/, /Reemplazar/, /Quitar/, /Cambiar los datos/])
-      expect(screen.queryByRole("button", { name: nombre })).toBeNull();
-    expect(screen.getByRole("button", { name: "Volver a la lista" })).toBeTruthy(); // control
+      expect(within(ficha).queryByRole("button", { name: nombre })).toBeNull();
+    fireEvent.click(within(ficha).getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(document.activeElement?.textContent).toMatch(/^Ascensores Ficticios SA /));
     await sinFaltasDeAccesibilidad(container);
   });
 
-  it("el menú la ofrece a quien solo consulta y no a quien ya gestiona proveedores", async () => {
+  it("CPR-02: sin CUIT ni rubro, quien consulta no ve «Sin CUIT» ni «Sin rubro»; un estado que no es activo sí se dice", async () => {
+    const suspendido = { ...enConsulta, cuit: null, rubro: null, estado: "suspendido" as const };
+    vi.stubGlobal("fetch", consulta({
+      [`GET ${CONSULTA}`]: () => Response.json({ elementos: [suspendido], documentacion_vencida: [], documentacion_por_vencer: [],
+        documentacion_faltante: [], modo_exigencia: "bloquear" }),  // prettier-ignore
+      [`GET ${CONSULTA}/${P1}`]: () => Response.json({ proveedor: suspendido, documentacion: [], rubros_legales: [], faltantes: [],
+        requisitos: [], configuracion, salteos: [] }),  // prettier-ignore
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    const fila = await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
+    expect(fila.textContent).toContain("Suspendido");
+    fireEvent.click(fila);
+    const ficha = await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" });
+    expect(within(ficha).getByText("Suspendido")).toBeTruthy();
+    expect(within(ficha).queryByText(/Sin CUIT|Sin rubro/)).toBeNull();
+    // Sin nada cargado ni nada que hacer: una línea para los seguros y ninguna sección vacía (SEG-03).
+    expect(within(ficha).getByText(SIN_DOCUMENTACION_TEXTO)).toBeTruthy();
+    expect(within(ficha).queryByRole("heading", { name: TITULO_EXIGENCIA })).toBeNull();
+    expect(within(ficha).queryByRole("heading", { name: TITULO_SECCION })).toBeNull();
+  });
+
+  it("MEN-05: una sola entrada «Proveedores», que lleva a la consulta a quien solo consulta y a la gestión a quien gestiona", async () => {
     vi.stubGlobal("fetch", consulta());
     abrir(RUTA_CONSULTA_PROVEEDORES);
     const menu = await screen.findByRole("navigation", { name: "Secciones" });
-    expect(await within(menu).findByRole("link", { name: TITULO_CONSULTA_PROVEEDORES })).toBeTruthy();
-    expect(within(menu).queryByRole("link", { name: "Proveedores" })).toBeNull();
+    const entrada = await within(menu).findByRole("link", { name: "Proveedores" });
+    expect(entrada.getAttribute("href")).toBe(RUTA_CONSULTA_PROVEEDORES);
+    expect(entrada.getAttribute("aria-current")).toBe("page");
+    expect(within(menu).queryByRole("link", { name: TITULO_CONSULTA_PROVEEDORES })).toBeNull();
+    // Sin la facultad de autorizar, la pantalla no ofrece «Quién ve los proveedores».
+    await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
+    expect(screen.queryByRole("link", { name: "Quién ve los proveedores" })).toBeNull();
     cleanup();
-    // Control: con todas las acciones, la ficha completa y no la consulta.
+    // Control: con todas las acciones, la misma entrada lleva a la gestión.
     vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanzaTodo(MIS_ACCIONES) ?? (() => Response.json({})) }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     const otro = await screen.findByRole("navigation", { name: "Secciones" });
-    expect(await within(otro).findByRole("link", { name: "Proveedores" })).toBeTruthy();
-    expect(within(otro).queryByRole("link", { name: TITULO_CONSULTA_PROVEEDORES })).toBeNull();
+    expect((await within(otro).findByRole("link", { name: "Proveedores" })).getAttribute("href")).toBe("/egresos/proveedores");
+    expect(within(otro).getAllByRole("link", { name: /proveedores/i })).toHaveLength(1);
+  });
+
+  it("MEN-05: quien autoriza abre «Quién ve los proveedores» desde la consulta", async () => {
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("proveedores.ver", "proveedores.autorizar") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    const enlace = await screen.findByRole("link", { name: "Quién ve los proveedores" });
+    expect(enlace.getAttribute("href")).toBe(RUTA_AUTORIZACIONES_PROVEEDORES);
   });
 
   // Salteo por urgencia (app 0106; propietario, 16-11-2026: «si con motivo»).
@@ -1276,7 +1506,7 @@ describe("página /proveedores (consulta)", () => {
     motivo: "SINTETICO: pérdida de gas",
     registrado_en: "2026-11-16T15:00:00Z",
     registrado_por_nombre: "Consejera Ficticia",
-    vence_en: "2026-11-17T15:00:00Z",
+    vence_en: "2026-11-17T20:52:00Z",
     estado: "vigente" as const,
     orden_id: null,
     version: null,
@@ -1284,29 +1514,61 @@ describe("página /proveedores (consulta)", () => {
   };
   const SALTEOS = `${BASE}/proveedores/${P1}/salteos-documentacion`;
 
-  it("en una urgencia, el Consejo saltea el bloqueo con el motivo, para una orden", async () => {
+  it("en una urgencia, el Consejo saltea el bloqueo con el motivo, en su ventana, para una orden (SEG-04, SEG-06, C8P-22)", async () => {
+    let registrado = false;
     const api = consulta({
       [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
-      [`POST ${SALTEOS}`]: () => Response.json(SALTEO, { status: 201 }),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta(registrado ? [SALTEO] : []),
+      [`POST ${SALTEOS}`]: () => {
+        registrado = true;
+        return Response.json(SALTEO, { status: 201 });
+      },
     });
     vi.stubGlobal("fetch", api);
     const { container } = abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
     expect(await screen.findByRole("heading", { name: TITULO_SALTEO })).toBeTruthy();
-    expect(screen.getByText(EXPLICACION_SALTEO)).toBeTruthy();
+    // La explicación no está fija en la ficha: va en la ventana (SEG-06).
+    expect(screen.queryByText(EXPLICACION_SALTEO)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: SALTEAR }));
-    const confirmar = screen.getByRole("button", { name: CONFIRMAR_SALTEO });
-    expect((confirmar as HTMLButtonElement).disabled).toBe(true); // sin motivo no se manda
-    fireEvent.change(screen.getByLabelText(MOTIVO_SALTEO), { target: { value: "  SINTETICO: pérdida de gas  " } });
+    const ventana = await screen.findByRole("dialog", { name: SALTEAR });
+    expect(within(ventana).getByText(EXPLICACION_SALTEO)).toBeTruthy();
+    const confirmar = within(ventana).getByRole("button", { name: CONFIRMAR_SALTEO });
+    // Siempre activo: sin motivo, lo marca y no manda nada (C8P-22).
+    expect((confirmar as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(confirmar);
+    expect(await within(ventana).findByText(FALTA_MOTIVO_SALTEO)).toBeTruthy();
+    expect(pedidos(api, "POST", SALTEOS)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO_SALTEO), { target: { value: "  SINTETICO: pérdida de gas  " } });
+    fireEvent.click(confirmar);
+    // El resultado queda en la sección, con la ventana cerrada.
     expect(await screen.findByText(SALTEO_REGISTRADO)).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: SALTEAR })).toBeNull();
     const pedido = unico(pedidos(api, "POST", SALTEOS));
     expect(await pedido.json()).toEqual({ motivo: "SINTETICO: pérdida de gas" });
     expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+    // Comentario 40: el suyo espera su orden, así que no se le ofrece registrar otro.
+    expect(await screen.findByRole("list", { name: "Salteos" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     await sinFaltasDeAccesibilidad(container);
   });
 
-  it("sin la acción no se ofrece saltear, y la ficha muestra los salteos que hubo", async () => {
+  it("comentario 40: el salteo de otra persona que espera su orden no esconde el botón; la fecha lleva un solo punto", async () => {
+    const deOtro = { ...SALTEO, numero: 8, registrado_por_nombre: "Otro Consejero Ficticio" };
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([deOtro]),
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    // La base deja a cada miembro un salteo propio en espera: el de otro no le impide registrar el suyo.
+    expect(await screen.findByRole("button", { name: SALTEAR })).toBeTruthy();
+    const renglon = (await screen.findByRole("list", { name: "Salteos" })).textContent ?? "";
+    expect(renglon).toMatch(/^Espera su orden hasta el .*\. Registrado el /);
+    expect(renglon).not.toMatch(/\.\./);
+  });
+
+  it("sin la acción no se ofrece saltear, y la ficha muestra los salteos que hubo, plegados (SEG-07)", async () => {
     const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
     vi.stubGlobal("fetch", consulta());
     abrir(RUTA_CONSULTA_PROVEEDORES);
@@ -1315,13 +1577,16 @@ describe("página /proveedores (consulta)", () => {
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(screen.queryByRole("heading", { name: TITULO_SALTEO })).toBeNull();
     cleanup();
-    // Control: con un salteo ya usado, se ve aunque no se pueda saltear.
+    // Control: con un salteo ya usado, se ve aunque no se pueda saltear: en «Anteriores», sin la versión.
     vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([usado]) }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
     // El momento lleva espacios finos (Intl): se compara el texto entero de la fila.
-    expect((await screen.findByRole("list", { name: "Salteos" })).textContent).toBe(textoSalteo(usado));
-    expect(textoSalteo(usado)).toMatch(/^Usado por una orden \(versión 1\)\. Registrado el .*Consejera Ficticia: SINTETICO: pérdida de gas$/);
+    const anteriores = await screen.findByRole("list", { name: "Salteos anteriores" });
+    expect(anteriores.closest("details")?.open).toBe(false);
+    expect(anteriores.textContent).toBe(textoSalteo(usado));
+    expect(textoSalteo(usado)).toMatch(/^Usado por una orden\. Registrado el .*Consejera Ficticia: SINTETICO: pérdida de gas$/);
+    expect(screen.queryByRole("list", { name: "Salteos" })).toBeNull();
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(textoSalteoDeLaVersion(usado)).toContain("SINTETICO: pérdida de gas");
   });
@@ -1363,57 +1628,92 @@ describe("página /proveedores/quien-los-ve", () => {
       ...extra,
     });
 
-  it("autoriza con el motivo y la fila dice quién y cuándo", async () => {
-    const api = pantalla();
-    vi.stubGlobal("fetch", api);
+  /** Abre la ficha del habitante y la ventana de su acción. */
+  async function abrirVentana(boton: string) {
+    fireEvent.click(await screen.findByRole("button", { name: /^Habitante Ficticio / }));
+    const ficha = await screen.findByRole("dialog", { name: "Habitante Ficticio" });
+    fireEvent.click(within(ficha).getByRole("button", { name: boton }));
+    return screen.findByRole("dialog", { name: boton === AUTORIZAR ? "Autorizar a Habitante Ficticio" : "Retirar la autorización de Habitante Ficticio" });
+  }
+
+  it("cada habitante es una fila compacta que abre su ficha (comentario 38, AUT-01), sin el párrafo de arriba (AUT-03)", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => Response.json({ elementos: [sinAutorizar, { ...autorizado, persona_id: P1, nombre: "Otra Habitante" }] }) }));
     const { container } = abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
-    expect(await screen.findByRole("heading", { name: "Habitante Ficticio" })).toBeTruthy();
-    expect(screen.getByText("Sin autorización.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: AUTORIZAR }));
-    const confirmar = screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR });
-    expect((confirmar as HTMLButtonElement).disabled).toBe(true); // sin motivo no se manda
-    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "  SINTETICO: comisión de obras  " } });
-    fireEvent.click(confirmar);
-    expect(await screen.findByText(/^Autorizado el .* por Consejera Ficticia: SINTETICO: comisión de obras$/)).toBeTruthy();
-    const pedido = unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`));
-    expect(await pedido.json()).toEqual({ autorizada: true, motivo: "SINTETICO: comisión de obras" });
-    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
-    expect(screen.getByRole("button", { name: RETIRAR }).className).toBe("secundario peligro");
-    expect(screen.getByText(textoAutorizado("Habitante Ficticio"))).toBeTruthy();
+    const fila = await screen.findByRole("button", { name: /^Habitante Ficticio / });
+    expect(fila.className).toBe("fila-registro");
+    expect(fila.textContent).toBe("Habitante Ficticio 3° A · Sin autorización");
+    expect(screen.getByRole("button", { name: /^Otra Habitante / }).textContent).toBe("Otra Habitante 3° A · Autorizado");
+    // Ni tarjetas ni el botón en la lista: la acción está en la ficha.
+    expect(container.querySelector("article.tarjeta")).toBeNull();
+    expect(screen.queryByRole("button", { name: AUTORIZAR })).toBeNull();
+    expect(screen.queryByText(/El Consejo y la administración ven los proveedores/)).toBeNull();
+    // La ficha de quien está autorizado dice desde cuándo, quién y por qué.
+    fireEvent.click(screen.getByRole("button", { name: /^Otra Habitante / }));
+    const ficha = await screen.findByRole("dialog", { name: "Otra Habitante" });
+    expect(within(ficha).getByText("Consejera Ficticia")).toBeTruthy();
+    expect(within(ficha).getByText("SINTETICO: comisión de obras")).toBeTruthy();
+    expect(within(ficha).getByRole("button", { name: RETIRAR }).className).toBe("secundario peligro");
     await sinFaltasDeAccesibilidad(container);
   });
 
-  it("retirar pide el motivo y es un acto negativo", async () => {
+  it("autoriza con el motivo en su ventana (AUT-02): botón siempre activo, y al terminar queda la lista con el resultado", async () => {
+    const api = pantalla();
+    vi.stubGlobal("fetch", api);
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    const ventana = await abrirVentana(AUTORIZAR);
+    const confirmar = within(ventana).getByRole("button", { name: CONFIRMAR_AUTORIZAR });
+    // Sin motivo, lo marca y no manda nada (C8P-23).
+    expect((confirmar as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirmar);
+    expect(await within(ventana).findByText(FALTA_MOTIVO)).toBeTruthy();
+    expect(within(ventana).getByLabelText(MOTIVO).getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(api, "POST", `${LISTA}/${PERSONA}`)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO), { target: { value: "  SINTETICO: comisión de obras  " } });
+    fireEvent.click(confirmar);
+    expect(await screen.findByText(textoAutorizado("Habitante Ficticio"))).toBeTruthy();
+    const pedido = unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`));
+    expect(await pedido.json()).toEqual({ autorizada: true, motivo: "SINTETICO: comisión de obras" });
+    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+    // La ventana y la ficha se cierran; la fila ya dice lo nuevo.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: /^Habitante Ficticio / }).textContent).toContain("Autorizado");
+  });
+
+  it("retirar pide el motivo, es un acto negativo y aclara lo que ve por su rol", async () => {
     const api = pantalla({
       [`GET ${LISTA}`]: () => Response.json({ elementos: [autorizado] }),
       [`POST ${LISTA}/${PERSONA}`]: () => Response.json({ ...autorizado, autorizada: false, motivo: "SINTETICO: se mudó" }),
     });
     vi.stubGlobal("fetch", api);
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
-    fireEvent.click(await screen.findByRole("button", { name: RETIRAR }));
-    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO: se mudó" } });
-    const confirmar = screen.getByRole("button", { name: CONFIRMAR_RETIRAR });
+    const ventana = await abrirVentana(RETIRAR);
+    expect(within(ventana).getByText(ACLARACION_RETIRO)).toBeTruthy();
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO), { target: { value: "SINTETICO: se mudó" } });
+    const confirmar = within(ventana).getByRole("button", { name: CONFIRMAR_RETIRAR });
     expect(confirmar.className).toBe("peligro");
     fireEvent.click(confirmar);
-    expect(await screen.findByText(/^Autorización retirada el .*: SINTETICO: se mudó$/)).toBeTruthy();
-    expect(await unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`)).json()).toEqual({ autorizada: false, motivo: "SINTETICO: se mudó" });
-    expect(screen.getByRole("button", { name: AUTORIZAR })).toBeTruthy(); // control: vuelve a ofrecer autorizar
     // Solo dice lo que cambió: el rol puede seguir dándole acceso (Codex en #250).
-    expect(screen.getByText(textoRetirado("Habitante Ficticio"))).toBeTruthy();
+    expect(await screen.findByText(textoRetirado("Habitante Ficticio"))).toBeTruthy();
+    expect(await unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`)).json()).toEqual({ autorizada: false, motivo: "SINTETICO: se mudó" });
     expect(screen.queryByText(/ya no ve/)).toBeNull();
+    // Control: la ficha vuelve a ofrecer autorizar, y dice que se retiró.
+    fireEvent.click(screen.getByRole("button", { name: /^Habitante Ficticio / }));
+    const ficha = await screen.findByRole("dialog", { name: "Habitante Ficticio" });
+    expect(within(ficha).getByText("Autorización retirada")).toBeTruthy();
+    expect(within(ficha).getByRole("button", { name: AUTORIZAR })).toBeTruthy();
   });
 
-  it("un rechazo se dice junto al formulario, que queda abierto con lo escrito", async () => {
+  it("un rechazo se dice en la ventana, que queda abierta con lo escrito", async () => {
     vi.stubGlobal("fetch", pantalla({ [`POST ${LISTA}/${PERSONA}`]: () => error("motivo_invalido", 422) }));
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
-    fireEvent.click(await screen.findByRole("button", { name: AUTORIZAR }));
-    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
-    fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
-    expect((await screen.findByRole("alert")).textContent).toBe(mensajeDeError(422, "motivo_invalido"));
-    expect((screen.getByLabelText(MOTIVO) as HTMLTextAreaElement).value).toBe("SINTETICO");
+    const ventana = await abrirVentana(AUTORIZAR);
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
+    expect((await within(ventana).findByRole("alert")).textContent).toBe(mensajeDeError(422, "motivo_invalido"));
+    expect((within(ventana).getByLabelText(MOTIVO) as HTMLTextAreaElement).value).toBe("SINTETICO");
   });
 
-  it("si otro miembro del Consejo ya la cambió, cierra el formulario y vuelve a leer la lista (Codex en #250)", async () => {
+  it("si otro miembro del Consejo ya la cambió, cierra la ventana y la ficha y vuelve a leer la lista (Codex en #250)", async () => {
     // Lo registrado cambió en el medio: la base ya la tiene autorizada.
     let rechazado = false;
     const api = pantalla({
@@ -1425,29 +1725,32 @@ describe("página /proveedores/quien-los-ve", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
-    fireEvent.click(await screen.findByRole("button", { name: AUTORIZAR }));
-    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
-    fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
-    // La fila muestra lo registrado y ofrece lo que corresponde; el aviso queda.
-    expect(await screen.findByRole("button", { name: RETIRAR })).toBeTruthy();
-    expect(screen.getByText(mensajeDeError(409, "autorizacion_sin_cambios"))).toBeTruthy();
-    expect(screen.queryByLabelText(MOTIVO)).toBeNull();
-    const antes = pedidos(api, "GET", LISTA).length;
-    expect(antes).toBeGreaterThanOrEqual(2); // control: se volvió a leer después del rechazo
+    const ventana = await abrirVentana(AUTORIZAR);
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
+    // La fila muestra lo registrado; el aviso queda.
+    expect(await screen.findByText(mensajeDeError(409, "autorizacion_sin_cambios"))).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Habitante Ficticio / }).textContent).toContain("Autorizado"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(pedidos(api, "GET", LISTA).length).toBeGreaterThanOrEqual(2); // control: se volvió a leer después del rechazo
   });
 
-  it("con la autorización por persona apagada lo dice y no lista", async () => {
+  it("con la autorización por persona apagada lo dice una sola vez y no lista (AUT-04)", async () => {
     vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => error("autorizacion_por_persona_apagada", 409) }));
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
     expect(await screen.findByText(mensajeDeError(409, "autorizacion_por_persona_apagada"))).toBeTruthy();
-    expect(screen.queryByRole("button", { name: AUTORIZAR })).toBeNull();
+    expect(screen.queryByText(/puede autorizar a un habitante/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Habitante/ })).toBeNull();
   });
 
-  it("el menú la ofrece a quien autoriza y la dirección lleva al inicio a quien no", async () => {
+  it("MEN-05: la entrada «Proveedores» la marca y lleva acá a quien solo autoriza; la dirección lleva al inicio a quien no", async () => {
     vi.stubGlobal("fetch", pantalla());
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
     const menu = await screen.findByRole("navigation", { name: "Secciones" });
-    expect(await within(menu).findByRole("link", { name: TITULO_AUTORIZACIONES_PROVEEDORES })).toBeTruthy();
+    const entrada = await within(menu).findByRole("link", { name: "Proveedores" });
+    expect(entrada.getAttribute("href")).toBe(RUTA_AUTORIZACIONES_PROVEEDORES);
+    expect(entrada.getAttribute("aria-current")).toBe("page");
+    expect(within(menu).queryByRole("link", { name: TITULO_AUTORIZACIONES_PROVEEDORES })).toBeNull();
     cleanup();
     vi.stubGlobal("fetch", pantalla({ [MIS_ACCIONES]: alcanza("contactos.ver") }));
     abrir(RUTA_AUTORIZACIONES_PROVEEDORES);

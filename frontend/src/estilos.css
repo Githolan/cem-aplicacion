@@ -725,18 +725,7 @@ main:has(.tabla-lista) {
   white-space: nowrap;
 }
 
-/* Circuito de pagos: una bandeja y una ficha. En PC, una al lado de la otra; más angosto, aparte. */
-main:has(.circuito-pagos--al-lado),
-main:has(.cotejo) {
-  max-width: 80rem;
-}
-
-.circuito-pagos--al-lado {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 2rem;
-  align-items: start;
-}
+/* Circuito de pagos: una bandeja y una ficha, cada una sola en todos los anchos (fricción 17-11). */
 
 .titulo-grupo {
   margin: 1.5rem 0 0.5rem;
@@ -833,22 +822,9 @@ main:has(.cotejo) {
   color: var(--on-hero);
 }
 
-/* Cotejar con el banco: el extracto y la lista a mano, una al lado de la otra desde tablet ancha. */
-.cotejo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0 2rem;
-  align-items: start;
-}
-
+/* Cotejar con el banco: la lista de lo que falta cotejar; el extracto se sube en su ventana (COT-01). */
 .cotejo[hidden] {
   display: none;
-}
-
-@media (min-width: 64.0625em) {
-  .cotejo {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 /* Elegir un archivo (SubirArchivo.tsx): la zona para soltarlo y, en todos los anchos, la cámara, la
@@ -1964,4 +1940,219 @@ button.fila-registro:disabled {
 .etiqueta-situacion[data-tono="ok"] {
   background: var(--success-bg);
   color: var(--success-text);
+}
+
+/* Fricción 17-11, tanda 1: piezas compartidas (VentanaDeFormulario, FilaDeRegistro con estado,
+   ComandoNoDisponible, ResultadoDelActo) y el menú (MEN-02, MEN-03, MEN-06). */
+
+/* La ventana para cargar datos: los campos van en un fieldset sin marco, que se apaga entero
+   mientras viaja el pedido. */
+.ventana-formulario {
+  max-width: none;
+}
+
+.ventana-formulario__campos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* El estado corto de una fila, a la vista sin abrirla: una etiqueta chica junto al título. */
+.fila-registro__estado {
+  justify-self: start;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--pending-bg);
+  color: var(--pending-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+/* En lugar de un comando que no se puede usar: qué falta y dónde se resuelve, en una línea. */
+.comando-no-disponible {
+  margin: 0;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.resultado-del-acto > p {
+  margin: 0 0 var(--space-2);
+}
+
+/* El nombre de la cabecera ya no es un enlace (MEN-03). */
+p.persona-cabecera {
+  margin: 0;
+}
+
+/* Mientras se consulta qué alcanza la persona, la barra del teléfono conserva su alto (MEN-06). */
+.navegacion[aria-busy="true"] {
+  min-height: var(--alto-pestanas);
+}
+
+/* Si no se pudo leer el menú, lo dice el propio menú (MEN-06). En el teléfono, a todo el ancho
+   justo arriba de las pestañas. */
+.navegacion__falla {
+  position: absolute;
+  inset: auto 0 100%;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--divider);
+  background: var(--surface-raised);
+  font-size: 0.875rem;
+}
+
+/* En el teléfono y la tablet, una pantalla de Gestión marca «Inicio», desde donde se llega (MEN-02). */
+@media (max-width: 1024px) {
+  .navegacion__item--desde-inicio {
+    color: var(--accent);
+  }
+}
+
+@media (min-width: 769px) {
+  .navegacion__falla {
+    position: static;
+    padding: 0;
+    border-top: 0;
+    background: none;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .navegacion__item--desde-inicio {
+    background: var(--accent-tint);
+  }
+}
+
+/* Fricción 17-11, tanda 4 */
+/* Arriba de la lista de proveedores: el alta y los enlaces a las otras pantallas de proveedores (MEN-05). */
+.acciones-de-proveedores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0 0 1rem;
+}
+
+/* Fricción 17-11, tanda 8 */
+
+/* Liquidación: «Agregar gastos» va junto al título «Gastos» (LIQ-03). */
+.liquidacion__titulo-gastos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.liquidacion__titulo-gastos h3 {
+  margin: 0;
+}
+
+/* Fricción 17-11, tanda 6: bandeja, consulta y cotejo. */
+
+/* La fila compacta del Padrón cuando lleva a otra pantalla (pagos/FilaEnlace.tsx): un enlace con el
+   mismo dibujo que button.fila-registro. */
+a.fila-registro {
+  display: grid;
+  gap: 0.125rem;
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+a.fila-registro:hover {
+  border-color: var(--accent);
+}
+
+/* Las filas del cotejo y de lo que el extracto no explica, debajo de los grupos (BAN-07). */
+.bandeja-banco {
+  margin-top: 1.5rem;
+}
+
+/* «Nada pendiente.»: una sola línea (BAN-06). */
+.bandeja-al-dia {
+  margin: 0;
+  font-weight: 700;
+}
+
+/* La tarjeta de Pagos del inicio entera es el enlace (INI-06). */
+.resumen-inicio__enlace {
+  display: grid;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  border-radius: var(--radius-md);
+  color: var(--on-hero);
+  text-decoration: none;
+}
+
+.resumen-inicio__enlace .resumen-inicio__arriba,
+.resumen-inicio__cuenta,
+.resumen-inicio__enlace .resumen-inicio__edificio {
+  display: block;
+}
+
+
+/* Fricción 17-11, tanda 9 */
+/* Lo plegado (otras formas de entrar en la hoja, «Acerca de la aplicación»): el resumen se toca. */
+.otras-formas,
+.pie-version {
+  margin-top: var(--space-4);
+}
+
+.otras-formas summary,
+.pie-version summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+/* Cuenta: una fila por sesión, el dispositivo y el último uso a la izquierda y «Cerrar» a la derecha
+   (CTA-03); en un teléfono angosto el botón baja. */
+.sesiones.compactas li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+
+/* Fricción 17-11, tanda 7: padrón, invitaciones, contactos y documentos. */
+
+/* Una invitación pendiente del inicio en una fila compacta, como las del Padrón (INV-05, INI-11):
+   los datos a la izquierda y «Aceptar la invitación» en la misma fila; en el teléfono angosto, el
+   botón baja debajo de los datos. */
+.fila-invitacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-card);
+}
+
+.fila-invitacion__datos {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: 0.125rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

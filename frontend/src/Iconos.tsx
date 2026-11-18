@@ -67,6 +67,20 @@ const TRAZOS = {
     </>
   ),
   grafico: <path d="M3 3v18h18M7 16v-4M12 16V8M17 16v-7" />,
+  // Quién ve los proveedores (MEN-05): un ojo, para no repetir el del proveedor.
+  ojo: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  // Solicitudes formales (MEN-05): un sobre, para no repetir el de Documentos.
+  sobre: (
+    <>
+      <rect width="20" height="16" x="2" y="4" rx="2" />
+      <path d="m22 7-10 6L2 7" />
+    </>
+  ),
   flecha: <path d="m9 18 6-6-6-6" />,
   volver: <path d="m15 18-6-6 6-6" />,
 } satisfies Record<string, ReactNode>;

@@ -290,8 +290,8 @@ describe("página /cuenta/segundo-factor", () => {
     abrir();
 
     await desactivarConfirmando();
-    fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
+    // Queda un solo método más: el botón lo nombra y va directo (COD-01).
+    fireEvent.click(await screen.findByRole("button", { name: "Usar un código de recuperación" }));
     await screen.findByRole("button", { name: "Verificar y seguir" });
     escribirCodigo("Código", " K7M2Q X9P4T ");
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
@@ -977,9 +977,14 @@ describe("informe de fricción, tanda 7", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Copiar los códigos" }));
     expect(await screen.findByText(/Copiados/)).toBeTruthy();
     expect(escribir).toHaveBeenCalledWith(CODIGOS.join("\n"));
+    // CTA-13: el botón deja lugar a su resultado y el foco pasa a seguir.
+    expect(screen.queryByRole("button", { name: "Copiar los códigos" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Códigos guardados: seguir" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Guardar como archivo" }));
     expect(descargas).toEqual(["codigos-de-recuperacion-consorcio-en-mano.txt"]);
+    expect(screen.getByText("Archivo guardado en las descargas de este dispositivo.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Guardar como archivo" })).toBeNull();
     // Siguen a la vista: guardarlos no es decir que se guardaron.
     expect(screen.getByRole("list", { name: "Códigos de recuperación" })).toBeTruthy();
     Reflect.deleteProperty(navigator, "clipboard");
@@ -1095,7 +1100,65 @@ describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de
     escribirCodigo("Código de la aplicación", "042917");
     fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     expect(await screen.findByText(/El código no sirve/)).toBeTruthy();
+    // El rechazo queda en la ventana del alta (CTA-09): al cancelarla, la página se puede dejar.
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Cargar la cuenta en la aplicación" })).getByRole("button", { name: "Cancelar" }));
     expect(container.inert).toBeFalsy();
     expect(screen.getByRole("link", { name: "Volver a Cuenta" })).toBeTruthy();
+  });
+});
+
+describe("tanda 9: segundo factor", () => {
+  it("CTA-09: el alta va en una ventana sin la llave, se verifica sola al sexto número y se puede cancelar", async () => {
+    conLlaves();
+    const pedido = backend({
+      "GET /api/v1/auth/totp": () => Response.json({ ...INACTIVO, llaves: 0 }),
+      "GET /api/v1/auth/llave": () => Response.json([]),
+      "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+      "POST /api/v1/auth/totp/confirmar": () => Response.json({ codigos: CODIGOS }),
+    });
+    vi.stubGlobal("fetch", pedido);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Usar una aplicación de códigos" }));
+    const ventana = await screen.findByRole("dialog", { name: "Cargar la cuenta en la aplicación" });
+    expect(within(ventana).getByText(/Google Authenticator/)).toBeTruthy();
+    expect(document.activeElement).toBe(within(ventana).getByLabelText("Código de la aplicación"));
+    expect(screen.queryByRole("heading", { name: "Llave de acceso", hidden: true })).toBeNull();
+
+    // Cancelar vuelve a la página, con la llave a la vista.
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Llave de acceso" })).toBeTruthy();
+
+    // Al sexto número sale solo, sin tocar «Activar la aplicación».
+    fireEvent.click(screen.getByRole("button", { name: "Usar una aplicación de códigos" }));
+    await screen.findByLabelText("Código de la aplicación");
+    escribirCodigo("Código de la aplicación", "04291");
+    expect(rutas(pedido)).not.toContain("POST /api/v1/auth/totp/confirmar");
+    escribirCodigo("Código de la aplicación", "042917");
+    expect(await screen.findByRole("list", { name: "Códigos de recuperación" })).toBeTruthy();
+    expect(rutas(pedido).filter((r) => r === "POST /api/v1/auth/totp/confirmar")).toHaveLength(1);
+  });
+
+  it("CTA-10: con la tarjeta de la llave a la vista no repite que ya está activado", async () => {
+    conLlaves();
+    vi.stubGlobal(
+      "fetch",
+      backend({ "GET /api/v1/auth/totp": () => Response.json(SOLO_LLAVE), "GET /api/v1/auth/llave": () => Response.json([LLAVE]) }),
+    );
+    abrir();
+    expect(await screen.findByRole("heading", { name: "Otro método, opcional" })).toBeTruthy();
+    expect(screen.queryByText(ACTIVADO_CON_LLAVE)).toBeNull();
+  });
+
+  it("CTA-12: con pocos códigos solo el aviso; la baja se explica en su hoja, no en la página", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json({ ...ACTIVO, codigos_recuperacion_restantes: 2 }) }));
+    abrir();
+    expect(await screen.findByText(/Quedan 2 códigos de recuperación/)).toBeTruthy();
+    expect(screen.queryByText("Códigos de recuperación sin usar")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Desactivar" })).toBeNull();
+    expect(screen.queryByText(/Borra la aplicación cargada/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Desactivar la confirmación con código" }));
+    const hoja = await screen.findByRole("dialog", { name: "¿Desactivar la aplicación de códigos?" });
+    expect(within(hoja).getByText(/Se borran la aplicación cargada y los códigos de recuperación, y se avisa por correo/)).toBeTruthy();
   });
 });

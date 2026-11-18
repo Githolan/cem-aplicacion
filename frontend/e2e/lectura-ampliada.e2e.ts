@@ -57,7 +57,9 @@ test.describe("modo lectura ampliada", () => {
     test(`esquema ${esquema}: apagado AA; prendido AAA, 125 % de letra y botones grandes`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: esquema });
       await page.goto("/");
-      await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+      // Con el servicio funcionando no hay punto de estado (INI-09): se espera el menú.
+      await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+      await expect(page.getByRole("img", { name: "El servicio no funciona" })).toHaveCount(0);
       await expect(boton(page)).toHaveAttribute("aria-pressed", "false");
       await sinFaltasDeAccesibilidad(page);
       const antes = await tamanios(page);
@@ -429,7 +431,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
   {
     ruta: "/panel",
     url: "/panel",
-    cargada: ["Facturas faltantes", "Gasto pagado por rubro"],
+    cargada: ["Facturas faltantes (1)", "Gasto pagado por rubro"],
     api: {
       "GET /api/v1/me/consorcios": [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       "GET /api/v1/consorcios/11111111-1111-4111-8111-111111111111/panel": {
@@ -461,6 +463,15 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: `/invitacion#token=${TOKEN_ENLACE}`,
     cargada: "Aceptar la invitación",
     api: {
+      // La sesión abierta es la del correo invitado: con la de otra cuenta la página ya no ofrece
+      // aceptar (C8G-11), y lo que se mide acá es el formulario.
+      "GET /api/v1/auth/sesion": {
+        persona_id: "99999999-9999-4999-8999-999999999999",
+        nombre: "Beto Pérez",
+        correo: CORREO_LARGO,
+        sesion_id: "11111111-1111-4111-8111-111111111111",
+        vence_en: "2026-11-15T20:00:00Z",
+      },
       "POST /api/v1/auth/invitacion/consultar": {
         consorcio: "Edificio Azul",
         unidad: "1° A",

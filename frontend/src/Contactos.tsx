@@ -182,11 +182,6 @@ export function Contactos() {
   return (
     <>
       <h1>Contactos de emergencia</h1>
-      <p className="tarjeta">
-        Los teléfonos de la administración, el encargado, emergencias, la aseguradora y los
-        proveedores críticos del edificio. Quedan guardados en este dispositivo para verlos también
-        sin conexión, y se borran al salir de la cuenta.
-      </p>
 
       {edificios.length > 1 && (
         <div className="formulario formulario-movil tarjeta">
@@ -256,7 +251,7 @@ export function Contactos() {
           <div className="tarjeta">
             <p className="aviso-error">
               {lectura.mensaje} Esta es la copia guardada el {momento(lectura.copia.guardada_en)}, y puede no
-              tener los últimos cambios
+              tener los últimos cambios.
             </p>
             {botonReconsultar(lectura.reconsultando)}
           </div>
@@ -283,9 +278,8 @@ export function Contactos() {
     const enFicha = contactos.find((c) => c.id === fichas.abierta);
     return (
       <section aria-labelledby={`${id}-lista`} className="tarjeta">
+        {/* CON-02: sin fechas internas arriba de los teléfonos; la de la copia la dice el aviso de sin conexión. */}
         <h2 id={`${id}-lista`}>{copia.nombre}</h2>
-        <p>Actualizado el {momento(copia.guardada_en)}</p>
-        {datos.actualizada_en !== null && <p>Último cambio de la lista: {momento(datos.actualizada_en)}</p>}
         {contactos.length === 0 ? (
           <p>El edificio no tiene contactos de emergencia cargados.</p>
         ) : (
@@ -318,9 +312,8 @@ export function Contactos() {
       <FichaDeRegistro
         titulo={titulo(c)}
         alCerrar={() => fichas.cerrar()}
+        // CON-03: la función y el nombre ya son el título de la ficha.
         datos={[
-          { etiqueta: "Función", valor: TEXTO_FUNCION[c.funcion] },
-          { etiqueta: "Nombre", valor: c.nombre },
           { etiqueta: "Teléfono", valor: c.telefono === null ? "Sin teléfono" : <EnlaceTelefono telefono={c.telefono} /> },
           ...(c.indicaciones === null ? [] : [{ etiqueta: "Indicaciones", valor: c.indicaciones }]),
           ...(c.observado

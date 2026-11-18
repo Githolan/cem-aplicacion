@@ -9,7 +9,7 @@ import type { components } from "../api/tipos";
 import { alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
-import { mesSiguiente, periodo } from "./Liquidacion";
+import { ABRIR_UN_BORRADOR, AGREGAR_GASTOS, mesSiguiente, periodo } from "./Liquidacion";
 
 // Liquidación neutral (app 0057). Datos ficticios: ningún proveedor ni importe real.
 
@@ -114,10 +114,32 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Elige el período con los dos desplegables (AC-51). */
+/** La ventana de «Abrir un borrador» (LIQ-01): la que está abierta o, si no, la abre. */
+async function ventanaAbrir() {
+  const abierta = screen.queryByRole("dialog", { name: ABRIR_UN_BORRADOR });
+  if (abierta !== null) return abierta;
+  fireEvent.click(await screen.findByRole("button", { name: ABRIR_UN_BORRADOR }));
+  return screen.findByRole("dialog", { name: ABRIR_UN_BORRADOR });
+}
+
+/** Elige el período con los dos desplegables (AC-51), en la ventana de abrir un borrador. */
 async function elegirPeriodo(anio: string, mes: string) {
-  fireEvent.change(await screen.findByLabelText("Año"), { target: { value: anio } });
-  fireEvent.change(screen.getByLabelText("Mes"), { target: { value: mes } });
+  const ventana = await ventanaAbrir();
+  fireEvent.change(within(ventana).getByLabelText("Año"), { target: { value: anio } });
+  fireEvent.change(within(ventana).getByLabelText("Mes"), { target: { value: mes } });
+  return ventana;
+}
+
+/** Abre la ventana de agregar gastos desde el borrador a la vista (LIQ-03). */
+async function ventanaAgregar() {
+  fireEvent.click(await screen.findByRole("button", { name: AGREGAR_GASTOS }));
+  return screen.findByRole("dialog", { name: AGREGAR_GASTOS });
+}
+
+/** Desde la liquidación abierta, de vuelta a la lista (LIQ-02). */
+async function volverALaLista() {
+  fireEvent.click(await screen.findByRole("button", { name: "Volver a la lista" }));
+  return screen.findByRole("button", { name: ABRIR_UN_BORRADOR });
 }
 
 describe("liquidación (borrador)", () => {
@@ -162,12 +184,22 @@ describe("liquidación (borrador)", () => {
     expect(preparar!.headers.get("Idempotency-Key")).toBeTruthy();
 
     const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    // LIQ-02: abierto el borrador, se ve solo él.
+    expect(screen.queryByRole("list", { name: "Liquidaciones" })).toBeNull();
+    expect(screen.queryByRole("button", { name: ABRIR_UN_BORRADOR })).toBeNull();
     expect(within(borrador).getByText("Todavía no hay gastos agregados.")).toBeTruthy();
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    // LIQ-05: sin gastos, sin simulación.
+    expect(within(borrador).queryByRole("heading", { name: "Simulación del reparto" })).toBeNull();
+    // LIQ-03: las órdenes se eligen en su ventana, no en el borrador.
+    expect(within(borrador).queryByRole("checkbox")).toBeNull();
+    const ventana = await ventanaAgregar();
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
     // Un solo grupo vigente: va ese, sin desplegable (AC-48).
-    expect(within(borrador).queryByLabelText("Grupo de gasto")).toBeNull();
-    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
-    expect(await screen.findByText("Listo: el gasto quedó agregado. La simulación ya lo reparte.")).toBeTruthy();
+    expect(within(ventana).queryByLabelText("Grupo de gasto")).toBeNull();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar el gasto" }));
+    // LIQ-06: el «Listo» sale en el borrador, donde se actuó.
+    expect(await within(borrador).findByText("Listo: el gasto quedó agregado. La simulación ya lo reparte.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
     const [agregar] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
     expect(await agregar!.json()).toEqual({ orden_id: O1, grupo: "expensas_comunes" });
     // P3 139: la fecha con la que el gasto entra en el período, sin pasarla por la hora local.
@@ -210,6 +242,24 @@ describe("liquidación (borrador)", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  it("LIQ-05: un borrador sin gastos ni órdenes para agregar lo dice una sola vez, sin simulación", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
+    }));  // prettier-ignore
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    expect(within(borrador).getByText("No hay órdenes pagadas hasta el fin de octubre de 2026 para agregar.")).toBeTruthy();
+    expect(within(borrador).queryByText("Todavía no hay gastos agregados.")).toBeNull();
+    expect(within(borrador).queryByText(/nada que repartir/)).toBeNull();
+    expect(within(borrador).queryByRole("heading", { name: "Simulación del reparto" })).toBeNull();
+    // C8: sin órdenes para ofrecer, no hay botón de agregar.
+    expect(within(borrador).queryByRole("button", { name: AGREGAR_GASTOS })).toBeNull();
+  });
+
   it("una liquidación que no es borrador no ofrece quitar ni agregar", async () => {
     const publicada = { ...LIQUIDACION, estado: "publicada" };
     vi.stubGlobal("fetch", backend({
@@ -222,7 +272,7 @@ describe("liquidación (borrador)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     expect(await screen.findByText(/Limpieza Ficticia SRL: /)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Quitar/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Agregar el gasto" })).toBeNull();
+    expect(screen.queryByRole("button", { name: AGREGAR_GASTOS })).toBeNull();
   });
 
   it("descarta el borrador con su motivo, y sin motivo no se puede", async () => {
@@ -244,7 +294,11 @@ describe("liquidación (borrador)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Descartar el borrador" }));
     const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
     const boton = within(hoja).getByRole("button", { name: "Descartar el borrador" });
-    expect((boton as HTMLButtonElement).disabled).toBe(true);
+    // C8P-20: el botón está activo; sin motivo, marca el campo y no manda nada.
+    expect((boton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(boton);
+    expect(await within(hoja).findByText("Falta escribir el motivo.")).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/descartar`)).toHaveLength(0);
     fireEvent.change(within(hoja).getByLabelText("Motivo para descartar el borrador"),
       { target: { value: "  SINTETICO: período equivocado " } });
     fireEvent.click(boton);
@@ -276,13 +330,12 @@ describe("liquidación (borrador)", () => {
       { target: { value: "SINTETICO: el de octubre" } });
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await volverALaLista();
     fireEvent.click(screen.getByRole("button", { name: /^Noviembre de 2026 ·/ }));
     await screen.findByRole("region", { name: "Borrador de noviembre de 2026" });
     fireEvent.click(screen.getByRole("button", { name: "Descartar el borrador" }));
     const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
     expect((within(hoja).getByLabelText("Motivo para descartar el borrador") as HTMLInputElement).value).toBe("");
-    const boton = within(hoja).getByRole("button", { name: "Descartar el borrador" });
-    expect((boton as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("con gastos en una moneda solo ofrece órdenes de esa moneda", async () => {
@@ -297,7 +350,7 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    const lista = await screen.findByRole("list", { name: "Órdenes pagadas" });
+    const lista = within(await ventanaAgregar()).getByRole("list", { name: "Órdenes pagadas" });
     const opciones = within(lista).getAllByRole("checkbox").map((o) => o.closest("label")?.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true);
     expect(opciones.some((t) => t?.includes("Proveedor en dólares SRL"))).toBe(false);
@@ -315,7 +368,7 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    const lista = await screen.findByRole("list", { name: "Órdenes pagadas" });
+    const lista = within(await ventanaAgregar()).getByRole("list", { name: "Órdenes pagadas" });
     const opciones = within(lista).getAllByRole("checkbox").map((o) => o.closest("label")?.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true); // control: el 31 entra
     expect(opciones.some((t) => t?.includes("Pagada en noviembre SRL"))).toBe(false);
@@ -334,9 +387,13 @@ describe("liquidación (borrador)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir();
+    // LIQ-01: el período no es un formulario fijo de la página: se elige en la ventana del botón.
+    expect(await screen.findByRole("button", { name: ABRIR_UN_BORRADOR })).toBeTruthy();
+    expect(screen.queryByLabelText("Mes")).toBeNull();
+    const ventana = await ventanaAbrir();
     // AC-51: el período se elige con dos desplegables, sin escribir «2026-10», y empieza en el mes anterior.
-    const mes = (await screen.findByLabelText("Mes")) as HTMLSelectElement;
-    const anio = screen.getByLabelText("Año") as HTMLSelectElement;
+    const mes = within(ventana).getByLabelText("Mes") as HTMLSelectElement;
+    const anio = within(ventana).getByLabelText("Año") as HTMLSelectElement;
     expect(mes.tagName).toBe("SELECT");
     expect(anio.tagName).toBe("SELECT");
     const hoy = new Date();
@@ -466,15 +523,19 @@ describe("liquidación (borrador)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    // LIQ-01: con el borrador a la vista no se ofrece abrir otro; se vuelve a la lista.
+    expect(screen.queryByRole("button", { name: ABRIR_UN_BORRADOR })).toBeNull();
+    await volverALaLista();
+    const ventana = await ventanaAbrir();
     // Vuelve al mes anterior, como al abrir uno que ya existía: nada vacío ni a medias.
     const hoy = new Date();
     const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
     const anio = String(anterior.getFullYear());
-    expect((screen.getByLabelText("Año") as HTMLSelectElement).value).toBe(anio);
-    expect((screen.getByLabelText("Mes") as HTMLSelectElement).value).toBe(String(anterior.getMonth() + 1).padStart(2, "0"));
+    expect((within(ventana).getByLabelText("Año") as HTMLSelectElement).value).toBe(anio);
+    expect((within(ventana).getByLabelText("Mes") as HTMLSelectElement).value).toBe(String(anterior.getMonth() + 1).padStart(2, "0"));
     // Cambiar solo el mes deja un período completo, con el año que se ve.
-    fireEvent.change(screen.getByLabelText("Mes"), { target: { value: "03" } });
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.change(within(ventana).getByLabelText("Mes"), { target: { value: "03" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
     expect(await pedidos(api, "POST", `${BASE}/liquidaciones`)[1]!.json()).toEqual({ periodo: `${anio}-03-01` });
   });
@@ -506,13 +567,13 @@ describe("liquidación (borrador)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Descartar el borrador" }));
     const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
     fireEvent.change(within(hoja).getByLabelText("Motivo para descartar el borrador"), { target: { value: "SINTETICO" } });
-    // Control: mientras está abierta, su fila queda marcada.
-    expect(screen.getByRole("button", { name: /^Octubre de 2026 ·/ }).getAttribute("aria-current")).toBe("true");
+    // Control: mientras está abierta, la lista no se ve (LIQ-02).
+    expect(screen.queryByRole("list", { name: "Liquidaciones" })).toBeNull();
     const pedidasAntes = pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`).length;
     fireEvent.click(within(hoja).getByRole("button", { name: "Descartar el borrador" }));
     expect(await screen.findByText(/Listo: el borrador se descartó/)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Borrador de octubre de 2026" })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Octubre de 2026 ·/ }).getAttribute("aria-current")).toBeNull();
+    expect(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ })).toBeTruthy();
     expect(pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`)).toHaveLength(pedidasAntes);
   });
 
@@ -529,7 +590,7 @@ describe("liquidación (borrador)", () => {
     expect(screen.getByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
   });
 
-  it("si falla el detalle de la abierta, la lista sigue: se reintenta o se vuelve a ella", async () => {
+  it("si falla el detalle de la abierta, se reintenta o se vuelve a la lista", async () => {
     let caido = true;
     vi.stubGlobal("fetch", backend({
       ...LISTAS,
@@ -538,12 +599,14 @@ describe("liquidación (borrador)", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     expect((await screen.findByRole("alert")).textContent).toContain("No se pudo abrir esta liquidación");
-    expect(screen.getByRole("list", { name: "Liquidaciones" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Liquidaciones" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
+    await volverALaLista();
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     const boton = screen.getByRole("button", { name: /^Octubre de 2026 ·/ });
     expect(boton.getAttribute("aria-current")).toBeNull();
+    // El foco vuelve a la fila que lo abrió.
+    await waitFor(() => expect(document.activeElement).toBe(boton));
 
     fireEvent.click(boton);
     const reintentar = await screen.findByRole("button", { name: "Reintentar" });
@@ -607,6 +670,12 @@ describe("informe de fricción, tanda 9", () => {
     return screen.findByRole("region", { name: "Borrador de octubre de 2026" });
   }
 
+  /** El borrador abierto y, sobre él, la ventana de agregar gastos. */
+  async function agregarEnBorrador() {
+    const borrador = await abrirBorrador();
+    return { borrador, ventana: await ventanaAgregar() };
+  }
+
   it("AC-48: se eligen varias; cada una va en su pedido y la que no entra se dice cuál y por qué", async () => {
     let restantes: unknown[] = TRES;
     const api = backend({
@@ -623,12 +692,13 @@ describe("informe de fricción, tanda 9", () => {
       },
     });
     vi.stubGlobal("fetch", api);
-    const borrador = await abrirBorrador();
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: "Elegir las 3" }));
+    const { ventana } = await agregarEnBorrador();
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: "Elegir las 3" }));
     restantes = [TRES[1]];
-    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar 3 gastos" }));
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar 3 gastos" }));
 
-    expect((await screen.findByRole("alert")).textContent).toMatch(
+    // Lo que no entró queda en la ventana, con la orden todavía elegida.
+    expect((await within(ventana).findByRole("alert")).textContent).toMatch(
       /^Se agregaron 2 de 3 gastos\. No se agregó Ascensores Ficticios SA, \$\s?500,00: La orden ya está en una liquidación\.$/,
     );
     const enviados = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
@@ -641,9 +711,9 @@ describe("informe de fricción, tanda 9", () => {
     expect(new Set(enviados.map((q) => q.headers.get("Idempotency-Key"))).size).toBe(3);
     // La que no entró sigue elegida y a la vista.
     await vi.waitFor(() =>
-      expect((within(borrador).getByRole("checkbox", { name: /Ascensores Ficticios SA/ }) as HTMLInputElement).checked).toBe(true),
+      expect((within(ventana).getByRole("checkbox", { name: /Ascensores Ficticios SA/ }) as HTMLInputElement).checked).toBe(true),
     );
-    expect(within(borrador).getByRole("button", { name: "Agregar el gasto" })).toBeTruthy();
+    expect(within(ventana).getByRole("button", { name: "Agregar el gasto" })).toBeTruthy();
   });
 
   it("AC-48: todas entran y el «Listo» dice cuántas", async () => {
@@ -652,11 +722,12 @@ describe("informe de fricción, tanda 9", () => {
       [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => Response.json({ id: G1 }, { status: 201 }),
     });
     vi.stubGlobal("fetch", api);
-    const borrador = await abrirBorrador();
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Pinturas Ficticias SRL/ }));
-    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar 2 gastos" }));
-    expect(await screen.findByText("Listo: se agregaron 2 gastos. La simulación ya los reparte.")).toBeTruthy();
+    const { borrador, ventana } = await agregarEnBorrador();
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: /Pinturas Ficticias SRL/ }));
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar 2 gastos" }));
+    expect(await within(borrador).findByText("Listo: se agregaron 2 gastos. La simulación ya los reparte.")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: AGREGAR_GASTOS })).toBeNull();
     expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(2);
   });
 
@@ -668,14 +739,14 @@ describe("informe de fricción, tanda 9", () => {
         caido ? error("error_interno", 500) : Response.json({ id: G1 }, { status: 201 }),
     });
     vi.stubGlobal("fetch", api);
-    const borrador = await abrirBorrador();
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: "Elegir las 2" }));
-    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar 2 gastos" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/^No se agregó ningún gasto\. .*Las órdenes que faltan siguen elegidas\.$/);
+    const { ventana } = await agregarEnBorrador();
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: "Elegir las 2" }));
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar 2 gastos" }));
+    expect((await within(ventana).findByRole("alert")).textContent).toMatch(/^No se agregó ningún gasto\. .*Las órdenes que faltan siguen elegidas\.$/);
     expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(1);
 
     caido = false;
-    fireEvent.click(await within(borrador).findByRole("button", { name: "Agregar 2 gastos" }));
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Agregar 2 gastos" }));
     expect(await screen.findByText("Listo: se agregaron 2 gastos. La simulación ya los reparte.")).toBeTruthy();
     const claves = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`).map((q) => q.headers.get("Idempotency-Key"));
     expect(claves).toHaveLength(3);
@@ -683,19 +754,26 @@ describe("informe de fricción, tanda 9", () => {
     expect(claves[2]).not.toBe(claves[0]);
   });
 
-  it("AC-48: con más de un grupo, el grupo se elige y sin él no se agrega", async () => {
+  it("AC-48 y C8P-19: con más de un grupo, el grupo se elige; sin él o sin órdenes, se marca lo que falta", async () => {
     const dos: Detalle = { ...SIN_GASTOS, grupos: [GRUPO, { ...GRUPO, grupo: "cocheras", esquema_id: U2 }] };
     const api = backend({
       ...CON_LISTAS([LIQUIDABLE], dos),
       [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => Response.json({ id: G1 }, { status: 201 }),
     });
     vi.stubGlobal("fetch", api);
-    const borrador = await abrirBorrador();
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
-    const boton = within(borrador).getByRole("button", { name: "Agregar el gasto" }) as HTMLButtonElement;
-    expect(boton.disabled).toBe(true);
-    fireEvent.change(within(borrador).getByLabelText("Grupo de gasto"), { target: { value: "cocheras" } });
+    const { ventana } = await agregarEnBorrador();
+    const boton = within(ventana).getByRole("button", { name: "Agregar el gasto" }) as HTMLButtonElement;
     expect(boton.disabled).toBe(false);
+    fireEvent.click(boton);
+    expect(await within(ventana).findByText("Falta tildar las órdenes para agregar.")).toBeTruthy();
+    expect(within(ventana).getByText("Falta elegir el grupo de gasto.")).toBeTruthy();
+    expect(within(ventana).getByLabelText("Grupo de gasto").getAttribute("aria-invalid")).toBe("true");
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    expect(within(ventana).queryByText("Falta tildar las órdenes para agregar.")).toBeNull();
+    fireEvent.click(boton);
+    await within(ventana).findByText("Falta elegir el grupo de gasto.");
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Grupo de gasto"), { target: { value: "cocheras" } });
     fireEvent.click(boton);
     await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(1));
     expect(await pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)[0]!.json()).toEqual({ orden_id: O1, grupo: "cocheras" });
@@ -719,17 +797,18 @@ describe("informe de fricción, tanda 9", () => {
     expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull();
   });
 
-  it("AC-49: donde termina dice para qué sirve y ofrece imprimir", async () => {
+  it("AC-49 y LIQ-04: donde termina ofrece imprimir, sin repetir que es un borrador", async () => {
     const imprimir = vi.spyOn(window, "print").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", backend(CON_LISTAS([], CON_GASTO)));
     const borrador = await abrirBorrador();
-    expect(within(borrador).getByText(/antes de liquidar por el sistema de siempre/)).toBeTruthy();
+    expect(screen.queryByText(/antes de liquidar por el sistema de siempre/)).toBeNull();
+    expect(screen.queryByText(/Es un borrador para revisar los números/)).toBeNull();
     fireEvent.click(within(borrador).getByRole("button", { name: "Imprimir o guardar como PDF" }));
     expect(imprimir).toHaveBeenCalledTimes(1);
   });
 
   it("AC-52: el motivo para descartar aparece recién al tocar «Descartar el borrador»", async () => {
-    vi.stubGlobal("fetch", backend(CON_LISTAS([LIQUIDABLE])));
+    vi.stubGlobal("fetch", backend(CON_LISTAS([LIQUIDABLE], CON_GASTO)));
     const borrador = await abrirBorrador();
     expect(screen.queryByLabelText("Motivo para descartar el borrador")).toBeNull();
     // La simulación va antes que descartar.
@@ -761,7 +840,7 @@ describe("informe de fricción, tanda 9", () => {
     expect(screen.queryByText("Cargando la liquidación…")).toBeNull();
   });
 
-  it("AC-53: lo mismo si la confirmación la pidió el detalle: la lista sigue y se puede reintentar", async () => {
+  it("AC-53: lo mismo si la confirmación la pidió el detalle: se puede reintentar o volver a la lista", async () => {
     vi.stubGlobal("fetch", backend({
       ...CON_LISTAS([]),
       [`GET ${BASE}/liquidaciones/${L1}`]: () => error("segundo_factor_requerido", 403),
@@ -770,6 +849,7 @@ describe("informe de fricción, tanda 9", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
     expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(await volverALaLista()).toBeTruthy();
     expect(screen.getByRole("list", { name: "Liquidaciones" })).toBeTruthy();
   });
 });
@@ -804,15 +884,18 @@ describe("claves retenidas (Codex en #242)", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
-    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
-    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
-    // La recarga muestra el gasto: el pedido llegó.
+    const ventana = await ventanaAgregar();
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar el gasto" }));
+    // La recarga muestra el gasto: el pedido llegó, y la ventana ya no tiene qué ofrecer.
     fireEvent.click(await within(borrador).findByRole("button", { name: /^Quitar Limpieza Ficticia SRL/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(await screen.findByText("Listo: el gasto salió del borrador.")).toBeTruthy();
 
-    const casilla = (await within(borrador).findByRole("checkbox", { name: /Limpieza Ficticia SRL/ })) as HTMLInputElement;
+    const otra = await ventanaAgregar();
+    const casilla = within(otra).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }) as HTMLInputElement;
     if (!casilla.checked) fireEvent.click(casilla);
-    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
+    fireEvent.click(within(otra).getByRole("button", { name: "Agregar el gasto" }));
     await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(2));
     const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).not.toBe(primera);
@@ -842,13 +925,19 @@ describe("claves retenidas (Codex en #242)", () => {
     abrir();
     await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
-    await screen.findByRole("alert");
+    const ventana = screen.getByRole("dialog", { name: ABRIR_UN_BORRADOR });
+    await within(ventana).findByRole("alert");
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
     // Otra lectura (abrir noviembre) ya muestra el borrador de octubre: el pedido llegó.
     fireEvent.click(screen.getByRole("button", { name: /^Noviembre de 2026 ·/ }));
+    await screen.findByRole("region", { name: "Borrador de noviembre de 2026" });
+    await volverALaLista();
     expect(await screen.findByRole("button", { name: /^Octubre de 2026 · Borrador/ })).toBeTruthy();
     // Otra persona lo descarta; al abrirlo se ve descartado y el período admite uno nuevo.
     liquidaciones = [noviembre, { ...LIQUIDACION, estado: "descartada" }];
     fireEvent.click(screen.getByRole("button", { name: /^Octubre de 2026 · Borrador/ }));
+    await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    await volverALaLista();
     expect(await screen.findByText("Ver descartados (1)")).toBeTruthy();
     await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
@@ -910,17 +999,18 @@ describe("errores al descartar, dentro de la hoja (Codex en #242)", () => {
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
-  it("si el servidor no lo admite (lo descartó otra persona), lo dice en la hoja y solo ofrece cerrarla", async () => {
+  it("si el servidor no lo admite (lo descartó otra persona), cierra la ventana y lo dice en el borrador", async () => {
     let actual: Detalle = SIN_GASTOS;
     vi.stubGlobal("fetch", backend(LISTAS_DESCARTE(() => {
       actual = { ...SIN_GASTOS, liquidacion: { ...LIQUIDACION, estado: "descartada" } };
       return error("liquidacion_no_admite", 409);
     }, () => actual)));
-    const hoja = await descartarCon("SINTETICO");
-    expect((await within(hoja).findByRole("alert")).textContent).toMatch(/La liquidación no admite eso/);
-    await vi.waitFor(() => expect(within(hoja).queryByRole("button", { name: "Descartar el borrador" })).toBeNull());
-    expect(within(hoja).getByRole("button", { name: "Cancelar" })).toBeTruthy();
-    expect(within(hoja).getByRole("alert")).toBeTruthy();
+    await descartarCon("SINTETICO");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    expect(within(borrador).getByText(/La liquidación no admite eso/)).toBeTruthy();
+    // La lectura ya la muestra descartada: no se ofrece otra vez.
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull());
   });
 
   it("un 422 del motivo va junto al campo", async () => {

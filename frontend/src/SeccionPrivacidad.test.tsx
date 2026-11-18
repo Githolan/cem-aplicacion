@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,14 +9,17 @@ import { SeccionPrivacidad } from "./SeccionPrivacidad";
 const CASO = "01a18105-0000-7000-8000-000000000001";
 const CASOS = "/api/v1/privacidad/casos";
 
-function caso(estado: string, derecho = "acceso") {
+/** Un día después de ahora: el código del correo todavía sirve. */
+const VENCE = new Date(Date.now() + 86_400_000).toISOString();
+
+function caso(estado: string, derecho = "acceso", codigoVenceEn: string | null = estado === "abierto" ? VENCE : null) {
   return {
     id: CASO,
     alcance_consorcio_id: null,
     derecho,
     estado,
     abierto_en: "2026-10-28T12:00:00Z",
-    codigo_vence_en: estado === "abierto" ? "2026-10-31T12:00:00Z" : null,
+    codigo_vence_en: codigoVenceEn,
     confirmado_en: null,
     copia_entregada_en: null,
     resuelto_en: null,
@@ -51,6 +54,26 @@ function mostrar(contrasena = true, sinSesion: () => void = () => undefined) {
       <SeccionPrivacidad contrasena={contrasena} fecha={(iso) => iso.slice(0, 10)} sinSesion={sinSesion} />
     </MemoryRouter>,
   );
+}
+
+/** La ventana abierta para cargar el código o la contraseña. */
+function ventana() {
+  return within(screen.getByRole("dialog"));
+}
+
+/** Toca el botón de la fila; con «Confirmar el pedido» o «Descargar…» se abre la ventana. */
+async function tocarFila(nombre: string) {
+  const boton = await screen.findByRole("button", { name: nombre });
+  boton.focus();
+  fireEvent.click(boton);
+}
+
+/** Abre la ventana de confirmar, la completa y la manda. */
+async function confirmarConDatos() {
+  await tocarFila("Confirmar el pedido");
+  fireEvent.change(ventana().getByLabelText("Código que llegó por correo"), { target: { value: "ABCDE" } });
+  fireEvent.change(ventana().getByLabelText("Contraseña"), { target: { value: "una frase" } });
+  fireEvent.click(ventana().getByRole("button", { name: "Confirmar el pedido" }));
 }
 
 beforeEach(() => {
@@ -92,20 +115,24 @@ describe("sección de pedidos sobre los datos", () => {
     });
     vi.stubGlobal("fetch", simulado);
     mostrar();
-    fireEvent.change(await screen.findByLabelText("Código que llegó por correo"), {
-      target: { value: "ABCDE-FGHIJ" },
-    });
-    fireEvent.change(screen.getByLabelText("Contraseña"), { target: { value: "una frase larga" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+    // CTA-06: el pedido es una fila; el código y la contraseña se escriben en su ventana.
+    expect(await screen.findByText(`El código sirve hasta el ${VENCE.slice(0, 10)}.`)).toBeTruthy();
+    expect(screen.queryByLabelText("Código que llegó por correo")).toBeNull();
+    await tocarFila("Confirmar el pedido");
+    fireEvent.change(ventana().getByLabelText("Código que llegó por correo"), { target: { value: "ABCDE-FGHIJ" } });
+    fireEvent.change(ventana().getByLabelText("Contraseña"), { target: { value: "una frase larga" } });
+    fireEvent.click(ventana().getByRole("button", { name: "Confirmar el pedido" }));
     expect(await screen.findByText("Listo: el pedido quedó confirmado.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([
       { codigo: "ABCDE-FGHIJ", contrasena: "una frase larga" },
     ]);
-    // La contraseña se vacía: para descargar se vuelve a escribir.
-    const campo = screen.getByLabelText("Contraseña") as HTMLInputElement;
+    // La contraseña se vuelve a escribir para descargar, en otra ventana que empieza vacía.
+    await tocarFila("Descargar la copia de mis datos");
+    const campo = ventana().getByLabelText("Contraseña") as HTMLInputElement;
     expect(campo.value).toBe("");
     fireEvent.change(campo, { target: { value: "una frase larga" } });
-    fireEvent.click(screen.getByRole("button", { name: "Descargar la copia de mis datos" }));
+    fireEvent.click(ventana().getByRole("button", { name: "Descargar la copia de mis datos" }));
     expect(
       await screen.findByText("La copia se descargó. Conviene revisar que el archivo se haya guardado y avisarlo acá."),
     ).toBeTruthy();
@@ -116,13 +143,16 @@ describe("sección de pedidos sobre los datos", () => {
     expect(liberado).not.toHaveBeenCalled();
     vi.advanceTimersByTime(60_000);
     expect(liberado).toHaveBeenCalledWith("blob:local");
-    // Puede descargarla de nuevo y después cerrar el pedido.
-    fireEvent.change(screen.getByLabelText("Contraseña"), { target: { value: "una frase larga" } });
-    fireEvent.click(screen.getByRole("button", { name: "Descargar de nuevo" }));
+    // CTA-07: lo que sigue es avisar que se guardó; «No se guardó» la descarga de nuevo.
+    expect(screen.queryByRole("button", { name: "Descargar la copia de mis datos" })).toBeNull();
+    await tocarFila("No se guardó");
+    fireEvent.change(ventana().getByLabelText("Contraseña"), { target: { value: "una frase larga" } });
+    fireEvent.click(ventana().getByRole("button", { name: "Descargar la copia de mis datos" }));
     await waitFor(() => expect(creado).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Copia guardada: cerrar el pedido" }));
     expect(await screen.findByText("Listo: el pedido quedó cerrado.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Descargar de nuevo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "No se guardó" })).toBeNull();
     vi.useRealTimers();
   });
 
@@ -161,9 +191,10 @@ describe("sección de pedidos sobre los datos", () => {
     });
     vi.stubGlobal("fetch", simulado);
     mostrar();
-    fireEvent.change(await screen.findByLabelText("Código que llegó por correo"), { target: { value: "ABCDE" } });
-    fireEvent.change(screen.getByLabelText("Contraseña"), { target: { value: "una frase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+    await tocarFila("Confirmar el pedido");
+    fireEvent.change(ventana().getByLabelText("Código que llegó por correo"), { target: { value: "ABCDE" } });
+    fireEvent.change(ventana().getByLabelText("Contraseña"), { target: { value: "una frase" } });
+    fireEvent.click(ventana().getByRole("button", { name: "Confirmar el pedido" }));
 
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
 
@@ -181,13 +212,18 @@ describe("sección de pedidos sobre los datos", () => {
       [`POST ${CASOS}/${CASO}/confirmar`]: () => error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
     });
     vi.stubGlobal("fetch", simulado);
-    mostrar();
-    fireEvent.change(await screen.findByLabelText("Código que llegó por correo"), { target: { value: "ABCDE" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+    mostrar(false);
+    await tocarFila("Confirmar el pedido");
+    fireEvent.change(ventana().getByLabelText("Código que llegó por correo"), { target: { value: "ABCDE" } });
+    fireEvent.click(ventana().getByRole("button", { name: "Confirmar el pedido" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    // El «Cancelar» de la hoja del código, no el de la ventana.
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(2));
+    const hojaDelCodigo = screen.getAllByRole("dialog")[1] as HTMLElement;
+    fireEvent.click(within(hojaDelCodigo).getByRole("button", { name: "Cancelar" }));
 
-    const campo = (await screen.findByLabelText("Código que llegó por correo")) as HTMLInputElement;
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
+    const campo = ventana().getByLabelText("Código que llegó por correo") as HTMLInputElement;
     expect(campo.value).toBe("ABCDE");
     expect(await Promise.all(cuerpos(simulado, "POST"))).toHaveLength(1);
   });
@@ -201,10 +237,37 @@ describe("sección de pedidos sobre los datos", () => {
       }),
     );
     mostrar();
-    fireEvent.click(await screen.findByRole("button", { name: "Descargar la copia de mis datos" }));
+    await tocarFila("Descargar la copia de mis datos");
+    fireEvent.change(ventana().getByLabelText("Contraseña"), { target: { value: "una frase" } });
+    fireEvent.click(ventana().getByRole("button", { name: "Descargar la copia de mis datos" }));
 
-    expect(await screen.findByText("Falta la contraseña actual.")).toBeTruthy();
+    expect(await ventana().findByText("Falta la contraseña actual.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Verificar y seguir" })).toBeNull();
+  });
+
+  it("C8G-14: con los campos vacíos marca lo que falta y no manda nada", async () => {
+    const simulado = backend({ [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }) });
+    vi.stubGlobal("fetch", simulado);
+    mostrar();
+    await tocarFila("Confirmar el pedido");
+    fireEvent.click(ventana().getByRole("button", { name: "Confirmar el pedido" }));
+
+    expect(await ventana().findByText("Falta el código que llegó por correo.")).toBeTruthy();
+    expect(ventana().getByText("Falta la contraseña.")).toBeTruthy();
+    expect(document.activeElement).toBe(ventana().getByLabelText("Código que llegó por correo"));
+    expect(cuerpos(simulado, "POST")).toHaveLength(0);
+  });
+
+  it.each([
+    ["vencido", "2026-10-31T12:00:00Z", "El código de este pedido venció el 2026-10-31."],
+    ["sin código", null, "El código de este pedido ya no sirve."],
+  ])("C8G-15: con el código %s no ofrece confirmar y dice qué hace falta", async (_caso, vence, texto) => {
+    vi.stubGlobal("fetch", backend({ [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto", "acceso", vence)] }) }));
+    const { container } = mostrar();
+
+    expect(await screen.findByText(`${texto} Para seguir hace falta un código nuevo, que se pide a soporte.`)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirmar el pedido" })).toBeNull();
+    expect((await axe.run(container)).violations).toEqual([]);
   });
 
   it("no avisa por adelantado lo que va a pedir: lo pide si hace falta", async () => {
@@ -228,7 +291,7 @@ describe("sección de pedidos sobre los datos", () => {
       }),
     );
     mostrar();
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar el pedido" }));
+    await confirmarConDatos();
 
     expect(await screen.findByText(mensaje)).toBeTruthy();
     expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
@@ -245,7 +308,7 @@ describe("sección de pedidos sobre los datos", () => {
       }),
     );
     mostrar();
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar el pedido" }));
+    await confirmarConDatos();
 
     expect(await screen.findByText(SIN_CONEXION)).toBeTruthy();
   });
@@ -260,10 +323,10 @@ describe("sección de pedidos sobre los datos", () => {
     );
     const { container } = mostrar();
     expect(await screen.findByRole("heading", { name: "Suprimir los datos: espera confirmación" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
-    expect(await screen.findByText("El código no sirve.")).toBeTruthy();
-    const resultado = await axe.run(container);
-    expect(resultado.violations).toEqual([]);
+    await confirmarConDatos();
+    expect(await ventana().findByText("El código no sirve.")).toBeTruthy();
+    expect((await axe.run(container)).violations).toEqual([]);
+    expect((await axe.run(screen.getByRole("dialog"))).violations).toEqual([]);
   });
 
   it("mientras consulta no muestra nada y después muestra el caso", async () => {

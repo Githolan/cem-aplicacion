@@ -86,7 +86,9 @@ test.describe("invitación", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: ALTO_TELEFONO_PX });
     const pedidos = await simularApi(page, baseURL!);
-    await simularSesion(page, "con_sesion");
+    // La cuenta nueva queda con la sesión abierta al aceptar; antes no hay sesión (con la de otra
+    // cuenta, la página ya no ofrece aceptar: C8G-11).
+    await simularSesion(page, () => (pedidos.some((p) => p.camino.endsWith("/aceptar")) ? "con_sesion" : "sin_sesion"));
     await page.goto(`/invitacion#token=${TOKEN}`);
 
     await expect(page.getByRole("heading", { level: 2, name: "Edificio Azul" })).toBeVisible();
@@ -109,7 +111,8 @@ test.describe("invitación", () => {
     for (const p of pedidos) expect(p.url).not.toContain(TOKEN);
     expect(pedidos[0]).toMatchObject({ cuerpo: { token: TOKEN } });
     expect(pedidos[1]).toMatchObject({ csrf: CSRF, cuerpo: { token: TOKEN, nombre: "Alberto" } });
-    expect(errores).toEqual([]);
+    // La consola informa el 401 de la sesión antes de aceptar (C8G-11 la lee); errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
   test("carga: mientras la consulta no responde dice «Buscando la invitación…», accesible", async ({ page, baseURL }) => {
@@ -133,7 +136,9 @@ test.describe("invitación", () => {
 
     await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toBeVisible();
     await expect(page.getByText("Buscando la invitación…")).toHaveCount(0);
-    expect(errores).toEqual([]);
+    // La consola informa el 401 de la sesión, que la página lee junto con la invitación (C8G-11);
+    // violaciones de la CSP o errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
   test("sin red: la consulta cortada se explica, sin botón de aceptar y sin salirse de 360 px", async ({
@@ -151,8 +156,9 @@ test.describe("invitación", () => {
     expect(pedidos.map((p) => p.camino)).toEqual(["/api/v1/auth/invitacion/consultar"]);
     expect(await anchoDePagina(page)).toBeLessThanOrEqual(ANCHO_TELEFONO_PX);
     await sinFaltasDeAccesibilidad(page);
-    // La consola informa el pedido cortado; violaciones de la CSP o errores de la página, ninguno.
-    expect(errores.filter((e) => !e.includes("ERR_INTERNET_DISCONNECTED"))).toEqual([]);
+    // La consola informa el pedido cortado y el 401 de la sesión (C8G-11 la lee); violaciones de la
+    // CSP o errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("ERR_INTERNET_DISCONNECTED") && !e.includes("401"))).toEqual([]);
   });
 
   test("«Reintentar» consulta de nuevo y, si responde, muestra la invitación", async ({ page, baseURL }) => {
@@ -185,7 +191,7 @@ test.describe("invitación", () => {
       return ruta.fulfill({ json: ACEPTADA });
     });
     await simularPuntero(page, false);
-    await simularSesion(page, "con_sesion");
+    await simularSesion(page, () => (caido ? "sin_sesion" : "con_sesion"));
     await page.goto(`/invitacion#token=${TOKEN}`);
     await page.getByLabel("Nombre").fill("Alberto");
     await page.getByRole("button", { name: "Aceptar la invitación" }).click();
@@ -207,8 +213,9 @@ test.describe("invitación", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     await expect(page.getByText(AVISO)).toHaveCount(0);
-    await page.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }).click();
-    await expect(page).toHaveURL(/\/instalar$/);
+    // El enlace de instalar ya no está en un teléfono sin el botón del navegador (INI-10): por Cuenta.
+    await page.getByRole("link", { name: "Cuenta", exact: true }).click();
+    await expect(page).toHaveURL(/\/cuenta$/);
     await page.goBack();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     await expect(page.getByText(AVISO)).toHaveCount(0);

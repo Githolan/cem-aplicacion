@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 
 import { App } from "./App";
-import { AvisoVersion } from "./AvisoVersion";
+import { AvisoVersion, VersionAlCambiarDePantalla } from "./AvisoVersion";
 import { escucharInstalacion } from "./instalacion";
 import { aplicarLecturaAmpliada, preferenciaInicial } from "./lecturaAmpliada";
 import { ProveedorVersion } from "./ProveedorVersion";
@@ -32,6 +32,7 @@ createRoot(document.getElementById("raiz")!).render(
       <QueryClientProvider client={consultas}>
         <BrowserRouter>
           <App />
+          <VersionAlCambiarDePantalla />
         </BrowserRouter>
         <AvisoVersion />
       </QueryClientProvider>

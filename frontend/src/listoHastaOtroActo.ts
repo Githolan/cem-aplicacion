@@ -2,7 +2,8 @@ import { type RefObject, useEffect, useRef } from "react";
 
 // Un «Listo» dice lo último que se hizo en su tarjeta. Si la persona empieza otro acto en otra
 // tarjeta de la misma página (toca un botón o un enlace fuera de ella), ese «Listo» ya no habla de
-// lo que está haciendo y se va (AC-41 del informe de fricción).
+// lo que está haciendo y se va (AC-41 del informe de fricción). La regla completa del resultado y la
+// pieza que la aplica: `ResultadoDelActo.tsx`.
 
 /** Llama a `quitar` cada vez que se toca un botón o un enlace fuera de `zona`. */
 export function useListoHastaOtroActo(zona: RefObject<HTMLElement | null>, quitar: () => void) {

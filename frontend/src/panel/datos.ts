@@ -3,7 +3,7 @@ import { importe, TEXTO_ESTADO_ORDEN } from "../egresos/comun";
 import { periodo } from "../egresos/Liquidacion";
 
 // Lo que el resumen de pagos del edificio hace con la respuesta de `GET …/panel` (app 0094): solo agrupa y
-// ordena lo que ya vino calculado de la base, para cada gráfico y su tabla. No decide nada.
+// ordena lo que ya vino calculado de la base, para cada gráfico. Las tablas son para el lector de pantalla. No decide nada.
 
 export type Panel = components["schemas"]["PanelFiscalizacion"];
 export type Faltante = components["schemas"]["ComprobanteFaltante"];
@@ -89,16 +89,6 @@ export function gastoPorRubro(panel: Panel, moneda: string, mes: string): Barra[
   return [...totales]
     .sort(([ra, a], [rb, b]) => Number(ra === "") - Number(rb === "") || b.centavos - a.centavos || ra.localeCompare(rb))
     .map(([rubro, t]) => barraDeImporte(rubro === "" ? "sin-rubro" : rubro, rubro === "" ? SIN_RUBRO : rubro, t, moneda));
-}
-
-/** Las facturas faltantes contadas por estado de la orden, en el orden del circuito. */
-export function faltantesPorEstado(panel: Panel): Barra[] {
-  return porPalabra(panel.comprobantes_faltantes, () => 1, () => 0).map((t) => ({
-    clave: t.clave,
-    etiqueta: t.etiqueta,
-    valor: t.cantidad,
-    texto: cantidadDeOrdenes(t.cantidad),
-  }));
 }
 
 export const estaVacio = (panel: Panel) =>

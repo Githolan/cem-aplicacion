@@ -83,11 +83,13 @@ function mandar(boton: string) {
 function escribirContrasena(correo = CORREO, contrasena = CONTRASENA) {
   fireEvent.change(seccion().getByLabelText("Correo"), { target: { value: correo } });
   fireEvent.change(seccion().getByLabelText("Contraseña"), { target: { value: contrasena } });
-  mandar("Entrar con la contraseña");
+  mandar("Entrar");
 }
 
 async function llegoAlInicio() {
-  expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
+  expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+  // ACC-06: sin «Listo: sesión abierta.»: la pantalla a la que se llega ya lo dice.
+  expect(screen.queryByText("Listo: sesión abierta.")).toBeNull();
   expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Entrar con contraseña" })).toBeNull();
 }
@@ -337,7 +339,7 @@ describe("entrar con contraseña: estado de carga (documento 08, §13.1)", () =>
     escribirContrasena();
 
     expect(await seccion().findByText("Entrando…")).toBeTruthy();
-    const boton = seccion().getByRole("button", { name: "Entrar con la contraseña" }) as HTMLButtonElement;
+    const boton = seccion().getByRole("button", { name: "Entrar" }) as HTMLButtonElement;
     expect(boton.disabled).toBe(true);
     soltar();
 

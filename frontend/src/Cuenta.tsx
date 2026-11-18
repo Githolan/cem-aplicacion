@@ -10,6 +10,7 @@ import { CodigosRecuperacion } from "./CodigosRecuperacion";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { PieDeVersion } from "./EstadoServicio";
+import { EnlaceInstalarEnCuenta } from "./Instalar";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { Hoja } from "./Hoja";
 import { llaveDisponible } from "./llaveAcceso";
@@ -26,6 +27,11 @@ import { useAEntrar } from "./sesionEncima";
 // pasó y deja reintentar, y las demás siguen a la vista. Diseño provisorio: el definitivo llega con G3.
 // Sin segundo factor, la tarjeta activa la llave ahí mismo, con un botón, y la página del segundo
 // factor queda para las otras opciones (informe de fricción, AC-21).
+//
+// Informe de fricción, tanda 9: primero lo que se configura (confirmación y contraseña, cada una
+// con su estado en un renglón y su ventana); las sesiones abiertas, una fila por sesión, solo si
+// hay otras además de esta (CTA-03); «Salir» al final (CTA-08). El «Listo» de la llave sale una sola
+// vez y se va con el acto siguiente (CTA-04).
 
 type Yo = components["schemas"]["SesionActual"];
 type Sesion = components["schemas"]["SesionDispositivo"];
@@ -115,14 +121,22 @@ export function Cuenta() {
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [fallaSalir, setFallaSalir] = useState<string | null>(null);
   const [codigosNuevos, setCodigosNuevos] = useState<string[] | null>(null);
   const [llaveActivada, setLlaveActivada] = useState(false);
   const [activando, setActivando] = useState(false);
   // El «Listo» de las sesiones se va al empezar otro acto en otra tarjeta (AC-41).
   const tarjetaSesiones = useRef<HTMLElement | null>(null);
   useListoHastaOtroActo(tarjetaSesiones, () => setAviso((actual) => (actual?.ok === true ? null : actual)));
+  const tarjetaFactor = useRef<HTMLElement | null>(null);
+  useListoHastaOtroActo(tarjetaFactor, () => setLlaveActivada(false));
   const consultado = useRef(false);
   const textoAviso = useRef<HTMLParagraphElement>(null);
+  const textoFallaSalir = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (fallaSalir !== null) textoFallaSalir.current?.focus();
+  }, [fallaSalir]);
 
   // El aviso va en la tarjeta de las sesiones y lleva el foco: al cerrar una, su fila desaparece y
   // en un teléfono el resultado podría quedar fuera de la vista.
@@ -183,8 +197,9 @@ export function Cuenta() {
 
   /** La llave quedó activada desde la tarjeta: el segundo factor ya está. */
   function activarLlave(codigos: string[] | null) {
+    // Con códigos, el «Listo» va en su hoja; sin ellos, en la tarjeta (CTA-04).
     setCodigosNuevos(codigos);
-    setLlaveActivada(true);
+    setLlaveActivada(codigos === null);
     setPantalla((actual) => (actual.tipo === "lista" ? { ...actual, segundoFactor: { ok: true, valor: true } } : actual));
   }
 
@@ -249,20 +264,27 @@ export function Cuenta() {
 
   function salir() {
     setEnviando(true);
-    setAviso(null);
+    setFallaSalir(null);
     void api
       .POST("/api/v1/auth/salir", { headers: encabezadoCsrf() })
       .then(({ error, response }) => {
         exigirSesion(response);
         if (response.ok) aEntrar();
-        else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
+        // Junto a «Salir», no en otra tarjeta.
+        else setFallaSalir(mensajeDeFalla(response.status, codigoDe(error)));
       })
-      .catch(atajar)
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else setFallaSalir(SIN_CONEXION);
+      })
       .finally(() => setEnviando(false));
   }
 
   const lista = pantalla.tipo === "lista" ? pantalla : null;
-  const hayOtras = lista?.sesiones.ok === true && lista.sesiones.valor.some((s) => !s.actual);
+  const otras = lista?.sesiones.ok === true ? lista.sesiones.valor.filter((s) => !s.actual).length : 0;
+  // Con solo esta sesión no hay nada para hacer: la tarjeta no aparece (CTA-03), salvo para decir
+  // cómo terminó lo último que se hizo en ella o que no se pudo leer.
+  const conSesiones = lista !== null && (!lista.sesiones.ok || otras > 0 || aviso !== null);
 
   /** El error de una parte con su Reintentar; nada si la lectura salió bien. */
   const fallaDe = (parte: keyof Partes, lectura: Parte<unknown>) =>
@@ -287,58 +309,9 @@ export function Cuenta() {
                 <dd>{lista.yo.valor.correo}</dd>
               </dl>
             )}
-            <button type="button" className="secundario" onClick={salir} disabled={enviando}>
-              Salir
-            </button>
           </section>
 
-          <section ref={tarjetaSesiones} aria-labelledby={`${id}-sesiones`} className="tarjeta">
-            <h2 id={`${id}-sesiones`}>Sesiones abiertas</h2>
-            <div role="status" aria-live="polite">
-              {aviso && (
-                <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
-                  {aviso.texto}
-                </p>
-              )}
-            </div>
-            {fallaDe("sesiones", lista.sesiones)}
-            {lista.sesiones.ok && (
-              <ul className="sesiones">
-                {lista.sesiones.valor.map((s) => (
-                  <li key={s.id} aria-current={s.actual ? "true" : undefined}>
-                    <h3 id={`${id}-${s.id}`}>
-                      {s.dispositivo}
-                      {s.actual && <span className="sesion-actual"> (este dispositivo)</span>}
-                    </h3>
-                    <dl className="detalles">
-                      <dt>Abierta</dt>
-                      <dd>{fecha(s.creada_en)}</dd>
-                      <dt>Último uso</dt>
-                      <dd>{fecha(s.ultimo_uso_en)}</dd>
-                      <dt>Vence</dt>
-                      <dd>{fecha(s.vence_en)}</dd>
-                    </dl>
-                    <button
-                      type="button"
-                      className="secundario"
-                      onClick={() => cerrar(s)}
-                      disabled={enviando}
-                      aria-describedby={`${id}-${s.id}`}
-                    >
-                      Cerrar esta sesión
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {hayOtras && (
-              <button type="button" className="secundario" onClick={cerrarOtras} disabled={enviando}>
-                Cerrar las otras sesiones
-              </button>
-            )}
-          </section>
-
-          <section aria-labelledby={`${id}-factor`} className="tarjeta">
+          <section ref={tarjetaFactor} aria-labelledby={`${id}-factor`} className="tarjeta">
             <h2 id={`${id}-factor`}>Confirmación con PIN, huella o código</h2>
             {fallaDe("segundoFactor", lista.segundoFactor)}
             {/* Los códigos llegan una sola vez: van en una hoja que deja inerte el resto de la
@@ -357,12 +330,16 @@ export function Cuenta() {
             )}
             {lista.segundoFactor.ok && (
               <>
-                {llaveActivada && <p className="aviso-ok">Listo: la llave quedó activada.</p>}
-                <p>
-                  {lista.segundoFactor.valor
-                    ? "Está activado: las acciones delicadas piden confirmar la identidad."
-                    : "No está activado."}
-                </p>
+                {/* El «Listo» reemplaza al estado mientras se ve: dicen lo mismo (CTA-04). */}
+                {llaveActivada ? (
+                  <p className="aviso-ok">Listo: la llave quedó activada.</p>
+                ) : (
+                  <p>
+                    {lista.segundoFactor.valor
+                      ? "Está activado: las acciones delicadas piden confirmar la identidad."
+                      : "No está activado."}
+                  </p>
+                )}
                 {!lista.segundoFactor.valor && <ActivarLlave alActivar={activarLlave} alOcupar={setActivando} />}
                 <p>
                   <Link to={RUTA_SEGUNDO_FACTOR} className="enlace-suelto">
@@ -407,9 +384,70 @@ export function Cuenta() {
             </section>
           )}
 
+          {conSesiones && (
+            <section ref={tarjetaSesiones} aria-labelledby={`${id}-sesiones`} className="tarjeta">
+              <h2 id={`${id}-sesiones`}>Sesiones abiertas</h2>
+              <div role="status" aria-live="polite">
+                {aviso && (
+                  <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
+                    {aviso.texto}
+                  </p>
+                )}
+              </div>
+              {fallaDe("sesiones", lista.sesiones)}
+              {lista.sesiones.ok && otras > 0 && (
+                // Una fila por sesión: el dispositivo y el último uso; la de este dispositivo sin
+                // botón, que sería lo mismo que «Salir» (CTA-03).
+                <ul className="sesiones compactas">
+                  {lista.sesiones.valor.map((s) => (
+                    <li key={s.id} aria-current={s.actual ? "true" : undefined}>
+                      <span>
+                        <span id={`${id}-${s.id}`}>{s.dispositivo}</span>
+                        {s.actual ? (
+                          <span className="sesion-actual"> (este dispositivo)</span>
+                        ) : (
+                          <span> · último uso {fecha(s.ultimo_uso_en)}</span>
+                        )}
+                      </span>
+                      {!s.actual && (
+                        <button
+                          type="button"
+                          className="secundario"
+                          onClick={() => cerrar(s)}
+                          disabled={enviando}
+                          aria-describedby={`${id}-${s.id}`}
+                        >
+                          Cerrar
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {/* Con una sola otra sesión, su «Cerrar» ya lo hace. */}
+              {otras > 1 && (
+                <button type="button" className="secundario" onClick={cerrarOtras} disabled={enviando}>
+                  Cerrar las otras sesiones
+                </button>
+              )}
+            </section>
+          )}
+
           {/* Pide o no la contraseña según esta lectura: sin ella no se puede armar. */}
           {lista.contrasena.ok && (
             <SeccionPrivacidad contrasena={lista.contrasena.valor.definida} fecha={fecha} sinSesion={aEntrar} />
+          )}
+
+          <EnlaceInstalarEnCuenta />
+          <div className="acciones-pantalla">
+            <button type="button" className="secundario" onClick={salir} disabled={enviando}>
+              Salir
+            </button>
+          </div>
+          {fallaSalir !== null && (
+            <p ref={textoFallaSalir} tabIndex={-1} className="aviso-error" role="alert">
+              {fallaSalir}
+            </p>
           )}
         </>
       )}

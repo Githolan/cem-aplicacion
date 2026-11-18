@@ -154,10 +154,8 @@ export function InvitacionMandato() {
             <dt>Invitó</dt>
             <dd>{invitacion.invitada_por ?? "El equipo de Consorcio en Mano"}</dd>
           </dl>
-          <p>
-            Al aceptar, la cuenta queda asociada al mandato de administración de este consorcio. El
-            mandato, su CUIT y su vigencia no cambian.
-          </p>
+          {/* MAN-15: lo que ya dicen el título y el botón no se repite; queda lo que no cambia. */}
+          <p>El mandato, su CUIT y su vigencia no cambian.</p>
           <form className="formulario" onSubmit={aceptar}>
             <label htmlFor={`${id}-nombre`}>Nombre (solo si la cuenta es nueva)</label>
             <input

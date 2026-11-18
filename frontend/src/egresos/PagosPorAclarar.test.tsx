@@ -9,6 +9,7 @@ import { alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { VOLVIO_LA_RED } from "./comun";
+import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
 
 // Pagos para aclarar (app 0067). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -123,21 +124,52 @@ const conEsperaManual = () => vi.useFakeTimers({ toFake: ["setInterval", "clearI
 const ESPERA = 3000;
 const volvioLaRed = () => fireEvent(window, new Event("online"));
 
+const POR_ACLARAR = {
+  consorcio_id: C1,
+  consorcio: "Edificio Ficticio",
+  orden_id: O1,
+  version: 1,
+  concepto: "Limpieza de octubre",
+  importe_centavos: 1_500_000,
+  moneda: "ARS",
+  cuenta_vista_en: "2026-10-31T13:00:00Z",
+  huella: H1,
+  comprobante_id: null,
+  comprobante_estado: null,
+};
+
+/** Abre la ficha del pago tocando su fila. */
+async function abrirFicha() {
+  fireEvent.click(await screen.findByRole("button", { name: /^Edificio Ficticio: / }));
+  return screen.findByRole("dialog", { name: /^Edificio Ficticio: / });
+}
+
+/** Abre la ficha y, sobre ella, la ventana de la acción. */
+async function abrirAccion(boton: string, ventana: string | RegExp) {
+  const ficha = await abrirFicha();
+  fireEvent.click(within(ficha).getByRole("button", { name: boton }));
+  return screen.findByRole("dialog", { name: ventana });
+}
+
+const transferencia = () => abrirAccion(SI_SE_TRANSFIRIO, REGISTRAR_TRANSFERENCIA);
+
 describe("pagos para aclarar (app 0067)", () => {
-  const POR_ACLARAR = {
-    consorcio_id: C1,
-    consorcio: "Edificio Ficticio",
-    orden_id: O1,
-    version: 1,
-    concepto: "Limpieza de octubre",
-    importe_centavos: 1_500_000,
-    moneda: "ARS",
-    cuenta_vista_en: "2026-10-31T13:00:00Z",
-    huella: H1,
-    comprobante_id: null,
-    comprobante_estado: null,
-  };
   const DECLARAR = `${BASE}/pagos-por-aclarar/${O1}/no-realizado`;
+
+  it("ACL-01 y ACL-03: cada pago es una fila que abre su ficha, sin formularios ni explicación en la lista", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [POR_ACLARAR] }) }));
+    abrir("/pagos/por-aclarar");
+    const lista = await screen.findByRole("list", { name: "Pagos para aclarar" });
+    expect(within(lista).getAllByRole("button")).toHaveLength(1);
+    expect(within(lista).getByRole("button").textContent).toMatch(/Edificio Ficticio: .*Limpieza de octubre/);
+    expect(screen.queryByLabelText("Por qué no se transfirió")).toBeNull();
+    expect(screen.queryByText(/Esta cuenta vio la cuenta/)).toBeNull();
+    const ficha = await abrirFicha();
+    expect(within(ficha).getByText("Limpieza de octubre")).toBeTruthy();
+    expect(within(ficha).getByRole("button", { name: NO_SE_TRANSFIRIO })).toBeTruthy();
+    expect(within(ficha).getByRole("button", { name: SI_SE_TRANSFIRIO })).toBeTruthy();
+    await sinFaltasDeAccesibilidad(document.body);
+  });
 
   it("quien dejó de administrar declara que no transfirió, con el código si hace falta y la misma clave", async () => {
     let primera = true;
@@ -156,20 +188,39 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     const { container } = abrir("/pagos/por-aclarar");
-    const tarjetas = await screen.findByRole("list", { name: "Pagos para aclarar" });
-    expect(within(tarjetas).getByText(/Edificio Ficticio/)).toBeTruthy();
+    const ventana = await abrirAccion(NO_SE_TRANSFIRIO, "Declarar que no se transfirió");
     expect(container.textContent).not.toContain(CUENTA);
-    await sinFaltasDeAccesibilidad(container);
-    const boton = screen.getByRole("button", { name: "No se transfirió" }) as HTMLButtonElement;
-    expect(boton.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Por qué no se transfirió"), { target: { value: "Renuncié antes de pagar" } });
+    // C8P-18: el botón está activo; sin el motivo, marca el campo y no manda nada.
+    const boton = within(ventana).getByRole("button", { name: NO_SE_TRANSFIRIO }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(false);
+    fireEvent.click(boton);
+    expect(await within(ventana).findByText("Falta decir por qué no se transfirió.")).toBeTruthy();
+    expect(within(ventana).getByLabelText("Por qué no se transfirió").getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(api, "POST", DECLARAR)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Por qué no se transfirió"), { target: { value: "Renuncié antes de pagar" } });
     fireEvent.click(boton);
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
     expect(await screen.findByText(/Ahora lo confirma otro miembro del Consejo/)).toBeTruthy();
-    expect(await screen.findByText("No hay pagos para aclarar.")).toBeTruthy();
+    // ACL-06: aclarado el último, el «Listo» y la vuelta al inicio, sin la tarjeta de vacío.
+    expect((await screen.findByRole("link", { name: "Volver al inicio" })).getAttribute("href")).toBe("/");
+    expect(screen.queryByText(SIN_PAGOS)).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     const [uno, dos] = pedidos(api, "POST", DECLARAR);
     expect(await uno?.json()).toEqual({ version: 1, motivo: "Renuncié antes de pagar" });
     expect(dos?.headers.get("Idempotency-Key")).toBe(uno?.headers.get("Idempotency-Key"));
+  });
+
+  it("un rechazo de la declaración queda en su ventana, con lo escrito", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [POR_ACLARAR] }),
+      [`POST ${DECLARAR}`]: () => error("error_interno", 500),
+    }));  // prettier-ignore
+    abrir("/pagos/por-aclarar");
+    const ventana = await abrirAccion(NO_SE_TRANSFIRIO, "Declarar que no se transfirió");
+    fireEvent.change(within(ventana).getByLabelText("Por qué no se transfirió"), { target: { value: "Renuncié" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: NO_SE_TRANSFIRIO }));
+    expect((await within(ventana).findByRole("alert")).textContent).not.toBe("");
+    expect((within(ventana).getByLabelText("Por qué no se transfirió") as HTMLInputElement).value).toBe("Renuncié");
   });
 
   it("quien transfirió y dejó de administrar sube el comprobante y registra el pago (app 0068)", async () => {
@@ -192,19 +243,19 @@ describe("pagos para aclarar (app 0067)", () => {
       },
     });
     vi.stubGlobal("fetch", api);
-    const { container } = abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-    expect(screen.getByText("Primero hay que subir el comprobante de la transferencia.")).toBeTruthy();
-    const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
-    expect(registrar.disabled).toBe(true);
+    abrir("/pagos/por-aclarar");
+    const hoja = await transferencia();
+    expect(within(hoja).getByText("Primero hay que subir el comprobante de la transferencia.")).toBeTruthy();
+    // C8P-10: sin el comprobante aceptado, ni los datos del pago ni el botón de registrar.
+    expect(within(hoja).queryByRole("button", { name: "Registrar el pago" })).toBeNull();
+    expect(within(hoja).queryByLabelText("Número de operación")).toBeNull();
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
-    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
-    expect(await screen.findByText(/Listo: el comprobante se subió/)).toBeTruthy();
-    expect(await screen.findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
-    expect(registrar.disabled).toBe(true); // en cuarentena todavía no se registra
+    fireEvent.change(within(hoja).getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
+    expect(await within(hoja).findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
+    // ACL-05: la línea de estado alcanza, sin otro aviso que quede viejo.
+    expect(screen.queryByText(/Listo: el comprobante se subió/)).toBeNull();
     const [carga] = pedidos(api, "POST", CARGA);
-    expect(await carga?.json()).toEqual({ titulo: "Comprobante de la transferencia", fecha: "2026-10-31" });
+    expect(await carga?.json()).toEqual({ titulo: "Comprobante de la transferencia", fecha: new Date().toLocaleDateString("en-CA") });
     const [subida] = pedidos(api, "POST", SUBIDA);
     expect(subida?.headers.get("Content-Type")).toBe("application/pdf");
     expect(subida?.headers.get("Idempotency-Key")).toBeTruthy();
@@ -212,14 +263,21 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(screen.queryByRole("button", { name: "Actualizar" })).toBeNull();
     lista = [{ ...POR_ACLARAR, comprobante_id: NUEVO, comprobante_estado: "disponible" }];
     await vi.advanceTimersByTimeAsync(ESPERA);
-    expect(await screen.findByText(/ya se puede registrar el pago/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
-    fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
-    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: `${CUENTA.slice(0, 8)} ${CUENTA.slice(8)}` } });
-    await sinFaltasDeAccesibilidad(container);
-    fireEvent.click(registrar);
+    const ventana = await screen.findByRole("dialog", { name: REGISTRAR_TRANSFERENCIA });
+    expect(await within(ventana).findByText(/ya se puede registrar el pago/)).toBeTruthy();
+    // Decisión 4: el botón está activo y marca lo que falta.
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar el pago" }));
+    expect(await within(ventana).findByText("Falta escribir el número de operación.")).toBeTruthy();
+    expect(within(ventana).getByText("Falta escribir el importe.")).toBeTruthy();
+    expect(pedidos(api, "POST", REGISTRO)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(within(ventana).getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(within(ventana).getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
+    fireEvent.change(within(ventana).getByLabelText(/^CBU\/CVU de destino/), { target: { value: `${CUENTA.slice(0, 8)} ${CUENTA.slice(8)}` } });
+    await sinFaltasDeAccesibilidad(document.body);
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar el pago" }));
     expect(await screen.findByText(/Listo: el pago quedó registrado/)).toBeTruthy();
-    expect(await screen.findByText("No hay pagos para aclarar.")).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Volver al inicio" })).toBeTruthy();
     const [registro] = pedidos(api, "POST", REGISTRO);
     expect(await registro?.json()).toEqual({
       version: 1,
@@ -243,12 +301,11 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-    expect(screen.getByText(/El antivirus rechazó el archivo/)).toBeTruthy();
+    const hoja = await transferencia();
+    expect(within(hoja).getByText(/El antivirus rechazó el archivo/)).toBeTruthy();
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
-    expect(await screen.findByText(/Listo: el comprobante se subió/)).toBeTruthy();
-    expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
+    fireEvent.change(within(hoja).getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
+    await waitFor(() => expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1));
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/comprobante`)).toHaveLength(0);
   });
 
@@ -263,15 +320,15 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
+    const hoja = await transferencia();
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
-    expect(await screen.findByText(/El archivo no se subió/)).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Reintentar la subida" }));
-    expect(await screen.findByText(/Listo: el comprobante se subió/)).toBeTruthy();
+    fireEvent.change(within(hoja).getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
+    expect(await within(hoja).findByText(/El archivo no se subió/)).toBeTruthy();
+    fireEvent.click(await within(hoja).findByRole("button", { name: "Reintentar la subida" }));
+    await waitFor(() => expect(within(hoja).queryByRole("button", { name: "Reintentar la subida" })).toBeNull());
+    expect(within(hoja).queryByText(/El archivo no se subió/)).toBeNull();
     const [primera, segunda] = pedidos(api, "POST", SUBIDA).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
-    expect(screen.queryByRole("button", { name: "Reintentar la subida" })).toBeNull();
   });
 
   it("quien perdió la facultad y pagó otra cosa lo registra con su explicación, por su ruta", async () => {
@@ -282,17 +339,20 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-    expect(screen.queryByLabelText("Qué pasó")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Se transfirió otro importe o a otra cuenta" }));
-    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
-    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
-    fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
-    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
-    fireEvent.click(screen.getByRole("button", { name: "Registrar lo que pasó" }));
+    const ventana = await transferencia();
+    expect(within(ventana).queryByLabelText("Qué pasó")).toBeNull();
+    fireEvent.click(within(ventana).getByRole("button", { name: OTRA_COSA }));
+    fireEvent.change(within(ventana).getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(within(ventana).getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(within(ventana).getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
+    fireEvent.change(within(ventana).getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    // ACL-03: la ayuda dice solo lo que hace falta para escribir.
+    expect(within(ventana).getByText("Sin números de cuenta.")).toBeTruthy();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar lo que pasó" }));
+    expect(await within(ventana).findByText("Falta escribir qué pasó.")).toBeTruthy();
     expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(0); // sin explicación no se manda
-    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "SINTETICO: transferí de menos" } });
-    fireEvent.click(screen.getByRole("button", { name: "Registrar lo que pasó" }));
+    fireEvent.change(within(ventana).getByLabelText("Qué pasó"), { target: { value: "SINTETICO: transferí de menos" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar lo que pasó" }));
     await waitFor(() => expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(1));
     expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ moneda: "ARS", documento_id: DOC, explicacion: "SINTETICO: transferí de menos", cuenta_real: CUENTA });
     expect(await screen.findByText(/lo resuelve el Consejo/)).toBeTruthy();
@@ -307,19 +367,19 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-    expect(screen.queryByLabelText("Moneda que salió del banco")).toBeNull(); // el registro común no la pide
-    fireEvent.click(screen.getByRole("button", { name: "Se transfirió otro importe o a otra cuenta" }));
-    const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
+    const ventana = await transferencia();
+    expect(within(ventana).queryByLabelText("Moneda que salió del banco")).toBeNull(); // el registro común no la pide
+    fireEvent.click(within(ventana).getByRole("button", { name: OTRA_COSA }));
+    const moneda = within(ventana).getByLabelText("Moneda que salió del banco") as HTMLInputElement;
     expect(moneda.value).toBe("ARS");
     fireEvent.change(moneda, { target: { value: "usd" } });
     expect(moneda.value).toBe("USD");
-    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
-    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
-    fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
-    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
-    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "SINTETICO: salió en dólares" } });
-    fireEvent.click(screen.getByRole("button", { name: "Registrar lo que pasó" }));
+    fireEvent.change(within(ventana).getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(within(ventana).getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(within(ventana).getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
+    fireEvent.change(within(ventana).getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.change(within(ventana).getByLabelText("Qué pasó"), { target: { value: "SINTETICO: salió en dólares" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar lo que pasó" }));
     await waitFor(() => expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(1));
     expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ moneda: "USD" });
   });
@@ -327,20 +387,16 @@ describe("pagos para aclarar (app 0067)", () => {
   it("sin pagos para aclarar lo dice", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }) }));
     abrir("/pagos/por-aclarar");
-    expect(await screen.findByText("No hay pagos para aclarar.")).toBeTruthy();
+    expect(await screen.findByText(SIN_PAGOS)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Volver al inicio" })).toBeNull();
   });
 });
 
 describe("fricción: las lecturas y el comprobante", () => {
   const NUEVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  const POR_ACLARAR = {
-    consorcio_id: C1, consorcio: "Edificio Ficticio", orden_id: O1, version: 1, concepto: "Limpieza de octubre",
-    importe_centavos: 1_500_000, moneda: "ARS", cuenta_vista_en: "2026-10-31T13:00:00Z", huella: H1,
-    comprobante_id: null, comprobante_estado: null,
-  };
 
   const LECTURAS = [
-    ["/pagos/por-aclarar", "GET /api/v1/pagos-por-aclarar", "No hay pagos para aclarar."],
+    ["/pagos/por-aclarar", "GET /api/v1/pagos-por-aclarar", SIN_PAGOS],
   ] as const;
 
   const conLecturaCaida = (clave: string, caido: () => boolean) =>
@@ -378,62 +434,56 @@ describe("fricción: las lecturas y el comprobante", () => {
 
   describe("pagos para aclarar", () => {
     const CON_ARCHIVO = { ...POR_ACLARAR, comprobante_id: NUEVO };
+    const EN_REVISION = { ...CON_ARCHIVO, comprobante_estado: "en_cuarentena" };
+    const actualizar = () => screen.queryByRole("button", { name: "Actualizar" });
 
-    it("el comprobante en revisión se actualiza solo y habilita registrar", async () => {
+    it("el comprobante en revisión se actualiza solo y recién entonces ofrece registrar", async () => {
       conEsperaManual();
       let estado = "en_cuarentena";
       vi.stubGlobal("fetch", backend({
         "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...CON_ARCHIVO, comprobante_estado: estado }] }),
       }));
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-      const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
-      expect(registrar.disabled).toBe(true);
+      await transferencia();
+      expect(screen.queryByRole("button", { name: "Registrar el pago" })).toBeNull();
       estado = "disponible";
       await vi.advanceTimersByTimeAsync(ESPERA);
       expect(await screen.findByText(/ya se puede registrar el pago/)).toBeTruthy();
-      expect(registrar.disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement).disabled).toBe(false);
     });
 
-    it("sin el formulario abierto no mira nada por su cuenta", async () => {
+    it("sin la ventana abierta no mira nada por su cuenta", async () => {
       conEsperaManual();
-      const api = backend({
-        "GET /api/v1/pagos-por-aclarar": () =>
-          Response.json({ elementos: [{ ...CON_ARCHIVO, comprobante_estado: "en_cuarentena" }] }),
-      });
+      const api = backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [EN_REVISION] }) });
       vi.stubGlobal("fetch", api);
       abrir("/pagos/por-aclarar");
-      await screen.findByRole("button", { name: "Sí se transfirió" });
+      await abrirFicha();
       const lecturas = pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length;
       await vi.advanceTimersByTimeAsync(ESPERA * 2);
       expect(pedidos(api, "GET", "/api/v1/pagos-por-aclarar")).toHaveLength(lecturas);
     });
 
-    const EN_REVISION = { ...CON_ARCHIVO, comprobante_estado: "en_cuarentena" };
-    const actualizar = () => screen.queryByRole("button", { name: "Actualizar" });
-
-    it("si falla la actualización, el formulario queda con lo escrito, lo avisa y deja actualizar", async () => {
+    it("ACL-04: si falla la actualización lo dice en la ventana y la vuelve a pedir sola, sin «Actualizar»", async () => {
       conEsperaManual();
       let caido = false;
       vi.stubGlobal("fetch", backend({
         "GET /api/v1/pagos-por-aclarar": () =>
           caido ? error("error_interno", 500) : Response.json({ elementos: [EN_REVISION] }),
       }));
-      abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-      fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
-      expect(actualizar()).toBeNull();
+      const hoja = await (async () => {
+        abrir("/pagos/por-aclarar");
+        return transferencia();
+      })();
       caido = true;
       await vi.advanceTimersByTimeAsync(ESPERA);
-      expect((await screen.findByRole("alert")).textContent).toContain("No se pudo actualizar la lista");
-      expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
-      caido = false;
-      fireEvent.click(actualizar() as HTMLElement);
-      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+      expect((await within(hoja).findByRole("alert")).textContent).toContain("No se pudo actualizar la lista");
       expect(actualizar()).toBeNull();
+      caido = false;
+      await vi.advanceTimersByTimeAsync(ESPERA);
+      await waitFor(() => expect(within(hoja).queryByRole("alert")).toBeNull());
     });
 
-    it("la lista que falló con el formulario abierto se repite sola al volver la red", async () => {
+    it("la lista que falló con la ventana abierta se repite sola al volver la red", async () => {
       conEsperaManual();
       let caido = false;
       const api = backend({
@@ -442,36 +492,27 @@ describe("fricción: las lecturas y el comprobante", () => {
       });
       vi.stubGlobal("fetch", api);
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
+      const hoja = await transferencia();
       caido = true;
       await vi.advanceTimersByTimeAsync(ESPERA);
-      await screen.findByRole("alert");
+      await within(hoja).findByRole("alert");
       caido = false;
       volvioLaRed();
-      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+      await waitFor(() => expect(within(hoja).queryByRole("alert")).toBeNull());
     });
 
-    it("si el antivirus agota la espera, lo dice y recién ahí ofrece actualizar", async () => {
+    it("ACL-04: si el antivirus tarda, sigue mirando solo y no ofrece «Actualizar»", async () => {
       conEsperaManual();
       const api = backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [EN_REVISION] }) });
       vi.stubGlobal("fetch", api);
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
-      await vi.advanceTimersByTimeAsync(ESPERA * 20);
-      // Control: mientras todavía mira, no hay botón.
+      await transferencia();
+      await vi.advanceTimersByTimeAsync(ESPERA * 21);
       expect(actualizar()).toBeNull();
-      await vi.advanceTimersByTimeAsync(ESPERA);
-      expect((await screen.findByRole("alert")).textContent).toContain("El antivirus sigue revisando el comprobante");
-      expect(actualizar()).toBeTruthy();
+      expect(screen.queryByText(/El antivirus sigue revisando el comprobante/)).toBeNull();
       const lecturas = pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length;
       await vi.advanceTimersByTimeAsync(ESPERA * 2);
-      expect(pedidos(api, "GET", "/api/v1/pagos-por-aclarar")).toHaveLength(lecturas);
-      // Tocar «Actualizar» con el archivo todavía en revisión vuelve a mirar solo.
-      fireEvent.click(actualizar() as HTMLElement);
-      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-      const despues = pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length;
-      await vi.advanceTimersByTimeAsync(ESPERA);
-      expect(pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length).toBeGreaterThan(despues);
+      expect(pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length).toBeGreaterThan(lecturas);
     });
   });
 });

@@ -7,6 +7,7 @@ import { TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "../archivos";
 import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
 import { mensajeDeError as mensajeDeCarga } from "../Documentos";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
 import { SubirArchivo } from "../SubirArchivo";
@@ -20,6 +21,11 @@ import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "./useConsorcio
 // y hasta cuándo vale, y elegir el archivo. Lo que el rol no puede hacer no aparece.
 // RF50 configurable (app 0104): «No vence» con la fecha en blanco, si el edificio lo admite, y el
 // requisito de la ley que cubre, a elegir de la matriz legal.
+//
+// Informe de fricción, tanda 4: el vencimiento lo dice la etiqueta de cada documento y la
+// consecuencia, una sola vez, «Lo que exige la ley» (SEG-08); quien solo lee no ve una sección vacía
+// con título (SEG-03); aceptado el archivo, la hoja se cierra sola y la ficha lo muestra (SEG-09);
+// y un archivo elegido antes de completar los datos no se pierde: se carga con «Cargar» (SEG-10).
 
 export type Documentacion = components["schemas"]["DocumentacionProveedor"];
 export type RequisitoLegal = components["schemas"]["RequisitoLegal"];
@@ -28,10 +34,12 @@ type Tipo = components["schemas"]["TipoDocumentacionProveedor"];
 
 export const TITULO_SECCION = "Seguros y habilitaciones";
 export const AGREGAR = "Agregar un seguro o una habilitación";
-export const AVISO_VENCIDA = "Tiene documentación vencida. Se le puede seguir contratando y pagando; queda marcado.";
 export const SIN_DOCUMENTACION = "No tiene seguros ni habilitaciones cargados.";
 export const NO_VENCE = "No vence";
 export const SIN_REQUISITO = "Ninguno en particular";
+export const FALTA_DESCRIPCION = "Falta decir qué cubre.";
+export const FALTA_VENCIMIENTO = "Falta la fecha de vencimiento.";
+export const CARGAR = "Cargar";
 export const TEXTO_TIPO: Record<Tipo, string> = { seguro: "Seguro", habilitacion: "Habilitación" };
 /** Lo que cuenta para la marca y lo único que se reemplaza (`ESTADOS_QUE_VALEN` del contrato). */
 const VALEN: ReadonlySet<Estado> = new Set<Estado>(["vigente", "por_vencer", "vencida"]);
@@ -84,15 +92,15 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
   const conReemplazoEnCurso = new Set(
     documentacion.filter((d) => d.estado === "en_revision" && d.reemplaza_a !== null).map((d) => d.reemplaza_a),
   );
-  const vencida = documentacion.some((d) => d.estado === "vencida");
+
+  // Quien solo lee y no hay nada: una línea, sin título (la pantalla se llama «Proveedores y sus
+  // seguros» y hace falta decirlo). Quien carga ve el título con su botón, sin la frase (SEG-03).
+  if (!puedeCargar && documentacion.length === 0) return <p>{SIN_DOCUMENTACION}</p>;
 
   return (
     <section aria-labelledby={`${id}-titulo`}>
       <h3 id={`${id}-titulo`}>{TITULO_SECCION}</h3>
-      {vencida && <p className="aviso-pendiente">{AVISO_VENCIDA}</p>}
-      {actuales.length === 0 ? (
-        <p>{SIN_DOCUMENTACION}</p>
-      ) : (
+      {actuales.length > 0 && (
         <ul className="lista-documentacion" aria-label={TITULO_SECCION}>
           {actuales.map((d) => (
             <li key={d.id}>
@@ -153,7 +161,7 @@ export function descripcionDe(requisitos: readonly RequisitoLegal[], codigo: str
   return requisitos.find((r) => r.codigo === codigo)?.descripcion ?? codigo;
 }
 
-type Fase = { tipo: "elegir" } | { tipo: "subiendo" } | { tipo: "revisando" } | { tipo: "aceptada" } | { tipo: "rechazada" };
+type Fase = { tipo: "elegir" } | { tipo: "subiendo" } | { tipo: "revisando" } | { tipo: "rechazada" };
 
 type PropsHoja = {
   consorcio: string;
@@ -175,6 +183,9 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
   const deEsteTipo = requisitos.filter((r) => r.tipo === tipo);
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
   const [falla, setFalla] = useState<string | null>(null);
+  /** El archivo elegido antes de completar los datos: queda para «Cargar» (SEG-10). */
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const clave = useRef<string | null>(null);
   const cambio = useRef(false);
   const enEspera = useRef<{ documento: string; version: string } | null>(null);
@@ -190,26 +201,49 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
         exigirSesion(response);
         if (enEspera.current !== cual || data === undefined || data.estado === "en_cuarentena") return;
         enEspera.current = null;
-        setFase({ tipo: data.estado === "disponible" ? "aceptada" : "rechazada" });
+        // Aceptado, la hoja se cierra sola y la ficha, al volver a leerse, muestra el documento con su
+        // etiqueta (SEG-09). El rechazo queda en la hoja, para elegir otro archivo.
+        if (data.estado === "disponible") alCerrar(true);
+        else {
+          setArchivo(null);
+          setFase({ tipo: "rechazada" });
+        }
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
       });
-  }, [consorcio, aEntrar]);
+  }, [consorcio, aEntrar, alCerrar]);
   const tarda = useConsultaDelAntivirus(fase.tipo === "revisando", mirar);
 
-  async function subir(archivo: File) {
-    const sinDescripcion = descripcion.trim() === "";
-    if (sinDescripcion || (!noVence && vence === "")) {
-      setFalla(sinDescripcion ? "Falta decir qué cubre." : "Falta la fecha de vencimiento.");
-      return;
-    }
+  /** Lo que falta para mandar el archivo, marcado junto a su campo. */
+  function faltan(): ErroresDeCampo {
+    return faltaCompletar({
+      descripcion: [descripcion, FALTA_DESCRIPCION],
+      ...(noVence ? {} : { vence: [vence, FALTA_VENCIMIENTO] as const }),
+    });
+  }
+
+  /** Elegir el archivo lo manda si los datos están; si falta alguno, el archivo queda elegido. */
+  function elegir(elegido: File) {
+    setArchivo(elegido);
+    const marcados = faltan();
+    setErrores(marcados);
+    if (!hayErrores(marcados)) void subir(elegido);
+  }
+
+  function cargar() {
+    const marcados = faltan();
+    setErrores(marcados);
+    if (archivo !== null && !hayErrores(marcados)) void subir(archivo);
+  }
+
+  async function subir(elegido: File) {
     setFase({ tipo: "subiendo" });
     setFalla(null);
     clave.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/documentacion", {
-        headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
+        headers: { ...encabezadoCsrf(), "Content-Type": elegido.type },
         params: {
           path: { consorcio_id: consorcio, proveedor_id: proveedor.id },
           query: {
@@ -217,13 +251,13 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
             descripcion: descripcion.trim(),
             ...(noVence ? { no_vence: true } : { vence_el: vence }),
             ...(requisito === "" ? {} : { requisito }),
-            titulo: tituloDeArchivo(archivo, TEXTO_TIPO[tipo], LARGO_TITULO),
+            titulo: tituloDeArchivo(elegido, TEXTO_TIPO[tipo], LARGO_TITULO),
             ...(reemplaza === null ? {} : { reemplaza: reemplaza.id }),
           },
           header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current },
         },
         // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
-        body: archivo as unknown as string,
+        body: elegido as unknown as string,
         bodySerializer: (cuerpo) => cuerpo,
       });
       exigirSesion(response);
@@ -243,6 +277,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
       clave.current = null;
       cambio.current = true;
       enEspera.current = { documento: data.documento_id, version: data.archivo.id };
+      setArchivo(null);
       setFase({ tipo: "revisando" });
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
@@ -269,11 +304,6 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
       )}
       {fase.tipo === "revisando" && tarda && (
         <p className="aviso-info">El antivirus está tardando. Se puede cerrar: la ficha lo muestra cuando termine.</p>
-      )}
-      {fase.tipo === "aceptada" && (
-        <p role="status" className="aviso-ok">
-          El antivirus aceptó el archivo: ya figura en la ficha con su vencimiento.
-        </p>
       )}
       {fase.tipo === "rechazada" && (
         <p role="alert" className="aviso-error">
@@ -315,8 +345,13 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
             required
             disabled={enviando}
             placeholder="Por ejemplo: ART del personal, matrícula de gasista"
-            onChange={(e) => setDescripcion(e.target.value)}
+            {...marcaDe(`${id}-descripcion`, errores.descripcion)}
+            onChange={(e) => {
+              setErrores((actuales) => sinElDe(actuales, "descripcion"));
+              setDescripcion(e.target.value);
+            }}
           />
+          <ErrorDeCampo idCampo={`${id}-descripcion`} mensaje={errores.descripcion} />
           {deEsteTipo.length > 0 && (
             <>
               <label htmlFor={`${id}-requisito`}>Qué requisito de la ley cubre</label>
@@ -337,15 +372,44 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
             required={!noVence}
             value={noVence ? "" : vence}
             disabled={enviando || noVence}
-            onChange={(e) => setVence(e.target.value)}
+            {...marcaDe(`${id}-vence`, errores.vence)}
+            onChange={(e) => {
+              setErrores((actuales) => sinElDe(actuales, "vence"));
+              setVence(e.target.value);
+            }}
           />
+          <ErrorDeCampo idCampo={`${id}-vence`} mensaje={errores.vence} />
           {admiteNoVence && (
             <label className="opcion">
-              <input type="checkbox" checked={noVence} disabled={enviando} onChange={(e) => setNoVence(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={noVence}
+                disabled={enviando}
+                onChange={(e) => {
+                  setErrores((actuales) => sinElDe(actuales, "vence"));
+                  setNoVence(e.target.checked);
+                }}
+              />
               {NO_VENCE}: la fecha queda en blanco
             </label>
           )}
-          <SubirArchivo de="del documento" tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} deshabilitada={enviando} alElegir={(a) => void subir(a)} />
+          <SubirArchivo
+            de="del documento"
+            tipos={TIPOS_DE_DOCUMENTO}
+            tope={TOPE_BYTES}
+            reemplaza={archivo !== null}
+            deshabilitada={enviando}
+            elegido={archivo?.name ?? null}
+            alElegir={elegir}
+          />
+          {/* Elegido antes de completar los datos: se manda con este botón, sin volver a elegirlo (SEG-10). */}
+          {archivo !== null && !enviando && (
+            <div className="acciones">
+              <button type="button" onClick={cargar}>
+                {CARGAR}
+              </button>
+            </div>
+          )}
           {enviando && (
             <p role="status" className="aviso-info">
               {TEXTO_SUBIENDO}

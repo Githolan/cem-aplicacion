@@ -63,7 +63,8 @@ test.describe("página /instalar", () => {
       await pagina.evaluate(() => navigator.serviceWorker.ready);
       await pagina.reload();
       await expect(pagina.getByRole("button", { name: BOTON })).toBeVisible();
-      await expect(pagina.getByText("Tocar el botón y confirmar.")).toBeVisible();
+      // Con el botón basta el título y el botón (ACC-07).
+      await expect(pagina.getByText("Tocar el botón y confirmar.")).toHaveCount(0);
       await sinFaltasDeAccesibilidad(pagina);
     } finally {
       await contexto.close();

@@ -28,13 +28,35 @@ import {
   sinPisarLoHecho,
   sobreLoNuevo,
 } from "../egresos/comun";
+import { ComandoNoDisponible } from "../ComandoNoDisponible";
 import { FallaDeLectura } from "../egresos/EstadoPantalla";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { exigirSesion, type MonedasDelEdificio, SinSesion } from "../egresos/useConsorcio";
+import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { VentanaDeFormulario } from "../VentanaDeFormulario";
 import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { rutaFicha } from "./rutas";
-import { AVISO_MODIFICAR, fechaCorta, GUARDAR_IGUAL, textoParecidaAntes, VER_LA_OTRA } from "./textos";
+import {
+  AVISO_MODIFICAR,
+  CON_SALTEO,
+  FALTA_CONCEPTO,
+  FALTA_IMPORTE,
+  FALTA_PROVEEDOR,
+  fechaCorta,
+  GUARDAR_IGUAL,
+  IR_A_PROVEEDORES,
+  MARCA_SIN_DOCUMENTACION,
+  NOMBRE_ESTADO,
+  PROVEEDOR_INACTIVO,
+  SIN_CAMBIOS,
+  SIN_DOCUMENTACION,
+  SIN_DOCUMENTACION_SIN_SABER,
+  textoContratoExcedido,
+  textoParecidaAntes,
+  TITULO_PARECIDA,
+  VER_LA_OTRA,
+} from "./textos";
 import type { ActoEnCurso } from "./useActo";
 
 // Preparar una orden o guardar una versión nueva: el proveedor se elige de la lista, nunca se
@@ -59,6 +81,7 @@ type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
 type Version = components["schemas"]["VersionOrdenPago"];
 type OrdenParecida = components["schemas"]["OrdenParecida"];
+type ModoExigencia = components["schemas"]["ModoExigencia"];
 
 export const MONEDAS = ["ARS", "USD"] as const;
 /** Lo que ve la persona al elegir la moneda de una orden (P-14): el código queda para el servidor. */
@@ -66,7 +89,22 @@ const NOMBRE_MONEDA: Record<(typeof MONEDAS)[number], string> = { ARS: "Pesos", 
 /** Rechazos que se arreglan cambiando lo escrito: el formulario sigue abierto con sus datos. */
 const SE_CORRIGE_EN_EL_FORMULARIO = new Set(["sin_cambios", "proveedor_inactivo"]);
 
-type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; proveedores: Proveedor[]; contratos: Contrato[] };
+type Lectura =
+  | { tipo: "cargando" }
+  | { tipo: "sin_servicio" }
+  | {
+      tipo: "ok";
+      proveedores: Proveedor[];
+      contratos: Contrato[];
+      /** Los proveedores a los que les falta documentación legal (app 0104) y si eso bloquea (0106). */
+      sinDocumentacion: ReadonlySet<string>;
+      modo: ModoExigencia;
+    };
+
+/** Si hay un salteo por urgencia que espera la orden del proveedor bloqueado (informe de fricción,
+ * C8P-01): sin él la base no deja crear la orden, ni como borrador. Se lee de su ficha, que trae los
+ * salteos con el estado que calcula la base. Quién lo registró no se sabe acá (C8P-02, backend). */
+type Salteo = { proveedor: string; estado: "consultando" | "vigente" | "sin_salteo" | "sin_saber" };
 
 type Datos = {
   proveedor: string;
@@ -86,6 +124,10 @@ const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
 export function contratosAplicables(contratos: Contrato[], proveedor: string, moneda: string): Contrato[] {
   return contratos.filter((k) => k.estado === "vigente" && k.proveedor_id === proveedor && k.moneda === moneda);
 }
+
+/** Si el contrato cubre el importe escrito (C8P-04): uno con un máximo menor no se ofrece. Sin un
+ * importe que se entienda, todavía no se descarta ninguno. */
+export const cubreElImporte = (k: Contrato, centavos: number | null) => centavos === null || centavos <= k.importe_maximo_centavos;
 
 /** Las monedas del edificio que el formulario ofrece, en el orden de `MONEDAS` (P-14). */
 const monedasOfrecidas = (monedas: readonly string[]) => MONEDAS.filter((m) => monedas.includes(m));
@@ -198,8 +240,9 @@ type Props = {
   modificar?: Modificar;
   /** Con qué abre una orden nueva; el proveedor, si sigue activo. */
   inicial?: OrdenInicial;
-  /** `falla`: la orden quedó guardada, pero el envío a aprobar no salió. */
-  alGuardar: (orden: string, texto: string, falla?: boolean) => void;
+  /** `quedo`: «enviada» a aprobar; «guardada» (un borrador o los cambios de una versión); «sin_enviar»,
+   * la orden quedó guardada, pero el envío a aprobar no salió. */
+  alGuardar: (orden: string, texto: string, quedo: "enviada" | "guardada" | "sin_enviar") => void;
   /** La orden nueva ya existe, aunque falte enviarla: quien pide el código sabe adónde ir si se cancela. */
   alCrear?: (orden: string) => void;
   alCancelar: () => void;
@@ -218,6 +261,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const { enviando, setAviso } = acto;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
+  /** Cada guardar con algo que falta lleva el foco al primer campo marcado, ya dibujado. */
+  const [moverFoco, setMoverFoco] = useState(0);
   const [datos, setDatos] = useState<Datos | null>(null);
   /** Otra orden parecida, encontrada al guardar (decisión 4 del 13-11-2026): se avisa y no bloquea. */
   const [parecida, setParecida] = useState<OrdenParecida | null>(null);
@@ -265,6 +310,44 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const [facturaEnEspera, setFacturaEnEspera] = useState(false);
   /** La factura subida en este formulario, ya aprobada por el antivirus. */
   const [subida, setSubida] = useState<Cargado | null>(null);
+  /** Lo obligatorio que faltaba al tocar guardar (decisión 4: el botón siempre activo). */
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  const [salteo, setSalteo] = useState<Salteo | null>(null);
+  const proveedorElegido = datos?.proveedor ?? "";
+  // La base niega solo la versión 1 o una versión que cambia de proveedor (`exigir_documentacion_legal`, app 0104):
+  // al modificar una orden sin cambiarle el proveedor no hay bloqueo (Codex en #257).
+  const mismoProveedorDeLaOrden = modificar !== undefined && proveedorElegido === modificar.version.proveedor_id;
+  const bloqueado =
+    lectura.tipo === "ok" &&
+    lectura.modo === "bloquear" &&
+    proveedorElegido !== "" &&
+    !mismoProveedorDeLaOrden &&
+    lectura.sinDocumentacion.has(proveedorElegido);
+
+  // C8P-01: con el proveedor bloqueado, se mira si un salteo por urgencia espera su orden.
+  useEffect(() => {
+    if (!bloqueado) return;
+    let vigente = true;
+    setSalteo({ proveedor: proveedorElegido, estado: "consultando" });
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}", {
+        params: { path: { consorcio_id: consorcio, proveedor_id: proveedorElegido } },
+      })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (!vigente) return;
+        const estado = data === undefined ? "sin_saber" : data.salteos.some((x) => x.estado === "vigente") ? "vigente" : "sin_salteo";
+        setSalteo({ proveedor: proveedorElegido, estado });
+      })
+      .catch((e: unknown) => {
+        if (!vigente) return;
+        if (e instanceof SinSesion) aEntrar();
+        else setSalteo({ proveedor: proveedorElegido, estado: "sin_saber" });
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [bloqueado, consorcio, proveedorElegido, aEntrar]);
 
   useEffect(() => {
     let vigente = true;
@@ -278,7 +361,13 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         exigirSesion(contratos.response);
         if (!vigente) return;
         if (proveedores.data !== undefined && contratos.data !== undefined) {
-          setLectura({ tipo: "ok", proveedores: proveedores.data.elementos, contratos: contratos.data.elementos });
+          setLectura({
+            tipo: "ok",
+            proveedores: proveedores.data.elementos,
+            contratos: contratos.data.elementos,
+            sinDocumentacion: new Set(proveedores.data.documentacion_faltante),
+            modo: proveedores.data.modo_exigencia,
+          });
           return;
         }
         const falla = proveedores.data === undefined ? proveedores : contratos;
@@ -301,6 +390,10 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, aInicio, setAviso]);
+
+  useEffect(() => {
+    if (moverFoco > 0) formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [moverFoco]);
 
   // Al llegar los datos, o una versión nueva con el formulario abierto.
   useEffect(() => {
@@ -387,6 +480,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     revisado(campo);
+    setErrores((e) => sinElDe(e, campo));
     elegidos.current.add(campo);
     setParecida(null);
     setDatos((d) => {
@@ -401,6 +495,16 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     evento.preventDefault();
     // Guardar ahora mandaría la orden sin el archivo que todavía no terminó (o sin la factura anterior).
     if (datos === null || facturaEnEspera) return;
+    const faltan = faltaCompletar({
+      proveedor: [datos.proveedor, FALTA_PROVEEDOR],
+      importe: [datos.importe, FALTA_IMPORTE],
+      concepto: [datos.concepto, FALTA_CONCEPTO],
+    });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      setMoverFoco((n) => n + 1);
+      return;
+    }
     const centavos = aCentavos(datos.importe);
     if (centavos === null) {
       setAviso({ texto: "Hay que escribir el importe en pesos, por ejemplo 12345,50.", ok: false });
@@ -408,7 +512,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     }
     // Antes de guardar, si no es rutinaria (sin contrato ni abono), se mira si hay otra parecida.
     const comparable = { proveedor_id: datos.proveedor, importe_centavos: centavos, moneda: datos.moneda };
-    if (datos.contrato === "" && guardarIgual.current !== JSON.stringify(comparable)) {
+    const contrato = contratoQueCubre(datos, centavos);
+    if (contrato === "" && guardarIgual.current !== JSON.stringify(comparable)) {
       mirarParecida(comparable);
       return;
     }
@@ -419,7 +524,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
       proveedor_id: datos.proveedor,
       comprobante: opcional(datos.comprobante),
       usa_fondo_reserva: datos.reserva,
-      contrato_id: datos.contrato === "" ? null : datos.contrato,
+      contrato_id: contrato === "" ? null : contrato,
       factura_version_id: factura,
     };
     void acto.hacer({
@@ -440,8 +545,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
             });
       },
       alTerminar: (data) => {
-        if (modificar !== undefined) alGuardar(data.id, "Listo: los cambios quedaron guardados.");
-        else if (destino.current === "borrador") alGuardar(data.id, "Listo: la orden quedó en borrador.");
+        if (modificar !== undefined) alGuardar(data.id, "Listo: los cambios quedaron guardados.", "guardada");
+        else if (destino.current === "borrador") alGuardar(data.id, "Listo: la orden quedó en borrador.", "guardada");
         else {
           alCrear?.(data.id);
           enviarLaNueva(data);
@@ -455,6 +560,13 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         }
       },
     });
+  }
+
+  /** El contrato elegido, si cubre el importe (C8P-04); si no, ninguno. */
+  function contratoQueCubre(d: Datos, centavos: number | null): string {
+    if (d.contrato === "" || lectura.tipo !== "ok") return d.contrato;
+    const elegido = lectura.contratos.find((k) => k.id === d.contrato);
+    return elegido !== undefined && cubreElImporte(elegido, centavos) ? d.contrato : "";
   }
 
   /** Si hay otra orden parecida, la muestra; si no, guarda. Mirar no cambia nada. */
@@ -500,14 +612,14 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         // Hasta saber en qué quedó, el botón no se vuelve a tocar: la orden ya existe.
         acto.setEnviando(true);
         void leerComoQuedo(consorcio, nueva.id)
-          .then((texto) => siSigueAbierto(() => alGuardar(nueva.id, texto)))
+          .then((texto) => siSigueAbierto(() => alGuardar(nueva.id, texto, "enviada")))
           .catch((e: unknown) =>
-            siSigueAbierto(() => (e instanceof SinSesion ? aEntrar() : alGuardar(nueva.id, TEXTO_ENVIADA))),
+            siSigueAbierto(() => (e instanceof SinSesion ? aEntrar() : alGuardar(nueva.id, TEXTO_ENVIADA, "enviada"))),
           )
           .finally(() => acto.setEnviando(false));
       },
-      alFallar: (estado, _codigo, error) => alGuardar(nueva.id, noSeEnvio(mensajeDeActo(estado, error)), true),
-      alNoLlegar: () => alGuardar(nueva.id, noSeEnvio(SIN_CONEXION), true),
+      alFallar: (estado, _codigo, error) => alGuardar(nueva.id, noSeEnvio(mensajeDeActo(estado, error)), "sin_enviar"),
+      alNoLlegar: () => alGuardar(nueva.id, noSeEnvio(SIN_CONEXION), "sin_enviar"),
     });
   }
 
@@ -535,7 +647,12 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     );
   if (datos === null) return null;
 
+  const centavosEscritos = aCentavos(datos.importe);
   const aplicables = contratosAplicables(lectura.contratos, datos.proveedor, datos.moneda);
+  /** Los que cubren el importe escrito (C8P-04); el elegido que no lo cubre se dice junto al campo. */
+  const ofrecidos = aplicables.filter((k) => cubreElImporte(k, centavosEscritos));
+  const contrato = contratoQueCubre(datos, centavosEscritos);
+  const excedido = contrato !== datos.contrato ? lectura.contratos.find((k) => k.id === datos.contrato) : undefined;
   const ofrecidas = monedasOfrecidas(monedas);
   /** Los obligatorios vacíos después de leer. El proveedor no cargado ya tiene su aviso con el alta. */
   const faltan = leida
@@ -545,7 +662,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const marca = (campo: Campo) => {
     const antes = diferencias.get(campo);
     if (antes !== undefined) return <MarcaDeDiferencia antes={antes} alRevisar={() => revisado(campo)} />;
-    return (faltan as readonly Campo[]).includes(campo) ? <MarcaDeFalta /> : null;
+    // Lo que falta al tocar guardar ya lo dice el error del campo.
+    return (faltan as readonly Campo[]).includes(campo) && errores[campo] === undefined ? <MarcaDeFalta /> : null;
   };
   const facturaVisible: Cargado | undefined = subida ?? inicial?.factura ?? facturaDeLaVersion ?? undefined;
   const alAlta = sinProveedor === null ? null : {
@@ -556,137 +674,177 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
       ? { paraPreparar: true, orden: { importe: datos.importe, moneda: datos.moneda, concepto: datos.concepto, comprobante: datos.comprobante, factura: facturaVisible } }
       : {}),
   };
+  const elegido = lectura.proveedores.find((p) => p.id === datos.proveedor);
+  /** Al modificar, el proveedor de la orden puede estar suspendido o de baja (C8P-06). */
+  const inactivo = elegido !== undefined && elegido.estado !== "activo";
+  const salteoDelElegido = bloqueado && salteo?.proveedor === datos.proveedor ? salteo.estado : null;
+  /** Sin salteo, la base no deja crear la orden (ni como borrador): no se ofrece guardar (C8P-01). */
+  const sinSalteo = bloqueado && (salteoDelElegido === "sin_salteo" || salteoDelElegido === "consultando" || salteoDelElegido === null);
+  /** Al modificar, sin tocar nada no hay qué guardar (C8P-05). */
+  const sinCambios =
+    modificar !== undefined &&
+    vistos.current !== null &&
+    (Object.keys(datos) as Campo[]).every((c) => datos[c] === vistos.current?.[c]) &&
+    factura === (modificar.version.factura_version_id ?? null);
+  const seGuarda = !sinSalteo && !inactivo && !sinCambios;
+  const idProveedor = `${id}-proveedor`;
+  const idImporte = `${id}-importe`;
+  const idConcepto = `${id}-concepto`;
 
   return (
-    <form ref={formulario} className="formulario tarjeta" onSubmit={guardar} aria-labelledby={`${id}-form`}>
-      <h2 id={`${id}-form`}>{modificar === undefined ? "Preparar una orden" : "Modificar la orden"}</h2>
-      {/* Se avisa al abrir, no después de completar todo (P-32). */}
-      {modificar?.pierdeAprobaciones === true && <p className="aviso-info" role="note">{AVISO_MODIFICAR}</p>}
-      <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
-        deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
-        alCargar={(c) => {
-          setSubida(c);
-          cargarFactura(c);
-        }}
-        alLeer={leerFactura} alEsperar={setFacturaEnEspera} quedaPorRevisar={quedaPorRevisar} />
-      {alAlta !== null && (
-        <div className="aviso-info" role="note">
-          <p>
-            El proveedor de la factura no está cargado en este edificio
-            {sinProveedor?.razon_social != null && <> ({sinProveedor.razon_social})</>}.
-          </p>
-          <Link to={RUTA_PROVEEDORES} state={alAlta}>
-            Dar de alta el proveedor
-          </Link>
-        </div>
-      )}
-      <label htmlFor={`${id}-proveedor`}>Proveedor</label>
-      <select id={`${id}-proveedor`} required value={datos.proveedor} disabled={enviando}
-        onChange={(e) => cambiar("proveedor", e.target.value)}>
-        <option value="" disabled>
-          Elegir un proveedor
-        </option>
-        {lectura.proveedores
-          .filter((p) => p.estado === "activo" || p.id === datos.proveedor)
-          .map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.razon_social}
-            </option>
-          ))}
-      </select>
-      {marca("proveedor")}
-      <label htmlFor={`${id}-importe`}>Importe</label>
-      <CampoImporte id={`${id}-importe`} valor={datos.importe} deshabilitado={enviando}
-        alCambiar={(texto) => cambiar("importe", texto)} />
-      {marca("importe")}
-      {monedaAjena !== null && (
-        <p className="marca-lectura" role="alert">
-          {textoMonedaAjena(monedaAjena, !conCampoMoneda(monedas))}{" "}
-          <button type="button" className="sutil" onClick={() => setMonedaAjena(null)}>
-            Está bien
-          </button>
-        </p>
-      )}
-      {/* Solo en un edificio que opera en más de una moneda (P-14); si no, la orden va en pesos. */}
-      {conCampoMoneda(monedas) && (
-        <>
-          <label htmlFor={`${id}-moneda`}>Moneda</label>
-          <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
-            {ofrecidas.map((m) => (
-              <option key={m} value={m}>
-                {NOMBRE_MONEDA[m]}
-              </option>
-            ))}
-          </select>
-          {marca("moneda")}
-        </>
-      )}
-      {/* Solo si el proveedor elegido tiene un contrato vigente en esa moneda (P-14). */}
-      {aplicables.length > 0 && (
-        <>
-          <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
-          <select id={`${id}-contrato`} value={datos.contrato} disabled={enviando}
-            onChange={(e) => cambiar("contrato", e.target.value)}>
-            <option value="">Ninguno</option>
-            {aplicables.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.alcance} (hasta {importe(k.importe_maximo_centavos, k.moneda)})
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-      <label htmlFor={`${id}-concepto`}>Concepto</label>
-      <input id={`${id}-concepto`} required maxLength={300} value={datos.concepto} disabled={enviando}
-        onChange={(e) => cambiar("concepto", e.target.value)} />
-      {marca("concepto")}
-      <label htmlFor={`${id}-comprobante`}>Número de la factura (opcional)</label>
-      <input id={`${id}-comprobante`} maxLength={200} value={datos.comprobante} disabled={enviando}
-        onChange={(e) => cambiar("comprobante", e.target.value)} />
-      {marca("comprobante")}
-      <label>
-        <input type="checkbox" checked={datos.reserva} disabled={enviando}
-          onChange={(e) => cambiar("reserva", e.target.checked)} />{" "}
-        Usa el fondo de reserva (siempre lo aprueba el Consejo)
-      </label>
-      <p>Tildar solo si este gasto se paga con el fondo de reserva.</p>
-      {parecida !== null && (
-        <div className="aviso-info" role="alert">
-          <p>{textoParecidaAntes(fechaCorta(parecida.creada_en))}</p>
-          <div className="acciones">
-            <button type="button" className="secundario" disabled={enviando} onClick={() => {
-              guardarIgual.current = JSON.stringify({ proveedor_id: datos.proveedor, importe_centavos: aCentavos(datos.importe), moneda: datos.moneda });
-              setParecida(null);
-              formulario.current?.requestSubmit();
-            }}>
-              {GUARDAR_IGUAL}
-            </button>
-            <Link to={rutaFicha(parecida.orden_id)} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
-              {VER_LA_OTRA}
+    <>
+      <form ref={formulario} className="formulario tarjeta" onSubmit={guardar} noValidate
+        aria-label={modificar === undefined ? "Preparar una orden" : "Modificar la orden"}>
+        {/* Se avisa al abrir, no después de completar todo (P-32). */}
+        {modificar?.pierdeAprobaciones === true && <p className="aviso-info" role="note">{AVISO_MODIFICAR}</p>}
+        <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
+          deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
+          alCargar={(c) => {
+            setSubida(c);
+            cargarFactura(c);
+          }}
+          alLeer={leerFactura} alEsperar={setFacturaEnEspera} quedaPorRevisar={quedaPorRevisar} />
+        {alAlta !== null && (
+          <div className="aviso-info" role="note">
+            <p>
+              El proveedor de la factura no está cargado en este edificio
+              {sinProveedor?.razon_social != null && <> ({sinProveedor.razon_social})</>}.
+            </p>
+            <Link to={RUTA_PROVEEDORES} state={alAlta}>
+              Dar de alta el proveedor
             </Link>
           </div>
-        </div>
-      )}
-      {facturaEnEspera && (
-        <p id={`${id}-espera`} className="aviso-info">
-          {TEXTO_ESPERA_PARA_GUARDAR}
-        </p>
-      )}
-      <div className="acciones">
-        <button type="submit" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
-          aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "enviar")}>
-          {modificar === undefined ? "Guardar y enviar a aprobar" : modificar.pierdeAprobaciones ? "Guardar y enviar a aprobar de nuevo" : "Guardar la orden"}
-        </button>
-        {modificar === undefined && (
-          <button type="submit" className="secundario" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
-            aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "borrador")}>
-            Guardar como borrador
-          </button>
         )}
-        <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
-          Cancelar
-        </button>
-      </div>
-    </form>
+        <label htmlFor={idProveedor}>Proveedor</label>
+        <select id={idProveedor} value={datos.proveedor} disabled={enviando} {...marcaDe(idProveedor, errores.proveedor)}
+          onChange={(e) => cambiar("proveedor", e.target.value)}>
+          <option value="" disabled>
+            Elegir un proveedor
+          </option>
+          {lectura.proveedores
+            .filter((p) => p.estado === "activo" || p.id === datos.proveedor)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {lectura.modo === "bloquear" && lectura.sinDocumentacion.has(p.id) ? `${p.razon_social} ${MARCA_SIN_DOCUMENTACION}` : p.razon_social}
+              </option>
+            ))}
+        </select>
+        <ErrorDeCampo idCampo={idProveedor} mensaje={errores.proveedor} />
+        {marca("proveedor")}
+        {inactivo && <ComandoNoDisponible motivo={PROVEEDOR_INACTIVO} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />}
+        {salteoDelElegido === "sin_salteo" && (
+          <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />
+        )}
+        {salteoDelElegido === "sin_saber" && (
+          <ComandoNoDisponible motivo={SIN_DOCUMENTACION_SIN_SABER} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />
+        )}
+        {salteoDelElegido === "vigente" && <p className="aviso-pendiente" role="note">{CON_SALTEO}</p>}
+        {salteoDelElegido === "consultando" && <p role="status">Consultando si hay un salteo por urgencia…</p>}
+        <label htmlFor={idImporte}>Importe</label>
+        <CampoImporte id={idImporte} valor={datos.importe} deshabilitado={enviando} {...marcaDe(idImporte, errores.importe)}
+          alCambiar={(texto) => cambiar("importe", texto)} />
+        <ErrorDeCampo idCampo={idImporte} mensaje={errores.importe} />
+        {marca("importe")}
+        {monedaAjena !== null && (
+          <p className="marca-lectura" role="alert">
+            {textoMonedaAjena(monedaAjena, !conCampoMoneda(monedas))}{" "}
+            <button type="button" className="sutil" onClick={() => setMonedaAjena(null)}>
+              Está bien
+            </button>
+          </p>
+        )}
+        {/* Solo en un edificio que opera en más de una moneda (P-14); si no, la orden va en pesos. */}
+        {conCampoMoneda(monedas) && (
+          <>
+            <label htmlFor={`${id}-moneda`}>Moneda</label>
+            <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
+              {ofrecidas.map((m) => (
+                <option key={m} value={m}>
+                  {NOMBRE_MONEDA[m]}
+                </option>
+              ))}
+            </select>
+            {marca("moneda")}
+          </>
+        )}
+        {/* Solo si el proveedor elegido tiene un contrato vigente en esa moneda (P-14) que cubra el importe. */}
+        {ofrecidos.length > 0 && (
+          <>
+            <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
+            <select id={`${id}-contrato`} value={contrato} disabled={enviando}
+              onChange={(e) => cambiar("contrato", e.target.value)}>
+              <option value="">Ninguno</option>
+              {ofrecidos.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.alcance} (hasta {importe(k.importe_maximo_centavos, k.moneda)})
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {excedido !== undefined && (
+          <p className="aviso-pendiente" role="note">
+            {textoContratoExcedido(importe(excedido.importe_maximo_centavos, excedido.moneda))}
+          </p>
+        )}
+        <label htmlFor={idConcepto}>Concepto</label>
+        <input id={idConcepto} maxLength={300} value={datos.concepto} disabled={enviando} {...marcaDe(idConcepto, errores.concepto)}
+          onChange={(e) => cambiar("concepto", e.target.value)} />
+        <ErrorDeCampo idCampo={idConcepto} mensaje={errores.concepto} />
+        {marca("concepto")}
+        <label htmlFor={`${id}-comprobante`}>Número de la factura (opcional)</label>
+        <input id={`${id}-comprobante`} maxLength={200} value={datos.comprobante} disabled={enviando}
+          onChange={(e) => cambiar("comprobante", e.target.value)} />
+        {marca("comprobante")}
+        <label>
+          <input type="checkbox" checked={datos.reserva} disabled={enviando}
+            onChange={(e) => cambiar("reserva", e.target.checked)} />{" "}
+          Usa el fondo de reserva (siempre lo aprueba el Consejo)
+        </label>
+        {facturaEnEspera && (
+          <p id={`${id}-espera`} className="aviso-info">
+            {TEXTO_ESPERA_PARA_GUARDAR}
+          </p>
+        )}
+        {sinCambios && <p role="note">{SIN_CAMBIOS}</p>}
+        <div className="acciones">
+          {seGuarda && (
+            <button type="submit" disabled={enviando || facturaEnEspera}
+              aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "enviar")}>
+              {modificar === undefined ? "Guardar y enviar a aprobar" : modificar.pierdeAprobaciones ? "Guardar y enviar a aprobar de nuevo" : "Guardar la orden"}
+            </button>
+          )}
+          {seGuarda && modificar === undefined && (
+            <button type="submit" className="secundario" disabled={enviando || facturaEnEspera}
+              aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "borrador")}>
+              Guardar como borrador
+            </button>
+          )}
+          <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+            Cancelar
+          </button>
+        </div>
+      </form>
+      {/* La pregunta de la orden parecida, en su ventana (ORD-06): fuera del formulario, para que su
+          envío no sea el de la orden; mientras está abierta, los botones de guardar no quedan a mano. */}
+      {parecida !== null && (
+        <VentanaDeFormulario titulo={TITULO_PARECIDA} textoEnviar={GUARDAR_IGUAL} alCerrar={() => setParecida(null)}
+          alEnviar={() => {
+            guardarIgual.current = JSON.stringify({ proveedor_id: datos.proveedor, importe_centavos: centavosEscritos, moneda: datos.moneda });
+            formulario.current?.requestSubmit();
+            return "cerrar";
+          }}>
+          <p>
+            {textoParecidaAntes(fechaCorta(parecida.creada_en))} {NOMBRE_ESTADO[parecida.estado_visible]}.
+          </p>
+          {/* En otra pestaña: lo escrito en el formulario no se pierde. */}
+          <p>
+            <Link to={rutaFicha(parecida.orden_id)} target="_blank" rel="noopener" className="enlace-suelto">
+              {VER_LA_OTRA}
+            </Link>
+          </p>
+        </VentanaDeFormulario>
+      )}
+    </>
   );
 }

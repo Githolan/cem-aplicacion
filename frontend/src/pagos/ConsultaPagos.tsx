@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useId, useState } from "react";
-import { Link } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
@@ -11,14 +11,23 @@ import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
 import { CargandoPagos } from "./CargandoPagos";
-import { RUTA_PAGOS, rutaFicha } from "./rutas";
-import { fechaCorta, FILTROS, type Filtro, NOMBRE_ESTADO, TONO_ESTADO } from "./textos";
+import { FilaEnlace } from "./FilaEnlace";
+import { RUTA_CONSULTA, RUTA_PAGOS, rutaFicha } from "./rutas";
+import { fechaCorta, FILTROS, type Filtro, NOMBRE_ESTADO } from "./textos";
 
-// `/pagos/consulta`: lo cerrado y lo que se busca (§11). Abre la misma ficha.
+// `/pagos/consulta`: lo cerrado y lo que se busca (§11). Abre la misma ficha, sola, y su «volver»
+// regresa acá con lo buscado: la búsqueda y el filtro van en la dirección (CNS-01). Cada pago es
+// una fila compacta, como el Padrón: proveedor; estado, fecha e importe (CNS-02). El concepto y el
+// número de operación están en la ficha.
 
 type Elemento = components["schemas"]["ElementoConsultaPagos"];
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[]; siguiente: number | null };
-type Pedido = { busqueda: string; filtro: Filtro; saltar: number };
+
+const PARAM_BUSQUEDA = "busqueda";
+const PARAM_FILTRO = "filtro";
+const FILTRO_INICIAL: Filtro = "todos";
+
+const filtroDe = (valor: string | null): Filtro => FILTROS.find((f) => f.valor === valor)?.valor ?? FILTRO_INICIAL;
 
 export function ConsultaPagos() {
   const elegido = useConsorcio(REQUISITOS.pagos);
@@ -27,8 +36,13 @@ export function ConsultaPagos() {
 
 function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
-  const [escrito, setEscrito] = useState("");
-  const [pedido, setPedido] = useState<Pedido>({ busqueda: "", filtro: "todos", saltar: 0 });
+  const { search } = useLocation();
+  const [parametros, setParametros] = useSearchParams();
+  const busqueda = parametros.get(PARAM_BUSQUEDA) ?? "";
+  const filtro = filtroDe(parametros.get(PARAM_FILTRO));
+  const [escrito, setEscrito] = useState(busqueda);
+  /** Cuántos saltear: «Ver más» pide la página siguiente; una consulta nueva vuelve a cero. */
+  const [saltar, setSaltar] = useState(0);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [vuelta, setVuelta] = useState(0);
@@ -36,7 +50,6 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   useEffect(() => {
     if (consorcio === "") return;
     let vigente = true;
-    const { busqueda, filtro, saltar } = pedido;
     // Si falla «Ver más», lo ya cargado queda y el mismo botón vuelve a pedir esa página.
     const falla = (l: Lectura): Lectura => (saltar > 0 && l.tipo === "ok" ? l : { tipo: "sin_servicio" });
     void api
@@ -75,12 +88,22 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     return () => {
       vigente = false;
     };
-  }, [consorcio, pedido, vuelta, aEntrar, aInicio]);
+  }, [consorcio, busqueda, filtro, saltar, vuelta, aEntrar, aInicio]);
 
-  /** Otra consulta empieza de cero: lo cargado y su «Ver más» eran de la anterior. */
-  function consultar(cambio: Partial<Pedido>) {
+  /** Otra consulta empieza de cero: lo cargado y su «Ver más» eran de la anterior. Queda en la
+   * dirección, sin sumar pasos al historial, para volver a ella desde la ficha. */
+  function consultar(cambio: { busqueda?: string; filtro?: Filtro }) {
+    const nueva = { busqueda: cambio.busqueda ?? busqueda, filtro: cambio.filtro ?? filtro };
     setLectura({ tipo: "cargando" });
-    setPedido((p) => ({ ...p, ...cambio, saltar: 0 }));
+    setSaltar(0);
+    setVuelta((v) => v + 1);
+    setParametros(
+      {
+        ...(nueva.busqueda === "" ? {} : { [PARAM_BUSQUEDA]: nueva.busqueda }),
+        ...(nueva.filtro === FILTRO_INICIAL ? {} : { [PARAM_FILTRO]: nueva.filtro }),
+      },
+      { replace: true },
+    );
   }
 
   function buscar(evento: FormEvent) {
@@ -89,6 +112,8 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   }
 
   const siguiente = lectura.tipo === "ok" ? lectura.siguiente : null;
+  /** Adonde vuelve la ficha abierta desde acá: esta consulta, con lo buscado. */
+  const volver = `${RUTA_CONSULTA}${search}`;
 
   return (
     <>
@@ -107,7 +132,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           </form>
           <div className="filtros-pago" role="group" aria-label="Filtrar">
             {FILTROS.map((f) => (
-              <button key={f.valor} type="button" className="secundario" aria-pressed={pedido.filtro === f.valor}
+              <button key={f.valor} type="button" className="secundario" aria-pressed={filtro === f.valor}
                 onClick={() => consultar({ filtro: f.valor })}>
                 {f.texto}
               </button>
@@ -126,51 +151,36 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           )}
           {lectura.tipo === "ok" && lectura.elementos.length === 0 && <p className="tarjeta">No se encontraron pagos.</p>}
           {lectura.tipo === "ok" && lectura.elementos.length > 0 && (
-            <div className="tabla-lista tabla-tarjetas">
-              <table aria-label="Pagos">
-                <thead>
-                  <tr>
-                    <th scope="col">Proveedor</th>
-                    <th scope="col">Estado y fecha</th>
-                    <th scope="col">Operación</th>
-                    <th scope="col">Importe</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lectura.elementos.map((e) => (
-                    <tr key={e.orden_id}>
-                      <th scope="row">
-                        <Link to={rutaFicha(e.orden_id)} state={{ consorcio }} className="enlace-fila">
-                          {e.proveedor}
-                        </Link>
-                        <p className="tabla-lista__dato">{e.concepto}</p>
-                      </th>
-                      {/* La fecha va debajo del estado: la tabla no se ensancha (decisión 11). */}
-                      <td data-etiqueta="Estado y fecha">
-                        <span className="fila-pago__verbo" data-tono={TONO_ESTADO[e.estado_visible]}>
-                          {NOMBRE_ESTADO[e.estado_visible]}
-                        </span>
-                        <p className="tabla-lista__dato">
-                          <time dateTime={e.creada_en}>{fechaCorta(e.creada_en)}</time>
-                        </p>
-                      </td>
-                      <td data-etiqueta="Operación">{e.numero_operacion}</td>
-                      <td data-etiqueta="Importe">
-                        <div>
-                          {importe(e.importe_centavos, e.moneda)}
-                          {e.importe_pagado_centavos !== null && <p className="tabla-lista__dato">Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</p>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="filas-registro" aria-label="Pagos">
+              {lectura.elementos.map((e) => (
+                <li key={e.orden_id}>
+                  <FilaEnlace
+                    a={rutaFicha(e.orden_id)}
+                    estadoNavegacion={{ consorcio, volver }}
+                    titulo={e.proveedor}
+                    resumen={
+                      <>
+                        {NOMBRE_ESTADO[e.estado_visible]} · <time dateTime={e.creada_en}>{fechaCorta(e.creada_en)}</time> ·{" "}
+                        {importe(e.importe_centavos, e.moneda)}
+                        {e.importe_pagado_centavos !== null && <> · Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</>}
+                      </>
+                    }
+                  />
+                </li>
+              ))}
+            </ul>
           )}
           {siguiente !== null && (
             <div className="formulario">
-              <button type="button" className="secundario"
-                onClick={() => setPedido((p) => ({ ...p, saltar: siguiente }))}>
+              <button
+                type="button"
+                className="secundario"
+                onClick={() => {
+                  setSaltar(siguiente);
+                  // Si falló, `saltar` no cambia y el mismo botón tiene que volver a pedir.
+                  setVuelta((v) => v + 1);
+                }}
+              >
                 Ver más
               </button>
             </div>

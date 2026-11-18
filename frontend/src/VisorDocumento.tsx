@@ -14,8 +14,9 @@ import { abrirPdf } from "./pagos/pdf";
 // PDF, dibujados en un `<canvas>`, para que se vean igual en una PWA de iOS. Lo mismo sirve dentro
 // de la pantalla (el comprobante de un pago) y en una hoja más ancha que se abre con «Ver».
 
-/** Un comprobante son una o dos páginas y un documento rara vez pasa de unas pocas; a lo sumo se dibujan estas. */
-const PAGINAS_A_DIBUJAR = 5;
+/** Un comprobante son una o dos páginas y un documento rara vez pasa de unas pocas: se dibujan de a
+ * estas, y «Ver las siguientes» suma otras tantas en la misma hoja (DOC-15 del informe de fricción). */
+export const PAGINAS_A_DIBUJAR = 5;
 const FALLA_PDF = "No se pudo mostrar este PDF.";
 
 export type LecturaDelArchivo = { tipo: "cargando" } | { tipo: "falla"; texto: string } | { tipo: "ok"; archivo: Blob };
@@ -78,6 +79,8 @@ function Pdf({ archivo, nombre }: { archivo: Blob; nombre: string }) {
   const paginas = useRef<HTMLDivElement>(null);
   const [falla, setFalla] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
+  /** Hasta qué página se dibuja: crece con «Ver las siguientes». */
+  const [hasta, setHasta] = useState(PAGINAS_A_DIBUJAR);
 
   useEffect(() => {
     const destino = paginas.current;
@@ -89,7 +92,7 @@ function Pdf({ archivo, nombre }: { archivo: Blob; nombre: string }) {
       const tarea = await abrirPdf(new Uint8Array(await archivo.arrayBuffer()));
       cerrar = () => void tarea.destroy();
       const documento = await tarea.promise;
-      const cantidad = Math.min(documento.numPages, PAGINAS_A_DIBUJAR);
+      const cantidad = Math.min(documento.numPages, hasta);
       for (let numero = 1; numero <= cantidad && vigente; numero += 1) {
         const pagina = await documento.getPage(numero);
         const escala = (lugar.clientWidth / pagina.getViewport({ scale: 1 }).width) * window.devicePixelRatio;
@@ -115,14 +118,17 @@ function Pdf({ archivo, nombre }: { archivo: Blob; nombre: string }) {
       cerrar();
       destino.replaceChildren();
     };
-  }, [archivo, nombre]);
+  }, [archivo, nombre, hasta]);
 
   return (
     <>
       <div ref={paginas} />
-      {total !== null && total > PAGINAS_A_DIBUJAR && (
+      {total !== null && total > hasta && (
         <p>
-          Se ven las primeras {PAGINAS_A_DIBUJAR} páginas de {total}.
+          Se ven las primeras {hasta} páginas de {total}.{" "}
+          <button type="button" className="secundario" onClick={() => setHasta((h) => h + PAGINAS_A_DIBUJAR)}>
+            Ver las siguientes
+          </button>
         </p>
       )}
       {falla && (

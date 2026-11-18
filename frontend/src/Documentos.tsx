@@ -1,12 +1,25 @@
-import { type FormEvent, type MouseEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { hoyDelDispositivo, TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "./archivos";
+import { ComandoNoDisponible } from "./ComandoNoDisponible";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe as resumenDeErrores, REVISAR_DATO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
+import {
+  ErrorDeCampo,
+  type ErroresDeCampo,
+  erroresDe,
+  faltaCompletar,
+  hayErrores,
+  marcaDe,
+  resumenDe as resumenDeErrores,
+  REVISAR_DATO,
+  SIN_ERRORES,
+  sinElDe,
+  soloDe,
+} from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import {
@@ -24,6 +37,7 @@ import { useConsultaDelAntivirus } from "./egresos/useConsorcio";
 import { SubirArchivo } from "./SubirArchivo";
 import { VisorDocumento } from "./VisorDocumento";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
+import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
 // documentos del edificio por categoría, con sus versiones, y la carga en dos pasos (se crea el
@@ -40,6 +54,11 @@ import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 // facultad `documentos.ver` (`documentos.ver_restringidos`), con un motivo obligatorio. No se borra
 // nada: el documento sale de la lista y queda en la exportación y en la auditoría. El servidor lo
 // niega si el documento respalda algo guardado.
+//
+// Informe de fricción (tandas 1 y 7, 17-11-2026): toda carga va en su ventana, también la de quien
+// solo carga (DOC-01, DOC-02); los avisos van arriba (DOC-09); la lista no tiene «Actualizar»: se
+// vuelve a pedir sola y, si eso falla, lo dice con «Consultar de nuevo» (DOC-06, DOC-14); después de
+// una carga o un retiro queda a la vista mientras llega la nueva (DOC-13).
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Documento = components["schemas"]["DocumentoEnLista"];
@@ -71,8 +90,8 @@ const LARGO_TITULO = 200;
 /** El tope del motivo de un retiro (`LARGO_MAXIMO_MOTIVO_RETIRO` del contrato). */
 export const LARGO_MOTIVO_RETIRO = 300;
 export const RETIRAR_DOCUMENTO = "Retirar el documento";
-export const AYUDA_RETIRO =
-  "El documento deja de aparecer en la lista. No se borra: queda en la exportación del edificio y en la auditoría. Si respalda una orden, un pago, un proveedor, un contrato o el acta de una decisión, no se puede retirar.";
+/** Una sola línea (DOC-04): que no respalde nada ya lo controló la ficha, que no ofrece el retiro. */
+export const AYUDA_RETIRO = "No se borra: queda en la exportación y en la auditoría.";
 const BYTES_POR_KB = 1024;
 const BYTES_POR_MB = 1024 * 1024;
 /** Un texto con algo más que espacios. */
@@ -113,6 +132,9 @@ const TEXTO_CAMPO: Record<string, string> = {
  *  son los teléfonos y correos (G-08). */
 export const MENSAJES_PROPIOS: Record<string, string> = { titulo: "El título no puede llevar teléfonos ni correos." };
 const FALTA_ARCHIVO = "Falta elegir el archivo.";
+/** C8G-08: con un archivo en revisión no se ofrece subir otro; se dice por qué y que la ficha sigue sola. */
+export const ARCHIVO_EN_REVISION =
+  "Hay un archivo en revisión del antivirus: cuando termine se puede subir otra versión. La ficha se actualiza sola.";
 
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
 const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeStyle: "short" });
@@ -198,7 +220,6 @@ const vacio = (): Datos => ({ categoria: "actas_y_decisiones", titulo: "", fecha
 /** Lo que dice si algo guardado cita el documento (G-02): en lugar del botón que no puede andar. */
 export const RESPALDA_ALGO =
   "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede retirar.";
-export const AYUDA_FECHA = "La fecha que figura en el documento; si no figura, la de hoy.";
 
 type Pantalla =
   | { tipo: "cargando" }
@@ -208,13 +229,12 @@ type Pantalla =
 
 const SIN_EDIFICIOS: readonly Consorcio[] = [];
 
-/** `solo_carga`: quien carga sin acceso a la lista (el administrador externo, documento 08 §4). */
-type Lectura = { tipo: "cargando" } | { tipo: "solo_carga" } | { tipo: "sin_servicio" } | { tipo: "ok"; documentos: Documento[] };
+/** `solo_carga`: quien carga sin acceso a la lista (el administrador externo, documento 08 §4).
+ * `sin_servicio` lleva el motivo, que se dice una vez, junto a «Consultar de nuevo» (DOC-14). */
+type Lectura = { tipo: "cargando" } | { tipo: "solo_carga" } | { tipo: "sin_servicio"; motivo: string } | { tipo: "ok"; documentos: Documento[] };
 
-/** El formulario abierto: el de un documento nuevo, o el de subir el archivo de uno que ya existe. */
+/** La ventana abierta: la de un documento nuevo, o la de subir el archivo de uno que ya existe. */
 type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: string };
-
-const NUEVO: Abierto = { tipo: "nuevo" };
 
 type Aviso = { texto: string; ok: boolean };
 /** Un archivo subido por quien solo carga, a la espera del antivirus (G-09), con las consultas
@@ -281,6 +301,17 @@ function admiteOtraVersion(d: Documento): boolean {
   return d.versiones.some((v) => v.estado === "disponible") && !d.versiones.some((v) => v.estado === "en_cuarentena");
 }
 
+/**
+ * Los archivos de la ficha (DOC-11): a la vista, el vigente con lo que vino después (uno en revisión o
+ * un rechazo que todavía no se reemplazó); plegados, los anteriores y los rechazos ya reemplazados.
+ * Sin ninguno disponible, a la vista queda el más nuevo.
+ */
+export function archivosDeLaFicha(versiones: readonly Version[]): { aLaVista: Version[]; anteriores: Version[] } {
+  const vigente = versiones.findIndex((v) => v.estado === "disponible");
+  const corte = vigente === -1 ? Math.min(1, versiones.length) : vigente + 1;
+  return { aLaVista: versiones.slice(0, corte), anteriores: versiones.slice(corte) };
+}
+
 /** El resumen de la fila: la fecha y el estado del archivo más nuevo; el detalle va en la ficha. */
 function resumenDe(d: Documento): string {
   const [ultima] = d.versiones;
@@ -308,14 +339,19 @@ export function Documentos() {
   const quedaLaCarga = sabeQueAlcanza && carga;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [abierto, setAbierto] = useState<Abierto | null>(null);
-  // Quien solo carga no tiene otra cosa que hacer en la pantalla: el formulario ya está abierto y no
-  // hay a qué volver. No toma el foco al llegar: eso queda para cuando la persona abre uno.
+  // Quien solo carga ve el botón y el estado de lo que subió; la carga, como para todos, en su ventana (DOC-02).
   const soloCarga = lectura.tipo === "solo_carga";
-  const formulario = abierto ?? (soloCarga ? NUEVO : null);
+  const formulario = abierto;
   const [datos, setDatos] = useState<Datos>(vacio);
   const [archivo, setArchivo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** El refresco de la lista falló: la lista a la vista puede estar vieja (DOC-06). */
+  const [refrescoFallido, setRefrescoFallido] = useState<string | null>(null);
+  /** Por qué no se pudo bajar un archivo: se dice en su ficha, que no se cierra (DOC-05). */
+  const [fallaDescarga, setFallaDescarga] = useState<{ documento: string; texto: string } | null>(null);
+  /** El «Listo» de una carga y su archivo: se va cuando la lista lo muestra fuera de revisión (DOC-08). */
+  const listoDeLaCarga = useRef<{ version: string; texto: string } | null>(null);
   /** Los campos del documento nuevo que rechazó la API, con su motivo (G-08). */
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** La versión que se está mirando en la hoja de «Ver». */
@@ -328,8 +364,10 @@ export function Documentos() {
   // cambiar los datos o el archivo.
   const claveCrear = useRef<string | null>(null);
   const claveSubir = useRef<string | null>(null);
-  /** El retiro abierto en la ficha: el documento y el motivo escrito. */
+  /** El retiro abierto en su ventana, sobre la ficha: el documento y el motivo escrito. */
   const [retiro, setRetiro] = useState<{ documento: string; motivo: string } | null>(null);
+  /** El motivo del retiro, si falta (decisión 4: el botón queda activo y marca el campo). */
+  const [erroresRetiro, setErroresRetiro] = useState<ErroresDeCampo>(SIN_ERRORES);
   const claveRetiro = useRef<string | null>(null);
   const primerCampo = useRef<HTMLElement | null>(null);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
@@ -349,31 +387,24 @@ export function Documentos() {
   // El próximo pedido de la lista es el refresco automático: si falla, la lista a la vista no se pierde.
   const refrescoAutomatico = useRef(false);
 
+  // El foco va al aviso cuando termina un acto. Con una ventana abierta se espera a que se cierre: al
+  // cerrarse, `Hoja` devuelve el foco a lo que la abrió, y recién entonces pasa al aviso.
   useEffect(() => {
-    if (abierto !== null) primerCampo.current?.focus();
-  }, [abierto]);
-
-  // El foco va al aviso cuando termina un envío, o cuando el archivo se rechaza sin enviar nada.
-  useEffect(() => {
-    if (enviando || !alAviso.current || aviso === null) return;
+    if (enviando || abierto !== null || !alAviso.current || aviso === null) return;
     alAviso.current = false;
     textoAviso.current?.focus();
-  }, [enviando, aviso]);
+  }, [enviando, aviso, abierto]);
 
   // Sin sesión no queda ninguna copia de /contactos, igual que en las demás páginas con sesión.
   function bajar(evento: MouseEvent<HTMLAnchorElement>, documento: string, version: string) {
     evento.preventDefault();
-    setAviso(null);
-    // El aviso queda al final de la página: sin el foco, tocar «Descargar» parece no hacer nada. Se
-    // marca recién con la falla, para que una descarga buena no le deje el foco a un aviso posterior.
-    // Una falla que llega con otro edificio ya elegido es de un documento que ya no está a la vista.
+    setFallaDescarga(null);
+    // DOC-05: la falla se dice en la ficha, que sigue abierta. Una falla que llega con otro edificio ya
+    // elegido es de un documento que ya no está a la vista.
     const pedidoEn = consorcio;
     const fallo = (texto: string) => {
       if (consorcioVigente.current !== pedidoEn) return;
-      alAviso.current = true;
-      setAviso({ texto, ok: false });
-      // El aviso está en la página, debajo de la ficha: la ficha se cierra para que lo tome el foco.
-      cerrarFichaDe(false);
+      setFallaDescarga({ documento, texto });
     };
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
@@ -482,37 +513,31 @@ export function Documentos() {
     let vigente = true;
     const automatico = refrescoAutomatico.current;
     refrescoAutomatico.current = false;
-    // El refresco que falla deja la lista y un formulario abierto como están, dice que puede estar
-    // vieja y no sigue solo (`setLectura` no cambia, así que no se programa otro): queda «Actualizar».
-    const fallaAutomatica = (falla: string) =>
-      setAviso((actual) =>
-        actual !== null && !actual.ok ? actual : { texto: `${falla} La lista puede no estar al día: «Actualizar» la vuelve a pedir.`, ok: false },
-      );
+    // El refresco que falla deja la lista y una ventana abierta como están, dice en la lista que puede
+    // estar vieja y no sigue solo (`setLectura` no cambia, así que no se programa otro): queda
+    // «Consultar de nuevo» junto a ese aviso (DOC-06).
+    const fallaAutomatica = (falla: string) => setRefrescoFallido(falla);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, error, response }) => {
         exigirSesion(response);
         // Una lista pedida antes de un cambio, o de otro edificio, puede llegar después.
         if (!vigente) return;
-        if (data !== undefined) setLectura({ tipo: "ok", documentos: data.documentos });
-        else if (response.status === ESTADO.sinPermiso) {
+        if (data !== undefined) {
+          setRefrescoFallido(null);
+          setLectura({ tipo: "ok", documentos: data.documentos });
+        } else if (response.status === ESTADO.sinPermiso) {
           if (quedaLaCarga) setLectura({ tipo: "solo_carga" });
           else navegar(RUTA_INICIO, { replace: true });
         } else if (automatico) fallaAutomatica(mensajeDeFalla(response.status, codigoDe(error)));
-        else {
-          setLectura({ tipo: "sin_servicio" });
-          const falla = mensajeDeFalla(response.status, codigoDe(error));
-          setAviso((actual) => (actual === null ? { texto: falla, ok: false } : actual));
-        }
+        // DOC-14: el motivo, una vez, en la lista y junto a «Consultar de nuevo».
+        else setLectura({ tipo: "sin_servicio", motivo: mensajeDeFalla(response.status, codigoDe(error)) });
       })
       .catch((e: unknown) => {
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
         else if (automatico) fallaAutomatica(SIN_CONEXION);
-        else {
-          setLectura({ tipo: "sin_servicio" });
-          setAviso((actual) => (actual === null ? { texto: SIN_CONEXION, ok: false } : actual));
-        }
+        else setLectura({ tipo: "sin_servicio", motivo: SIN_CONEXION });
       });
     return () => {
       vigente = false;
@@ -530,8 +555,24 @@ export function Documentos() {
     return () => clearTimeout(espera);
   }, [lectura]);
 
+  // DOC-08: el «Listo» de una carga se va cuando la lista ya muestra ese archivo fuera de revisión.
+  useEffect(() => {
+    const listo = listoDeLaCarga.current;
+    if (listo === null || lectura.tipo !== "ok") return;
+    const version = lectura.documentos.flatMap((d) => d.versiones).find((v) => v.id === listo.version);
+    if (version === undefined || version.estado === "en_cuarentena") return;
+    listoDeLaCarga.current = null;
+    setAviso((actual) => (actual?.texto === listo.texto ? null : actual));
+  }, [lectura]);
+
+  /**
+   * Vuelve a pedir la lista. Con la lista a la vista, como el refresco automático: queda mientras
+   * llega la nueva y, si falla, sigue con el aviso de que puede estar vieja (DOC-13).
+   */
   function volverAPedir() {
-    setLectura({ tipo: "cargando" });
+    if (lectura.tipo === "ok") refrescoAutomatico.current = true;
+    else setLectura({ tipo: "cargando" });
+    setRefrescoFallido(null);
     setVuelta((v) => v + 1);
   }
 
@@ -575,7 +616,6 @@ export function Documentos() {
 
   function elegirArchivo(elegido: File) {
     claveSubir.current = null;
-    setAviso((actual) => (actual?.texto === FALTA_ARCHIVO ? null : actual));
     setArchivo(elegido);
     // El nombre del archivo propone el título (G-06), sin pisar uno que la persona escribió.
     const propuesto = tituloDeArchivo(elegido, "", LARGO_TITULO);
@@ -585,31 +625,51 @@ export function Documentos() {
     }
   }
 
-  function enviar(evento: FormEvent) {
-    evento.preventDefault();
-    if (formulario === null) return;
+  /**
+   * El botón de la ventana de carga (DOC-01): lo que falta se marca sin enviar (decisión 4); un
+   * documento nuevo se crea y después se sube su archivo, en un solo envío. El rechazo queda en la
+   * ventana; si el documento se creó y el archivo no entró, la misma ventana pasa a subir solo el
+   * archivo de ese documento.
+   */
+  async function enviarCarga(): Promise<FinDeEnvio> {
+    if (formulario === null) return "cerrar";
+    const faltan =
+      formulario.tipo === "nuevo"
+        ? faltaCompletar({ titulo: [datos.titulo, "Falta escribir el título."], fecha: [datos.fecha, "Falta la fecha del documento."] })
+        : SIN_ERRORES;
+    setErrores(faltan);
     // El tipo y el tamaño ya los controló `SubirArchivo` al elegirlo: un archivo que no va a entrar
     // no llega acá ni deja un documento vacío. El servidor vuelve a controlar el tipo real y el tamaño.
-    if (archivo === null) {
-      alAviso.current = true;
-      setAviso({ texto: FALTA_ARCHIVO, ok: false });
-      return;
-    }
-    alAviso.current = true;
+    if (archivo === null) return { rechazo: FALTA_ARCHIVO };
+    if (hayErrores(faltan)) return "seguir";
     setEnviando(true);
     setAviso(null);
-    if (formulario.tipo === "subir") {
-      void subir(formulario.documento, formulario.titulo, archivo, false).finally(() => setEnviando(false));
-      return;
+    try {
+      if (formulario.tipo === "subir") return await subir(formulario.documento, formulario.titulo, archivo, false);
+      const titulo = datos.titulo.trim();
+      const resultado = await crear(titulo);
+      if ("fin" in resultado) return resultado.fin;
+      return await subir(resultado.creado, titulo, archivo, true);
+    } finally {
+      setEnviando(false);
     }
-    const titulo = datos.titulo.trim();
-    void crear(titulo)
-      .then((documento) => (documento === null ? undefined : subir(documento, titulo, archivo, true)))
-      .finally(() => setEnviando(false));
   }
 
-  /** Primer paso: crea el documento. Devuelve su id, o nulo si no se creó (el aviso ya lo dice). */
-  async function crear(titulo: string): Promise<string | null> {
+  /** Subir el archivo desde la ficha, en su ventana: el rechazo queda en la ventana. */
+  async function subirDesdeLaFicha(documento: string, titulo: string): Promise<FinDeEnvio> {
+    if (archivo === null) return { rechazo: FALTA_ARCHIVO };
+    setEnviando(true);
+    setAviso(null);
+    try {
+      return await subir(documento, titulo, archivo, false);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  /** Primer paso: crea el documento. Devuelve su id o, si no se creó, cómo sigue la ventana. */
+  /** El id del documento creado, o cómo termina la ventana (Codex en #257: "seguir" no es un id). */
+  async function crear(titulo: string): Promise<{ creado: string } | { fin: FinDeEnvio }> {
     claveCrear.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos", {
@@ -623,33 +683,33 @@ export function Documentos() {
         if (renovarClave(response.status, codigo)) claveCrear.current = null;
         const marcados = soloDe(erroresDe(error, REVISAR_DATO, MENSAJES_PROPIOS), TEXTO_CAMPO);
         setErrores(marcados);
-        setAviso({ texto: mensajeDeError(response.status, codigo, "crear", Object.keys(marcados).map((c) => `body.${c}`)), ok: false });
-        return null;
+        return { fin: { rechazo: mensajeDeError(response.status, codigo, "crear", Object.keys(marcados).map((c) => `body.${c}`)) } };
       }
       claveCrear.current = null;
-      return data.id;
+      return { creado: data.id };
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else setAviso({ texto: SIN_CONEXION, ok: false });
-      return null;
+      if (!(e instanceof SinSesion)) return { fin: { rechazo: SIN_CONEXION } };
+      // La sesión se pide encima: lo escrito queda en la ventana para repetir el paso.
+      aEntrar();
+      return { fin: "seguir" };
     }
   }
 
-  /** Segundo paso: sube el archivo crudo, sin JSON ni multipart, con su tipo como `Content-Type`. */
-  async function subir(documento: string, titulo: string, elegido: File, recienCreado: boolean) {
+  /**
+   * Segundo paso: sube el archivo crudo, sin JSON ni multipart, con su tipo como `Content-Type`.
+   * Devuelve cómo terminó: el rechazo lo dice la ventana desde la que se subió.
+   */
+  async function subir(documento: string, titulo: string, elegido: File, recienCreado: boolean): Promise<FinDeEnvio> {
     claveSubir.current ??= crypto.randomUUID();
     // Si el documento se acaba de crear y el archivo no entra, el documento queda sin archivo:
     // se dice y el formulario pasa a subir solo el archivo de ese documento.
-    const fallo = (texto: string) => {
-      setAviso({
-        texto: recienCreado ? `El documento «${titulo}» quedó creado, pero el archivo no se subió. ${texto}` : texto,
-        ok: false,
-      });
+    const fallo = (texto: string): FinDeEnvio => {
       if (recienCreado) {
         claveCrear.current = null;
         setAbierto({ tipo: "subir", documento, titulo });
         actualizarLista();
       }
+      return { rechazo: recienCreado ? `El documento «${titulo}» quedó creado, pero el archivo no se subió. ${texto}` : texto };
     };
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
@@ -667,8 +727,7 @@ export function Documentos() {
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveSubir.current = null;
-        fallo(mensajeDeError(response.status, codigo, "subir", [], response.headers.has("Retry-After")));
-        return;
+        return fallo(mensajeDeError(response.status, codigo, "subir", [], response.headers.has("Retry-After")));
       }
       cerrar();
       cerrarFichaDe(false);
@@ -678,23 +737,27 @@ export function Documentos() {
         setEsperando((lista) => [...lista, { consorcio, documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA }]);
       // Ese documento ya tiene otro archivo: su rechazo anterior está atendido.
       setRechazados((lista) => lista.filter((r) => r.documento !== documento));
-      const despues = soloCarga
-        ? "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; esta pantalla avisa cuando termina."
-        : lectura.tipo === "sin_servicio"
-          ? "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; «Actualizar» muestra si ya está disponible."
-          : "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; la lista se actualiza sola.";
-      setAviso({ texto: `Listo: el archivo de «${titulo}» se subió. ${despues}`, ok: true });
+      // DOC-08: con la lista, la fila ya dice «En revisión»; sin ella (quien solo carga), el estado de lo
+      // que subió lo dice esta pantalla.
+      const texto = soloCarga
+        ? `Listo: el archivo de «${titulo}» se subió. Queda «En revisión» mientras el antivirus lo analiza; esta pantalla avisa cuando termina.`
+        : `Listo: el archivo de «${titulo}» se subió.`;
+      listoDeLaCarga.current = soloCarga ? null : { version: data.id, texto };
+      alAviso.current = true;
+      setAviso({ texto, ok: true });
       actualizarLista();
+      return "cerrar";
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else fallo(SIN_CONEXION);
+      if (!(e instanceof SinSesion)) return fallo(SIN_CONEXION);
+      // La sesión se pide encima: el archivo elegido queda para repetir el paso.
+      aEntrar();
+      return "seguir";
     }
   }
 
-  // El error de subir el archivo desde la ficha se dice en la ficha: la página de atrás queda
-  // inerte mientras está abierta (G-01).
-  const avisoEnFicha = aviso !== null && !aviso.ok && abierto?.tipo === "subir" && enSuFicha(abierto.documento);
-  const conMensaje = (aviso !== null && !avisoEnFicha) || rechazados.length > 0 || esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR) || pantalla.tipo !== "lista";
+  // El error de una carga o de un retiro se dice en su ventana: la página de atrás queda inerte
+  // mientras está abierta (G-01).
+  const conMensaje = aviso !== null || rechazados.length > 0 || esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR) || pantalla.tipo !== "lista";
 
   if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
 
@@ -702,92 +765,40 @@ export function Documentos() {
     <>
       <h1>Documentos del edificio</h1>
 
-      {pantalla.tipo === "lista" && (
-        <>
-          {edificios.length > 1 && (
-            <div className="formulario formulario-movil tarjeta">
-              <label htmlFor={`${id}-consorcio`}>Edificio</label>
-              <select
-                id={`${id}-consorcio`}
-                value={consorcio}
-                disabled={enviando}
-                onChange={(e) => {
-                  // Desde ya, lo que responda el edificio anterior se ignora (ver `consorcioVigente`).
-                  consorcioVigente.current = e.target.value;
-                  cerrar();
-                  cerrarFichaDe(false);
-                  setEsperando([]);
-                  setRechazados([]);
-                  setRetiro(null);
-                  setViendo(null);
-                  setAviso(null);
-                  setLectura({ tipo: "cargando" });
-                  setConsorcio(e.target.value);
-                }}
-              >
-                {edificios.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* G-05: la carga va arriba, antes de la lista. También sin acceso a la lista: el administrador
-              externo solo carga (documento 08 §4). Con la lista caída sigue a la vista, porque cargar no
-              depende de ella, y un formulario nuevo abierto no se va mientras llega la lista. */}
-          {carga && (lectura.tipo !== "cargando" || abierto?.tipo === "nuevo") &&
-            (formulario?.tipo === "nuevo" || (formulario?.tipo === "subir" && !enSuFicha(formulario.documento)) ? (
-              <section aria-labelledby={`${id}-carga`} className="tarjeta">
-                {formulario.tipo === "nuevo" ? (
-                  formularioNuevo(`${id}-carga`)
-                ) : (
-                  // El reintento del archivo de un documento cuya ficha no está abierta: el que se acaba
-                  // de crear, el de quien solo carga (sin acceso a la lista), una categoría que la persona
-                  // carga pero no ve, o la lista caída.
-                  formularioArchivo(`${id}-carga`, `Subir el archivo de «${formulario.titulo}»`, "h2")
-                )}
-              </section>
-            ) : (
-              <p className="acciones-pantalla">
-                <button type="button" onClick={() => abrir({ tipo: "nuevo" })} disabled={enviando}>
-                  Cargar un documento
-                </button>
-              </p>
+      {pantalla.tipo === "lista" && edificios.length > 1 && (
+        <div className="formulario formulario-movil tarjeta">
+          <label htmlFor={`${id}-consorcio`}>Edificio</label>
+          <select
+            id={`${id}-consorcio`}
+            value={consorcio}
+            disabled={enviando}
+            onChange={(e) => {
+              // Desde ya, lo que responda el edificio anterior se ignora (ver `consorcioVigente`).
+              consorcioVigente.current = e.target.value;
+              cerrar();
+              cerrarFichaDe(false);
+              setEsperando([]);
+              setRechazados([]);
+              setRetiro(null);
+              setViendo(null);
+              setAviso(null);
+              setRefrescoFallido(null);
+              setFallaDescarga(null);
+              listoDeLaCarga.current = null;
+              setLectura({ tipo: "cargando" });
+              setConsorcio(e.target.value);
+            }}
+          >
+            {edificios.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
             ))}
-
-          {!soloCarga && (
-            <section aria-labelledby={`${id}-lista`} className="tarjeta">
-              <h2 id={`${id}-lista`}>Documentos</h2>
-              {lectura.tipo === "cargando" && <p>Consultando…</p>}
-              {lectura.tipo === "sin_servicio" && <p>No se pudo mostrar la lista.</p>}
-              {lectura.tipo === "ok" && (
-                <>
-                  {lectura.documentos.length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
-                  {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => categoria(c, lectura.documentos))}
-                </>
-              )}
-              {lectura.tipo !== "cargando" && (
-                <p>
-                  <button type="button" className="secundario" onClick={volverAPedir} disabled={enviando}>
-                    Actualizar
-                  </button>
-                </p>
-              )}
-            </section>
-          )}
-
-        </>
+          </select>
+        </div>
       )}
 
-      {fichaDelDocumento()}
-
-      {viendo !== null && (
-        <VisorDocumento consorcio={consorcio} documento={viendo.documento} version={viendo.version} nombre={viendo.titulo}
-          alCerrar={() => setViendo(null)} aEntrar={aEntrar} />
-      )}
-
+      {/* DOC-09: los avisos arriba, debajo del título, como en el Padrón y en Contactos. */}
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
@@ -808,7 +819,7 @@ export function Documentos() {
             </button>
           </>
         )}
-        {aviso && !avisoEnFicha && (
+        {aviso && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
           </p>
@@ -839,6 +850,61 @@ export function Documentos() {
           </div>
         ))}
       </div>
+
+      {pantalla.tipo === "lista" && (
+        <>
+          {/* G-05: la carga va arriba, antes de la lista. También sin acceso a la lista: el administrador
+              externo solo carga (documento 08 §4). Con la lista caída o mientras llega la nueva sigue a
+              la vista, porque cargar no depende de ella (DOC-13). */}
+          {carga && lectura.tipo !== "cargando" && (
+            <p className="acciones-pantalla">
+              <button type="button" onClick={() => abrir({ tipo: "nuevo" })} disabled={enviando}>
+                Cargar un documento
+              </button>
+            </p>
+          )}
+
+          {!soloCarga && (
+            <section aria-label="Documentos" className="tarjeta">
+              {lectura.tipo === "cargando" && <p>Consultando…</p>}
+              {lectura.tipo === "sin_servicio" && (
+                <>
+                  <p className="aviso-error">No se pudo mostrar la lista. {lectura.motivo}</p>
+                  <button type="button" className="secundario" onClick={volverAPedir} disabled={enviando}>
+                    Consultar de nuevo
+                  </button>
+                </>
+              )}
+              {lectura.tipo === "ok" && (
+                <>
+                  {refrescoFallido !== null && (
+                    <>
+                      <p className="aviso-error">{refrescoFallido} La lista puede no estar al día.</p>
+                      <button type="button" className="secundario" onClick={volverAPedir} disabled={enviando}>
+                        Consultar de nuevo
+                      </button>
+                    </>
+                  )}
+                  {lectura.documentos.length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
+                  {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => categoria(c, lectura.documentos))}
+                </>
+              )}
+            </section>
+          )}
+        </>
+      )}
+
+      {/* La carga en su ventana (DOC-01, DOC-02): la de un documento nuevo, o la de subir el archivo de
+          uno cuya ficha no está abierta (el que se acaba de crear, el de quien solo carga, una categoría
+          que la persona carga pero no ve, o la lista caída). La del archivo desde la ficha va sobre ella. */}
+      {formulario !== null && (formulario.tipo === "nuevo" || !enSuFicha(formulario.documento)) && ventanaCarga(formulario)}
+
+      {fichaDelDocumento()}
+
+      {viendo !== null && (
+        <VisorDocumento consorcio={consorcio} documento={viendo.documento} version={viendo.version} nombre={viendo.titulo}
+          alCerrar={() => setViendo(null)} aEntrar={aEntrar} />
+      )}
     </>
   );
 
@@ -849,11 +915,14 @@ export function Documentos() {
     const titulo = `${id}-${c}`;
     return (
       <section key={c} aria-labelledby={titulo}>
-        <h3 id={titulo}>{TEXTO_CATEGORIA[c]}</h3>
+        <h2 id={titulo}>{TEXTO_CATEGORIA[c]}</h2>
         <ul className="filas-registro" aria-labelledby={titulo}>
           {deEsta.map((d) => (
             <li key={d.id}>
-              <FilaDeRegistro titulo={d.titulo} resumen={resumenDe(d)} alAbrir={() => abrirFicha(d.id)} refFila={refFila(d.id)}
+              <FilaDeRegistro titulo={d.titulo} resumen={resumenDe(d)} alAbrir={() => {
+                setFallaDescarga(null);
+                abrirFicha(d.id);
+              }} refFila={refFila(d.id)}
                 abierta={fichaAbierta === d.id} deshabilitada={enviando} />
             </li>
           ))}
@@ -862,12 +931,16 @@ export function Documentos() {
     );
   }
 
-  /** Retirar el documento: con el motivo, por la API, que lo niega si algo guardado lo cita. */
-  async function retirar(evento: FormEvent, documento: string, titulo: string) {
-    evento.preventDefault();
-    if (retiro === null) return;
+  /** Retirar el documento: con el motivo, por la API, que lo niega si algo guardado lo cita. El
+   * rechazo queda en la ventana del retiro, sobre la ficha, para corregir o cancelar. */
+  async function retirar(documento: string, titulo: string): Promise<FinDeEnvio> {
+    if (retiro === null) return "cerrar";
+    const faltan = faltaCompletar({ motivo: [retiro.motivo, "Falta escribir el motivo del retiro."] });
+    if (hayErrores(faltan)) {
+      setErroresRetiro(faltan);
+      return "seguir";
+    }
     claveRetiro.current ??= crypto.randomUUID();
-    alAviso.current = true;
     setEnviando(true);
     setAviso(null);
     try {
@@ -880,79 +953,71 @@ export function Documentos() {
       if (!response.ok) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveRetiro.current = null;
-        setAviso({ texto: `El documento no se retiró. ${mensajeDeRetiro(response.status, codigo)}`, ok: false });
-        cerrarFichaDe(false);
-        return;
+        return { rechazo: `El documento no se retiró. ${mensajeDeRetiro(response.status, codigo)}` };
       }
       claveRetiro.current = null;
+      alAviso.current = true;
       setRetiro(null);
       cerrarFichaDe(false);
+      // Sale de la lista ya, sin esperar la nueva (DOC-13).
+      setLectura((actual) => (actual.tipo === "ok" ? { tipo: "ok", documentos: actual.documentos.filter((x) => x.id !== documento) } : actual));
       setAviso({ texto: `Listo: se retiró «${titulo}». Ya no aparece en la lista.`, ok: true });
       actualizarLista();
+      return "cerrar";
     } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else {
-        setAviso({ texto: `El documento no se retiró. ${SIN_CONEXION}`, ok: false });
-        cerrarFichaDe(false);
-      }
+      if (!(e instanceof SinSesion)) return { rechazo: `El documento no se retiró. ${SIN_CONEXION}` };
+      aEntrar();
+      return "seguir";
     } finally {
       setEnviando(false);
     }
   }
 
-  /** El formulario del retiro, en la ficha: el motivo y la confirmación. */
-  function formularioRetiro(d: Documento) {
+  /** El retiro, en su ventana sobre la ficha: el motivo y la confirmación. */
+  function ventanaRetiro(d: Documento) {
+    if (retiro?.documento !== d.id) return null;
     const base = `${id}-retiro-${d.id}`;
-    if (retiro?.documento !== d.id)
-      return (
-        <p>
-          <button type="button" className="secundario peligro" disabled={enviando}
-            onClick={() => {
-              claveRetiro.current = null;
-              setRetiro({ documento: d.id, motivo: "" });
-            }}>
-            {RETIRAR_DOCUMENTO}
-          </button>
-        </p>
-      );
     return (
-      <form className="formulario formulario-movil" onSubmit={(e) => void retirar(e, d.id, d.titulo)} aria-labelledby={`${base}-accion`}>
-        <h3 id={`${base}-accion`}>{RETIRAR_DOCUMENTO}</h3>
+      <VentanaDeFormulario
+        titulo={RETIRAR_DOCUMENTO}
+        textoEnviar="Retirar"
+        peligro
+        alEnviar={() => retirar(d.id, d.titulo)}
+        alCerrar={() => {
+          setErroresRetiro(SIN_ERRORES);
+          setRetiro(null);
+        }}
+      >
         <p id={`${base}-ayuda`}>{AYUDA_RETIRO}</p>
         <label htmlFor={`${base}-motivo`}>Motivo del retiro</label>
         <textarea
           id={`${base}-motivo`}
+          data-foco
           required
           maxLength={LARGO_MOTIVO_RETIRO}
-          disabled={enviando}
-          aria-describedby={`${base}-ayuda ${base}-ayuda-motivo`}
+          {...marcaDe(`${base}-motivo`, erroresRetiro.motivo, `${base}-ayuda`)}
           value={retiro.motivo}
           onChange={(e) => {
             claveRetiro.current = null;
+            setErroresRetiro((actuales) => sinElDe(actuales, "motivo"));
             setRetiro({ documento: d.id, motivo: e.target.value });
           }}
         />
-        <p id={`${base}-ayuda-motivo`}>Obligatorio. Sin teléfonos, correos ni números de cuenta.</p>
-        <p>
-          <button type="submit" className="secundario peligro" disabled={enviando || retiro.motivo.trim() === ""}>
-            {RETIRAR_DOCUMENTO}
-          </button>{" "}
-          <button type="button" className="secundario" disabled={enviando} onClick={() => setRetiro(null)}>
-            No retirar
-          </button>
-        </p>
-      </form>
+        <ErrorDeCampo idCampo={`${base}-motivo`} mensaje={erroresRetiro.motivo} />
+      </VentanaDeFormulario>
     );
   }
 
   /** Cerrar la ficha también deja el archivo a medio elegir de ese documento. */
   function cerrarFicha() {
     if (abierto?.tipo === "subir" && abierto.documento === fichaAbierta) cancelar();
+    setFallaDescarga(null);
     setRetiro(null);
+    setErroresRetiro(SIN_ERRORES);
     cerrarFichaDe();
   }
 
-  /** Si la ficha de ese documento está a la vista (ahí se dibuja su formulario de archivo). */
+  /** Si la ficha de ese documento está a la vista (ahí se abre la ventana de su archivo). */
   function enSuFicha(documento: string) {
     return fichaAbierta === documento && lectura.tipo === "ok" && lectura.documentos.some((d) => d.id === documento);
   }
@@ -975,53 +1040,65 @@ export function Documentos() {
           { etiqueta: "Fecha del documento", valor: dia(d.fecha) },
           {
             etiqueta: "Archivos",
-            valor:
-              d.versiones.length === 0 ? (
-                "Todavía no tiene un archivo."
-              ) : (
-                <ul className="versiones" aria-label={`Archivos de ${d.titulo}`}>
-                  {d.versiones.map((v) => (
-                    <li key={v.id}>
-                      <strong>{estadoEnPalabras(v)}</strong>
-                      <span>
-                        {" "}
-                        · {TEXTO_TIPO[v.tipo]} de {tamano(v.tamano)} · subido el {momento(v.subida_en)}
-                      </span>
-                      {v.estado === "disponible" && (
-                        <>
-                          {" "}
-                          <button type="button" className="secundario"
-                            onClick={() => setViendo({ documento: d.id, version: v.id, titulo: d.titulo })}>
-                            Ver
-                          </button>{" "}
-                          <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} onClick={(e) => bajar(e, d.id, v.id)}>
-                            Descargar
-                          </a>
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ),
+            valor: d.versiones.length === 0 ? "Todavía no tiene un archivo." : archivos(d),
           },
         ]}
+        ventana={
+          subiendo ? (
+            <VentanaDeFormulario
+              titulo={`Subir el archivo de «${d.titulo}»`}
+              textoEnviar="Subir el archivo"
+              alEnviar={() => subirDesdeLaFicha(d.id, d.titulo)}
+              alCerrar={cancelar}
+            >
+              {campoArchivo()}
+            </VentanaDeFormulario>
+          ) : (
+            ventanaRetiro(d)
+          )
+        }
       >
-        {subiendo
-          ? formularioArchivo(`${id}-${d.id}`, `Subir el archivo de «${d.titulo}»`, "h3", true)
-          : subir !== null &&
-            puede(...accionesDeCarga(d.categoria)) && (
-              <p>
-                {/* G-04: sin archivo, subirlo es lo que hace avanzar: el principal (pregunta 13). */}
-                <button type="button" className={esperaArchivo(d) ? undefined : "secundario"}
-                  onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })} disabled={enviando}>
-                  {subir}
-                </button>
-              </p>
-            )}
+        {fallaDescarga?.documento === d.id && (
+          <p className="aviso-error" role="alert">
+            {fallaDescarga.texto}
+          </p>
+        )}
+        {/* C8G-08: con un archivo en revisión no se ofrece subir otro; se dice por qué. */}
+        {subir === null && puede(...accionesDeCarga(d.categoria)) && d.versiones.some((v) => v.estado === "en_cuarentena") && (
+          <ComandoNoDisponible motivo={ARCHIVO_EN_REVISION} />
+        )}
+        {subir !== null && puede(...accionesDeCarga(d.categoria)) && (
+          <p>
+            {/* G-04: sin archivo, subirlo es lo que hace avanzar: el principal (pregunta 13). */}
+            <button type="button" className={esperaArchivo(d) ? undefined : "secundario"}
+              onClick={() => {
+                setRetiro(null);
+                setFallaDescarga(null);
+                abrir({ tipo: "subir", documento: d.id, titulo: d.titulo });
+              }} disabled={enviando}>
+              {subir}
+            </button>
+          </p>
+        )}
         {/* Retirar: quien carga la categoría y además tiene la facultad de ver (`0089`). */}
         {/* G-02: si algo guardado lo cita, se dice en lugar del botón, sin pedir el motivo para nada. */}
-        {!subiendo && puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") &&
-          (d.respalda === true ? <p>{RESPALDA_ALGO}</p> : formularioRetiro(d))}
+        {puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") &&
+          (d.respalda === true ? (
+            <p>{RESPALDA_ALGO}</p>
+          ) : (
+            <p>
+              <button type="button" className="secundario peligro" disabled={enviando}
+                onClick={() => {
+                  if (subiendo) cancelar();
+                  setFallaDescarga(null);
+                  claveRetiro.current = null;
+                  setErroresRetiro(SIN_ERRORES);
+                  setRetiro({ documento: d.id, motivo: "" });
+                }}>
+                {RETIRAR_DOCUMENTO}
+              </button>
+            </p>
+          ))}
       </FichaDeRegistro>
     );
   }
@@ -1036,7 +1113,6 @@ export function Documentos() {
         tope={TOPE_BYTES}
         reemplaza={archivo !== null}
         deshabilitada={enviando}
-        nota="Antes de mostrarlo lo revisa el antivirus."
         elegido={archivo === null ? null : `${archivo.name} (${tamano(archivo.size)})`}
         refPrimero={(e) => {
           primerCampo.current = e;
@@ -1046,47 +1122,78 @@ export function Documentos() {
     );
   }
 
-  /** Subir el archivo de un documento que ya existe (o reintentar el segundo paso). */
-  function formularioArchivo(titulo: string, encabezado: string, Nivel: "h2" | "h3" | "h5" = "h5", enFicha = false) {
-    // En la tarjeta de arriba el encabezado nombra también la sección (`${titulo}` es su id).
-    const idEncabezado = Nivel === "h2" ? titulo : `${titulo}-accion`;
+  /** Los archivos de la ficha (DOC-11): el vigente a la vista, con «Ver» y «Descargar»; los anteriores, plegados. */
+  function archivos(d: Documento) {
+    const { aLaVista, anteriores } = archivosDeLaFicha(d.versiones);
     return (
-      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={idEncabezado}>
-        <Nivel id={idEncabezado}>{encabezado}</Nivel>
-        {campoArchivo()}
-        {enFicha && aviso !== null && !aviso.ok && (
-          <p className="aviso-error" role="alert">
-            {aviso.texto}
-          </p>
+      <>
+        <ul className="versiones" aria-label={`Archivos de ${d.titulo}`}>
+          {aLaVista.map((v) => version(d, v))}
+        </ul>
+        {anteriores.length > 0 && (
+          <details className="historial">
+            <summary>Versiones anteriores ({anteriores.length})</summary>
+            <ul className="versiones" aria-label={`Versiones anteriores de ${d.titulo}`}>
+              {anteriores.map((v) => version(d, v))}
+            </ul>
+          </details>
         )}
-        <p>
-          <button type="submit" disabled={enviando}>
-            Subir el archivo
-          </button>{" "}
-          <button type="button" className="secundario" onClick={cancelar} disabled={enviando}>
-            Cancelar
-          </button>
-        </p>
-      </form>
+      </>
     );
   }
 
-  /** Un documento nuevo: el archivo primero, que propone el título (G-06); después la categoría, el
-   * título y la fecha (hoy, por omisión). Un solo envío de dos pasos. */
-  function formularioNuevo(idSeccion: string) {
-    const titulo = `${id}-nuevo`;
-    const ayudaTitulo = `${titulo}-ayuda-titulo`;
-    const ayudaFecha = `${titulo}-ayuda-fecha`;
+  function version(d: Documento, v: Version) {
     return (
-      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={idSeccion}>
-        <h2 id={idSeccion}>Cargar un documento</h2>
+      <li key={v.id}>
+        <strong>{estadoEnPalabras(v)}</strong>
+        <span>
+          {" "}
+          · {TEXTO_TIPO[v.tipo]} de {tamano(v.tamano)} · subido el {momento(v.subida_en)}
+        </span>
+        {v.estado === "disponible" && (
+          <>
+            {" "}
+            <button type="button" className="secundario" onClick={() => setViendo({ documento: d.id, version: v.id, titulo: d.titulo })}>
+              Ver
+            </button>{" "}
+            <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} onClick={(e) => bajar(e, d.id, v.id)}>
+              Descargar
+            </a>
+          </>
+        )}
+      </li>
+    );
+  }
+
+  /**
+   * La carga en su ventana (DOC-01): un documento nuevo (el archivo primero, que propone el título,
+   * G-06; después la categoría, el título y la fecha, hoy por omisión) o el archivo de uno que ya
+   * existe. El nombre de la acción va una vez, en el título; el botón dice el verbo (DOC-10).
+   */
+  function ventanaCarga(f: Abierto) {
+    return (
+      <VentanaDeFormulario
+        titulo={f.tipo === "nuevo" ? "Cargar un documento" : `Subir el archivo de «${f.titulo}»`}
+        textoEnviar={f.tipo === "nuevo" ? "Cargar" : "Subir el archivo"}
+        alEnviar={enviarCarga}
+        alCerrar={cancelar}
+      >
         {campoArchivo()}
+        {f.tipo === "nuevo" && camposNuevo()}
+      </VentanaDeFormulario>
+    );
+  }
+
+  /** La categoría, el título y la fecha de un documento nuevo, sin ayudas fijas (DOC-10). */
+  function camposNuevo() {
+    const titulo = `${id}-nuevo`;
+    return (
+      <>
         <label htmlFor={`${titulo}-categoria`}>Categoría</label>
         <select
           id={`${titulo}-categoria`}
           {...marcaDe(`${titulo}-categoria`, errores.categoria)}
           value={datos.categoria}
-          disabled={enviando}
           onChange={(e) => cambiar("categoria", e.target.value as Categoria)}
         >
           {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).filter((c) => puede(...accionesDeCarga(c))).map((c) => (
@@ -1104,39 +1211,22 @@ export function Documentos() {
           maxLength={LARGO_TITULO}
           pattern={PATRON_TEXTO}
           required
-          disabled={enviando}
-          {...marcaDe(`${titulo}-titulo`, errores.titulo, ayudaTitulo)}
+          {...marcaDe(`${titulo}-titulo`, errores.titulo)}
           value={datos.titulo}
           onChange={(e) => cambiar("titulo", e.target.value)}
         />
-        <p id={ayudaTitulo}>Sin teléfonos ni correos en el título.</p>
         <ErrorDeCampo idCampo={`${titulo}-titulo`} mensaje={errores.titulo} />
         <label htmlFor={`${titulo}-fecha`}>Fecha del documento</label>
         <input
           id={`${titulo}-fecha`}
           type="date"
           required
-          disabled={enviando}
-          {...marcaDe(`${titulo}-fecha`, errores.fecha, ayudaFecha)}
+          {...marcaDe(`${titulo}-fecha`, errores.fecha)}
           value={datos.fecha}
           onChange={(e) => cambiar("fecha", e.target.value)}
         />
-        <p id={ayudaFecha}>{AYUDA_FECHA}</p>
         <ErrorDeCampo idCampo={`${titulo}-fecha`} mensaje={errores.fecha} />
-        <p>
-          <button type="submit" disabled={enviando}>
-            Cargar el documento
-          </button>
-          {!soloCarga && (
-            <>
-              {" "}
-              <button type="button" className="secundario" onClick={cancelar} disabled={enviando}>
-                Cancelar
-              </button>
-            </>
-          )}
-        </p>
-      </form>
+      </>
     );
   }
 }

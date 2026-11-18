@@ -7,6 +7,27 @@ import { Hoja } from "./Hoja";
 // fila no tiene botones propios: es un único control, con el foco visible y 44 px de alto. Al cerrar
 // la ficha el foco vuelve a la fila que la abrió. Quién puede hacer qué lo decide el servidor: la
 // ficha solo deja de ofrecer lo que ya se sabe que no alcanza (`usePuede` o una marca de la API).
+//
+// Uso (tanda 1 del informe de fricción, 17-11-2026):
+//
+//   <ul className="filas-registro" aria-label="Contactos">
+//     {lista.map((c) => (
+//       <li key={c.id}>
+//         <FilaDeRegistro titulo={c.nombre} resumen="Plomero · Comprobado" estado="Señalado"
+//           alAbrir={() => fichas.abrir(c.id)} refFila={fichas.refFila(c.id)} abierta={fichas.abierta === c.id} />
+//       </li>))}
+//   </ul>
+//   {enFicha && (
+//     <FichaDeRegistro titulo={…} datos={[…]} alCerrar={() => fichas.cerrar()}
+//       ventana={accion === "senalar" && <VentanaDeFormulario …>…</VentanaDeFormulario>}>
+//       <p className="ficha-registro__acciones"><button onClick={() => setAccion("senalar")}>Señalar</button></p>
+//     </FichaDeRegistro>)}
+//
+// - `children`: solo los botones de las acciones (o la línea de `ComandoNoDisponible`). Ningún
+//   formulario va adentro de la ficha (criterio 3).
+// - `ventana`: el formulario de la acción abierta, en una `VentanaDeFormulario`. Se abre encima de
+//   la ficha, que queda atrás, inerte, y vuelve a la vista al cancelar. Si el acto sale bien, la
+//   pantalla suele cerrar también la ficha (`fichas.cerrar(false)`) y dar el resultado donde se actuó.
 
 export type DatoDeFicha = { etiqueta: string; valor: ReactNode };
 
@@ -16,13 +37,16 @@ type PropsFila = {
   resumen?: ReactNode;
   alAbrir: () => void;
   refFila?: (elemento: HTMLButtonElement | null) => void;
+  /** Un estado corto que se destaca a la derecha del título («Sin confirmar», «Vence pronto»):
+   * solo si cambia lo que la persona tiene que hacer. Lo demás va en `resumen`. */
+  estado?: ReactNode;
   /** La fila de la ficha abierta (o del detalle a la vista). */
   abierta?: boolean;
   deshabilitada?: boolean;
 };
 
 /** Una fila de una lista: el botón entero abre la ficha. */
-export function FilaDeRegistro({ titulo, resumen, alAbrir, refFila, abierta = false, deshabilitada = false }: PropsFila) {
+export function FilaDeRegistro({ titulo, resumen, estado, alAbrir, refFila, abierta = false, deshabilitada = false }: PropsFila) {
   return (
     <button
       type="button"
@@ -33,6 +57,12 @@ export function FilaDeRegistro({ titulo, resumen, alAbrir, refFila, abierta = fa
       aria-current={abierta ? "true" : undefined}
     >
       <span className="fila-registro__titulo">{titulo}</span>
+      {estado !== undefined && (
+        <>
+          {" "}
+          <span className="fila-registro__estado">{estado}</span>
+        </>
+      )}
       {/* El espacio separa el título del resumen en el nombre que lee el lector de pantalla. */}
       {resumen !== undefined && (
         <>
@@ -47,32 +77,39 @@ export function FilaDeRegistro({ titulo, resumen, alAbrir, refFila, abierta = fa
 type PropsFicha = {
   titulo: string;
   datos: readonly DatoDeFicha[];
-  /** Las acciones que el rol permite y sus formularios. Sin nada, la ficha es solo de lectura. */
+  /** Los botones de las acciones que el rol permite. Sin nada, la ficha es solo de lectura. */
   children?: ReactNode;
+  /** El formulario de la acción abierta, en una `VentanaDeFormulario`: se abre encima de la ficha. */
+  ventana?: ReactNode;
   alCerrar: () => void;
   /** Con un pedido en curso no se cierra: ni «Cerrar» ni Escape. */
   ocupada?: boolean;
 };
 
 /** La ficha de un registro, en una hoja sobre la lista. */
-export function FichaDeRegistro({ titulo, datos, children, alCerrar, ocupada = false }: PropsFicha) {
+export function FichaDeRegistro({ titulo, datos, children, ventana, alCerrar, ocupada = false }: PropsFicha) {
+  // La ventana va al lado y no adentro de la hoja de la ficha: se monta después y queda arriba
+  // (`pilaDeHojas`), y sus eventos no pasan por la ficha.
   return (
-    <Hoja titulo={titulo} alEscapar={ocupada ? undefined : alCerrar}>
-      <dl className="ficha-registro">
-        {datos.map((d) => (
-          <div key={d.etiqueta} className="ficha-registro__dato">
-            <dt>{d.etiqueta}</dt>
-            <dd>{d.valor}</dd>
-          </div>
-        ))}
-      </dl>
-      {children}
-      <p className="ficha-registro__cerrar">
-        <button type="button" className="secundario" onClick={alCerrar} disabled={ocupada}>
-          Cerrar
-        </button>
-      </p>
-    </Hoja>
+    <>
+      <Hoja titulo={titulo} alEscapar={ocupada ? undefined : alCerrar}>
+        <dl className="ficha-registro">
+          {datos.map((d) => (
+            <div key={d.etiqueta} className="ficha-registro__dato">
+              <dt>{d.etiqueta}</dt>
+              <dd>{d.valor}</dd>
+            </div>
+          ))}
+        </dl>
+        {children}
+        <p className="ficha-registro__cerrar">
+          <button type="button" className="secundario" onClick={alCerrar} disabled={ocupada}>
+            Cerrar
+          </button>
+        </p>
+      </Hoja>
+      {ventana}
+    </>
   );
 }
 

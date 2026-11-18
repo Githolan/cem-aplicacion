@@ -11,8 +11,8 @@ import { ContextoVersion } from "../version";
 import { nombreDeFacultad } from "../facultades";
 import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTO_RECHAZADA } from "../pagos/SubirFactura";
-import { faltantesPorEstado, gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
-import { TEXTO_LA_SUBE_LA_ADMINISTRACION } from "./Panel";
+import { gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
+import { TEXTO_LA_SUBE_LA_ADMINISTRACION, textoSolicitudesAbiertas } from "./Panel";
 
 // Resumen de pagos del edificio (app 0094; antes «Panel del Consejo»). Datos ficticios: ningún
 // proveedor ni importe real.
@@ -140,7 +140,7 @@ describe("resumen de pagos del edificio", () => {
     const fondo = screen.getByRole("region", { name: "Pagos con el fondo de reserva" });
     expect(within(fondo).getByText(/No es el saldo del fondo/)).toBeTruthy();
 
-    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
+    const faltantes = screen.getByRole("region", { name: /^Facturas faltantes/ });
     const lista = within(faltantes).getByRole("table", { name: "Órdenes sin factura" });
     expect(within(lista).getByRole("link", { name: "Limpieza Ficticia SRL" }).getAttribute("href")).toBe(`/pagos/${O1}`);
     expect(within(lista).getByRole("link", { name: "Ascensores Ficticios SA" }).getAttribute("href")).toBe(`/pagos/${O2}`);
@@ -149,10 +149,56 @@ describe("resumen de pagos del edificio", () => {
     await sinViolaciones(container);
   });
 
+  it("PAN-02 y PAN-05: sin la tabla repetida a la vista; la base, plegada salvo lo que evita leer mal", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS) }));
+    const { container } = abrir();
+    const estados = await screen.findByRole("region", { name: "Órdenes de pago por estado" });
+    expect(screen.queryByText("Ver los datos en una tabla")).toBeNull();
+    // La tabla sigue para el lector de pantalla, que no lee las barras.
+    expect(within(estados).getByRole("table", { name: "Órdenes de pago por estado" }).closest(".solo-lector")).not.toBeNull();
+    expect(container.querySelector(".grafico__barras")?.getAttribute("aria-hidden")).toBe("true");
+    const como = within(estados).getByText("Cómo se calcula").closest("details");
+    expect(como?.open).toBe(false);
+    expect(within(como as HTMLElement).getByText(/Cuántas órdenes hay en cada paso/)).toBeTruthy();
+  });
+
+  it("PAN-01: «Solicitudes abiertas» solo si hay alguna", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS) }));
+    abrir();
+    expect((await screen.findByRole("link", { name: textoSolicitudesAbiertas(2) })).getAttribute("href")).toBe("/solicitudes");
+    cleanup();
+
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json({ ...DATOS, solicitudes_abiertas: 0 }) }));
+    abrir();
+    await screen.findByRole("region", { name: "Órdenes de pago por estado" });
+    expect(screen.queryByText(/Solicitudes abiertas/)).toBeNull();
+  });
+
+  it("PAN-04 y PAN-06: las facturas faltantes, con la cantidad en el título y sin datos repetidos", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: alcanza("fiscalizacion.ver_panel", "egresos.revisar_orden") }));
+    abrir();
+    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes (2)" });
+    expect(faltantes.querySelector(".grafico__barras")).toBeNull();
+    const tabla = within(faltantes).getByRole("table", { name: "Órdenes sin factura" });
+    expect(within(tabla).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Proveedor", "Estado", "Importe"]);
+    expect(within(faltantes).queryByText("Falta")).toBeNull();
+    expect(within(faltantes).getAllByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toHaveLength(1);
+    expect(screen.queryByText(/Conviene pedirlo/)).toBeNull();
+  });
+
+  it("PAN-07: con un solo mes no hay desplegable y el mes va en el título", async () => {
+    const unMes: Panel = { ...DATOS, gasto_pagado: DATOS.gasto_pagado.filter((g) => g.periodo === "2026-11-01") };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(unMes) }));
+    abrir();
+    const porRubro = await screen.findByRole("region", { name: "Gasto pagado por rubro, noviembre de 2026" });
+    expect(within(porRubro).queryByLabelText("Mes")).toBeNull();
+    expect(within(porRubro).getAllByRole("rowheader").map((c) => c.textContent)).toEqual(["Limpieza", SIN_RUBRO]);
+  });
+
   it("sin acceso a los pagos no ofrece los enlaces a los registros", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: alcanza("fiscalizacion.ver_panel") }));
     abrir();
-    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
     expect(within(faltantes).getByText("Limpieza Ficticia SRL")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Limpieza Ficticia SRL" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Consultar los pagos" })).toBeNull();
@@ -183,7 +229,7 @@ describe("resumen de pagos del edificio", () => {
     await sinViolaciones(container);
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
-    expect(await screen.findByRole("region", { name: "Facturas faltantes" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: /^Facturas faltantes/ })).toBeTruthy();
     expect(screen.queryByText("No se pudieron cargar los datos de esta pantalla.")).toBeNull();
   });
 
@@ -192,7 +238,8 @@ describe("resumen de pagos del edificio", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
-    await screen.findByRole("link", { name: "Documentos del edificio" });
+    // Decisión 5: el inicio no repite el menú; la entrada de Documentos está en la navegación.
+    await within(await screen.findByRole("navigation", { name: "Secciones" })).findByRole("link", { name: /^Documentos/ });
     expect(screen.queryByRole("link", { name: "Resumen de pagos del edificio" })).toBeNull();
     expect(api.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/panel"))).toBe(false);
   });
@@ -242,10 +289,6 @@ describe("informe de fricción, tanda 9", () => {
         { estado: "pagada", moneda: "ARS", cantidad: 3, importe_centavos: 300000 },
         { estado: "en_revision", moneda: "ARS", cantidad: 1, importe_centavos: 50000 },
       ],
-      comprobantes_faltantes: [
-        ...DATOS.comprobantes_faltantes,
-        { ...DATOS.comprobantes_faltantes[0]!, orden_id: O2.replace("4444-4444", "4445-4444"), estado: "conciliada" },
-      ],
     };
     const barras = ordenesPorEstado(conConciliadas, "ARS");
     expect(barras.map((b) => [b.etiqueta, b.valor])).toEqual([
@@ -253,18 +296,16 @@ describe("informe de fricción, tanda 9", () => {
       ["Pagada", 5],
     ]);
     expect(barras[1]!.texto).toMatch(/^5 órdenes, \$\s?5\.000,00$/);
-    expect(faltantesPorEstado(conConciliadas).map((b) => [b.etiqueta, b.valor])).toEqual([
-      ["Lista para pagar", 1],
-      ["Pagada", 2],
-    ]);
   });
 
-  it("AC-45: sin pagos lo dice en palabras, y sin edificios igual que las demás pantallas", async () => {
+  it("AC-45 y PAN-03: sin pagos no se dibujan sus bloques, y sin edificios igual que las demás pantallas", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json({ ...DATOS, gasto_pagado: [] }) }));
     abrir();
-    const porMes = await screen.findByRole("region", { name: "Gasto pagado por mes" });
-    expect(within(porMes).getByText("Todavía no se pagó ninguna orden.")).toBeTruthy();
-    expect(screen.queryByText(/pagos con fecha/)).toBeNull();
+    // Control: el bloque con datos sí está.
+    expect(await screen.findByRole("region", { name: "Órdenes de pago por estado" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: /^Gasto pagado/ })).toBeNull();
+    expect(screen.queryByRole("region", { name: /^Pagos con el fondo/ })).toBeNull();
+    expect(screen.queryByText(/pagos con fecha|Todavía no se pagó/)).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
@@ -312,7 +353,7 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
   }
 
   async function abrirLaHoja() {
-    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
     const fila = within(faltantes).getByRole("row", { name: /Ascensores Ficticios SA/ });
     fireEvent.click(await within(fila).findByRole("button", { name: SUBIR_FACTURA }));
     return screen.findByRole("dialog", { name: SUBIR_FACTURA });
@@ -342,7 +383,7 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     expect(await within(hoja).findByText(TEXTO_ACEPTADA)).toBeTruthy();
     fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
-    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
+    const faltantes = screen.getByRole("region", { name: /^Facturas faltantes/ });
     await waitFor(() => expect(within(faltantes).queryByText("Ascensores Ficticios SA")).toBeNull());
     expect(within(faltantes).getByText("Limpieza Ficticia SRL")).toBeTruthy(); // control: la otra sigue
   });
@@ -380,14 +421,14 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     };
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: alcanza("fiscalizacion.ver_panel", "egresos.preparar_orden") }));
     abrir();
-    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
     await within(faltantes).findByRole("link", { name: "Limpieza Ficticia SRL" });
     expect(within(faltantes).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: PREPARA }));
     abrir();
-    const otra = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const otra = await screen.findByRole("region", { name: /^Facturas faltantes/ });
     const [limpieza, ascensores] = within(within(otra).getByRole("table", { name: "Órdenes sin factura" })).getAllByRole("row").slice(1);
     // Control: la que falta sí la ofrece.
     expect(await within(limpieza!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
@@ -497,7 +538,7 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
     await within(hoja).findByText(TEXTO_LISTO);
     fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
-    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
+    const faltantes = screen.getByRole("region", { name: /^Facturas faltantes/ });
     const fila = () => within(faltantes).getByRole("row", { name: /Ascensores Ficticios SA/ });
     expect(await within(faltantes).findByText("El antivirus la está revisando")).toBeTruthy();
     expect(within(fila()).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
@@ -509,29 +550,30 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     expect(within(fila()).getByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
   });
 
-  it("al Consejo, que no prepara, la fila le dice que la sube la administración", async () => {
+  it("al Consejo, que no prepara, se le dice una vez que la sube la administración", async () => {
     const enRevision: Panel = {
       ...DATOS,
       comprobantes_faltantes: [DATOS.comprobantes_faltantes[0]!, { ...DATOS.comprobantes_faltantes[1]!, factura_subida: "en_cuarentena" }],
     };
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: alcanza("fiscalizacion.ver_panel", "egresos.revisar_orden") }));
     abrir();
-    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
     const tabla = within(faltantes).getByRole("table", { name: "Órdenes sin factura" });
+    // Una sola vez, sobre la lista, y no en cada fila (PAN-06).
+    expect(await within(faltantes).findByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeTruthy();
+    expect(within(tabla).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
     const [limpieza, ascensores] = within(tabla).getAllByRole("row").slice(1);
-    expect(await within(limpieza!).findByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeTruthy();
     expect(within(limpieza!).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
-    // Mientras el antivirus revisa la subida, la fila dice eso y no quién la sube.
+    // Lo que cambia sí se dice en la fila: la subida está en el antivirus.
     expect(within(ascensores!).getByText("El antivirus la está revisando")).toBeTruthy();
-    expect(within(ascensores!).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
     cleanup();
 
     // Control: quien prepara y carga ve el botón, no el aviso.
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: PREPARA }));
     abrir();
-    const otra = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const otra = await screen.findByRole("region", { name: /^Facturas faltantes/ });
     const [fila] = within(within(otra).getByRole("table", { name: "Órdenes sin factura" })).getAllByRole("row").slice(1);
     expect(await within(fila!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
-    expect(within(fila!).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
+    expect(within(otra).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
   });
 });

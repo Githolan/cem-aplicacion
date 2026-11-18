@@ -1,4 +1,4 @@
-import { expect, type Page, type Request, test } from "@playwright/test";
+import { expect, type Locator, type Page, type Request, test } from "@playwright/test";
 
 import { simularPermisos, sinFaltasDeAccesibilidad } from "./entorno";
 
@@ -84,6 +84,12 @@ async function completarAlta(pagina: Page) {
 
 const guardar = (pagina: Page) => pagina.getByRole("button", { name: "Dar de alta el proveedor" }).click();
 
+/** En la hoja de la sesión vencida las otras formas van plegadas (ACC-05): se abre el pliegue y se elige el código. */
+async function yaTengoUnCodigo(hoja: Locator) {
+  await hoja.getByText("Otras formas de entrar", { exact: true }).click();
+  await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
+}
+
 async function sinDesborde(pagina: Page) {
   const { scrollWidth, clientWidth } = await pagina.evaluate(() => {
     const { scrollWidth, clientWidth } = document.documentElement;
@@ -115,8 +121,10 @@ test.describe("entrar encima", () => {
     if (ventana.width < ANCHO_HOJA_CENTRADA_PX) expect(caja!.y + caja!.height).toBeCloseTo(ventana.height, 0);
     await sinDesborde(page);
 
-    await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
-    await expect(hoja.getByLabel("Correo", { exact: true })).toHaveValue("ana@ejemplo.com");
+    await yaTengoUnCodigo(hoja);
+    // El correo es el de la sesión y va como texto, sin campo (ACC-05).
+    await expect(hoja.getByText("ana@ejemplo.com", { exact: true })).toBeVisible();
+    await expect(hoja.getByLabel("Correo", { exact: true })).toHaveCount(0);
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
@@ -140,7 +148,7 @@ test.describe("entrar encima", () => {
     await guardar(page);
 
     const hoja = page.getByRole("dialog", { name: "La sesión venció" });
-    await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
+    await yaTengoUnCodigo(hoja);
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
@@ -209,7 +217,7 @@ test.describe("hojas superpuestas", () => {
     await expect(entrar).toBeVisible();
     const fallo = page.getByRole("dialog", { name: "No se pudo confirmar" });
     // Un clic de verdad: falla si la hoja quedó inerte o tapada por la de confirmar.
-    await entrar.getByRole("button", { name: "Ya tengo un código" }).click();
+    await yaTengoUnCodigo(entrar);
     await entrar.getByLabel(/Código de/).fill("042917");
     await sinFaltasDeAccesibilidad(page);
     await entrar.getByRole("button", { name: "Entrar con el código" }).click();
@@ -264,7 +272,7 @@ test.describe("entrar encima en mi cuenta", () => {
     await expect(hoja).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/cuenta");
 
-    await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
+    await yaTengoUnCodigo(hoja);
     await hoja.getByLabel(/Código de/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 

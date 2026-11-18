@@ -37,7 +37,15 @@ export function Hoja({ titulo, children, alEscapar, encima = false, ancha = fals
   );
 
   return createPortal(
-    <div ref={fondo} className={encima ? "hoja-fondo hoja-fondo-encima" : "hoja-fondo"} onKeyDown={(e) => e.key === "Escape" && alEscapar?.()}>
+    <div
+      ref={fondo}
+      className={encima ? "hoja-fondo hoja-fondo-encima" : "hoja-fondo"}
+      onKeyDown={(e) => {
+        // Una hoja montada dentro de otra (la ventana de una acción, sobre su ficha) va en su propio
+        // portal, pero React le pasa sus teclas a la de abajo: Escape cierra solo la de arriba.
+        if (e.key === "Escape" && e.target instanceof Node && fondo.current?.contains(e.target) === true) alEscapar?.();
+      }}
+    >
       <div ref={hoja} className={ancha ? "hoja hoja--ancha" : "hoja"} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1}>
         <h2 id={id}>{titulo}</h2>
         {children}

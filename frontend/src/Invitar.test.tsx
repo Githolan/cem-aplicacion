@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, mensajeAlInvitar } from "./Invitar";
+import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, mensajeAlInvitar, SIN_UNIDADES_INVITABLES } from "./Invitar";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -112,13 +112,24 @@ function abrir(ruta = "/invitaciones") {
   );
 }
 
-async function completar(nombre = "Dora Ruiz", correo = "dora@ejemplo.com") {
-  await screen.findByText("Beto Pérez, 1° A");
-  fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: nombre } });
-  fireEvent.change(screen.getByLabelText("Correo"), { target: { value: correo } });
+/** INV-01: invitar se carga en su ventana; si no está abierta, se abre con «Invitar a una persona». */
+async function abrirVentana(): Promise<HTMLElement> {
+  const abierta = screen.queryByRole("dialog", { name: "Invitar a una persona" });
+  if (abierta !== null) return abierta;
+  const boton = await screen.findByRole("button", { name: "Invitar a una persona" });
+  boton.focus();
+  fireEvent.click(boton);
+  return screen.getByRole("dialog", { name: "Invitar a una persona" });
 }
 
-const invitarBoton = () => screen.getByRole("button", { name: "Invitar" });
+async function completar(nombre = "Dora Ruiz", correo = "dora@ejemplo.com") {
+  await screen.findByText("Beto Pérez, 1° A");
+  const ventana = await abrirVentana();
+  fireEvent.change(within(ventana).getByLabelText("Nombre"), { target: { value: nombre } });
+  fireEvent.change(within(ventana).getByLabelText("Correo"), { target: { value: correo } });
+}
+
+const invitarBoton = () => within(screen.getByRole("dialog", { name: "Invitar a una persona" })).getByRole("button", { name: "Invitar" });
 
 /** Abre la ficha de la invitación desde su fila (con el foco en la fila, como al tocarla) y la devuelve. */
 async function abrirFicha(titulo: string): Promise<HTMLElement> {
@@ -178,15 +189,28 @@ describe("página /invitaciones", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeTruthy();
   });
 
-  it("muestra todas las unidades, el aviso fijo y el correo solo si la API lo manda", async () => {
+  it("muestra todas las unidades en la ventana, sin aviso fijo, y el correo solo si la API lo manda", async () => {
     vi.stubGlobal("fetch", conConsorcio());
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    expect(screen.getByText(/Invitar no acredita el carácter de propietario, inquilino u ocupante/)).toBeTruthy();
-    const unidades = within(screen.getByLabelText("Unidad")).getAllByRole("option");
+    // INV-01: la página no trae el formulario; INV-03: ni la tarjeta fija.
+    expect(screen.queryByLabelText("Unidad")).toBeNull();
+    expect(screen.queryByText(/Invitar no acredita el carácter/)).toBeNull();
+    const ventana = await abrirVentana();
+    const unidades = within(within(ventana).getByLabelText("Unidad")).getAllByRole("option");
     expect(unidades.map((o) => o.textContent)).toEqual(["1° A", "2° B"]);
+    // INV-03: una línea junto al vínculo, que describe el campo.
+    const tipo = within(ventana).getByLabelText("Vínculo con la unidad");
+    expect(document.getElementById(tipo.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "Queda sin confirmar hasta que se confirme con el título.",
+    );
+    expect(within(ventana).getAllByRole("button").map((b) => b.textContent)).toEqual(["Invitar", "Cancelar"]);
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
     const beto = await abrirFicha("Beto Pérez, 1° A");
     expect(within(beto).getByText("beto@ejemplo.com")).toBeTruthy();
+    // INV-02: la persona y la unidad son el título; no se repiten como datos.
+    expect(within(beto).queryByText("Persona")).toBeNull();
+    expect(within(beto).queryByText("Unidad")).toBeNull();
     fireEvent.click(within(beto).getByRole("button", { name: "Cerrar" }));
     const aceptada = await abrirFicha("Carla Gómez, 1° A");
     expect(within(aceptada).queryByText("Correo")).toBeNull();
@@ -230,13 +254,23 @@ describe("página /invitaciones", () => {
     expect(within(vencida).getByRole("button", { name: "Retirar" })).toBeTruthy();
   });
 
-  it("sin pendientes lo dice, y el historial sigue plegado", async () => {
+  it("INV-04: sin pendientes no hay aviso de lista vacía; queda el historial plegado", async () => {
     const lista = { elementos: [invitacion(ACEPTADA, "Carla Gómez", "aceptada", null)] };
     vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => Response.json(lista) }));
     abrir();
-    expect(await screen.findByText("No hay invitaciones pendientes.")).toBeTruthy();
+    await waitFor(() => expect(document.querySelector("details.historial")).toBeTruthy());
+    expect(screen.queryByText("No hay invitaciones pendientes.")).toBeNull();
     expect(screen.queryByRole("list", { name: "Pendientes" })).toBeNull();
     expect((document.querySelector("details.historial") as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("INV-02: la fila pendiente dice el vínculo y el vencimiento, no «Pendiente»", async () => {
+    vi.stubGlobal("fetch", conConsorcio());
+    abrir();
+    const fila = await screen.findByRole("button", { name: /^Beto Pérez, 1° A / });
+    const resumen = fila.querySelector(".fila-registro__resumen")?.textContent ?? "";
+    expect(resumen).toMatch(/^Inquilino\/a · Vence el /);
+    expect(resumen).not.toMatch(/Pendiente/);
   });
 
   it("invita con CSRF y una clave de reintento, y vuelve a pedir la lista", async () => {
@@ -251,14 +285,17 @@ describe("página /invitaciones", () => {
     fireEvent.change(screen.getByLabelText("Vínculo con la unidad"), { target: { value: "ocupante" } });
     fireEvent.click(invitarBoton());
     expect(await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeTruthy();
+    // INV-01: la ventana se cierra sola; no queda un «Invitar» que sugiera repetir.
+    expect(screen.queryByRole("dialog", { name: "Invitar a una persona" })).toBeNull();
     const post = en(pedidos(simulado, "POST", RUTA_LISTA), 0);
     expect(post.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(post.headers.get("Idempotency-Key")).toMatch(UUID);
     expect(await post.json()).toEqual({ unidad_id: U2, tipo: "ocupante", correo: "dora@ejemplo.com", nombre: "Dora Ruiz" });
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2));
-    expect((screen.getByLabelText("Correo") as HTMLInputElement).value).toBe("");
+    const ventana = await abrirVentana();
+    expect((within(ventana).getByLabelText("Correo") as HTMLInputElement).value).toBe("");
     // Las unidades no se vuelven a pedir: la elegida queda como estaba para la próxima invitación.
-    expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2);
+    expect((within(ventana).getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2);
     expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(1);
   });
 
@@ -419,10 +456,10 @@ describe("página /invitaciones", () => {
     fireEvent.click(invitarBoton());
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
     for (const campo of ["Unidad", "Vínculo con la unidad", "Nombre", "Correo"])
-      expect((screen.getByLabelText(campo) as HTMLInputElement).disabled).toBe(true);
+      expect(screen.getByLabelText(campo).matches(":disabled")).toBe(true);
     soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
     expect(await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeTruthy();
-    expect((screen.getByLabelText("Nombre") as HTMLInputElement).disabled).toBe(false);
+    expect((await abrirVentana()).querySelector("input")?.matches(":disabled")).toBe(false);
   });
 
   it("con dos edificios, el selector tampoco se cambia con un envío en curso", async () => {
@@ -486,10 +523,11 @@ describe("página /invitaciones", () => {
     abrir();
     const edificio = await screen.findByLabelText("Edificio");
     fireEvent.change(edificio, { target: { value: C2 } });
-    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
+    await screen.findByRole("button", { name: "Invitar a una persona" });
     fallar(new TypeError("sin red"));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByText(/No se pudo completar el pedido/)).toBeNull();
+    expect(screen.queryByText(/No se pudieron mostrar las unidades/)).toBeNull();
   });
 
   it("G-23: un 422 del correo marca el correo, con su motivo al lado, y no habla del nombre", async () => {
@@ -618,21 +656,20 @@ describe("página /invitaciones", () => {
       }),
     );
     abrir();
-    await completar();
+    await screen.findByText("Beto Pérez, 1° A");
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
     const retiro = await screen.findByText("Listo: la invitación de Beto Pérez se retiró.");
     await waitFor(() => expect(document.activeElement).toBe(retiro));
-    const correo = screen.getByLabelText("Correo");
-    correo.focus();
-    fireEvent.submit(correo.closest("form") as HTMLFormElement);
+    await completar();
+    fireEvent.click(invitarBoton());
     const aviso = await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
   });
 
-  it("al invitar, el aviso queda entre el formulario y la lista, y toma el foco", async () => {
+  it("al invitar, la ventana se cierra y el «Listo» queda junto al botón que la abrió, antes de la lista, con el foco", async () => {
     vi.stubGlobal(
       "fetch",
       conConsorcio({
@@ -642,64 +679,52 @@ describe("página /invitaciones", () => {
     );
     abrir();
     await completar();
-    const correo = screen.getByLabelText("Correo");
-    correo.focus();
-    fireEvent.submit(correo.closest("form") as HTMLFormElement);
+    fireEvent.click(invitarBoton());
     const aviso = await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
-    expect(antes(invitarBoton(), aviso)).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(antes(screen.getByRole("button", { name: "Invitar a una persona" }), aviso)).toBe(true);
     expect(antes(aviso, screen.getByRole("heading", { level: 2, name: "Invitaciones" }))).toBe(true);
   });
 
-  it("si invitar falla, el error aparece al lado del formulario, con el foco, y lo escrito sigue", async () => {
+  it("si invitar falla, el motivo queda en la ventana, con el foco, y lo escrito sigue", async () => {
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error("sin_permiso", 403) }));
     abrir();
     await completar();
     fireEvent.click(invitarBoton());
-    const aviso = await screen.findByText("Esta cuenta no tiene permiso para invitar a esa unidad.");
+    const ventana = screen.getByRole("dialog", { name: "Invitar a una persona" });
+    const aviso = await within(ventana).findByText("Esta cuenta no tiene permiso para invitar a esa unidad.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
-    expect(antes(invitarBoton(), aviso)).toBe(true);
-    expect(antes(aviso, screen.getByRole("heading", { level: 2, name: "Invitaciones" }))).toBe(true);
-    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
-    expect((screen.getByLabelText("Correo") as HTMLInputElement).value).toBe("dora@ejemplo.com");
+    expect((within(ventana).getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
+    expect((within(ventana).getByLabelText("Correo") as HTMLInputElement).value).toBe("dora@ejemplo.com");
   });
 
-  it("aunque el botón tocado no tome el foco, como en Safari, el aviso lo toma", async () => {
-    vi.stubGlobal("fetch", conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error("sin_permiso", 403) }));
-    abrir();
-    await completar();
-    // Control: nada tiene el foco al tocar el botón.
-    expect(document.activeElement).toBe(document.body);
-    fireEvent.click(invitarBoton());
-    const aviso = await screen.findByText("Esta cuenta no tiene permiso para invitar a esa unidad.");
-    await waitFor(() => expect(document.activeElement).toBe(aviso));
-  });
-
-  it("control: si durante el envío la persona llevó el foco a otro lado, el aviso no se lo saca", async () => {
-    let soltar: (r: Response) => void = () => undefined;
+  it("decisión 4: «Invitar» sigue activo con el nombre o el correo vacíos y marca lo que falta sin enviar", async () => {
     const simulado = conConsorcio();
-    const base = simulado.getMockImplementation() as (p: Request) => Promise<Response>;
-    simulado.mockImplementation(async (pedido: Request) =>
-      pedido.method === "POST"
-        ? new Promise<Response>((r) => {
-            soltar = r;
-          })
-        : base(pedido),
-    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    const ventana = await abrirVentana();
+    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(invitarBoton());
+    expect(await within(ventana).findByText("Falta escribir el nombre.")).toBeTruthy();
+    expect(within(ventana).getByText("Falta escribir el correo.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(within(ventana).getByLabelText("Nombre")));
+    expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(0);
+    // Control: al escribir, la marca de ese campo se va.
+    fireEvent.change(within(ventana).getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
+    expect(within(ventana).queryByText("Falta escribir el nombre.")).toBeNull();
+  });
+
+  it("«Cancelar» cierra la ventana sin enviar y el foco vuelve a «Invitar a una persona»", async () => {
+    const simulado = conConsorcio();
     vi.stubGlobal("fetch", simulado);
     abrir();
     await completar();
-    const correo = screen.getByLabelText("Correo") as HTMLInputElement;
-    correo.focus();
-    fireEvent.submit(correo.closest("form") as HTMLFormElement);
-    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
-    const titulo = screen.getByRole("heading", { level: 1, name: "Invitar a una persona" });
-    titulo.tabIndex = -1;
-    titulo.focus();
-    soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
-    await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
-    await waitFor(() => expect(correo.disabled).toBe(false));
-    expect(document.activeElement).toBe(titulo);
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Invitar a una persona" }));
+    expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(0);
   });
 
   it("E35: una lista pedida antes del retiro no vuelve a mostrar pendiente la invitación retirada", async () => {
@@ -821,8 +846,9 @@ describe("página /invitaciones", () => {
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
-    const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
-    expect(fila.textContent).toContain("Pendiente");
+    // Sigue en la lista de pendientes (la fila ya no repite «Pendiente»: INV-02).
+    const pendientes = screen.getByRole("list", { name: "Pendientes" });
+    expect(within(pendientes).getByText("Beto Pérez, 1° A")).toBeTruthy();
   });
 
   it("con dos edificios se elige cuál, y cambia unidades e invitaciones", async () => {
@@ -836,11 +862,16 @@ describe("página /invitaciones", () => {
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByText("Todavía no hay invitaciones.")).toBeTruthy();
-    expect(within(screen.getByLabelText("Unidad")).getAllByRole("option").map((o) => o.textContent)).toEqual(["9° Z", "9° Y"]);
+    // INV-04: sin invitaciones no hay sección «Invitaciones».
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Invitaciones" })).toBeNull());
+    expect(screen.queryByText("Beto Pérez, 1° A")).toBeNull();
+    const ventana = await abrirVentana();
+    expect(within(within(ventana).getByLabelText("Unidad")).getAllByRole("option").map((o) => o.textContent)).toEqual(["9° Z", "9° Y"]);
+    // INV-01: el edificio se elige en la página, no en la ventana.
+    expect(within(ventana).queryByLabelText("Edificio")).toBeNull();
   });
 
-  it("al cambiar de edificio no queda elegida una unidad del anterior", async () => {
+  it("al cambiar de edificio no queda elegida una unidad del anterior ni se ofrece invitar", async () => {
     vi.stubGlobal(
       "fetch",
       conConsorcio({
@@ -851,11 +882,36 @@ describe("página /invitaciones", () => {
       }),
     );
     abrir();
-    await completar();
+    await screen.findByText("Beto Pérez, 1° A");
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
-    expect(within(screen.getByLabelText("Unidad")).queryAllByRole("option")).toHaveLength(0);
-    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(true);
+    expect(await screen.findByText(/^No se pudieron mostrar las unidades\. El servicio no está disponible/)).toBeTruthy();
+    // C8G-09: con las unidades caídas no hay botón apagado ni formulario: el motivo y «Consultar de nuevo».
+    expect(screen.queryByRole("button", { name: "Invitar a una persona" })).toBeNull();
+    expect(screen.queryByLabelText("Unidad")).toBeNull();
+    expect(screen.getByRole("button", { name: "Consultar de nuevo" })).toBeTruthy();
+  });
+
+  it("C8G-09: sin unidades a las que invitar no se ofrece invitar y se dice por qué", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({ [`GET ${RUTA_UNIDADES}`]: () => Response.json({ elementos: [{ id: U1, designacion: "1° A", invitable: false }] }) }),
+    );
+    abrir();
+    expect(await screen.findByText(SIN_UNIDADES_INVITABLES)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Invitar a una persona" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Invitar" })).toBeNull();
+    // Control: la lista de invitaciones sigue a la vista.
+    expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
+  });
+
+  it("C8G-09: mientras llegan las unidades no se ofrece invitar", async () => {
+    const { retenido, soltar } = retener(conConsorcio(), RUTA_UNIDADES);
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    expect(screen.queryByRole("button", { name: "Invitar a una persona" })).toBeNull();
+    soltar();
+    expect(await screen.findByRole("button", { name: "Invitar a una persona" })).toBeTruthy();
   });
 
   it("sin edificios lo dice", async () => {
@@ -875,6 +931,17 @@ describe("página /invitaciones", () => {
     expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
     // La ficha va en un portal, fuera del contenedor: con ella y su pregunta, la página entera.
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("la ventana de invitar, con lo que falta marcado, no tiene faltas de accesibilidad detectables por axe", async () => {
+    vi.stubGlobal("fetch", conConsorcio());
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    await abrirVentana();
+    fireEvent.click(invitarBoton());
+    await screen.findByText("Falta escribir el nombre.");
+    const reglas = { rules: { "color-contrast": { enabled: false } } };
     expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
   });
 
@@ -930,13 +997,14 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     expect(within(lista).queryByText("Consultando…")).toBeNull();
   });
 
-  it("vacía: un edificio sin invitaciones lo dice", async () => {
+  it("vacía (INV-04): un edificio sin invitaciones no muestra la sección ni un aviso de lista vacía", async () => {
     vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => Response.json({ elementos: [] }) }));
     abrir();
 
-    const lista = await screen.findByRole("region", { name: "Invitaciones" });
-    expect(await within(lista).findByText("Todavía no hay invitaciones.")).toBeTruthy();
-    expect(within(lista).queryByRole("list")).toBeNull();
+    // Control: la sección existe mientras se consulta.
+    await screen.findByRole("button", { name: "Invitar a una persona" });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Invitaciones" })).toBeNull());
+    expect(screen.queryByText("Todavía no hay invitaciones.")).toBeNull();
   });
 
   it("error al consultar la lista: la sección deja de decir «Consultando…»", async () => {
@@ -958,12 +1026,10 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     abrir();
     const lista = await screen.findByRole("region", { name: "Invitaciones" });
     expect(await within(lista).findByText("No se pudieron mostrar las invitaciones.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
     caida = false;
     fireEvent.click(within(lista).getByRole("button", { name: "Consultar de nuevo" }));
     expect(await within(lista).findByText("Beto Pérez, 1° A")).toBeTruthy();
     expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2);
-    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
     // Control: con la lista a la vista no hay nada que reintentar.
     expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
@@ -977,23 +1043,25 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
         throw new TypeError("Failed to fetch");
       },
     ],
-  ])("las unidades que fallan con %s se reintentan en la pantalla, sin perder lo escrito", async (_, falla) => {
+  ])("las unidades que fallan con %s se reintentan en la pantalla, con el motivo dicho una sola vez", async (_, falla) => {
     let caida = true;
     const simulado = conConsorcio({
       [`GET ${RUTA_UNIDADES}`]: () => (caida ? falla() : Response.json(UNIDADES)),
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText("No se pudieron mostrar las unidades.")).toBeTruthy();
-    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(true);
+    const motivo = await screen.findByText(/^No se pudieron mostrar las unidades\./);
+    // C8G-09: ni botón apagado ni formulario; el motivo, una sola vez (no también arriba).
+    expect(screen.queryByRole("button", { name: "Invitar a una persona" })).toBeNull();
+    expect(document.querySelectorAll(".aviso-error")).toHaveLength(1);
+    expect(motivo.textContent).not.toBe("No se pudieron mostrar las unidades. ");
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
-    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
-    expect(screen.queryByText("No se pudieron mostrar las unidades.")).toBeNull();
+    const ventana = await abrirVentana();
+    expect((within(ventana).getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1);
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText(/^No se pudieron mostrar las unidades/)).toBeNull();
     expect(document.querySelector(".aviso-error")).toBeNull();
     expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(2);
     // Control: la lista estaba bien y no se volvió a pedir; ya no hay nada que reintentar.
@@ -1013,7 +1081,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     caida = false;
     fireEvent.click(en(screen.getAllByRole("button", { name: "Consultar de nuevo" }), 0));
     expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
-    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
+    expect(await screen.findByRole("button", { name: "Invitar a una persona" })).toBeTruthy();
     expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(2);
     expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
@@ -1031,10 +1099,12 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
       }),
     );
     abrir();
-    expect(await screen.findByText("No se pudieron mostrar las unidades.")).toBeTruthy();
+    expect(await screen.findByText(/^No se pudieron mostrar las unidades\./)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2));
-    expect(screen.queryByText("No se pudieron mostrar las unidades.")).toBeNull();
+    const ventana = await abrirVentana();
+    expect((within(ventana).getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2);
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText(/^No se pudieron mostrar las unidades/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
   });
 
@@ -1113,8 +1183,8 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_UNIDADES}`]: () => Response.json(unidades(false, true, true)) }));
     abrir();
 
-    await screen.findByRole("option", { name: "2° A" });
-    const opciones = within(screen.getByLabelText("Unidad")).getAllByRole("option");
+    const ventana = await abrirVentana();
+    const opciones = within(within(ventana).getByLabelText("Unidad")).getAllByRole("option");
     expect(opciones.map((o) => o.textContent)).toEqual(["2° A", "3° A"]);
   });
 
@@ -1126,6 +1196,7 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
 
+    await abrirVentana();
     expect(await screen.findByText("Unidad: 2° A")).toBeTruthy();
     expect(screen.queryByLabelText("Unidad")).toBeNull();
     fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Ana Díaz" } });
@@ -1141,7 +1212,7 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio());
     abrir();
 
-    expect(await screen.findByLabelText("Unidad")).toBeTruthy();
+    expect(within(await abrirVentana()).getByLabelText("Unidad")).toBeTruthy();
   });
 
   it("«Retirar» se ve con `invitaciones.revocar`", async () => {

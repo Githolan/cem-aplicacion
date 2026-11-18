@@ -72,8 +72,8 @@ describe("sección de la llave", () => {
     mostrar();
 
     await quitarConfirmando();
-    fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
+    // Queda un solo método más: el botón lo nombra y va directo (COD-01).
+    fireEvent.click(await screen.findByRole("button", { name: "Usar un código de recuperación" }));
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
@@ -121,6 +121,15 @@ describe("sección de la llave", () => {
     expect(await screen.findByText(/La llave ya funciona en este dispositivo/)).not.toBeNull();
     expect(screen.getByRole("list", { name: "Llaves de la cuenta" }).textContent).toContain("Mi PC (este dispositivo)");
     expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
+    // CTA-10: dicho una vez, sin «No hace falta nada más».
+    expect(screen.queryByText(/No hace falta nada más/)).toBeNull();
+  });
+
+  it("CTA-11: sin llaves en la cuenta explica qué es la llave", async () => {
+    backend({ "GET /api/v1/auth/llave": () => Response.json([]) });
+    mostrar();
+
+    expect(await screen.findByText(/sin escribir códigos y sin instalar nada/)).not.toBeNull();
   });
 
   it("control: con la llave de otro dispositivo ofrece agregar este y no dice que está listo", async () => {
@@ -129,7 +138,9 @@ describe("sección de la llave", () => {
     mostrar();
 
     expect(await screen.findByRole("button", { name: "Agregar este dispositivo" })).not.toBeNull();
-    expect(screen.getByText("Si este dispositivo no está en la lista, agregarlo.")).not.toBeNull();
+    // CTA-11: ni la frase que repite al botón ni qué es la llave, que la cuenta ya tiene.
+    expect(screen.queryByText("Si este dispositivo no está en la lista, agregarlo.")).toBeNull();
+    expect(screen.queryByText(/sin escribir códigos y sin instalar nada/)).toBeNull();
     expect(screen.queryByText(/La llave ya funciona en este dispositivo/)).toBeNull();
     expect(screen.getByRole("list", { name: "Llaves de la cuenta" }).textContent).not.toContain("(este dispositivo)");
   });
