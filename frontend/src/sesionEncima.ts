@@ -193,9 +193,14 @@ export async function comprobarSesion(pedir: Request): Promise<Response> {
 
 /** El `fetch` del cliente de la API. */
 export async function pedirConSesion(pedir: Request): Promise<Response> {
-  // El cuerpo se lee al mandarlo: la copia para repetirlo se hace antes.
-  const repetible = activa ? pedir.clone() : null;
-  const respuesta = await globalThis.fetch(pedir);
+  // El cuerpo se lee al mandarlo: la copia para repetirlo se hace antes. Se lee entero primero, no con
+  // `clone()`: la copia de un cuerpo es un flujo, y el navegador lo manda como flujo (sin poder verlo
+  // las herramientas del navegador ni las pruebas e2e). Los cuerpos de la API son JSON chicos o un
+  // adjunto de hasta 20 MB, que queda en memoria mientras dura el pedido.
+  const cuerpo = activa && pedir.body !== null ? await pedir.arrayBuffer() : null;
+  const mandar = cuerpo === null ? pedir : new Request(pedir, { body: cuerpo });
+  const repetible = activa ? (cuerpo === null ? pedir.clone() : new Request(pedir, { body: cuerpo })) : null;
+  const respuesta = await globalThis.fetch(mandar);
   if (repetible === null) return respuesta;
   const ruta = new URL(pedir.url).pathname;
   if (ruta === RUTA_SESION) await anotarSesion(respuesta);
