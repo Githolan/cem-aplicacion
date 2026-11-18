@@ -91,6 +91,10 @@ export const INVITACION_DEL_PADRON =
 /** En lugar de «Invitar a una persona» cuando el edificio no tiene ninguna unidad que la cuenta alcance (C8G-09). */
 export const SIN_UNIDADES_INVITABLES =
   "Esta cuenta no tiene unidades a las que invitar en este edificio. Las unidades se cargan con el padrón; el alcance de la cuenta lo define su mandato.";
+/** FL-PAD-02: en la ventana de invitar, quién confirma el vínculo. La regla que está en el código:
+ * quien registró el vínculo (quien invita) no lo confirma. */
+export const QUIEN_CONFIRMA =
+  "Queda sin confirmar hasta que se confirme con el título. Lo confirma otra persona del edificio que confirma vínculos, no quien invita.";
 /** En la ficha de una invitación aceptada: lo que falta y dónde (G-26). */
 export const FALTA_CONFIRMAR =
   "Aceptada la invitación, el vínculo se confirma en el Padrón, donde figura «Sin confirmar» hasta entonces.";
@@ -352,6 +356,20 @@ export function Invitar() {
     setInvitando(true);
   }
 
+  /** FL-INV-02: «Invitar de nuevo» a quien no aceptó a tiempo, con la unidad, el vínculo, el nombre y
+   * (si la API lo manda) el correo de la vencida ya puestos. La ficha se cierra: la ventana es de la página. */
+  function invitarDeNuevo(vencida: Invitacion) {
+    fichas.cerrar(false);
+    clave.current = null;
+    setUnidad(vencida.unidad_id);
+    setTipo(vencida.tipo);
+    setNombre(vencida.nombre);
+    setCorreo(vencida.correo ?? "");
+    setErrores(SIN_ERRORES);
+    setAviso(null);
+    setInvitando(true);
+  }
+
   /**
    * El botón de la ventana: lo que falta se marca; si está completo, se manda. Un rechazo queda en la
    * ventana (los campos que marcó la API, junto a cada uno); el «Listo» sale en la página, junto al
@@ -407,14 +425,14 @@ export function Invitar() {
     }
   }
 
-  function retirar(invitacion: Invitacion) {
+  function retirar(invitacion: Invitacion): Promise<FinDeEnvio> {
     // Al terminar, la ficha se cierra y `Hoja` devuelve el foco a la fila: eso no es que la persona
     // lo haya llevado a otro lado, y el foco va al aviso del resultado.
     foco.current = fichas.filaDe(invitacion.id) ?? document.activeElement;
     alAviso.current = true;
     setEnviando(true);
     setAviso(null);
-    void api
+    return api
       .POST("/api/v1/consorcios/{consorcio_id}/invitaciones/{invitacion_id}/revocar", {
         params: { path: { consorcio_id: consorcio, invitacion_id: invitacion.id } },
         headers: encabezadoCsrf(),
@@ -466,7 +484,8 @@ export function Invitar() {
         setARetirar(null);
         fichas.cerrar(false);
         setEnviando(false);
-      });
+      })
+      .then((): FinDeEnvio => "cerrar");
   }
 
   function abrirFicha(i: Invitacion) {
@@ -630,10 +649,15 @@ export function Invitar() {
     );
   }
 
-  /** La ficha de una invitación, con «Retirar» si se puede (pendiente o vencida) y el rol lo permite. */
+  /**
+   * La ficha de una invitación, con «Retirar» si está pendiente y el rol lo permite. Una vencida ya no
+   * sirve: retirarla no cambia nada, y en su lugar se ofrece invitar de nuevo (FL-INV-02) si la cuenta
+   * todavía alcanza esa unidad.
+   */
   function ficha(i: Invitacion) {
     const cierre = i.aceptada_en ?? i.revocada_en;
-    const retirable = (i.estado === "pendiente" || i.estado === "vencida") && puede("invitaciones.revocar");
+    const retirable = i.estado === "pendiente" && puede("invitaciones.revocar");
+    const reinvitable = i.estado === "vencida" && (unidades ?? []).some((u) => u.id === i.unidad_id);
     return (
       <FichaDeRegistro
         titulo={`${i.nombre}, ${i.unidad}`}
@@ -642,6 +666,22 @@ export function Invitar() {
           fichas.cerrar();
         }}
         ocupada={enviando}
+        ventana={
+          // FL-INV-03: retirar pregunta en su ventana, como en Mandatos.
+          retirable && aRetirar?.id === i.id && (
+            <VentanaDeFormulario
+              titulo="Retirar la invitación"
+              textoEnviar="Sí, retirarla"
+              peligro
+              alEnviar={() => retirar(i)}
+              alCerrar={() => setARetirar(null)}
+            >
+              <p>
+                ¿Retirar la invitación de {i.nombre} a la unidad {i.unidad}? Si el correo ya salió, su enlace deja de servir.
+              </p>
+            </VentanaDeFormulario>
+          )
+        }
         datos={[
           // INV-02: la persona y la unidad ya son el título de la ficha.
           { etiqueta: "Vínculo", valor: TEXTO_TIPO[i.tipo] },
@@ -659,24 +699,20 @@ export function Invitar() {
             {FALTA_CONFIRMAR} <Link to={RUTA_PADRON}>Ir al Padrón para confirmar el vínculo</Link>
           </p>
         )}
-        {retirable &&
-          (aRetirar?.id === i.id ? (
-            <div role="group" aria-labelledby={`${id}-${i.id}-confirmar`}>
-              <p id={`${id}-${i.id}-confirmar`}>¿Retirar la invitación de {i.nombre} a la unidad {i.unidad}?</p>
-              <button type="button" className="peligro" onClick={() => retirar(i)} disabled={enviando}>
-                Sí, retirarla
-              </button>{" "}
-              <button type="button" className="secundario" onClick={() => setARetirar(null)} disabled={enviando}>
-                No
-              </button>
-            </div>
-          ) : (
-            <p className="ficha-registro__acciones">
-              <button type="button" className="secundario peligro" onClick={() => setARetirar(i)} disabled={enviando}>
-                Retirar
-              </button>
-            </p>
-          ))}
+        {retirable && (
+          <p className="ficha-registro__acciones">
+            <button type="button" className="secundario peligro" onClick={() => setARetirar(i)} disabled={enviando}>
+              Retirar
+            </button>
+          </p>
+        )}
+        {reinvitable && (
+          <p className="ficha-registro__acciones">
+            <button type="button" onClick={() => invitarDeNuevo(i)} disabled={enviando}>
+              Invitar de nuevo
+            </button>
+          </p>
+        )}
       </FichaDeRegistro>
     );
   }
@@ -727,7 +763,7 @@ export function Invitar() {
           ))}
         </select>
         {/* INV-03: lo que antes era una tarjeta fija de la página, en una línea junto al campo que decide. */}
-        <p id={`${id}-tipo-ayuda`}>Queda sin confirmar hasta que se confirme con el título.</p>
+        <p id={`${id}-tipo-ayuda`}>{QUIEN_CONFIRMA}</p>
         <ErrorDeCampo idCampo={`${id}-tipo`} mensaje={errores.tipo} />
         <label htmlFor={`${id}-nombre`}>Nombre</label>
         <input
