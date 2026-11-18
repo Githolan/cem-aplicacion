@@ -11,6 +11,7 @@ import type { components } from "../api/tipos";
 import { ContextoVersion } from "../version";
 import {
   DOS_FIRMAS,
+  DESDE_EL_PANEL,
   FALTA_ADMINISTRADOR,
   FIRMAR,
   IR_A_MANDATOS,
@@ -23,6 +24,7 @@ import {
   textoSituacion,
   TITULO_SOLICITUDES,
 } from "./Solicitudes";
+import { TITULO_PANEL } from "../panel/Panel";
 
 // Solicitudes formales (RF49, app 0108). Datos ficticios: ningún edificio, persona ni documento real.
 
@@ -146,7 +148,7 @@ function error(codigo: string, status: number, mensaje = "x") {
   return Response.json({ codigo, mensaje, detalle: null, id_correlacion: "c" }, { status });
 }
 
-function abrir(ruta = "/solicitudes") {
+function abrir(ruta: string | { pathname: string; state: unknown } = "/solicitudes") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -490,5 +492,25 @@ describe("solicitudes formales", () => {
     const borrador = await abrirFicha(3);
     expect(borrador.queryByText("Firmas")).toBeNull();
     expect(borrador.getByText("Preparó")).toBeTruthy();
+  });
+});
+
+describe("el círculo de volver (FL-SOL-07)", () => {
+  it("desde el Resumen de pagos vuelve al Resumen, en todos los anchos", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir({ pathname: "/solicitudes", state: { consorcio: C1, desde: DESDE_EL_PANEL } });
+    await fila(1);
+    const volver = screen.getByRole("link", { name: `Volver a ${TITULO_PANEL}` });
+    expect(volver.getAttribute("href")).toBe("/panel");
+    expect(volver.classList.contains("cabecera-interna__volver--angosto")).toBe(false);
+  });
+
+  it("control: llegando de otro lado vuelve al inicio, y ese círculo es solo para el teléfono y la tablet", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    await fila(1);
+    const volver = screen.getByRole("link", { name: "Volver a Inicio" });
+    expect(volver.getAttribute("href")).toBe("/");
+    expect(volver.classList.contains("cabecera-interna__volver--angosto")).toBe(true);
   });
 });

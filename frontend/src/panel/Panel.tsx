@@ -10,7 +10,7 @@ import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/
 import { periodo } from "../egresos/Liquidacion";
 import { exigirSesion, SinSesion, useConsorcio, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { RUTA_SOLICITUDES } from "../fiscalizacion/Solicitudes";
+import { DESDE_EL_PANEL, RUTA_SOLICITUDES } from "../fiscalizacion/Solicitudes";
 import { cumple, REQUISITOS, useAcciones } from "../permisos";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
 import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
@@ -137,7 +137,7 @@ export const textoSolicitudesAbiertas = (n: number) => `Solicitudes abiertas: ${
 function LineaSolicitudes({ consorcio, abiertas }: { consorcio: string; abiertas: number }) {
   return (
     <p>
-      <Link to={RUTA_SOLICITUDES} state={{ consorcio }} className="enlace-suelto">
+      <Link to={RUTA_SOLICITUDES} state={{ consorcio, desde: DESDE_EL_PANEL }} className="enlace-suelto">
         {textoSolicitudesAbiertas(abiertas)}
       </Link>
     </p>

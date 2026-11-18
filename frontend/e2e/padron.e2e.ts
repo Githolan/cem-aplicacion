@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularInicioSinPendientes, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /padron servida por el nginx de la imagen, con su CSP real. Como en mandatos.e2e.ts,
 // sin sesión responde el backend de verdad (401) y, con sesión, la API se simula desde el
@@ -71,6 +71,9 @@ async function simularApi(pagina: Page, baseURL: string, quien: "consejo" | "vec
         return ruta.fulfill({
           json: { elementos: PADRON.elementos.map((f) => ({ ...f, correo: "privado@ejemplo.com", telefono: "+54 11 4321-9876" })) },
         });
+      // Lo demás que lee el inicio, sin pendientes (decisión 9, tanda 2 de flujos).
+      const inicio = simularInicioSinPendientes(ruta, camino);
+      if (inicio !== null) return inicio;
       return ruta.abort();
     }
     const csrf = (await pedido.headerValue("x-csrf-token")) ?? null;

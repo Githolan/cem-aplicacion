@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useLocation } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
@@ -29,6 +30,7 @@ import { type DatoDeFicha, FichaDeRegistro, FilaDeRegistro, useFichas } from "..
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { ComandoNoDisponible } from "../ComandoNoDisponible";
 import { RUTA_MANDATOS } from "../Mandatos";
+import { RUTA_PANEL, TITULO_PANEL } from "../panel/Panel";
 import { REQUISITOS } from "../permisos";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { SubirArchivo } from "../SubirArchivo";
@@ -138,12 +140,27 @@ const descarga = (consorcio: string, documento: string, version: string) =>
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; lista: Lista };
 
+/** Lo que pone el Resumen de pagos en `state.desde` al abrir las solicitudes: el círculo vuelve ahí. */
+export const DESDE_EL_PANEL = "panel";
+
 export function Solicitudes() {
   const elegido = useConsorcio(REQUISITOS.solicitudes);
-  return <DelEdificio key={elegido.consorcio} {...elegido} />;
+  // Se lee una vez, al llegar: `AvisoLlegada` borra el `state` apenas lo ve. Desde el Resumen de
+  // pagos, volver vuelve al Resumen (FL-SOL-07).
+  const estado: unknown = useLocation().state;
+  const desdePanel = useRef(typeof estado === "object" && estado !== null && "desde" in estado && estado.desde === DESDE_EL_PANEL);
+  return <DelEdificio key={elegido.consorcio} {...elegido} desdePanel={desdePanel.current} />;
 }
 
-function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+function DelEdificio({
+  pantalla,
+  consorcio,
+  setConsorcio,
+  aEntrar,
+  aInicio,
+  reintentar,
+  desdePanel,
+}: ReturnType<typeof useConsorcio> & { desdePanel: boolean }) {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   /** Por qué no llegó la lista. */
@@ -231,7 +248,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
   return (
     <>
-      <CabeceraInterna titulo={TITULO_SOLICITUDES} volver={RUTA_INICIO} destino="Inicio" />
+      <CabeceraInterna
+        titulo={TITULO_SOLICITUDES}
+        volver={desdePanel ? RUTA_PANEL : RUTA_INICIO}
+        destino={desdePanel ? TITULO_PANEL : "Inicio"}
+      />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}

@@ -1,6 +1,6 @@
 import { type QueryClient, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useLocation } from "react-router";
 
 import { api } from "./api/cliente";
 import { RUTA_INICIO } from "./enlace";
@@ -212,6 +212,17 @@ export function useEdificioElegido<T extends { id: string }>(
     consorcio: resuelto.current ? (actual?.id ?? "") : "",
     setConsorcio,
   };
+}
+
+/** El edificio con el que llega la persona desde otra pantalla (`state.consorcio`): una fila del
+ * inicio abre la pantalla en el edificio de la fila (FL-AVI-03). Se lee una vez, al llegar:
+ * `AvisoLlegada` borra el `state` apenas lo ve. */
+export function useConsorcioDeLlegada(): string | null {
+  const estado: unknown = useLocation().state;
+  const llegada = useRef(
+    typeof estado === "object" && estado !== null && "consorcio" in estado && typeof estado.consorcio === "string" ? estado.consorcio : null,
+  );
+  return llegada.current;
 }
 
 /** Una dirección abierta a mano sin permiso lleva al inicio, sin pantalla de «sin permiso». */
