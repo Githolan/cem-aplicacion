@@ -155,6 +155,12 @@ ADICIONES_0046 = {
     "administrador": [],
     "administrador_externo": [],
 }
+# `0110` (pregunta 7 del propietario, 18-11-2026): el Consejo también confirma vínculos.
+ADICIONES_0110 = {
+    "miembro_consejo": ["padron.confirmar_vinculo"],
+    "administrador": [],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -163,6 +169,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0031[tipo]
     + ADICIONES_0036[tipo]
     + ADICIONES_0046[tipo]
+    + ADICIONES_0110[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 
