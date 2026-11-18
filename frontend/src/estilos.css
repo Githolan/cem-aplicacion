@@ -2156,3 +2156,14 @@ a.fila-registro:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Flujos 18-11, tanda 1 */
+/* FL-ORD-01: con el proveedor que no admite la orden, sus campos se esconden sin desmontarse (lo
+   escrito y la factura subida se conservan). A la vista, son parte de la grilla del formulario. */
+.campos-de-la-orden {
+  display: contents;
+}
+
+.campos-de-la-orden[hidden] {
+  display: none;
+}

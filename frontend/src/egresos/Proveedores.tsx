@@ -67,6 +67,12 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // dice solo qué cambió (PRV-03); la fila y la ficha no dicen lo que es por defecto (PRV-04); cambiar
 // la cuenta es una pregunta corta (PRV-05); y guardar sin cambios no llega al servidor (C8P-07).
 // «Quién ve los proveedores» se abre desde acá (MEN-05).
+//
+// Flujos 18-11, tanda 1: el aviso de una orden lleva a la ficha de su proveedor y la ficha vuelve a la
+// orden con lo escrito y la factura (FL-ORD-04); cancelar el alta que vino de una orden vuelve a ella
+// (FL-PRV-02); con un salteo que espera su orden, la ficha ofrece prepararla (FL-PRV-04); suspender,
+// dar de baja y reactivar son actos propios con su consecuencia (FL-PRV-05); y sin ningún proveedor,
+// quien vino a preparar una orden llega al alta (FL-LEG-11).
 
 type Proveedor = components["schemas"]["Proveedor"];
 type FichaProveedor = components["schemas"]["ProveedorConVersiones"];
@@ -119,7 +125,9 @@ const VACIO: Datos = {
 
 type Cambio = { modo: "cambio"; proveedor: Proveedor };
 type CargaCuit = { modo: "cuit"; proveedor: Proveedor };
-type Formulario = { modo: "alta" } | Cambio | CargaCuit;
+/** Suspender, dar de baja o reactivar (FL-PRV-05): un acto propio, con su consecuencia a la vista. */
+type CambioDeEstado = { modo: "estado"; proveedor: Proveedor; estado: EstadoProveedor };
+type Formulario = { modo: "alta" } | Cambio | CargaCuit | CambioDeEstado;
 type Pendiente = { acto: string; reintentar: () => void };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
@@ -174,8 +182,10 @@ const NOMBRES: Record<string, string> = {
 /** Los campos que muestra cada formulario: solo esos se pueden marcar. */
 function nombresDe(f: Formulario): Record<string, string> {
   if (f.modo === "cuit") return { cuit: "el CUIT" };
-  const { cuit, estado, ...comunes } = NOMBRES;
-  return f.modo === "alta" ? { ...comunes, cuit: cuit ?? "" } : { ...comunes, estado: estado ?? "" };
+  if (f.modo === "estado") return { estado: "el estado" };
+  // El estado ya no está en el formulario de los datos (FL-PRV-05): tiene sus propios actos.
+  const comunes = Object.fromEntries(Object.entries(NOMBRES).filter(([campo]) => campo !== "cuit" && campo !== "estado"));
+  return f.modo === "alta" ? { ...comunes, cuit: NOMBRES.cuit ?? "" } : comunes;
 }
 
 /** Lo que trae la orden al dar de alta el proveedor de su factura (`AltaDesdeLaFactura`), con el
@@ -214,6 +224,42 @@ function desdeLaFactura(estado: unknown): DesdeLaFactura | null {
   };
 }
 
+/** Se llegó desde el aviso de una orden para abrir la ficha de un proveedor (FL-ORD-04): la ficha se
+ * abre sola y, en una orden nueva, ofrece volver a ella con lo escrito y la factura. */
+type DesdeLaOrden = { consorcio: string; abrir: string; orden: Record<string, unknown> | null };
+
+function desdeLaOrden(estado: unknown): DesdeLaOrden | null {
+  if (typeof estado !== "object" || estado === null || "alta" in estado) return null;
+  const { abrir, orden, consorcio } = estado as Record<string, unknown>;
+  if (typeof abrir !== "string" || typeof consorcio !== "string") return null;
+  return { consorcio, abrir, orden: typeof orden === "object" && orden !== null ? (orden as Record<string, unknown>) : null };
+}
+
+export const VOLVER_A_LA_ORDEN = "Volver a la orden";
+/** FL-PRV-04: con un salteo que espera su orden, el paso siguiente de quien prepara. */
+export const PREPARAR_LA_ORDEN = "Preparar la orden";
+
+/** FL-PRV-05: los cambios de estado, cada uno con su verbo y lo que pasa con lo que está en curso. */
+export const ACTO_DE_ESTADO: Record<EstadoProveedor, { verbo: string; hecho: string; consecuencia: string }> = {
+  activo: {
+    verbo: "Reactivar",
+    hecho: "quedó activo",
+    consecuencia: "Vuelve a recibir órdenes nuevas.",
+  },
+  suspendido: {
+    verbo: "Suspender",
+    hecho: "quedó suspendido",
+    consecuencia: "No recibe órdenes nuevas mientras esté suspendido; las que ya existen siguen su curso. Se puede reactivar.",
+  },
+  baja: {
+    verbo: "Dar de baja",
+    hecho: "quedó de baja",
+    consecuencia: "No recibe órdenes nuevas; las que ya existen siguen su curso. Se puede reactivar.",
+  },
+};
+/** El orden en que se ofrecen los cambios de estado: reactivar primero, dar de baja al final. */
+const ESTADOS_EN_ORDEN: readonly EstadoProveedor[] = ["activo", "suspendido", "baja"];
+
 /** Si se llegó desde Órdenes de pago porque faltaba un proveedor (`state.paraPreparar`). */
 function vieneAPreparar(estado: unknown): boolean {
   return typeof estado === "object" && estado !== null && "paraPreparar" in estado && estado.paraPreparar === true;
@@ -222,7 +268,7 @@ function vieneAPreparar(estado: unknown): boolean {
 /** En un cambio, el campo vacío conserva la cuenta del proveedor. La pantalla nunca la tiene
  * completa: lo pide con `conservar_cuenta` y el backend la toma de la versión esperada. */
 function conservaCuenta(f: Formulario, d: Datos): boolean {
-  return f.modo === "cambio" && d.cuenta.trim() === "";
+  return f.modo === "estado" || (f.modo === "cambio" && d.cuenta.trim() === "");
 }
 
 /** La pregunta antes de cambiar la cuenta (decisión del 30-10, punto 21): corta y con el color de lo
@@ -267,7 +313,13 @@ function sinCambios(escrito: Datos, actual: Datos): boolean {
 
 export const AVISO_PROVEEDOR_CAMBIO = "El proveedor cambió mientras estaba abierto. Hay que revisar los datos y guardar de nuevo.";
 
-type PropsDelEdificio = ReturnType<typeof useConsorcio> & { vuelveAPreparar: boolean; factura: DesdeLaFactura | null };
+type PropsDelEdificio = ReturnType<typeof useConsorcio> & {
+  vuelveAPreparar: boolean;
+  factura: DesdeLaFactura | null;
+  orden: DesdeLaOrden | null;
+  /** Se vino a preparar una orden en este edificio (FL-LEG-11). */
+  prepararAca: boolean;
+};
 
 // Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
 // el reintento pendiente después del código) llega a la pantalla de otro.
@@ -275,10 +327,17 @@ export function Proveedores() {
   const elegido = useConsorcio(REQUISITOS.proveedores);
   const estado = useLocation().state;
   const vuelveAPreparar = useRef(vieneAPreparar(estado));
+  /** El edificio desde el que se vino a preparar la orden: el alta sola se abre solo en ese (FL-LEG-11). */
+  const edificioDeLaLlegada = useRef(typeof estado === "object" && estado !== null && "consorcio" in estado ? estado.consorcio : null);
   const factura = useRef(desdeLaFactura(estado));
-  // Lo leído de la factura es del edificio de la orden: al elegir otro edificio no se usa.
+  const orden = useRef(desdeLaOrden(estado));
+  // Lo leído de la factura y la orden en curso son del edificio de la orden: en otro no se usan.
   const deEsteEdificio = factura.current?.consorcio === elegido.consorcio ? factura.current : null;
-  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} factura={deEsteEdificio} />;
+  const ordenDeEsteEdificio = orden.current?.consorcio === elegido.consorcio ? orden.current : null;
+  return (
+    <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} factura={deEsteEdificio}
+      orden={ordenDeEsteEdificio} prepararAca={vuelveAPreparar.current && edificioDeLaLlegada.current === elegido.consorcio} />
+  );
 }
 
 /** La fila del proveedor (PRV-04): el estado solo si no es «Activo», y la cuenta que falta sin la
@@ -294,7 +353,7 @@ export function resumenDeFila(p: Proveedor, marcas: readonly (string | null)[]):
     .join(" · ");
 }
 
-function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, vuelveAPreparar, factura }: PropsDelEdificio) {
+function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, vuelveAPreparar, factura, orden, prepararAca }: PropsDelEdificio) {
   const id = useId();
   const navegar = useNavigate();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
@@ -324,6 +383,10 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
   const montado = useMontado();
+  /** La llegada ya hizo lo suyo (abrir la ficha, o el alta en un edificio sin proveedores): una vez. */
+  const llegadaAtendida = useRef(false);
+  /** El alta que vino de una orden ya volvió a ella: cerrar la ventana no vuelve otra vez. */
+  const yaVolvio = useRef(false);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -362,6 +425,24 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
+
+  // La llegada, una vez leída la lista: desde el aviso de una orden se abre la ficha de ese proveedor
+  // (FL-ORD-04, FL-LEG-03); a preparar una orden en un edificio sin ningún proveedor, el alta (FL-LEG-11).
+  const atenderLlegada = useRef<(proveedores: readonly Proveedor[]) => void>(() => undefined);
+  atenderLlegada.current = (proveedores) => {
+    if (llegadaAtendida.current) return;
+    llegadaAtendida.current = true;
+    if (orden !== null && proveedores.some((p) => p.id === orden.abrir)) verFicha({ id: orden.abrir });
+    else if (prepararAca && factura === null && proveedores.length === 0) abrir({ modo: "alta" });
+  };
+  useEffect(() => {
+    if (lectura.tipo === "ok") atenderLlegada.current(lectura.proveedores);
+  }, [lectura]);
+
+  /** Vuelve a preparar la orden con lo que traía, con ese proveedor elegido (FL-ORD-04). */
+  function volverALaOrden(proveedor: string, aviso?: string) {
+    navegar(RUTA_NUEVA, { state: { ...(orden?.orden ?? factura?.orden ?? {}), consorcio, proveedor, ...(aviso === undefined ? {} : { aviso }) } });
+  }
 
   function cerrarFicha(devolverFoco = true) {
     setFicha(null);
@@ -405,7 +486,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setAviso(null);
     setErrores(SIN_ERRORES);
     setRechazoDelReintento(null);
-    setDatos(f.modo === "alta" ? VACIO : datosDe(f.proveedor));
+    setDatos(f.modo === "alta" ? VACIO : f.modo === "estado" ? { ...datosDe(f.proveedor), estado: f.estado } : datosDe(f.proveedor));
     setRespaldo(null);
     setDeLaLectura(new Set());
     setFormulario(f);
@@ -425,6 +506,15 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     clave.current = null;
     setDatos((d) => ({ ...d, ...leidos }));
     setDeLaLectura(new Set(Object.keys(leidos) as CampoLeido[]));
+  }
+
+  /** Cancelar el alta que vino de una orden vuelve a la orden con lo escrito y la factura (FL-PRV-02). */
+  function cerrarAlta() {
+    cerrar();
+    if (vuelveAPreparar && factura !== null && !yaVolvio.current) {
+      yaVolvio.current = true;
+      navegar(RUTA_NUEVA, { state: { ...(factura.orden ?? {}), consorcio } });
+    }
   }
 
   function cerrar() {
@@ -450,6 +540,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     // Dar de alta ahora mandaría el proveedor sin el documento que todavía no terminó: la línea de
     // arriba del botón dice por qué no sale.
     if (f.modo === "alta" && respaldoEnEspera) return "seguir";
+    // Cambiar el estado manda los datos que ya tiene, con la cuenta que tiene (FL-PRV-05).
+    if (f.modo === "estado") return pedir(f);
     const faltan = faltaCompletar({
       ...(f.modo === "cambio" ? {} : { cuit: [datos.cuit, FALTA_CUIT] as const }),
       ...(f.modo === "cuit" ? {} : { razon_social: [datos.razon, FALTA_RAZON] as const }),
@@ -551,9 +643,18 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             ? "Listo: el proveedor quedó dado de alta."
             : f.modo === "cuit"
               ? `Listo: el CUIT de ${f.proveedor.razon_social} quedó cargado.`
-              : `Listo: los cambios de ${comunes.razon_social} quedaron guardados.`;
+              : f.modo === "estado"
+                ? `Listo: ${f.proveedor.razon_social} ${ACTO_DE_ESTADO[f.estado].hecho}.`
+                : `Listo: los cambios de ${comunes.razon_social} quedaron guardados.`;
         if (f.modo === "alta" && vuelveAPreparar) {
+          yaVolvio.current = true;
           navegar(RUTA_NUEVA, { state: { ...(factura?.orden ?? {}), consorcio, proveedor: data.id, aviso: hecho } });
+          return "cerrar";
+        }
+        // Reactivado el proveedor por el que se vino a preparar una orden, se vuelve a ella (FL-LEG-11,
+        // FL-PRV-01): el paso siguiente es la orden, no la lista.
+        if (f.modo === "estado" && f.estado === "activo" && ((orden !== null && orden.orden !== null && orden.abrir === f.proveedor.id) || vuelveAPreparar)) {
+          volverALaOrden(f.proveedor.id, hecho);
           return "cerrar";
         }
         setAviso({ texto: hecho, ok: true });
@@ -655,6 +756,12 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 <button type="button" onClick={() => abrir({ modo: "alta" })}>
                   Dar de alta un proveedor
                 </button>
+                {/* Cerrada la ficha a la que llevó el aviso de la orden, la vuelta sigue a mano (FL-ORD-04). */}
+                {orden !== null && orden.orden !== null && enFicha === null && (
+                  <Link to={RUTA_NUEVA} state={{ ...orden.orden, consorcio, proveedor: orden.abrir }} className="enlace-suelto">
+                    {VOLVER_A_LA_ORDEN}
+                  </Link>
+                )}
                 {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú. */}
                 {puede("proveedores.autorizar") && (
                   <Link to={RUTA_AUTORIZACIONES_PROVEEDORES} state={{ consorcio }} className="enlace-suelto">
@@ -704,6 +811,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   function fichaDe(f: FichaProveedor) {
     const p = f.proveedor;
     const historia = historiaDeVersiones(f.versiones, p.version);
+    const vuelveALaOrden = orden !== null && orden.orden !== null && orden.abrir === p.id;
+    /** Un salteo de otra persona espera la orden de este proveedor bloqueado (FL-PRV-04). */
+    const salteoQueEspera =
+      p.estado === "activo" &&
+      f.configuracion.modo_exigencia === "bloquear" &&
+      f.faltantes.length > 0 &&
+      f.salteos.some((s) => s.estado === "vigente" && !s.propio);
+    const principal = vuelveALaOrden ? "volver" : salteoQueEspera ? "preparar" : p.cuit === null ? "cuit" : "cambiar";
     return (
       <FichaDelProveedor
         consorcio={consorcio}
@@ -722,15 +837,34 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         alCerrar={() => cerrarFicha()}
         acciones={
           <p className="ficha-registro__acciones">
-            {/* Un solo botón principal (P-27): cargar el CUIT mientras falte; si no, cambiar los datos. */}
+            {/* Un solo botón principal (P-27): volver a la orden de la que se vino (FL-ORD-04); con un
+                salteo que espera su orden, prepararla (FL-PRV-04); cargar el CUIT mientras falte; si no,
+                cambiar los datos. */}
+            {principal === "volver" && (
+              <button type="button" onClick={() => volverALaOrden(p.id)}>
+                {VOLVER_A_LA_ORDEN}
+              </button>
+            )}
+            {principal === "preparar" && (
+              <button type="button" onClick={() => navegar(RUTA_NUEVA, { state: { consorcio, proveedor: p.id } })}>
+                {PREPARAR_LA_ORDEN}
+              </button>
+            )}
             {p.cuit === null && (
-              <button type="button" onClick={() => abrir({ modo: "cuit", proveedor: p })}>
+              <button type="button" className={principal === "cuit" ? undefined : "secundario"} onClick={() => abrir({ modo: "cuit", proveedor: p })}>
                 Cargar el CUIT
               </button>
             )}
-            <button type="button" className={p.cuit === null ? "secundario" : undefined} onClick={() => abrir({ modo: "cambio", proveedor: p })}>
+            <button type="button" className={principal === "cambiar" ? undefined : "secundario"} onClick={() => abrir({ modo: "cambio", proveedor: p })}>
               Cambiar los datos
             </button>
+            {/* FL-PRV-05: el estado es un acto propio, con lo que pasa con lo que está en curso. */}
+            {ESTADOS_EN_ORDEN.filter((e) => e !== p.estado).map((e) => (
+              <button key={e} type="button" className={e === "baja" ? "secundario peligro" : "secundario"}
+                onClick={() => abrir({ modo: "estado", proveedor: p, estado: e })}>
+                {ACTO_DE_ESTADO[e].verbo}
+              </button>
+            ))}
           </p>
         }
         historia={
@@ -766,6 +900,16 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           {reintento}
         </VentanaDeFormulario>
       );
+    if (f.modo === "estado") {
+      const acto = ACTO_DE_ESTADO[f.estado];
+      return (
+        <VentanaDeFormulario titulo={`${acto.verbo}: ${f.proveedor.razon_social}`} textoEnviar={acto.verbo} peligro={f.estado === "baja"}
+          alEnviar={() => enviar(f)} alCerrar={cerrar}>
+          <p>{acto.consecuencia}</p>
+          {reintento}
+        </VentanaDeFormulario>
+      );
+    }
     const alta = f.modo === "alta";
     return (
       <VentanaDeFormulario
@@ -773,7 +917,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         textoEnviar={confirmarCuenta ? SI_CAMBIAR_CUENTA : alta ? "Dar de alta el proveedor" : "Guardar los cambios"}
         ancha
         alEnviar={() => enviar(f)}
-        alCerrar={cerrar}
+        alCerrar={alta ? cerrarAlta : cerrar}
       >
         {alta && (
           <>
@@ -833,18 +977,6 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           placeholder={alta ? undefined : cuentaEnmascarada(f.proveedor.cuenta_ultimos_digitos)}
           onChange={(e) => cambiar("cuenta", e.target.value)} />
         <ErrorDeCampo idCampo={`${id}-cuenta`} mensaje={errorDeCuenta} />
-        {!alta && (
-          <>
-            <label htmlFor={`${id}-estado`}>Estado</label>
-            <select id={`${id}-estado`} value={datos.estado} {...marcaDe(`${id}-estado`, errores.estado)}
-              onChange={(e) => cambiar("estado", e.target.value as EstadoProveedor)}>
-              {(Object.keys(TEXTO_ESTADO_PROVEEDOR) as EstadoProveedor[]).map((e) => (
-                <option key={e} value={e}>{TEXTO_ESTADO_PROVEEDOR[e]}</option>
-              ))}
-            </select>
-            <ErrorDeCampo idCampo={`${id}-estado`} mensaje={errores.estado} />
-          </>
-        )}
         {/* Una pregunta, no un error (PRV-05): «Sí» es el botón principal; «No» deja la cuenta que tiene. */}
         {confirmarCuenta && (
           <p className="aviso-pendiente pregunta-cuenta" role="status">

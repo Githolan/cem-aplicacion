@@ -14,11 +14,13 @@ import { Link } from "react-router";
 //
 // - `motivo`: una frase completa, sin voseo, que diga qué falta o quién lo hace.
 // - `resolver` (opcional): el enlace a la pantalla donde se resuelve. Sin él, el motivo ya dice dónde.
+//   `estado` viaja en la navegación: con él, la pantalla de destino abre lo que hay que resolver y
+//   puede volver a donde se estaba (flujos 18-11, FL-ORD-04).
 // - `enLinea`: dentro de un renglón (una celda, una fila) va como `span` en vez de párrafo.
 
 type Props = {
   motivo: string;
-  resolver?: { texto: string; a: string };
+  resolver?: { texto: string; a: string; estado?: unknown };
   enLinea?: boolean;
 };
 
@@ -30,7 +32,7 @@ export function ComandoNoDisponible({ motivo, resolver, enLinea = false }: Props
       {resolver !== undefined && (
         <>
           {" "}
-          <Link to={resolver.a} className="enlace-suelto">
+          <Link to={resolver.a} state={resolver.estado} className="enlace-suelto">
             {resolver.texto}
           </Link>
         </>
