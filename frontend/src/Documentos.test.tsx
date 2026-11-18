@@ -11,6 +11,7 @@ import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { aceptar, hoyDelDispositivo, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
+import { CAMBIAR_ARCHIVO } from "./SubirArchivo";
 import { ARCHIVO_EN_REVISION, archivosDeLaFicha, mensajeDeError, REFRESCO_CUARENTENA_MS, RESPALDA_ALGO, RETIRAR_DOCUMENTO, tamano } from "./Documentos";
 import { LIMITE_DE_PEDIDOS, SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
@@ -778,6 +779,10 @@ describe("página /documentos", () => {
     // La misma ventana sigue, ahora para subir solo el archivo de ese documento, con lo elegido.
     const tarjetaNueva = ventanaDe("Subir el archivo de «Presupuesto de pintura»");
     expect(within(tarjetaNueva).getByText(/Elegido: acta\.pdf/)).toBeTruthy();
+    // DOC-16: con el archivo elegido, en lugar de las formas de elegir, un solo «Cambiar el archivo».
+    expect(within(tarjetaNueva).getByRole("button", { name: CAMBIAR_ARCHIVO })).toBeTruthy();
+    for (const nombre of ["Sacar una foto", "Elegir de la galería", "Elegir un archivo"])
+      expect(within(tarjetaNueva).queryByRole("button", { name: nombre })).toBeNull();
     respuesta = () =>
       Response.json(
         { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
