@@ -17,7 +17,8 @@ import { CAMBIAR_ARCHIVO } from "../SubirArchivo";
 import { importe, TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
 import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
-import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
+import { FALTA_CODIGO_MONEDA } from "./CampoMonedaSalida";
+import { cambiosDeVersion, cambiosEntreVersiones, NO_ESTA_EN_NINGUNO } from "./Ficha";
 import { contratosAplicables, textoMonedaAjena } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
 import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_LISTO } from "./SubirFactura";
@@ -552,7 +553,7 @@ describe("el ancho de la pantalla", () => {
     const aprobar = (await boton("Aprobar la orden")) as HTMLButtonElement;
     await waitFor(() => expect(aprobar.disabled).toBe(false));
     fireEvent.click(aprobar);
-    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta. Falta otra aprobación.")).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Lo que pasó con la orden" })).toBeNull();
@@ -756,6 +757,37 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   it("una orden que no está en el edificio lo dice y deja volver", async () => {
     abrirFicha(PAGAR, { [`GET ${BASE}/pagos/${O1}`]: () => error("no_encontrado", 404) });
     expect(await screen.findByText("Esa orden no está en este edificio.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Volver a Pagos" })).toBeTruthy();
+  });
+
+  describe("FL-BAN-02: con más de un edificio, la orden se busca en los demás", () => {
+    const DOS_EDIFICIOS = () =>
+      Response.json([
+        { id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] },
+        { id: C2, nombre: "Otro Edificio Ficticio", vinculos: [], monedas: ["ARS"] },
+      ]);
+
+    it("si está en otro, la abre ahí, con ese edificio elegido", async () => {
+      const api = abrirFicha(PAGAR, {
+        "GET /api/v1/me/consorcios": DOS_EDIFICIOS,
+        [`GET ${BASE}/pagos/${O1}`]: () => error("no_encontrado", 404),
+        [`GET /api/v1/consorcios/${C2}/pagos/${O1}`]: () => Response.json(PAGAR),
+      });
+      expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
+      expect((screen.getByLabelText("Edificio") as HTMLSelectElement).value).toBe(C2);
+      expect(screen.queryByText(/Esa orden no está/)).toBeNull();
+      expect(pedidos(api, "GET", `/api/v1/consorcios/${C2}/pagos/${O1}`).length).toBeGreaterThan(0);
+    });
+
+    it("si no está en ninguno, lo dice así", async () => {
+      abrirFicha(PAGAR, {
+        "GET /api/v1/me/consorcios": DOS_EDIFICIOS,
+        [`GET ${BASE}/pagos/${O1}`]: () => error("no_encontrado", 404),
+        [`GET /api/v1/consorcios/${C2}/pagos/${O1}`]: () => error("no_encontrado", 404),
+      });
+      expect(await screen.findByText(NO_ESTA_EN_NINGUNO)).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Volver a Pagos" })).toBeTruthy();
+    });
   });
 
   it("no muestra datos que no hacen falta para decidir, salvo en «Más datos»", async () => {
@@ -928,6 +960,31 @@ describe("pagar", () => {
     // Lo que sigue es subir el comprobante: su botón abre la ventana (REG-01).
     expect(await boton("Subir el comprobante")).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
+  });
+
+  it("FL-PAG-03: sin CUIT, los datos para transferir no dibujan el renglón", async () => {
+    abrirFicha({ ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion(), versiones: [version({ cuit: null })] }, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO),
+    });
+    fireEvent.click(await boton("Ver la cuenta para pagar"));
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+    expect(screen.queryByText("CUIT del titular")).toBeNull();
+    expect(screen.queryByText("Sin CUIT")).toBeNull();
+  });
+
+  it("FL-PAG-03: sin CUIT, «Más datos» tampoco dice «Sin CUIT»", async () => {
+    abrirFicha({ ...PAGAR, versiones: [version({ cuit: null })] });
+    await boton("Ver la cuenta para pagar");
+    expect(screen.queryByText("Sin CUIT")).toBeNull();
+    expect(screen.queryByText("CUIT", { selector: "dt" })).toBeNull();
+  });
+
+  it("control de FL-PAG-03: con CUIT, el renglón está", async () => {
+    abrirFicha({ ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion() }, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO),
+    });
+    fireEvent.click(await boton("Ver la cuenta para pagar"));
+    expect(await screen.findByText("CUIT del titular")).toBeTruthy();
   });
 
   it("control: ya en ejecución no emite otra vez: solo abre la cuenta", async () => {
@@ -1141,14 +1198,60 @@ describe("registrar y corregir", () => {
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
-    const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
+    // FL-PAG-01: por su nombre, con la de la orden elegida.
+    const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLSelectElement;
+    expect(moneda.tagName).toBe("SELECT");
     expect(moneda.value).toBe("ARS");
-    fireEvent.change(moneda, { target: { value: "usd" } });
+    expect([...moneda.options].map((o) => o.text)).toEqual(["Pesos", "Dólares", "Otra"]);
+    expect(screen.queryByText(/código de tres letras/)).toBeNull();
+    fireEvent.change(moneda, { target: { value: "USD" } });
     expect(moneda.value).toBe("USD");
     fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "Salió en dólares" } });
     fireEvent.click(await boton("Registrar lo que pasó"));
     await screen.findByText(/La orden no queda pagada/);
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`)[0])).toMatchObject({ moneda: "USD" });
+  });
+
+  it("FL-PAG-02: lo que falta se marca junto a cada campo, sin el globo del navegador, y no se manda nada", async () => {
+    const api = abrirFicha(LISTO);
+    await abrirRegistro();
+    await screen.findByLabelText("Número de operación");
+    const formulario = screen.getByLabelText("Número de operación").closest("form") as HTMLFormElement;
+    expect(formulario.noValidate).toBe(true);
+    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "quince" } });
+    fireEvent.click(await boton("Registrar el pago"));
+    expect(await screen.findByText("Falta escribir el número de operación.")).toBeTruthy();
+    expect(screen.getByLabelText("Número de operación").getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("Falta elegir la fecha de la transferencia.")).toBeTruthy();
+    expect(screen.getByText("Escribir el importe con números, como 15000 o 15.000,50.")).toBeTruthy();
+    expect(screen.getByLabelText(/^Importe transferido/).getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("Falta escribir el CBU o CVU de destino.")).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)).toHaveLength(0);
+    // Al escribir, la marca de ese campo se va.
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    expect(screen.queryByText("Falta escribir el número de operación.")).toBeNull();
+    expect(screen.getByLabelText("Número de operación").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("FL-PAG-01: con «Otra», el código de la moneda se escribe aparte y va en mayúsculas", async () => {
+    const api = abrirFicha(LISTO, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => Response.json({ id: DIF, orden_id: O1 }, { status: 201 }),
+    });
+    await abrirRegistro();
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
+    fireEvent.change(screen.getByLabelText("Moneda que salió del banco"), { target: { value: "otra" } });
+    fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "Salió en euros" } });
+    fireEvent.click(await boton("Registrar lo que pasó"));
+    expect(await screen.findByText(FALTA_CODIGO_MONEDA)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`)).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Código de la moneda"), { target: { value: "eur" } });
+    fireEvent.click(await boton("Registrar lo que pasó"));
+    await screen.findByText(/La orden no queda pagada/);
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`)[0])).toMatchObject({ moneda: "EUR" });
   });
 
   it("pagué otra cosa con los mismos datos lo dice y deja lo escrito", async () => {
@@ -1896,7 +1999,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("una moneda distinta se avisa aunque el importe no se haya leído", async () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_lo_registrado: ["moneda"] }) });
-    expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y registraron ARS.");
+    expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice Dólares y registraron Pesos.");
     await boton("Está bien: conciliar");
     expect(nombres()).toEqual(["No coincide: devolverlo a corregir", "Está bien: conciliar"]);
   });
@@ -1904,7 +2007,7 @@ describe("la lectura con IA del comprobante", () => {
   it("antes de registrar, también: otra moneda sin importe pregunta qué pasó", async () => {
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_la_orden: ["moneda"] }) });
     await abrirRegistro();
-    expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y la orden es en ARS.");
+    expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice Dólares y la orden es en Pesos.");
     sinBoton("Registrar el pago");
     expect(await boton("Se leyó mal: corregir el dato")).toBeTruthy();
   });
@@ -2796,7 +2899,7 @@ describe("aprobar y rechazar", () => {
     await listoParaAprobar();
     fireEvent.click(await boton("Aprobar la orden"));
     await verificarCodigo();
-    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta. Falta otra aprobación.")).toBeTruthy();
     const aprobaciones = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`);
     expect(new Set(claves(aprobaciones)).size).toBe(1);
     expect(await cuerpo(aprobaciones[0])).toEqual({ version: 1, huella: H1 });
@@ -2828,7 +2931,7 @@ describe("aprobar y rechazar", () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(lugar()).toBe(`/pagos/${O2}`);
-    expect(screen.queryByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeNull();
+    expect(screen.queryByText(/^Listo: la orden quedó aprobada por esta cuenta\./)).toBeNull();
   });
 
   it("si la orden cambió entre la ficha y la revisión, la ficha se relee y deja aprobar", async () => {
@@ -2950,6 +3053,48 @@ describe("aprobar y rechazar", () => {
     fireEvent.change(await screen.findByLabelText("Motivo del rechazo"), { target: { value: "Falta" } });
     fireEvent.click(await boton("Rechazar la orden"));
     await waitFor(() => expect(screen.queryByLabelText("Motivo del rechazo")).toBeNull());
+  });
+
+  it("FL-APR-03: aprobada por la última que faltaba, el «Listo» dice que quedó lista para pagar", async () => {
+    let aprobada = false;
+    abrirFicha(() => (aprobada ? { ...APROBAR, orden: orden({ estado: "aprobada" }) } : APROBAR), {
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => {
+        aprobada = true;
+        return Response.json({ id: O1, version: 1 }, { status: 201 });
+      },
+    });
+    await listoParaAprobar();
+    fireEvent.click(await boton("Aprobar la orden"));
+    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta. Quedó lista para pagar.")).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+  });
+
+  it("FL-APR-01 (decisión 12): en el teléfono, si la tabla dice que sigue, aprobar abre la próxima por aprobar", async () => {
+    const SIGUE = { ...APROBAR, que_decir: "Falta aprobarla o rechazarla.", estado_visible: "esperando_aprobacion" as const, despues: "mismo_paso" as const };
+    const OTRA = { ...SIGUE, orden: orden({ id: O2, estado: "en_revision", aprobaciones: 0 }), versiones: [version({ razon_social: "Ascensores Ficticios SA", aprobada_por: [] })] };
+    abrirFicha(SIGUE, {
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [`GET ${BASE}/ordenes-pago/${O2}/revision`]: () =>
+        Response.json({ orden: OTRA.orden, versiones: OTRA.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar", { orden_id: O2 })),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+    });
+    await listoParaAprobar();
+    fireEvent.click(await boton("Aprobar la orden"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(await screen.findByText(/^Listo: la orden quedó aprobada por esta cuenta\. .+ Sigue este, 1 de 1\.$/)).toBeTruthy();
+  });
+
+  it("control de FL-APR-01: si la tabla no dice que sigue, aprobar vuelve a la bandeja", async () => {
+    abrirFicha(APROBAR, {
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar", { orden_id: O2 })),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+    });
+    await listoParaAprobar();
+    fireEvent.click(await boton("Aprobar la orden"));
+    await screen.findByText(/^Listo: la orden quedó aprobada por esta cuenta\./);
+    expect(lugar()).toBe("/pagos");
   });
 
   it("quien ya aprobó rechaza y no aprueba: cada botón sigue a su campo", async () => {
@@ -4516,6 +4661,9 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     abrir("/pagos");
     const aviso = await screen.findByText(/^Se rechazó la orden de Plomería Ficticia SRL/);
     expect(aviso.closest("[role=status]")?.textContent).toContain("Falta la factura");
+    // FL-BAN-01: dice el concepto y abre la orden rechazada.
+    expect(aviso.textContent).toContain("«Destapación»");
+    expect(screen.getByRole("link", { name: /^Se rechazó la orden de Plomería Ficticia SRL/ }).getAttribute("href")).toBe(`/pagos/${O2}`);
     expect(screen.getByRole("button", { name: PREPARAR_OTRA })).toBeTruthy();
     expect(screen.getByText("Nada pendiente.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: /^Para preparar/ })).toBeNull();

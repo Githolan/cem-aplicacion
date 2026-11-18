@@ -20,9 +20,9 @@ import {
   renovarClave,
 } from "../egresos/comun";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
-import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, resumenDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
+import { ErrorDeCampo, erroresDe, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, resumenDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { MONEDAS } from "./FormularioOrden";
+import { CampoMonedaSalida, FALTA_CODIGO_MONEDA, monedaValida, nombreDeMoneda } from "./CampoMonedaSalida";
 import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_LECTURA_FALLO, AVISO_OTRA_COSA } from "./textos";
 import type { ActoEnCurso } from "./useActo";
 import { SubirArchivo } from "../SubirArchivo";
@@ -60,6 +60,16 @@ const hoy = () => new Date().toLocaleDateString("en-CA");
 
 /** Los campos que el servidor puede marcar en el registro (D-43): el error va junto al campo. */
 const CAMPOS_REGISTRO = { fecha_operacion: "la fecha de la transferencia" } as const;
+
+/** El nombre del error de cada dato del registro: la fecha usa el del servidor (D-43). */
+const ERROR_DE: Record<keyof Registro, string> = {
+  numero: "numero",
+  fecha: "fecha_operacion",
+  importe: "importe",
+  moneda: "moneda",
+  cuenta: "cuenta",
+  explicacion: "explicacion",
+};
 
 /** Lo registrado, para corregirlo. La cuenta no viaja: se vuelve a escribir del comprobante. */
 function datosDeLaDiferencia(d: Diferencia): Registro {
@@ -137,7 +147,7 @@ function DistintoDeLaOrden({ leida, version }: { leida: Lectura; version: Versio
       )}
       {leida.distinto_de_la_orden.includes("moneda") && (
         <p>
-          El comprobante dice <strong>{leida.moneda}</strong> y la orden es en <strong>{version.moneda}</strong>.
+          El comprobante dice <strong>{nombreDeMoneda(leida.moneda ?? "")}</strong> y la orden es en <strong>{nombreDeMoneda(version.moneda)}</strong>.
         </p>
       )}
       {leida.distinto_de_la_orden.includes("cuenta") &&
@@ -293,13 +303,40 @@ export function RegistroPago(props: Props) {
     if (Object.keys(marcados).length > 0) setAviso({ texto: resumenDe(marcados, CAMPOS_REGISTRO), ok: false });
   }
 
+  /** Lo que falta o no se entiende, junto a cada campo (FL-PAG-02, decisión 4: el botón siempre
+   * activo, sin el globo del navegador). Solo los campos que el formulario muestra. */
+  function faltaDelRegistro(): ErroresDeCampo {
+    const faltan: Record<string, string> = {
+      ...faltaCompletar({
+        numero: [registro.numero, "Falta escribir el número de operación."],
+        fecha_operacion: [registro.fecha, "Falta elegir la fecha de la transferencia."],
+        ...(pideCuenta ? { cuenta: [registro.cuenta, "Falta escribir el CBU o CVU de destino."] as const } : {}),
+        ...(otraCosa ? { explicacion: [registro.explicacion, "Falta escribir qué pasó."] as const } : {}),
+      }),
+    };
+    if (pideImporte && aCentavos(registro.importe) === null)
+      faltan.importe =
+        registro.importe.trim() !== ""
+          ? "Escribir el importe con números, como 15000 o 15.000,50."
+          : otraCosa
+            ? "Falta escribir el importe que salió del banco."
+            : "Falta escribir el importe, tal como figura en el comprobante.";
+    if (otraCosa && !monedaValida(registro.moneda)) faltan.moneda = FALTA_CODIGO_MONEDA;
+    return faltan;
+  }
+
+  /** Si falta algo, lo marca junto al campo y no se manda nada. */
+  function faltaAlgo(): boolean {
+    const faltan = faltaDelRegistro();
+    setErrores(faltan);
+    return hayErrores(faltan);
+  }
+
   function registrar(evento: FormEvent, documento: string) {
     evento.preventDefault();
+    if (faltaAlgo()) return;
     const centavos = aCentavos(registro.importe);
-    if (centavos === null) {
-      setAviso({ texto: "Hay que escribir el importe tal como figura en el comprobante.", ok: false });
-      return;
-    }
+    if (centavos === null) return;
     void acto.hacer({
       quePide: ["registrar", orden, version.numero, version.huella, registro, documento, cuentaLeida],
       nombre: "registrar el pago",
@@ -329,11 +366,9 @@ export function RegistroPago(props: Props) {
 
   function registrarOtraCosa(evento: FormEvent, documento: string) {
     evento.preventDefault();
+    if (faltaAlgo()) return;
     const centavos = aCentavos(registro.importe);
-    if (centavos === null) {
-      setAviso({ texto: "Hay que escribir el importe que salió del banco.", ok: false });
-      return;
-    }
+    if (centavos === null) return;
     void acto.hacer({
       quePide: ["otra-cosa", orden, version.numero, version.huella, registro, documento, diferencia?.id],
       nombre: corrigeDiferencia ? "corregir lo registrado" : "registrar lo que pasó",
@@ -373,6 +408,7 @@ export function RegistroPago(props: Props) {
 
   function cambiar<K extends keyof Registro>(campo: K, valor: Registro[K]) {
     setRegistro((r) => ({ ...r, [campo]: valor }));
+    setErrores((antes) => sinElDe(antes, ERROR_DE[campo]));
   }
 
   const documentoDelRegistro = diferencia?.documento_id ?? comprobante?.documento_id ?? null;
@@ -381,6 +417,9 @@ export function RegistroPago(props: Props) {
   const pregunta = difiere && !corrige && !aMano && !otraCosa && !corrigeDiferencia;
   /** La cuenta y el importe los leyó la IA y coinciden: no hay nada que escribir de eso. */
   const cuentaLeida = coincide && !corrige && !aMano;
+  /** Lo que el formulario muestra para escribir: lo que no se muestra no se exige. */
+  const pideImporte = !cuentaLeida || otraCosa;
+  const pideCuenta = otraCosa || (!corrige && !cuentaLeida);
 
   return (
     <div className="comprobante-y-datos">
@@ -469,7 +508,7 @@ export function RegistroPago(props: Props) {
       )}
 
       {conDatos && !pregunta && (
-        <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, documentoDelRegistro) : registrar(e, documentoDelRegistro))}>
+        <form className="formulario" noValidate onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, documentoDelRegistro) : registrar(e, documentoDelRegistro))}>
           {otraCosa ? (
             <>
               <h3>{corrigeDiferencia ? "Corregir lo registrado" : "Se transfirió otro importe o a otra cuenta"}</h3>
@@ -497,35 +536,27 @@ export function RegistroPago(props: Props) {
             </>
           )}
           <label htmlFor={`${id}-numero`}>Número de operación</label>
-          <input id={`${id}-numero`} required maxLength={60} value={registro.numero} disabled={enviando}
-            onChange={(e) => cambiar("numero", e.target.value)} />
+          <input id={`${id}-numero`} maxLength={60} value={registro.numero} disabled={enviando}
+            {...marcaDe(`${id}-numero`, errores.numero)} onChange={(e) => cambiar("numero", e.target.value)} />
+          <ErrorDeCampo idCampo={`${id}-numero`} mensaje={errores.numero} />
           <label htmlFor={`${id}-fecha`}>Fecha de la transferencia</label>
-          <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
-            {...marcaDe(`${id}-fecha`, errores.fecha_operacion)}
-            onChange={(e) => {
-              cambiar("fecha", e.target.value);
-              setErrores((antes) => sinElDe(antes, "fecha_operacion"));
-            }} />
+          <input id={`${id}-fecha`} type="date" value={registro.fecha} disabled={enviando}
+            {...marcaDe(`${id}-fecha`, errores.fecha_operacion)} onChange={(e) => cambiar("fecha", e.target.value)} />
           <ErrorDeCampo idCampo={`${id}-fecha`} mensaje={errores.fecha_operacion} />
-          {(!cuentaLeida || otraCosa) && (
+          {pideImporte && (
             <>
               <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido"}</label>
               <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
-                alCambiar={(texto) => cambiar("importe", texto)} />
+                {...marcaDe(`${id}-importe`, errores.importe)} alCambiar={(texto) => cambiar("importe", texto)} />
+              <ErrorDeCampo idCampo={`${id}-importe`} mensaje={errores.importe} />
             </>
           )}
           {otraCosa && (
             <>
               <label htmlFor={`${id}-moneda`}>Moneda que salió del banco</label>
-              <input id={`${id}-moneda`} required list={`${id}-monedas`} pattern="[A-Z]{3}" maxLength={3} autoCapitalize="characters"
-                aria-describedby={`${id}-moneda-ayuda`} value={registro.moneda} disabled={enviando}
-                onChange={(e) => cambiar("moneda", e.target.value.toUpperCase())} />
-              <datalist id={`${id}-monedas`}>
-                {MONEDAS.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-              <p id={`${id}-moneda-ayuda`}>El código de tres letras, como {MONEDAS.join(" o ")}. Si no es la de la orden, solo se puede reclamar.</p>
+              <CampoMonedaSalida id={`${id}-moneda`} valor={registro.moneda} deshabilitado={enviando}
+                marca={marcaDe(`${id}-moneda`, errores.moneda)} alCambiar={(codigo) => cambiar("moneda", codigo)} />
+              <ErrorDeCampo idCampo={`${id}-moneda`} mensaje={errores.moneda} />
             </>
           )}
           {corrige && !otraCosa ? (
@@ -536,15 +567,18 @@ export function RegistroPago(props: Props) {
           ) : cuentaLeida && !otraCosa ? null : (
             <>
               <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino</label>
-              <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
-                onChange={(e) => cambiar("cuenta", e.target.value)} />
+              <input id={`${id}-cuenta`} inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
+                {...marcaDe(`${id}-cuenta`, errores.cuenta)} onChange={(e) => cambiar("cuenta", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-cuenta`} mensaje={errores.cuenta} />
             </>
           )}
           {otraCosa && (
             <>
               <label htmlFor={`${id}-explicacion`}>Qué pasó</label>
-              <textarea id={`${id}-explicacion`} required maxLength={300} rows={3} aria-describedby={`${id}-explicacion-ayuda`}
-                value={registro.explicacion} disabled={enviando} onChange={(e) => cambiar("explicacion", e.target.value)} />
+              <textarea id={`${id}-explicacion`} maxLength={300} rows={3} value={registro.explicacion} disabled={enviando}
+                {...marcaDe(`${id}-explicacion`, errores.explicacion, `${id}-explicacion-ayuda`)}
+                onChange={(e) => cambiar("explicacion", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-explicacion`} mensaje={errores.explicacion} />
               <p id={`${id}-explicacion-ayuda`}>Hasta 300 caracteres. Sin números de cuenta.</p>
             </>
           )}

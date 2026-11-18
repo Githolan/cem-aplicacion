@@ -2181,3 +2181,20 @@ a.fila-registro:hover {
 .campos-de-la-orden[hidden] {
   display: none;
 }
+
+/* Flujos 18-11, tanda 5 */
+
+/* La fila de quien solo lee (pagos/FilaEnlace.tsx, FilaDeLectura): el mismo dibujo que
+   button.fila-registro, sin nada que tocar (FL-CON-05, FL-PAN-02). */
+div.fila-registro--lectura {
+  display: grid;
+  gap: 0.125rem;
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}

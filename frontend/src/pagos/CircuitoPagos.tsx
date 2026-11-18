@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
@@ -13,7 +13,8 @@ import { REQUISITOS } from "../permisos";
 import { CargandoPagos } from "./CargandoPagos";
 import { Bandeja } from "./Bandeja";
 import { Ficha, type Seguir } from "./Ficha";
-import { RUTA_CONSULTA, RUTA_PAGOS, rutaFicha } from "./rutas";
+import { RUTA_PANEL } from "../panel/Panel";
+import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_PAGOS, rutaFicha } from "./rutas";
 import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 
 // `/pagos` y `/pagos/:orden`: una bandeja y una ficha (§1). Al abrir una orden se ve solo su ficha,
@@ -21,16 +22,29 @@ import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 // no va al lado de la bandeja en PC ni se abre sola la primera). Abierta desde la consulta, vuelve a
 // la consulta con lo buscado (CNS-01). Terminado un acto, en PC queda solo el «Listo» arriba de la
 // bandeja (decisión 2 del 17-11); en tablet y teléfono sigue sola la orden siguiente del mismo paso.
+// Abierta desde el cotejo o desde el resumen de pagos, vuelve ahí, con lo que esa pantalla mostraba
+// (FL-CON-03, FL-PAN-01, flujos 18-11-2026).
 
 type Elemento = components["schemas"]["ElementoBandejaPagos"];
 type BandejaPagos = components["schemas"]["BandejaPagos"];
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[]; bandeja: BandejaPagos };
 
-/** La consulta de donde se abrió la ficha (`state.volver`), con su búsqueda; si no, la bandeja. */
-function volverDe(estado: unknown): string {
-  if (typeof estado !== "object" || estado === null || !("volver" in estado)) return RUTA_PAGOS;
+/** A dónde vuelve la ficha, con qué nombre y lo que viaja de vuelta. */
+type Vuelta = { a: string; destino: string; estado?: unknown };
+
+const A_LA_BANDEJA: Vuelta = { a: RUTA_PAGOS, destino: "Pagos" };
+
+/** La pantalla de donde se abrió la ficha (`state.volver`): la consulta con su búsqueda, el cotejo o
+ * el resumen de pagos, con lo que traía en `state.volverCon`; si no, la bandeja. */
+function volverDe(estado: unknown): Vuelta {
+  if (typeof estado !== "object" || estado === null || !("volver" in estado)) return A_LA_BANDEJA;
   const { volver } = estado;
-  return typeof volver === "string" && (volver === RUTA_CONSULTA || volver.startsWith(`${RUTA_CONSULTA}?`)) ? volver : RUTA_PAGOS;
+  const volverCon = "volverCon" in estado ? estado.volverCon : undefined;
+  if (typeof volver !== "string") return A_LA_BANDEJA;
+  if (volver === RUTA_CONSULTA || volver.startsWith(`${RUTA_CONSULTA}?`)) return { a: volver, destino: "Consultar pagos" };
+  if (volver === RUTA_COTEJO) return { a: volver, destino: "Cotejar con el banco", estado: volverCon };
+  if (volver === RUTA_PANEL) return { a: volver, destino: "Resumen de pagos", estado: volverCon };
+  return A_LA_BANDEJA;
 }
 
 export function CircuitoPagos() {
@@ -115,12 +129,16 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   }
 
   const conPantalla = pantalla.tipo === "lista" && consorcio !== "";
+  /** Los demás edificios, donde se busca una orden que no está en este (FL-BAN-02). La lista se
+   * arma de nuevo en cada dibujo: se compara por los ids. */
+  const idsOtros = pantalla.tipo === "lista" ? pantalla.consorcios.map((c) => c.id).filter((c) => c !== consorcio).join(" ") : "";
+  const otrosEdificios = useMemo(() => (idsOtros === "" ? [] : idsOtros.split(" ")), [idsOtros]);
 
   return (
     <div className="circuito-pagos">
       {veBandeja && <h1>Pagos</h1>}
       {!veBandeja && (
-        <CabeceraInterna titulo="Orden de pago" volver={volver} destino={volver === RUTA_PAGOS ? "Pagos" : "Consultar pagos"} />
+        <CabeceraInterna titulo="Orden de pago" volver={volver.a} destino={volver.destino} estado={volver.estado} />
       )}
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={elegir} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
@@ -145,7 +163,8 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
       )}
       {orden !== null && conPantalla && (
         <Ficha key={`${orden}-${acto}`} consorcio={consorcio} monedas={monedasDe(pantalla, consorcio)} orden={orden}
-          aEntrar={aEntrar} aInicio={aInicio} terminar={terminar} alCambiar={alCambiar} />
+          aEntrar={aEntrar} aInicio={aInicio} terminar={terminar} alCambiar={alCambiar}
+          otrosEdificios={otrosEdificios} aOtroEdificio={setConsorcio} />
       )}
     </div>
   );

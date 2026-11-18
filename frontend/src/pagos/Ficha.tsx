@@ -41,7 +41,8 @@ import { Acciones } from "./Acciones";
 import { type AccionPago, TEXTO_ACCION } from "./textosDeAcciones";
 import { Barra } from "./Barra";
 import { BotonCopiar } from "./BotonCopiar";
-import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
+import { nombreDeMoneda } from "./CampoMonedaSalida";
+import { leerComoQuedo, leerComoQuedoAlAprobar, TEXTO_APROBADA, TEXTO_ENVIADA } from "./comoQuedo";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, rutaFicha } from "./rutas";
@@ -101,6 +102,10 @@ type Version = components["schemas"]["VersionOrdenPago"];
 type FacturaAdjunta = components["schemas"]["FacturaAdjunta"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
+
+/** Lo que se dice si la orden no está en ningún edificio de quien mira (FL-BAN-02). */
+export const NO_ESTA_EN_ESTE = "Esa orden no está en este edificio.";
+export const NO_ESTA_EN_NINGUNO = "Esa orden no está en ninguno de los edificios de esta cuenta.";
 /** El único campo de los formularios de motivo, por su nombre en la pantalla. */
 const CAMPOS_MOTIVO = { motivo: "el motivo" } as const;
 
@@ -133,7 +138,7 @@ function DistintoDeLoRegistrado({ lectura, registrado }: { lectura: LecturaCompr
       )}
       {campos.includes("moneda") && (
         <p>
-          El comprobante dice <strong>{lectura.moneda}</strong> y registraron <strong>{registrado.moneda}</strong>.
+          El comprobante dice <strong>{nombreDeMoneda(lectura.moneda ?? "")}</strong> y registraron <strong>{nombreDeMoneda(registrado.moneda)}</strong>.
         </p>
       )}
       {campos.includes("cuenta") && (
@@ -232,9 +237,13 @@ type Props = {
   terminar: (texto: string, seguir?: Seguir, paso?: Paso | null) => void;
   /** Algo cambió sin dejar la ficha: la bandeja de al lado se vuelve a leer. */
   alCambiar: () => void;
+  /** Los otros edificios de quien mira, donde se busca la orden que no está en este (FL-BAN-02). */
+  otrosEdificios: readonly string[];
+  /** La orden está en otro edificio: la pantalla pasa a ese. */
+  aOtroEdificio: (consorcio: string) => void;
 };
 
-export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: terminarActo, alCambiar }: Props) {
+export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: terminarActo, alCambiar, otrosEdificios, aOtroEdificio }: Props) {
   const id = useId();
   const acto = useActo(aEntrar, alCambiar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
@@ -370,6 +379,34 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
     };
   }, [consorcio, orden, vuelta, aEntrar, aInicio, setAviso]);
 
+  // Con más de un edificio, la orden que no está en este se busca en los demás antes de decir que
+  // no está (FL-BAN-02): un enlace a una orden puede llegar con otro edificio elegido.
+  const [buscada, setBuscada] = useState<"buscando" | "en_ninguno" | null>(null);
+  const noEsta = lectura.tipo === "no_esta";
+  useEffect(() => {
+    if (!noEsta || otrosEdificios.length === 0) return;
+    let vigente = true;
+    setBuscada("buscando");
+    void (async () => {
+      for (const otro of otrosEdificios) {
+        const { data, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/pagos/{orden_id}", {
+          params: { path: { consorcio_id: otro, orden_id: orden } },
+        });
+        exigirSesion(response);
+        if (!vigente) return;
+        if (data !== undefined) return aOtroEdificio(otro);
+      }
+      setBuscada("en_ninguno");
+    })().catch((e: unknown) => {
+      if (!vigente) return;
+      if (e instanceof SinSesion) aEntrar();
+      else setBuscada("en_ninguno");
+    });
+    return () => {
+      vigente = false;
+    };
+  }, [noEsta, otrosEdificios, orden, aOtroEdificio, aEntrar]);
+
   const releer = () => setVuelta((v) => v + 1);
   // La factura subida (o su reemplazo) sigue en el antivirus aunque se haya cerrado su hoja: la
   // ficha se vuelve a leer hasta que termina, para decir si la aceptó o la rechazó.
@@ -391,8 +428,11 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
   }
 
   if (lectura.tipo === "cargando") return <p role="status">Cargando la orden…</p>;
-  if (lectura.tipo === "no_esta")
-    return <p className="tarjeta">Esa orden no está en este edificio.</p>;
+  if (lectura.tipo === "no_esta") {
+    if (otrosEdificios.length === 0) return <p className="tarjeta">{NO_ESTA_EN_ESTE}</p>;
+    if (buscada === "en_ninguno") return <p className="tarjeta">{NO_ESTA_EN_NINGUNO}</p>;
+    return <p role="status">Cargando la orden…</p>;
+  }
   if (lectura.tipo === "sin_servicio")
     return (
       <>
@@ -574,9 +614,23 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version: v.numero, huella: v.huella },
         }),
-      alTerminar: () => terminar("Listo: la orden quedó aprobada por esta cuenta."),
+      // Dice en qué quedó la orden (FL-APR-03) y, en el teléfono, sigue con la próxima por aprobar
+      // si la tabla lo dice (FL-APR-01, decisión 12 del 18-11).
+      alTerminar: decirComoQuedoAlAprobar,
       alFallar: siCambio,
     });
+  }
+
+  function decirComoQuedoAlAprobar() {
+    const decir = (texto: string) => (montado.current ? terminar(texto, seguir) : alCambiar());
+    acto.setEnviando(true);
+    void leerComoQuedoAlAprobar(consorcio, orden)
+      .then(decir)
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion && montado.current) aEntrar();
+        else decir(TEXTO_APROBADA);
+      })
+      .finally(() => acto.setEnviando(false));
   }
 
   function rechazar(texto: string) {
@@ -590,7 +644,7 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version: v.numero, motivo: texto },
         }),
-      alTerminar: () => terminar("Listo: la orden se rechazó."),
+      alTerminar: () => terminar("Listo: la orden se rechazó.", seguir),
       alFallar: fallaDelMotivo,
     });
   }
@@ -1040,8 +1094,13 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
                   <code>{cuentaVista.cuenta_destino}</code>
                   <BotonCopiar valor={cuentaVista.cuenta_destino.replace(/\s/g, "")} nombre="el CBU" />
                 </dd>
-                <dt>CUIT del titular</dt>
-                <dd>{v.cuit ?? "Sin CUIT"}</dd>
+                {/* Sin CUIT no hay nada que comparar en el banco: no se dibuja el renglón (FL-PAG-03). */}
+                {v.cuit !== null && (
+                  <>
+                    <dt>CUIT del titular</dt>
+                    <dd>{v.cuit}</dd>
+                  </>
+                )}
                 <dt>Pagar antes de</dt>
                 <dd>{momento(cuentaVista.aprobacion_vence_en)}</dd>
               </dl>
@@ -1304,10 +1363,10 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
             <summary>Más datos</summary>
             <dl className="detalles">
               {/* Sin repetir lo que ya se ve arriba ni lo habitual (comentario 25, 09-11-2026). */}
-              {cuentaVista === null && (
+              {cuentaVista === null && v.cuit !== null && (
                 <>
                   <dt>CUIT</dt>
-                  <dd>{v.cuit ?? "Sin CUIT"}</dd>
+                  <dd>{v.cuit}</dd>
                 </>
               )}
               {v.condicion_beneficiario !== "conocido" && (

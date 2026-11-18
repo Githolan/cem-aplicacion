@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
@@ -68,6 +68,12 @@ function error(codigo: string, status: number) {
   return Response.json({ codigo, mensaje: "x", detalle: null, id_correlacion: "c" }, { status });
 }
 
+function Lugar() {
+  return <output data-testid="lugar">{useLocation().pathname}</output>;
+}
+
+const lugar = () => screen.getByTestId("lugar").textContent;
+
 function abrir(ruta = "/panel") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -76,6 +82,7 @@ function abrir(ruta = "/panel") {
         <QueryClientProvider client={consultas}>
           <MemoryRouter initialEntries={[ruta]}>
             <App />
+            <Lugar />
           </MemoryRouter>
         </QueryClientProvider>
       </ContextoVersion.Provider>
@@ -88,9 +95,20 @@ async function sinViolaciones(contenedor: HTMLElement) {
   expect(resultado.violations.map((v) => v.id)).toEqual([]);
 }
 
+/** Desde qué ancho «Facturas faltantes» es una tabla (FL-PAN-02); más angosto, filas compactas. */
+const TABLA_DE_FALTANTES = "(min-width: 48.0625em)";
+
+/** El ancho de la pantalla: con tabla (tablet y PC) o de teléfono. */
+function ancho(conTabla: boolean) {
+  vi.stubGlobal("matchMedia", (consulta: string) => ({
+    matches: conTabla && consulta === TABLA_DE_FALTANTES, media: consulta, addEventListener: () => undefined, removeEventListener: () => undefined,
+  }));
+}
+
 beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
   localStorage.clear();
+  ancho(true);
 });
 
 afterEach(() => {
@@ -575,5 +593,54 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     const [fila] = within(within(otra).getByRole("table", { name: "Órdenes sin factura" })).getAllByRole("row").slice(1);
     expect(await within(fila!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
     expect(within(otra).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
+  });
+});
+
+describe("las facturas faltantes, de vuelta al resumen y en el teléfono (flujos 18-11)", () => {
+  const PREPARA = alcanza("fiscalizacion.ver_panel", "egresos.preparar_orden", "documentos.cargar", "egresos.revisar_orden");
+  const CONSEJO = alcanza("fiscalizacion.ver_panel", "egresos.revisar_orden");
+  const NO_ESTA = () => error("no_encontrado", 404);
+
+  it("FL-PAN-01: la orden abierta desde «Facturas faltantes» vuelve al resumen, no a Pagos", async () => {
+    vi.stubGlobal("fetch", backend({
+      [PANEL]: () => Response.json(DATOS), [ACCIONES]: CONSEJO, [`GET /api/v1/consorcios/${C1}/pagos/${O1}`]: NO_ESTA,
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]),
+    }));
+    abrir();
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
+    fireEvent.click(within(faltantes).getByRole("link", { name: "Limpieza Ficticia SRL" }));
+    await waitFor(() => expect(lugar()).toBe(`/pagos/${O1}`));
+    expect(screen.queryByRole("link", { name: "Volver a Pagos" })).toBeNull();
+    fireEvent.click(await screen.findByRole("link", { name: "Volver a Resumen de pagos" }));
+    await waitFor(() => expect(lugar()).toBe("/panel"));
+  });
+
+  it("FL-PAN-02: en el teléfono, una fila compacta por orden, que abre la orden, y sin tabla", async () => {
+    ancho(false);
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: CONSEJO }));
+    const { container } = abrir();
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
+    expect(within(faltantes).queryByRole("table")).toBeNull();
+    const filas = within(within(faltantes).getByRole("list", { name: "Órdenes sin factura" })).getAllByRole("link");
+    expect(filas.map((f) => f.textContent)).toEqual([
+      expect.stringMatching(/^Limpieza Ficticia SRL · \$\s?1\.000,00 Limpieza de octubre · Pagada$/),
+      expect.stringMatching(/^Ascensores Ficticios SA · \$\s?800,00 Abono de noviembre · /),
+    ]);
+    expect(filas[0]!.getAttribute("href")).toBe(`/pagos/${O1}`);
+    await sinViolaciones(container);
+  });
+
+  it("FL-PAN-02: en el teléfono, quien sube la factura lo hace desde la ficha de la fila", async () => {
+    ancho(false);
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: PREPARA }));
+    abrir();
+    const faltantes = await screen.findByRole("region", { name: /^Facturas faltantes/ });
+    expect(within(faltantes).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+    fireEvent.click(await within(faltantes).findByRole("button", { name: /Ascensores Ficticios SA/ }));
+    const ficha = within(await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" }));
+    expect(ficha.getByText("Abono de noviembre")).toBeTruthy();
+    expect(ficha.getByRole("link", { name: "Ver la orden" }).getAttribute("href")).toBe(`/pagos/${O2}`);
+    fireEvent.click(ficha.getByRole("button", { name: SUBIR_FACTURA }));
+    expect(await screen.findByRole("dialog", { name: SUBIR_FACTURA })).toBeTruthy();
   });
 });

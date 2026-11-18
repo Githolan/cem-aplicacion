@@ -16,8 +16,9 @@ import { type DatoDeFicha, FichaDeRegistro, FilaDeRegistro, useFichas } from "..
 import { REQUISITOS, usePuede } from "../permisos";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { CargandoPagos } from "./CargandoPagos";
+import { FilaDeLectura } from "./FilaEnlace";
 import { RUTA_COTEJO, RUTA_PAGOS } from "./rutas";
-import { FALTA_MOTIVO, NO_ES_PAGO, RETIRAR_MARCA, TITULO_MARCADOS, TITULO_SIN_EXPLICAR, textoVerMarcados } from "./textos";
+import { FALTA_MOTIVO, LO_RESUELVE_QUIEN_CONCILIA, NO_ES_PAGO, RETIRAR_MARCA, TITULO_MARCADOS, TITULO_SIN_EXPLICAR, textoVerMarcados } from "./textos";
 import { useActo } from "./useActo";
 
 // `/pagos/extracto-sin-explicar`: los débitos de los extractos ya subidos que ningún pago explica
@@ -32,6 +33,9 @@ import { useActo } from "./useActo";
 // es una fila compacta que abre su ficha, y el motivo se escribe en su ventana (COT-08); lo ya
 // marcado no queda debajo de la lista de trabajo, sino detrás de «Ver los marcados» (COT-09); el
 // botón del acto está siempre activo y dice qué falta (C8P-17).
+//
+// Flujos 18-11-2026 (FL-CON-05, decisión 17): la administración, que solo lee, ve la lista sin ficha
+// (la ficha no le agregaba nada ni tenía comandos) y una línea que dice quién lo resuelve.
 
 type Movimiento = components["schemas"]["MovimientoSinExplicar"];
 type Marca = components["schemas"]["MarcaNoEsPago"];
@@ -319,18 +323,23 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               />
             )}
             {ok !== null && ok.total === 0 && <p className="tarjeta">El extracto no tiene nada sin explicar.</p>}
+            {ok !== null && !coteja && (ok.total > 0 || ok.totalMarcas > 0) && <p className="comando-no-disponible">{LO_RESUELVE_QUIEN_CONCILIA}</p>}
             {ok !== null && ok.total > 0 && (
               <>
                 <ul className="filas-registro" aria-label="Débitos sin explicar">
                   {ok.elementos.map((m) => (
                     <li key={m.movimiento_id}>
-                      <FilaDeRegistro
-                        titulo={importe(m.importe_centavos, m.moneda)}
-                        resumen={dato(m)}
-                        alAbrir={() => fichas.abrir(m.movimiento_id)}
-                        refFila={fichas.refFila(m.movimiento_id)}
-                        abierta={fichas.abierta === m.movimiento_id}
-                      />
+                      {coteja ? (
+                        <FilaDeRegistro
+                          titulo={importe(m.importe_centavos, m.moneda)}
+                          resumen={dato(m)}
+                          alAbrir={() => fichas.abrir(m.movimiento_id)}
+                          refFila={fichas.refFila(m.movimiento_id)}
+                          abierta={fichas.abierta === m.movimiento_id}
+                        />
+                      ) : (
+                        <FilaDeLectura titulo={importe(m.importe_centavos, m.moneda)} resumen={dato(m)} />
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -359,13 +368,18 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               <ul className="filas-registro" aria-label={TITULO_MARCADOS}>
                 {ok.marcas.map((m) => (
                   <li key={m.movimiento_id}>
-                    <FilaDeRegistro
-                      titulo={importe(m.importe_centavos, m.moneda)}
-                      resumen={dato(m)}
-                      alAbrir={() => fichas.abrir(m.movimiento_id)}
-                      refFila={fichas.refFila(m.movimiento_id)}
-                      abierta={fichas.abierta === m.movimiento_id}
-                    />
+                    {coteja ? (
+                      <FilaDeRegistro
+                        titulo={importe(m.importe_centavos, m.moneda)}
+                        resumen={dato(m)}
+                        alAbrir={() => fichas.abrir(m.movimiento_id)}
+                        refFila={fichas.refFila(m.movimiento_id)}
+                        abierta={fichas.abierta === m.movimiento_id}
+                      />
+                    ) : (
+                      // Sin ficha, el motivo de la marca va en la fila.
+                      <FilaDeLectura titulo={importe(m.importe_centavos, m.moneda)} resumen={`${dato(m)} · ${m.motivo}`} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -386,8 +400,8 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               </Link>
             </p>
           )}
-          {suelto !== undefined && ficha(suelto, "marcar", [{ etiqueta: "Extracto subido", valor: momentoAlFinal(suelto.visto_en) }])}
-          {marcado !== undefined &&
+          {coteja && suelto !== undefined && ficha(suelto, "marcar", [{ etiqueta: "Extracto subido", valor: momentoAlFinal(suelto.visto_en) }])}
+          {coteja && marcado !== undefined &&
             ficha(marcado, "retirar", [
               { etiqueta: "Marcado", valor: momento(marcado.marcado_en) },
               { etiqueta: "Motivo", valor: marcado.motivo },

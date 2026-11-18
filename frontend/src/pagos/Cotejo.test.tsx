@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
@@ -13,6 +13,7 @@ import {
   EJEMPLO_EXTRACTO,
   FALTA_ARCHIVO_EXTRACTO,
   FALTA_MOTIVO_DESHACER,
+  textoBancoNoAca,
   textoLosCotejaOtra,
   textoLosDeshaceOtra,
   textoTopeTildes,
@@ -106,7 +107,13 @@ function pedidos(simulado: ReturnType<typeof vi.fn>, clave: string): Request[] {
     .filter((p) => `${p.method} ${new URL(p.url).pathname}` === clave);
 }
 
-function abrir(ruta = "/pagos/cotejo") {
+function Lugar() {
+  return <output data-testid="lugar">{useLocation().pathname}</output>;
+}
+
+const lugar = () => screen.getByTestId("lugar").textContent;
+
+function abrir(ruta: string | { pathname: string; state: unknown } = "/pagos/cotejo") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -114,6 +121,7 @@ function abrir(ruta = "/pagos/cotejo") {
         <QueryClientProvider client={consultas}>
           <MemoryRouter initialEntries={[ruta]}>
             <App />
+            <Lugar />
           </MemoryRouter>
         </QueryClientProvider>
       </ContextoVersion.Provider>
@@ -284,6 +292,36 @@ describe("a mano", () => {
     expect(screen.queryByText(TILDAR_PAGOS)).toBeNull();
   });
 
+  it("FL-CON-02 (decisión 13): si ningún pago pendiente es suyo, no ofrece «Subir el extracto»: solo la línea", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: lista([elemento(P1, { puede_cotejar: false })]) }));
+    abrir();
+    expect(await screen.findByText(textoLosCotejaOtra(1))).toBeTruthy();
+    expect(screen.queryByRole("button", { name: SUBIR_EXTRACTO })).toBeNull();
+  });
+
+  it("control de FL-CON-02: con uno suyo, o con otra página por leer, sí lo ofrece", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: lista([elemento(P1, { puede_cotejar: false })], P1) }));
+    abrir();
+    expect(await screen.findByRole("button", { name: SUBIR_EXTRACTO })).toBeTruthy();
+  });
+
+  it("FL-CON-06: cotejado el último pago suyo, vuelve sola a Pagos con el «Listo» arriba", async () => {
+    let elementos = [elemento(P1), elemento(P2, { puede_cotejar: false })];
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: () => lista(elementos)(),
+      [TILDAR]: () => {
+        elementos = [elemento(P2, { puede_cotejar: false })];
+        return Response.json({ cotejados: 1 });
+      },
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Proveedor 22/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar 1 como cotejado" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Pagos" })).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+    expect(await screen.findByText("Listo: quedó cotejado 1 pago.")).toBeTruthy();
+  });
+
   it("C8P-11: las casillas no se apagan al llegar al tope; la de más no se tilda y dice por qué junto a ella", async () => {
     const simulado = backend({
       [LISTA]: lista([elemento(P1), elemento(P2), elemento(P3)], null, 2),
@@ -442,7 +480,7 @@ describe("COT-06: lo ya cotejado y deshacer el cotejo", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
     const fila = await screen.findByRole("button", { name: /Proveedor 22/ });
     expect(screen.queryByRole("button", { name: /Deshacer el cotejo/ })).toBeNull();
     fireEvent.click(fila);
@@ -477,7 +515,7 @@ describe("COT-06: lo ya cotejado y deshacer el cotejo", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
     fireEvent.click(await screen.findByRole("button", { name: /Proveedor 22/ }));
     fireEvent.click((await ventana("Proveedor 22")).getByRole("button", { name: "Deshacer el cotejo" }));
     const motivo = await ventana("Deshacer el cotejo");
@@ -499,7 +537,7 @@ describe("COT-06: lo ya cotejado y deshacer el cotejo", () => {
       },
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
     fireEvent.click(await screen.findByRole("button", { name: /Proveedor 22/ }));
     fireEvent.click((await ventana("Proveedor 22")).getByRole("button", { name: "Deshacer el cotejo" }));
     const motivo = await ventana("Deshacer el cotejo");
@@ -521,11 +559,11 @@ describe("COT-06: lo ya cotejado y deshacer el cotejo", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
     expect(await screen.findByText("Todavía no hay pagos cotejados.")).toBeTruthy();
     fireEvent.click(await screen.findByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Marcar 1 como cotejado" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
     expect(await screen.findByRole("button", { name: /Proveedor 22/ })).toBeTruthy();
   });
 
@@ -535,9 +573,41 @@ describe("COT-06: lo ya cotejado y deshacer el cotejo", () => {
       [COTEJADOS]: () => Response.json({ elementos: [cotejado(P1, { puede_cotejar: false })], siguiente: null }),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
     expect(await screen.findByText(textoLosDeshaceOtra(1))).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Proveedor 22/ })).toBeNull();
+  });
+
+  it("FL-CON-01: llegado desde «Ver lo cotejado» de la bandeja, lo cotejado ya está a la vista", async () => {
+    const simulado = backend({ [COTEJADOS]: () => Response.json({ elementos: [cotejado(P1)], siguiente: null }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir({ pathname: "/pagos/cotejo", state: { consorcio: C1, cotejados: true } });
+    expect(await screen.findByRole("button", { name: /Proveedor 22/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ver lo cotejado" })).toBeNull();
+    expect(pedidos(simulado, COTEJADOS)).toHaveLength(1);
+  });
+
+  it("control de FL-CON-01: entrando de otro lado, lo cotejado se pide con el botón", async () => {
+    const simulado = backend({ [COTEJADOS]: () => Response.json({ elementos: [cotejado(P1)], siguiente: null }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByRole("button", { name: "Ver lo cotejado" })).toBeTruthy();
+    expect(pedidos(simulado, COTEJADOS)).toHaveLength(0);
+  });
+
+  it("FL-CON-03: la orden abierta desde lo cotejado vuelve al cotejo, con lo cotejado a la vista", async () => {
+    vi.stubGlobal("fetch", backend({
+      [COTEJADOS]: () => Response.json({ elementos: [cotejado(P1)], siguiente: null }),
+      [`GET ${BASE}/pagos/${O1}`]: () => error("no_encontrado", 404),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Proveedor 22/ }));
+    fireEvent.click((await ventana("Proveedor 22")).getByRole("link", { name: "Ver la orden" }));
+    await waitFor(() => expect(lugar()).toBe(`/pagos/${O1}`));
+    fireEvent.click(await screen.findByRole("link", { name: "Volver a Cotejar con el banco" }));
+    await waitFor(() => expect(lugar()).toBe("/pagos/cotejo"));
+    expect(await screen.findByRole("button", { name: /Proveedor 22/ })).toBeTruthy();
   });
 });
 
@@ -635,11 +705,10 @@ describe("con el extracto", () => {
     const hoja = await hojaDelResultado();
     const aca = (await hoja.findByRole("heading", { name: /Están acá y no en el banco/ })).nextElementSibling as HTMLElement;
     expect(within(aca).getByRole("link", { name: /Proveedor 22/ }).getAttribute("href")).toBe(`/pagos/${O1}`);
-    const banco = hoja.getByRole("heading", { name: /Están en el banco y no acá/ }).nextElementSibling as HTMLElement;
-    expect(banco.textContent).toContain("12.400,00");
-    expect(banco.textContent).toContain("Referencia 0048213999 · 02/11/2026");
-    expect(banco.textContent).not.toContain("Queda en «Lo que el extracto no explica»");
-    expect(banco.textContent).not.toContain("Débito sin registrar");
+    // FL-CON-04: los débitos sin pago se cuentan, con el enlace a su pantalla; la lista no se repite acá.
+    expect(hoja.getByText(textoBancoNoAca(1), { exact: false })).toBeTruthy();
+    expect(hoja.queryByRole("heading", { name: /Están en el banco y no acá/ })).toBeNull();
+    expect(hoja.queryByText(/0048213999/)).toBeNull();
     expect(hoja.getByRole("link", { name: "Ver los débitos sin explicar" }).getAttribute("href")).toBe("/pagos/extracto-sin-explicar");
     expect(hoja.getByText("3 ya estaban cotejados.")).toBeTruthy();
     expect(hoja.getByText("2 coinciden, pero falta conciliarlos.")).toBeTruthy();
@@ -649,6 +718,7 @@ describe("con el extracto", () => {
 
   it("COT-04: el resultado se cierra con «Listo», sin «Subir otro extracto» ni «Elegir otras columnas», y queda la lista", async () => {
     vi.stubGlobal("fetch", backend({
+      [LISTA]: lista([elemento(P2)]),
       [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
       [EXTRACTO]: () => Response.json(resultado()),
     }));
@@ -661,7 +731,35 @@ describe("con el extracto", () => {
     expect(hoja.queryByRole("heading", { name: /Están/ })).toBeNull();
     fireEvent.click(hoja.getByRole("button", { name: "Listo" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(await screen.findByText("No falta cotejar ningún pago.")).toBeTruthy();
+    expect(await screen.findByRole("checkbox", { name: /Proveedor 33/ })).toBeTruthy();
+    expect(lugar()).toBe("/pagos/cotejo");
+  });
+
+  it("FL-CON-06: cerrado el resultado, si no queda nada para cotejar vuelve sola a Pagos", async () => {
+    vi.stubGlobal("fetch", backend({
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado()),
+    }));
+    abrir();
+    await subir();
+    fireEvent.click((await hojaDelResultado()).getByRole("button", { name: "Listo" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Pagos" })).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+  });
+
+  it("FL-CON-03: la orden abierta desde el resultado vuelve al cotejo, con el resultado a la vista", async () => {
+    vi.stubGlobal("fetch", backend({
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado({ aca_no_banco: [elemento(P1)], total_aca_no_banco: 1 })),
+      [`GET ${BASE}/pagos/${O1}`]: () => error("no_encontrado", 404),
+    }));
+    abrir();
+    await subir();
+    fireEvent.click((await hojaDelResultado()).getByRole("link", { name: /Proveedor 22/ }));
+    await waitFor(() => expect(lugar()).toBe(`/pagos/${O1}`));
+    fireEvent.click(await screen.findByRole("link", { name: "Volver a Cotejar con el banco" }));
+    await waitFor(() => expect(lugar()).toBe("/pagos/cotejo"));
+    expect((await hojaDelResultado()).getByRole("link", { name: /Proveedor 22/ })).toBeTruthy();
   });
 
   it("COT-02: en un edificio que opera solo en pesos no pregunta la moneda y manda pesos", async () => {

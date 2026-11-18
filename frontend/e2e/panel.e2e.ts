@@ -117,7 +117,14 @@ test.describe("panel", () => {
     await expect(page.getByRole("region", { name: "Órdenes de pago por estado" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Pagos con el fondo de reserva" })).toBeVisible();
     const faltantes = page.getByRole("region", { name: "Facturas faltantes" });
-    await expect(faltantes.getByRole("link", { name: PANEL.comprobantes_faltantes[0]!.proveedor })).toHaveAttribute("href", `/pagos/${O1}`);
+    // FL-PAN-02: en el teléfono, una fila compacta por orden; la orden y la factura, en su ficha.
+    const proveedor = PANEL.comprobantes_faltantes[0]!.proveedor;
+    await faltantes.getByRole("button", { name: new RegExp(`^${proveedor}`) }).click();
+    const ficha = page.getByRole("dialog", { name: proveedor });
+    await expect(ficha.getByRole("link", { name: "Ver la orden" })).toHaveAttribute("href", `/pagos/${O1}`);
+    expect(await sinDesplazamiento(page)).toBe(true);
+    await sinFaltasDeAccesibilidad(page);
+    await ficha.getByRole("button", { name: "Cerrar", exact: true }).click();
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
 
@@ -151,7 +158,9 @@ test.describe("subir la factura que falta (app 0099)", () => {
     await page.goto("/panel");
 
     const faltantes = page.getByRole("region", { name: "Facturas faltantes" });
-    await faltantes.getByRole("button", { name: "Subir la factura", exact: true }).click();
+    // FL-PAN-02: en el teléfono, la factura se sube desde la ficha de la fila.
+    await faltantes.getByRole("button", { name: /^Ascensores, Montacargas/ }).click();
+    await page.getByRole("dialog", { name: /^Ascensores, Montacargas/ }).getByRole("button", { name: "Subir la factura", exact: true }).click();
     const hoja = page.getByRole("dialog", { name: "Subir la factura", exact: true });
     await expect(hoja).toBeVisible();
     expect(await sinDesplazamiento(page)).toBe(true);
