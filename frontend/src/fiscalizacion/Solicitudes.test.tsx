@@ -11,6 +11,8 @@ import type { components } from "../api/tipos";
 import { hoyDelDispositivo } from "../archivos";
 import { ContextoVersion } from "../version";
 import {
+  ARCHIVO_EN_REVISION,
+  ARCHIVO_RECHAZADO,
   DOS_FIRMAS,
   DESDE_EL_PANEL,
   EMITE_AL_FIRMAR,
@@ -622,15 +624,56 @@ describe("Flujos 18-11, tanda 7", () => {
     expect(pedidos(api, "POST", `${BASE}/${S3}/respuesta-recibida`)).toHaveLength(0);
   });
 
-  it("decisión 15: sin administrador vigente, la ventana de preparar lo dice y deja guardar el borrador", async () => {
-    const espera: Solicitud = { ...CON_UNA_FIRMA, acciones: ["retirar"], falta_administrador_vigente: true };
-    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [espera] }) }));
+  it("decisión 15 y FL-SOL-05 (tanda 9): sin administrador vigente, la ventana de preparar lo dice y deja guardar el borrador", async () => {
+    // La lista lo dice aunque ningún borrador lo muestre todavía (app 0110).
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, hay_administrador_vigente: false }) }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: PREPARAR }));
     const ventana = within(await screen.findByRole("dialog", { name: PREPARAR }));
     const linea = ventana.getByText(new RegExp(`^${SIN_ADMINISTRADOR_AL_PREPARAR.slice(0, 40)}`));
     expect(within(linea).getByRole("link", { name: IR_A_MANDATOS }).getAttribute("href")).toBe("/mandatos");
     expect(ventana.getByRole("button", { name: "Guardar el borrador" })).toBeTruthy();
+  });
+
+  it("FL-SOL-04 (tanda 9): el adjunto en revisión o rechazado no se ofrece para bajar y se dice por qué; sin permiso, ni el enlace", async () => {
+    const adjunto = { documento_id: DOC_RESPUESTA, version_documento_id: VERSION_RESPUESTA };
+    const conEnvio = (numero: number, envio: Partial<NonNullable<Solicitud["envio"]>>): Solicitud => ({
+      ...ENVIADA, id: `dddddddd-dddd-4ddd-8ddd-00000000000${numero}`, numero, acciones: [],
+      envio: { ...ENVIADA.envio!, ...adjunto, ...envio },
+    });  // prettier-ignore
+    const elementos = [
+      conEnvio(1, { estado_archivo: "en_cuarentena", descargable: false }),
+      conEnvio(2, { estado_archivo: "rechazado", descargable: false }),
+      conEnvio(3, { estado_archivo: "disponible", descargable: false }),
+      conEnvio(4, { estado_archivo: "disponible", descargable: true }),
+    ];
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos }) }));
+    abrir();
+
+    const enRevision = await abrirFicha(1);
+    expect(enRevision.getByText(ARCHIVO_EN_REVISION)).toBeTruthy();
+    expect(enRevision.queryByRole("link", { name: "Descargar el comprobante" })).toBeNull();
+    fireEvent.click(enRevision.getByRole("button", { name: "Cerrar" }));
+    const rechazado = await abrirFicha(2);
+    expect(rechazado.getByText(ARCHIVO_RECHAZADO)).toBeTruthy();
+    expect(rechazado.queryByRole("link", { name: "Descargar el comprobante" })).toBeNull();
+    fireEvent.click(rechazado.getByRole("button", { name: "Cerrar" }));
+    const sinPermiso = await abrirFicha(3);
+    expect(sinPermiso.queryByRole("link", { name: "Descargar el comprobante" })).toBeNull();
+    expect(sinPermiso.queryByText(ARCHIVO_EN_REVISION)).toBeNull();
+    fireEvent.click(sinPermiso.getByRole("button", { name: "Cerrar" }));
+    // Control: disponible y con permiso, el enlace.
+    const lista = await abrirFicha(4);
+    expect(lista.getByRole("link", { name: "Descargar el comprobante" })).toBeTruthy();
+  });
+
+  it("P15 (tanda 9): con destinatario con cuenta, la vencida ofrece registrar la respuesta que llegó por otro medio", async () => {
+    const vencida: Solicitud = { ...ENVIADA, estado: "vencida", destinatario_con_cuenta: true, acciones: ["registrar_respuesta"] };
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [vencida] }) }));
+    abrir();
+    const ficha = await abrirFicha(1);
+    fireEvent.click(ficha.getByRole("button", { name: REGISTRAR_RESPUESTA }));
+    expect(await screen.findByRole("dialog", { name: REGISTRAR_RESPUESTA })).toBeTruthy();
   });
 
   it("decisión 15, control: con administrador vigente, la ventana no lo menciona", async () => {

@@ -144,6 +144,31 @@ export const tituloDe = (s: Solicitud) => `N.º ${s.numero} · ${TEXTO_OBJETO[s.
 const descarga = (consorcio: string, documento: string, version: string) =>
   `/api/v1/consorcios/${consorcio}/documentos/${documento}/versiones/${version}/descargar`;
 
+/** FL-SOL-04 (tanda 9, app 0110): el archivo en revisión o rechazado no se ofrece para bajar. */
+export const ARCHIVO_EN_REVISION = "El antivirus todavía lo está revisando: se puede descargar cuando termine.";
+export const ARCHIVO_RECHAZADO = "El antivirus rechazó el archivo: no se puede descargar.";
+
+type Adjunto = Pick<NonNullable<Solicitud["envio"]>, "documento_id" | "version_documento_id" | "estado_archivo" | "descargable">;
+
+/** El enlace al archivo solo si quien mira lo puede bajar (`descargable`); si no, por qué no, salvo
+ * que sea solo por no leer Documentos: entonces no se dice nada. */
+function enlaceDelAdjunto(consorcio: string, adjunto: Adjunto, texto: string) {
+  const { documento_id: documento, version_documento_id: version } = adjunto;
+  if (!documento || !version) return null;
+  if (adjunto.descargable)
+    return (
+      <>
+        {" "}
+        <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
+          {texto}
+        </a>
+      </>
+    );
+  if (adjunto.estado_archivo === "en_cuarentena") return <span className="ayuda"> {ARCHIVO_EN_REVISION}</span>;
+  if (adjunto.estado_archivo === "rechazado") return <span className="ayuda"> {ARCHIVO_RECHAZADO}</span>;
+  return null;
+}
+
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; lista: Lista };
 
 /** Lo que pone el Resumen de pagos en `state.desde` al abrir las solicitudes: el círculo vuelve ahí. */
@@ -428,9 +453,9 @@ function VentanaPreparar({ consorcio, lista, aEntrar, alCerrar, alPreparar }: Pr
 
   return (
     <VentanaDeFormulario titulo={PREPARAR} textoEnviar="Guardar el borrador" alEnviar={guardar} alCerrar={alCerrar} ancha>
-      {/* Decisión 15: sin administrador vigente se avisa y se deja guardar. La lista no dice si lo
-          hay: lo deja saber un borrador que esta cuenta firmaría segundo y no puede. */}
-      {lista.elementos.some((s) => s.falta_administrador_vigente) && (
+      {/* Decisión 15: sin administrador vigente se avisa y se deja guardar. FL-SOL-05 (tanda 9,
+          app 0110): la lista dice si lo hay. */}
+      {!lista.hay_administrador_vigente && (
         <ComandoNoDisponible motivo={SIN_ADMINISTRADOR_AL_PREPARAR} resolver={{ texto: IR_A_MANDATOS, a: RUTA_MANDATOS }} />
       )}
       <p>{DOS_FIRMAS}</p>
@@ -635,27 +660,18 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
     if (s.huella_texto !== null && s.huella_texto !== undefined) datos.push({ etiqueta: "Huella SHA-256", valor: s.huella_texto });
   }
   if (s.envio) {
-    const { documento_id: documento, version_documento_id: version } = s.envio;
     datos.push({
       etiqueta: "Envío",
       valor: (
         <>
           {TEXTO_MEDIO[s.envio.medio]}
           {s.envio.detalle ? ` (${s.envio.detalle})` : ""}, el {fechaLegible(s.envio.fecha_envio)}. Vence el {fechaLegible(s.envio.vence_el)}.
-          {documento && version && (
-            <>
-              {" "}
-              <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
-                Descargar el comprobante
-              </a>
-            </>
-          )}
+          {enlaceDelAdjunto(consorcio, s.envio, "Descargar el comprobante")}
         </>
       ),
     });
   }
   if (s.respuesta) {
-    const { documento_id: documento, version_documento_id: version } = s.respuesta;
     datos.push({
       etiqueta: "Respuesta",
       valor: (
@@ -666,14 +682,7 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
             {fechaLegible(s.respuesta.respondida_el)}
             {s.respuesta.fuera_de_plazo ? ", fuera de plazo" : ""}.
           </span>
-          {documento && version && (
-            <>
-              {" "}
-              <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
-                Descargar el adjunto
-              </a>
-            </>
-          )}
+          {enlaceDelAdjunto(consorcio, s.respuesta, "Descargar el adjunto")}
         </>
       ),
     });
