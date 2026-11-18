@@ -207,6 +207,42 @@ describe("página /entrar", () => {
   });
 });
 
+/** El almacenamiento del sitio bloqueado del todo, como lo deja un ajuste de privacidad del navegador. */
+function bloquearAlmacenamiento() {
+  const bloqueado = () => {
+    throw new DOMException("The operation is insecure.", "SecurityError");
+  };
+  for (const metodo of ["getItem", "setItem", "removeItem", "clear", "key"] as const)
+    vi.spyOn(Storage.prototype, metodo).mockImplementation(bloqueado);
+  // Control: de verdad no se puede ni leer ni escribir, en las dos.
+  expect(() => window.localStorage.getItem("x")).toThrow(DOMException);
+  expect(() => window.sessionStorage.setItem("x", "1")).toThrow(DOMException);
+}
+
+describe("con el almacenamiento del sitio bloqueado", () => {
+  it("/entrar se dibuja con las formas de entrar", async () => {
+    vi.stubGlobal("fetch", backend());
+    bloquearAlmacenamiento();
+
+    abrir("/entrar");
+
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.getByRole("region", PEDIR)).toBeTruthy();
+  });
+
+  it("el enlace del correo se canjea igual y entra, aunque no quede guardado para una recarga", async () => {
+    const pedido = backend();
+    vi.stubGlobal("fetch", pedido);
+    bloquearAlmacenamiento();
+
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(window.location.href).not.toContain(TOKEN);
+    expect(postsDe(pedido).map((p) => new URL(p.url).pathname)).toEqual([RUTA_CANJE]);
+  });
+});
+
 describe("token guardado en la pestaña (recarga o actualización a mitad de camino)", () => {
   function guardado(): { token: string; venceEn: number } | null {
     const texto = window.sessionStorage.getItem(CLAVE_GUARDADO);

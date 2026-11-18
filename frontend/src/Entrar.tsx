@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router";
 
 import { api } from "./api/cliente";
+import { borrarDeLaPestana, guardarEnLaPestana, leerDeLaPestana } from "./almacenDeLaPestana";
 import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceInstalar } from "./Instalar";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
@@ -18,7 +19,8 @@ import { useIrTrasEntrar, useSesion } from "./sesion";
 // servidor), así una recarga o una actualización de la aplicación a mitad de camino no lo pierde.
 // Lo borra cuando el canje termina o cuando el backend dice que no sirve, y no usa uno guardado
 // hace más que la vigencia del enlace. Una falla que no es del enlace (sin red, un 429, un 5xx) no
-// lo gasta: se queda para reintentar.
+// lo gasta: se queda para reintentar. Si el navegador no deja guardar, el canje sale igual y una
+// recarga a mitad de camino lo pierde (`almacenDeLaPestana.ts`).
 //
 // Es el paso de Acceso donde se elige cómo entrar (decisión del propietario del 05-11-2026, §2):
 // primero el código por correo (decisión del 12-11-2026, pregunta 16) o la última forma usada en
@@ -54,16 +56,16 @@ interface Lectura {
 
 export function guardarToken(token: string, ahora: number): void {
   const guardado: Guardado = { token, venceEn: ahora + VIGENCIA_ENLACE_MS };
-  window.sessionStorage.setItem(CLAVE_GUARDADO, JSON.stringify(guardado));
+  guardarEnLaPestana(CLAVE_GUARDADO, JSON.stringify(guardado));
 }
 
 export function olvidarToken(): void {
-  window.sessionStorage.removeItem(CLAVE_GUARDADO);
+  borrarDeLaPestana(CLAVE_GUARDADO);
 }
 
 /** El token guardado en esta pestaña si no venció; uno vencido se borra. */
 export function tokenGuardado(ahora: number): string | null {
-  const texto = window.sessionStorage.getItem(CLAVE_GUARDADO);
+  const texto = leerDeLaPestana(CLAVE_GUARDADO);
   if (texto === null) return null;
   const guardado = JSON.parse(texto) as Partial<Guardado>;
   if (typeof guardado.token !== "string" || typeof guardado.venceEn !== "number") {
