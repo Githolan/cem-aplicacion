@@ -123,6 +123,13 @@ function abrir(motivo: MotivoEncima) {
   publicar({ pidiendo: true, correo: conocida?.correo ?? "", recuperada: false, motivo });
 }
 
+/** FL-CTA-01 (tanda 9): abre la hoja de entrar de nuevo sin esperar un 403, para un acto que ya se
+ * sabe que pide una entrada reciente. Se resuelve al entrar con la misma persona. */
+export function pedirEntrarDeNuevo(): Promise<void> {
+  abrir("reciente");
+  return (pedido as Pedido).seguir;
+}
+
 function terminar({ antes, soltar }: Pedido, nueva: Sesion) {
   if (antes?.persona !== nueva.persona) {
     borrarCopias();

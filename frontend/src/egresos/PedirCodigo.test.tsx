@@ -1,10 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { BOTON_ENTRAR_PARA_ACTIVAR, ENTRAR_PARA_ACTIVAR } from "../altaDeConfirmacion";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render as dibujar, screen, waitFor } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { recordarLlave } from "../llaveAcceso";
 import { recordarMetodo, ultimoMetodo } from "../metodoConfirmar";
 import { PedirCodigo } from "./PedirCodigo";
+
+/** La hoja lee el plazo para activar (FL-CTA-01) con una consulta: va dentro de su proveedor. */
+function ConConsultas({ children }: { children: ReactNode }) {
+  return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>;
+}
+const render = (ui: ReactElement) => dibujar(ui, { wrapper: ConConsultas });
 
 const LLAVE = { id: "1", nombre: "Mi PC", credencial_id: "AQID", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null };
 const OPCIONES = { opciones: { challenge: "AAEC", allowCredentials: [{ id: "AwQF", type: "public-key" }] } };
@@ -37,8 +46,16 @@ const conLlave = (extra: Respuestas = {}): Respuestas => ({
   ...extra,
 });
 
+/** La sesión, con el plazo para activar la confirmación (FL-CTA-01, app 0110). */
+const sesion = (minutos: number) => () =>
+  Response.json({
+    persona_id: "0199e3a2-1234-7abc-8def-0123456789ab", nombre: "Ana", correo: "ana@ejemplo.com",
+    sesion_id: "0199e3a2-1234-7abc-8def-0123456789ac", vence_en: "2099-01-01T00:00:00Z",
+    alta_confirmacion_hasta: new Date(Date.now() + minutos * 60_000).toISOString(),
+  });
+
 function backend(respuestas: Respuestas) {
-  const lista: Respuestas = { "GET /api/v1/auth/totp": estadoTotp(true, 0), ...respuestas };
+  const lista: Respuestas = { "GET /api/v1/auth/totp": estadoTotp(true, 0), "GET /api/v1/auth/sesion": sesion(5), ...respuestas };
   const simulado = vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
     const respuesta = lista[clave];
@@ -346,6 +363,32 @@ describe("confirmar en el momento", () => {
     expect(alVerificar).toHaveBeenCalledOnce();
     expect(screen.queryByText("Otra página")).toBeNull();
     expect(pedidos(simulado, "/api/v1/auth/totp/confirmar")).toBe(1);
+  });
+
+  it("FL-CTA-01 (tanda 9): sin ningún método y con el plazo de la sesión vencido, pide entrar de nuevo en lugar de activar", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0), "GET /api/v1/auth/sesion": sesion(-1) });
+    render(
+      <MemoryRouter>
+        <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    await titulo("Falta la confirmación con PIN, huella o código");
+    expect(await screen.findByText(ENTRAR_PARA_ACTIVAR)).toBeTruthy();
+    expect(screen.getByRole("button", { name: BOTON_ENTRAR_PARA_ACTIVAR })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Usar una aplicación de códigos" })).toBeNull();
+  });
+
+  it("FL-CTA-01, control: dentro del plazo, se ofrece activar", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0), "GET /api/v1/auth/sesion": sesion(5) });
+    render(
+      <MemoryRouter>
+        <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Usar una aplicación de códigos" })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText(ENTRAR_PARA_ACTIVAR)).toBeNull());
   });
 
   it("si la pantalla se cierra mientras espera el gesto, corta el aviso y no sigue", async () => {

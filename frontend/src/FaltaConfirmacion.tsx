@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { ActivarLlave } from "./ActivarLlave";
 import { ActivarAplicacion } from "./AltaAplicacion";
+import { EntrarParaActivar, useAltaVencida } from "./altaDeConfirmacion";
 import { api } from "./api/cliente";
 import { CodigosRecuperacion } from "./CodigosRecuperacion";
 import { codigoDe, mensajeDeFalla } from "./fallas";
@@ -57,6 +58,8 @@ export function FaltaConfirmacion({ consulta: deAfuera }: { consulta?: ReturnTyp
   const { leDaUso, consulta } = deAfuera ?? propia;
   const [activado, setActivado] = useState<Activado | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  // FL-CTA-01 (tanda 9): solo si se va a ofrecer activar, si el plazo de esta sesión ya pasó.
+  const alta = useAltaVencida(leDaUso && consulta.data === false && activado === null);
 
   if (activado !== null)
     return activado.codigos === null ? (
@@ -91,6 +94,13 @@ export function FaltaConfirmacion({ consulta: deAfuera }: { consulta?: ReturnTyp
   if (consulta.data === undefined) return null;
 
   const conLlave = llaveDisponible();
+  if (alta.vencida === true)
+    return (
+      <section aria-label="Confirmación con PIN, huella o código" className="tarjeta falta-confirmacion">
+        <p>{FALTA_ACTIVAR}</p>
+        <EntrarParaActivar plazo={alta.plazo} />
+      </section>
+    );
   return (
     <section aria-label="Confirmación con PIN, huella o código" className="tarjeta falta-confirmacion">
       <p>{FALTA_ACTIVAR}</p>

@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { ActivarLlave } from "../ActivarLlave";
 import { ActivarAplicacion } from "../AltaAplicacion";
+import { EntrarParaActivar, useAltaVencida } from "../altaDeConfirmacion";
 import { api } from "../api/cliente";
 import { CodigosRecuperacion } from "../CodigosRecuperacion";
 import { encabezadoCsrf } from "../csrf";
@@ -111,6 +112,8 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const [activando, setActivando] = useState(false);
   // Con el alta de la llave en camino no se ofrece la otra: irse a ella perdería los códigos.
   const [llaveEnCurso, setLlaveEnCurso] = useState(false);
+  // FL-CTA-01 (tanda 9): sin ningún método, si el plazo de esta sesión para activar ya pasó.
+  const alta = useAltaVencida(paso.tipo === "sin_alta");
   const campo = useRef<HTMLInputElement>(null);
   const llave = useRef<AbortController | null>(null);
 
@@ -325,19 +328,25 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
             ? "Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo, o con una aplicación de códigos."
             : "Se activa acá mismo, con una aplicación de códigos en el teléfono."}
         </p>
-        <ActivarLlave
-          alOcupar={(ocupado) => {
-            setActivando(ocupado);
-            setLlaveEnCurso(ocupado);
-          }}
-          alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos, medio: "llave" }))}
-        />
-        {!llaveEnCurso && (
-          <ActivarAplicacion
-            secundario={conLlave}
-            alOcupar={setActivando}
-            alActivar={(codigos) => setPaso({ tipo: "codigos", codigos, medio: "aplicacion" })}
-          />
+        {alta.vencida === true ? (
+          <EntrarParaActivar plazo={alta.plazo} />
+        ) : (
+          <>
+            <ActivarLlave
+              alOcupar={(ocupado) => {
+                setActivando(ocupado);
+                setLlaveEnCurso(ocupado);
+              }}
+              alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos, medio: "llave" }))}
+            />
+            {!llaveEnCurso && (
+              <ActivarAplicacion
+                secundario={conLlave}
+                alOcupar={setActivando}
+                alActivar={(codigos) => setPaso({ tipo: "codigos", codigos, medio: "aplicacion" })}
+              />
+            )}
+          </>
         )}
         <div className="formulario">
           <div className="acciones">
