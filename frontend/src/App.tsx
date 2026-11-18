@@ -23,6 +23,7 @@ import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
 import { Icono, type NombreIcono } from "./Iconos";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
+import { FaltaConfirmacion } from "./FaltaConfirmacion";
 import { InvitacionesPropias, useMisInvitaciones } from "./InvitacionesPropias";
 import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
@@ -230,6 +231,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
+      <FaltaConfirmacion />
       <div className="grupos-inicio">
         {hayParaHacer && (
           <section aria-label="Para hacer">

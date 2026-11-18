@@ -33,6 +33,16 @@ const RUTA_EDIFICIOS = "**/api/v1/me/consorcios";
 const RUTA_MIS_INVITACIONES = "**/api/v1/me/invitaciones";
 const RUTA_MIS_ACCIONES = "**/api/v1/consorcios/*/mis-acciones";
 const RUTA_POR_ACLARAR = "**/api/v1/pagos-por-aclarar";
+const RUTA_CONFIRMACION = "**/api/v1/auth/totp";
+
+/** El inicio pregunta si la confirmación está activada (FL-CTA-01): por omisión, sí, y no ofrece activarla. */
+export const CONFIRMACION_ACTIVA = {
+  activo: true,
+  activado_en: "2026-10-15T20:00:00Z",
+  llaves: 0,
+  codigos_recuperacion_restantes: 10,
+  verificado_en: null,
+};
 
 const SESION_SIMULADA = {
   persona_id: "99999999-9999-4999-8999-999999999999",
@@ -54,6 +64,7 @@ export function simularPermisos(ruta: Route, camino: string, acciones: readonly 
   if (camino.endsWith("/mis-acciones")) return ruta.fulfill({ json: { acciones } });
   if (camino === "/api/v1/pagos-por-aclarar" || camino === "/api/v1/me/invitaciones")
     return ruta.fulfill({ json: { elementos: [] } });
+  if (camino === "/api/v1/auth/totp") return ruta.fulfill({ json: CONFIRMACION_ACTIVA });
   return null;
 }
 
@@ -76,11 +87,12 @@ export async function simularSesion(pagina: Page, sesion: Sesion | (() => Sesion
   await pagina.context().route(RUTA_MIS_INVITACIONES, conSesion({ elementos: [] }));
   await pagina.context().route(RUTA_MIS_ACCIONES, conSesion({ acciones: accionesDeLasPoliticas() }));
   await pagina.context().route(RUTA_POR_ACLARAR, conSesion({ elementos: [] }));
+  await pagina.context().route(RUTA_CONFIRMACION, conSesion(CONFIRMACION_ACTIVA));
 }
 
 /** Deja de simular: la consulta vuelve a salir a la red (o a fallar, si la prueba la cortó). */
 export async function dejarDeSimularSesion(pagina: Page) {
-  for (const ruta of [RUTA_SESION, RUTA_EDIFICIOS, RUTA_MIS_INVITACIONES, RUTA_MIS_ACCIONES, RUTA_POR_ACLARAR])
+  for (const ruta of [RUTA_SESION, RUTA_EDIFICIOS, RUTA_MIS_INVITACIONES, RUTA_MIS_ACCIONES, RUTA_POR_ACLARAR, RUTA_CONFIRMACION])
     await pagina.context().unroute(ruta);
 }
 
