@@ -133,6 +133,17 @@ class GrupoLiquidable(BaseModel):
     vigente_desde: date
 
 
+class GruposDelPeriodo(BaseModel):
+    """`GET …/liquidaciones/grupos?periodo=…`: los grupos con porcentajes que valen el último día
+    del período, antes de abrir el borrador (FL-LIQ-01). Sin ninguno, el borrador no se puede
+    repartir: los carga soporte."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    elementos: list[GrupoLiquidable]
+
+
 class GrupoSimulado(BaseModel):
     model_config = ConfigDict(frozen=True)
 

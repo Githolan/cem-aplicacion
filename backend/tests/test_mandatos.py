@@ -47,6 +47,7 @@ PAQUETE_CONSEJO = sorted(
         "liquidacion.revisar",
         "mandatos.registrar",
         "mandatos.ver",
+        "padron.confirmar_vinculo",  # `0110`, pregunta 7 del propietario
         "padron.ver",
         "solicitud_formal.firmar",
         "solicitud_formal.preparar",

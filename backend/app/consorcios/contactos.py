@@ -9,9 +9,12 @@ Diseño: `doc/diseno/H2b_7_Diseno.md` del repositorio CEM, con la decisión del 
 - **`GET …/contactos/gestion`** (`contactos.gestionar`, MC y AD): suma los futuros y esos datos.
   Es una ruta aparte para que cada ruta declare una sola acción y la lista de gestión nunca
   comparta URL con la que se guarda.
-- **Escrituras** (`contactos.gestionar`): agregar, corregir, retirar, verificar y señalar. La
-  política decide antes de leer nada, así que un contacto inexistente da 404 solo a quien tiene
-  la facultad.
+- **Escrituras** (`contactos.gestionar`): agregar, corregir, retirar y verificar. La política
+  decide antes de leer nada, así que un contacto inexistente da 404 solo a quien tiene la
+  facultad.
+- **Señalar un dato mal** (`contactos.ver`; pregunta 16 del propietario, 18-11-2026): cualquier
+  persona que ve los contactos, sobre uno que ve hoy (`0110`). Quien gestiona señala también los
+  futuros, y corrige directo.
 
 Las funciones de `0031` vuelven a exigir el ámbito o la facultad. Si la base niega lo que el
 evaluador concedió, es una discrepancia (500), nunca una lista vacía ni un 403.
@@ -242,13 +245,18 @@ def verificar_contacto(
 @router.post(
     "/consorcios/{consorcio_id}/contactos/{contacto_id}/senalar",
     response_model=ContactoId,
-    summary="Señalar un dato incorrecto, con el motivo (sin teléfonos ni correos)",
-    responses=RESPUESTAS_CAMBIO,
+    summary="Señalar un dato incorrecto, con el motivo (sin teléfonos ni correos): cualquier"
+    " persona que ve los contactos",
+    responses={
+        403: {"description": "Sin ámbito en el consorcio."},
+        404: {"description": "El contacto no existe o quien pide no lo ve hoy."},
+        409: RESPUESTAS_CAMBIO[409],
+    },
 )
 def senalar_contacto(
     contacto_id: UUID,
     senalamiento: Senalamiento,
-    permiso: Annotated[Permiso, Depends(requiere("contactos.gestionar"))],
+    permiso: Annotated[Permiso, Depends(requiere("contactos.ver"))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:

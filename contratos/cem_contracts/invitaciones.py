@@ -45,6 +45,9 @@ class PasoInvitacion(StrEnum):
     """La sesión abierta es de otra cuenta."""
     PROPIA = "propia"
     """La sesión es la de quien la creó (o de su misma identidad humana): no la acepta (F9)."""
+    YA_ACEPTADA = "ya_aceptada"
+    """La sesión es la de la cuenta del correo y esa invitación ya está aceptada: no hay nada
+    que hacer (FL-INVA-02, `0110`). A cualquier otra persona, la consulta responde 404."""
 
 
 class InvitacionNueva(BaseModel):
@@ -87,6 +90,11 @@ class Invitacion(BaseModel):
     importada: bool = Field(
         description="Si salió con el padrón importado (nombra su vínculo): una invitación manual"
         " no la reemplaza (`invitacion_importada_pendiente`).",
+    )
+    vinculo_id: UUID | None = Field(
+        description="Aceptada: el vínculo que dejó la aceptación (`0110`; FL-INV-01). Si está"
+        " confirmado y si quien lee lo puede confirmar lo dice su fila del padrón. Nulo si no se"
+        " aceptó."
     )
 
 

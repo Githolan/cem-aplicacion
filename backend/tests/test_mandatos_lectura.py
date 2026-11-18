@@ -30,13 +30,15 @@ pytestmark = [pytest.mark.db, pytest.mark.redis]
 INEXISTENTE = "01a10000-0000-7000-8000-000000000001"
 COLUMNAS_MANDATO = {
     "id", "tipo", "nombre", "cuit", "vigente_desde", "vigente_hasta", "estado", "con_cuenta",
+    "invitacion", "invitacion_emitida_por_mi",  # `0110`, FL-MAN-04
 }  # fmt: skip
 COLUMNAS_DETALLE = COLUMNAS_MANDATO | {
     "matricula", "decision_id", "facultades", "causa_baja", "baja_decision_id",
     "instrumento_referencia", "motivo_fin", "finalizado_en", "es_propio",
     "condicion_cumplida_hoy",
 }  # fmt: skip
-COLUMNAS_DECISION = {"id", "tipo", "fecha", "descripcion", "registrada_por_vos", "del_equipo"}
+COLUMNAS_DECISION = {"id", "tipo", "fecha", "descripcion", "registrada_por_vos", "del_equipo",
+                     "tiene_acta"}  # `0110`, FL-DEC-01  # fmt: skip
 
 
 def _get(persona, url):

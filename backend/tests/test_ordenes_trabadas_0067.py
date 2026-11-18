@@ -19,7 +19,7 @@ from app.db import transaccion
 from tests.test_cobertura_comprobantes import mandato_de
 from tests.test_egresos_1a import _hoy, envejecer
 from tests.test_mandatos import otra_persona
-from tests.test_orden_pago_neutra import llamar, niega, nueva_sesion, orden
+from tests.test_orden_pago_neutra import RAZON_SOCIAL, llamar, niega, nueva_sesion, orden
 from tests.test_pago_manual_0055 import (
     CONCILIAR,
     CONFIRMAR,
@@ -355,6 +355,8 @@ def test_por_http_quien_renuncio_ve_la_orden_y_declara_y_el_consejo_confirma(
     o = trabada(motor_migrate, motor_app, e)
     [fila] = lista_por_aclarar(e, e.adm)
     assert (fila["orden_id"], fila["version"]) == (str(o), 1)
+    # FL-ACL-03 (`0110`): con la razón social del proveedor de la versión.
+    assert fila["razon_social"] == RAZON_SOCIAL
     assert get(e, e.adm, f"ordenes-pago/{o}").status_code == 403  # ya no la lee
     ruta = f"pagos-por-aclarar/{o}/no-realizado"
     r = post(e, e.adm, ruta, {"version": 1, "motivo": MOTIVO})

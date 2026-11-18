@@ -217,7 +217,7 @@
         "rechazar"
       ],
       "que_decir": "Falta aprobarla o rechazarla.",
-      "despues": "listo"
+      "despues": "mismo_paso"
     },
     {
       "situacion": "en_revision",
@@ -293,6 +293,17 @@
       "secundarias": [],
       "negativas": [],
       "que_decir": "El proveedor cambió después de aprobarla: así no se puede pagar. Modificarla la vuelve a aprobación.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "para_pagar",
+      "paso": "falta_cuenta",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "modificar",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "El proveedor no tiene cuenta destino: así no se puede pagar. Se carga en la ficha del proveedor y después se modifica la orden, que vuelve a aprobación.",
       "despues": "listo"
     },
     {

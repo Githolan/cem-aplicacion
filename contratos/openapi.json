@@ -144,6 +144,22 @@
         "title": "AceptacionInvitacionMandato",
         "type": "object"
       },
+      "ActaDecision": {
+        "description": "`PUT /api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}/acta` (`0110`,\nFL-DEC-01): ata el acta a una decisión que quedó sin ella.",
+        "properties": {
+          "sha256": {
+            "description": "Huella de una versión disponible (ya analizada) de un documento vigente del consorcio: si no lo es, 422 `acta_no_disponible`. Una decisión con acta responde 409 `acta_ya_registrada`.",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256"
+        ],
+        "title": "ActaDecision",
+        "type": "object"
+      },
       "ActorEvento": {
         "properties": {
           "nombre": {
@@ -361,6 +377,11 @@
             },
             "title": "Unidades",
             "type": "array"
+          },
+          "ve_por_rol": {
+            "description": "Si ya ve los proveedores por su rol (`roles_que_ven` de la configuración): autorizarla no cambia lo que ve (FL-VER-02), y retirarle la autorización tampoco se lo quita.",
+            "title": "Ve Por Rol",
+            "type": "boolean"
           }
         },
         "required": [
@@ -370,7 +391,8 @@
           "autorizada",
           "motivo",
           "registrado_en",
-          "registrado_por_nombre"
+          "registrado_por_nombre",
+          "ve_por_rol"
         ],
         "title": "AutorizacionVerProveedores",
         "type": "object"
@@ -408,6 +430,11 @@
             "title": "Proveedor",
             "type": "string"
           },
+          "proveedor_admite_orden": {
+            "description": "Si hoy se le puede preparar una orden nueva a ese proveedor (activo y, si le falta documentación en modo «bloquear», con un salteo que sirve a quien lee): sin eso, no se ofrece «Preparar otra orden» (FL-ORD-05). Solo para mostrar.",
+            "title": "Proveedor Admite Orden",
+            "type": "boolean"
+          },
           "proveedor_id": {
             "format": "uuid",
             "title": "Proveedor Id",
@@ -428,7 +455,8 @@
           "proveedor_id",
           "motivo",
           "creada_en",
-          "rechazada_en"
+          "rechazada_en",
+          "proveedor_admite_orden"
         ],
         "title": "AvisoRechazo",
         "type": "object"
@@ -496,6 +524,12 @@
             "title": "Avisos Rechazo",
             "type": "array"
           },
+          "cotejados": {
+            "description": "Cuántos pagos cotejados y vigentes lee quien pide en «Ver lo cotejado» (`…/pagos/cotejo/cotejados`): sin ninguno, esa entrada no se ofrece (FL-CON-01). Cero si no puede cotejar.",
+            "minimum": 0.0,
+            "title": "Cotejados",
+            "type": "integer"
+          },
           "elementos": {
             "items": {
               "$ref": "#/components/schemas/ElementoBandejaPagos"
@@ -526,6 +560,7 @@
           "elementos",
           "avisos_rechazo",
           "por_cotejar",
+          "cotejados",
           "sin_explicar",
           "marcados_no_es_pago"
         ],
@@ -636,6 +671,19 @@
       "CandidatoMandato": {
         "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
         "properties": {
+          "habilita_consejo": {
+            "description": "Si hoy cumple la condición para integrar el Consejo con un vínculo confirmado de un carácter del catálogo (`0023`; hoy, propietario). El alta de un «Consejo de propietarios» se ofrece solo a quien la cumple (pregunta 8 del propietario, 18-11-2026; FL-MAN-02).",
+            "title": "Habilita Consejo",
+            "type": "boolean"
+          },
+          "mandatos": {
+            "description": "Los tipos de sus mandatos vigentes o futuros, sin baja: el alta de uno superpuesto del mismo tipo, o de un Consejo con administración, se niega (FL-MAN-03).",
+            "items": {
+              "$ref": "#/components/schemas/TipoMandato"
+            },
+            "title": "Mandatos",
+            "type": "array"
+          },
           "nombre": {
             "title": "Nombre",
             "type": "string"
@@ -657,7 +705,9 @@
         "required": [
           "persona_id",
           "nombre",
-          "unidades"
+          "unidades",
+          "habilita_consejo",
+          "mandatos"
         ],
         "title": "CandidatoMandato",
         "type": "object"
@@ -1034,6 +1084,10 @@
           "salteo_innecesario",
           "salteo_vigente",
           "salteo_de_quien_prepara",
+          "pedido_salteo_pendiente",
+          "motivo_requerido",
+          "acta_ya_registrada",
+          "acta_no_disponible",
           "documentacion_legal_faltante",
           "aprobacion_vencida",
           "aprobacion_vigente",
@@ -1463,6 +1517,11 @@
             "title": "Admite No Vence",
             "type": "boolean"
           },
+          "autoriza_por_persona": {
+            "description": "Si el consorcio autoriza a personas a ver los proveedores (`0105`): apagado, no se ofrece «Quién ve los proveedores» (FL-VER-01).",
+            "title": "Autoriza Por Persona",
+            "type": "boolean"
+          },
           "dias_por_vencer": {
             "title": "Dias Por Vencer",
             "type": "integer"
@@ -1474,7 +1533,8 @@
         "required": [
           "dias_por_vencer",
           "modo_exigencia",
-          "admite_no_vence"
+          "admite_no_vence",
+          "autoriza_por_persona"
         ],
         "title": "ConfiguracionProveedores",
         "type": "object"
@@ -2711,6 +2771,11 @@
             ],
             "title": "Sha256"
           },
+          "tiene_acta": {
+            "description": "Si ya tiene la huella del acta. Sin ella, quien registra decisiones la puede adjuntar (`PUT …/decisiones/{id}/acta`, `0110`, FL-DEC-01).",
+            "title": "Tiene Acta",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/components/schemas/TipoDecision"
           }
@@ -2722,6 +2787,7 @@
           "descripcion",
           "registrada_por_vos",
           "del_equipo",
+          "tiene_acta",
           "referencia",
           "sha256"
         ],
@@ -2826,6 +2892,11 @@
             "title": "Registrada Por Vos",
             "type": "boolean"
           },
+          "tiene_acta": {
+            "description": "Si ya tiene la huella del acta. Sin ella, quien registra decisiones la puede adjuntar (`PUT …/decisiones/{id}/acta`, `0110`, FL-DEC-01).",
+            "title": "Tiene Acta",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/components/schemas/TipoDecision"
           }
@@ -2836,7 +2907,8 @@
           "fecha",
           "descripcion",
           "registrada_por_vos",
-          "del_equipo"
+          "del_equipo",
+          "tiene_acta"
         ],
         "title": "DecisionResumen",
         "type": "object"
@@ -3863,6 +3935,11 @@
       },
       "EnvioSolicitud": {
         "properties": {
+          "descargable": {
+            "description": "Si quien lee lo puede descargar: disponible y con `documentos.ver`. Solo para mostrar: la descarga vuelve a decidir.",
+            "title": "Descargable",
+            "type": "boolean"
+          },
           "detalle": {
             "anyOf": [
               {
@@ -3886,6 +3963,17 @@
             ],
             "description": "El comprobante; nulo en `aplicacion`.",
             "title": "Documento Id"
+          },
+          "estado_archivo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cómo terminó el análisis del comprobante (FL-SOL-04): en cuarentena todavía no se descarga, y rechazado no se descarga nunca. Nulo sin comprobante."
           },
           "fecha_envio": {
             "format": "date",
@@ -3938,7 +4026,9 @@
           "registrado_por_nombre",
           "registrado_en",
           "documento_id",
-          "version_documento_id"
+          "version_documento_id",
+          "estado_archivo",
+          "descargable"
         ],
         "title": "EnvioSolicitud",
         "type": "object"
@@ -4243,6 +4333,15 @@
           "conciliada"
         ],
         "title": "EstadoOrdenPago",
+        "type": "string"
+      },
+      "EstadoPedidoSalteo": {
+        "enum": [
+          "pendiente",
+          "atendido",
+          "sin_bloqueo"
+        ],
+        "title": "EstadoPedidoSalteo",
         "type": "string"
       },
       "EstadoProveedor": {
@@ -4758,6 +4857,17 @@
             ],
             "description": "La de `comprobante_actual`. Nula si la lectura no corrió para ese archivo: con la lectura apagada, siempre."
           },
+          "motivo_sin_acto": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotivoSinActo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por qué no se le ofrece a quien mira el acto del paso en que está la orden, cuando la razón es de esta orden y no de su rol (FL-ORD-06, FL-ORD-08, FL-APR-02). Nulo si se le ofrece o si no es de su rol. Solo para mostrar: la ruta y la base vuelven a decidir."
+          },
           "observacion_vigente": {
             "anyOf": [
               {
@@ -4791,6 +4901,11 @@
                 "type": "null"
               }
             ]
+          },
+          "proveedor_admite_orden": {
+            "description": "Si quien lee puede prepararle hoy una orden nueva al proveedor de esta orden (activo y, si le falta documentación en modo «bloquear», con un salteo que le sirve). Falso para quien no prepara. Sin eso, no se ofrece «Preparar otra orden» (FL-ORD-05). Solo para mostrar: la base vuelve a decidir al preparar.",
+            "title": "Proveedor Admite Orden",
+            "type": "boolean"
           },
           "puede_aprobar": {
             "title": "Puede Aprobar",
@@ -4993,7 +5108,9 @@
           "facturas_anteriores",
           "puede_subir_factura",
           "puede_reemplazar_factura",
-          "documentacion_proveedor"
+          "documentacion_proveedor",
+          "motivo_sin_acto",
+          "proveedor_admite_orden"
         ],
         "title": "FichaPago",
         "type": "object"
@@ -5028,6 +5145,14 @@
             "title": "Requisitos",
             "type": "array"
           },
+          "retiros_con_motivo": {
+            "description": "Los rubros legales que se le quitaron con documentación faltante, con el motivo (`0110`), del más nuevo al más viejo.",
+            "items": {
+              "$ref": "#/components/schemas/RetiroRubroConMotivo"
+            },
+            "title": "Retiros Con Motivo",
+            "type": "array"
+          },
           "rubros_legales": {
             "items": {
               "type": "string"
@@ -5051,7 +5176,8 @@
           "faltantes",
           "requisitos",
           "configuracion",
-          "salteos"
+          "salteos",
+          "retiros_con_motivo"
         ],
         "title": "FichaProveedorConsulta",
         "type": "object"
@@ -5200,6 +5326,11 @@
             "title": "Nombre",
             "type": "string"
           },
+          "sostiene_consejo": {
+            "description": "Si el vínculo es de un carácter que habilita para el Consejo y su persona tiene hoy un mandato del Consejo vigente: si termina y no le queda otro, el mandato pasa a revisión y deja de autorizar actos (`0023`; FL-PAD-03).",
+            "title": "Sostiene Consejo",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/components/schemas/TipoVinculo"
           },
@@ -5243,7 +5374,8 @@
           "confirmado",
           "iniciado",
           "confirmable_por_vos",
-          "gestionable_por_vos"
+          "gestionable_por_vos",
+          "sostiene_consejo"
         ],
         "title": "FilaPadron",
         "type": "object"
@@ -5589,6 +5721,29 @@
         "title": "GrupoSimulado",
         "type": "object"
       },
+      "GruposDelPeriodo": {
+        "description": "`GET …/liquidaciones/grupos?periodo=…`: los grupos con porcentajes que valen el último día\ndel período, antes de abrir el borrador (FL-LIQ-01). Sin ninguno, el borrador no se puede\nrepartir: los carga soporte.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/GrupoLiquidable"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodo",
+          "elementos"
+        ],
+        "title": "GruposDelPeriodo",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -5790,6 +5945,19 @@
             "format": "date-time",
             "title": "Vence En",
             "type": "string"
+          },
+          "vinculo_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aceptada: el vínculo que dejó la aceptación (`0110`; FL-INV-01). Si está confirmado y si quien lee lo puede confirmar lo dice su fila del padrón. Nulo si no se aceptó.",
+            "title": "Vinculo Id"
           }
         },
         "required": [
@@ -5802,7 +5970,8 @@
           "estado",
           "creada_en",
           "vence_en",
-          "importada"
+          "importada",
+          "vinculo_id"
         ],
         "title": "Invitacion",
         "type": "object"
@@ -7292,8 +7461,30 @@
         "title": "ListaPagosPorAclarar",
         "type": "object"
       },
+      "ListaPedidosSalteo": {
+        "description": "`GET …/pedidos-salteo`: los del consorcio, del más nuevo al más viejo. Los lee quien\nsaltea (el Consejo, por la configuración) y quien prepara las órdenes.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PedidoSalteo"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaPedidosSalteo",
+        "type": "object"
+      },
       "ListaProveedores": {
         "properties": {
+          "autoriza_por_persona": {
+            "description": "Si el consorcio autoriza a personas a ver los proveedores (`0105`; FL-VER-01): apagado, no hay a quién autorizar.",
+            "title": "Autoriza Por Persona",
+            "type": "boolean"
+          },
           "con_salteo": {
             "description": "Los bloqueados (modo `bloquear` y documentación faltante) con un salteo por urgencia vigente que sirve para una orden que prepare quien lee: lo registró otra persona, con otra identidad humana (`0106`, `0109`). Solo para mostrar: la base vuelve a decidir al preparar.",
             "items": {
@@ -7348,6 +7539,23 @@
             },
             "title": "Salteo De Quien Prepara",
             "type": "array"
+          },
+          "salteo_vencido_sin_usar": {
+            "description": "Los bloqueados sin ningún salteo vigente cuyo último salteo venció sin que lo usara una orden (FL-SAL-04).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Salteo Vencido Sin Usar",
+            "type": "array"
+          },
+          "vence_salteo": {
+            "description": "De cada uno de `con_salteo`, hasta cuándo sirve su salteo (el último en vencer de los que sirven; FL-SAL-01, 18-11-2026).",
+            "items": {
+              "$ref": "#/components/schemas/VenceSalteo"
+            },
+            "title": "Vence Salteo",
+            "type": "array"
           }
         },
         "required": [
@@ -7357,13 +7565,30 @@
           "documentacion_faltante",
           "modo_exigencia",
           "con_salteo",
-          "salteo_de_quien_prepara"
+          "salteo_de_quien_prepara",
+          "vence_salteo",
+          "salteo_vencido_sin_usar",
+          "autoriza_por_persona"
         ],
         "title": "ListaProveedores",
         "type": "object"
       },
       "ListaProveedoresConsulta": {
         "properties": {
+          "autoriza_por_persona": {
+            "description": "Si el consorcio autoriza a personas a ver los proveedores (FL-VER-01).",
+            "title": "Autoriza Por Persona",
+            "type": "boolean"
+          },
+          "con_salteo": {
+            "description": "Los bloqueados (modo `bloquear` y documentación faltante) con un salteo por urgencia vigente, de quien sea (FL-VER-03).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Con Salteo",
+            "type": "array"
+          },
           "documentacion_faltante": {
             "items": {
               "format": "uuid",
@@ -7397,6 +7622,23 @@
           },
           "modo_exigencia": {
             "$ref": "#/components/schemas/ModoExigencia"
+          },
+          "salteo_vencido_sin_usar": {
+            "description": "Los bloqueados sin salteo vigente cuyo último salteo venció sin usarse (FL-SAL-04).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Salteo Vencido Sin Usar",
+            "type": "array"
+          },
+          "vence_salteo": {
+            "description": "De cada uno de `con_salteo`, hasta cuándo sirve (el último en vencer).",
+            "items": {
+              "$ref": "#/components/schemas/VenceSalteo"
+            },
+            "title": "Vence Salteo",
+            "type": "array"
           }
         },
         "required": [
@@ -7404,7 +7646,11 @@
           "documentacion_vencida",
           "documentacion_por_vencer",
           "documentacion_faltante",
-          "modo_exigencia"
+          "modo_exigencia",
+          "con_salteo",
+          "vence_salteo",
+          "salteo_vencido_sin_usar",
+          "autoriza_por_persona"
         ],
         "title": "ListaProveedoresConsulta",
         "type": "object"
@@ -7474,6 +7720,11 @@
             "title": "Elementos",
             "type": "array"
           },
+          "hay_administrador_vigente": {
+            "description": "Si hoy hay un mandato de administración vigente: sin él, una solicitud se prepara y se firma una vez, pero la segunda firma no la emite (A14; FL-SOL-05).",
+            "title": "Hay Administrador Vigente",
+            "type": "boolean"
+          },
           "plazo_maximo_dias": {
             "title": "Plazo Maximo Dias",
             "type": "integer"
@@ -7494,6 +7745,7 @@
         "required": [
           "elementos",
           "puede_preparar",
+          "hay_administrador_vigente",
           "plazo_por_defecto_dias",
           "plazo_minimo_dias",
           "plazo_maximo_dias"
@@ -7761,6 +8013,22 @@
             ],
             "title": "Instrumento Referencia"
           },
+          "invitacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoInvitacionMandato"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El estado de la última invitación del mandato, para quien ve las asociaciones (`mandatos.ver_asociaciones`); nulo si no tiene o si quien lee no las ve (FL-MAN-04)."
+          },
+          "invitacion_emitida_por_mi": {
+            "description": "Si esa invitación la emitió quien lee: no la aprueba (cuatro ojos).",
+            "title": "Invitacion Emitida Por Mi",
+            "type": "boolean"
+          },
           "matricula": {
             "anyOf": [
               {
@@ -7819,6 +8087,8 @@
           "vigente_hasta",
           "estado",
           "con_cuenta",
+          "invitacion",
+          "invitacion_emitida_por_mi",
           "matricula",
           "decision_id",
           "facultades",
@@ -7891,6 +8161,17 @@
             "description": "Exclusivo (A1): el último día es el anterior.",
             "title": "Hasta"
           },
+          "invitacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvitacionMandatoNueva"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo para el administrador externo: el correo del mandatario y de dónde sale. Con él, el alta emite también la invitación (A7), que queda por aprobar por otra persona, como si se emitiera después (pregunta 17 del propietario, 18-11-2026; FL-MAN-06). Pide `mandatos.asociar_persona`."
+          },
           "matricula": {
             "anyOf": [
               {
@@ -7951,6 +8232,19 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "invitacion_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La invitación emitida con el alta, por aprobar; nula si no se pidió.",
+            "title": "Invitacion Id"
           }
         },
         "required": [
@@ -7987,6 +8281,22 @@
             "title": "Id",
             "type": "string"
           },
+          "invitacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoInvitacionMandato"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El estado de la última invitación del mandato, para quien ve las asociaciones (`mandatos.ver_asociaciones`); nulo si no tiene o si quien lee no las ve (FL-MAN-04)."
+          },
+          "invitacion_emitida_por_mi": {
+            "description": "Si esa invitación la emitió quien lee: no la aprueba (cuatro ojos).",
+            "title": "Invitacion Emitida Por Mi",
+            "type": "boolean"
+          },
           "nombre": {
             "description": "El del mandatario sin cuenta (razón social) o el de la persona del mandato.",
             "title": "Nombre",
@@ -8022,7 +8332,9 @@
           "vigente_desde",
           "vigente_hasta",
           "estado",
-          "con_cuenta"
+          "con_cuenta",
+          "invitacion",
+          "invitacion_emitida_por_mi"
         ],
         "title": "MandatoResumen",
         "type": "object"
@@ -8189,6 +8501,18 @@
         "title": "MotivoRechazo",
         "type": "string"
       },
+      "MotivoSinActo": {
+        "description": "Por qué no se ofrece el acto del paso (pregunta 17 del propietario, 18-11-2026).",
+        "enum": [
+          "ya_aprobaste",
+          "cargaste_la_cuenta",
+          "aprobaste_la_orden",
+          "proveedor_sin_cuenta",
+          "proveedor_inactivo"
+        ],
+        "title": "MotivoSinActo",
+        "type": "string"
+      },
       "MovimientoMarcado": {
         "properties": {
           "movimiento_id": {
@@ -8347,6 +8671,40 @@
           "contrasena_nueva"
         ],
         "title": "NuevaContrasena",
+        "type": "object"
+      },
+      "NuevoPedidoSalteo": {
+        "additionalProperties": false,
+        "description": "`POST …/proveedores/{p}/pedidos-salteo`: quien prepara pide al Consejo un salteo para un\nproveedor bloqueado, con el motivo y el importe (pregunta 3 del propietario, 18-11-2026).",
+        "properties": {
+          "importe_centavos": {
+            "description": "En centavos.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "examples": [
+              "ARS"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo",
+          "importe_centavos",
+          "moneda"
+        ],
+        "title": "NuevoPedidoSalteo",
         "type": "object"
       },
       "NuevoSalteoDocumentacion": {
@@ -9357,6 +9715,11 @@
             "title": "Orden Id",
             "type": "string"
           },
+          "razon_social": {
+            "description": "El proveedor de la orden, sin la cuenta (pregunta 17 del propietario, 18-11-2026; FL-ACL-03).",
+            "title": "Razon Social",
+            "type": "string"
+          },
           "version": {
             "exclusiveMinimum": 0.0,
             "maximum": 2147483647.0,
@@ -9369,6 +9732,7 @@
           "consorcio",
           "orden_id",
           "version",
+          "razon_social",
           "concepto",
           "importe_centavos",
           "moneda",
@@ -9550,7 +9914,8 @@
           "aceptar",
           "entrar",
           "otra_cuenta",
-          "propia"
+          "propia",
+          "ya_aceptada"
         ],
         "title": "PasoInvitacion",
         "type": "string"
@@ -9578,6 +9943,7 @@
           "enviar",
           "renovar",
           "modificar",
+          "falta_cuenta",
           "volver_a_pagar",
           "rechazada",
           "aprobar",
@@ -9660,6 +10026,94 @@
           "correo"
         ],
         "title": "PedidoEnlace",
+        "type": "object"
+      },
+      "PedidoSalteo": {
+        "description": "Un pedido de salteo (`0110`). No se cambia ni se borra: lo atiende el salteo que el\nConsejo registra después.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoPedidoSalteo"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "numero": {
+            "title": "Numero",
+            "type": "integer"
+          },
+          "pedido_en": {
+            "format": "date-time",
+            "title": "Pedido En",
+            "type": "string"
+          },
+          "pedido_por_nombre": {
+            "title": "Pedido Por Nombre",
+            "type": "string"
+          },
+          "propio": {
+            "description": "Si lo pidió la cuenta de quien lee.",
+            "title": "Propio",
+            "type": "boolean"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "salteo_numero": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El salteo que lo atendió.",
+            "title": "Salteo Numero"
+          },
+          "salteo_vence_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hasta cuándo espera su orden el salteo que lo atendió.",
+            "title": "Salteo Vence En"
+          }
+        },
+        "required": [
+          "numero",
+          "proveedor_id",
+          "razon_social",
+          "motivo",
+          "importe_centavos",
+          "moneda",
+          "pedido_en",
+          "pedido_por_nombre",
+          "propio",
+          "estado",
+          "salteo_numero",
+          "salteo_vence_en"
+        ],
+        "title": "PedidoSalteo",
         "type": "object"
       },
       "PeriodoModo": {
@@ -9939,6 +10393,14 @@
             "title": "Requisitos",
             "type": "array"
           },
+          "retiros_con_motivo": {
+            "description": "Los rubros legales que se le quitaron con documentación faltante, con el motivo (`0110`), del más nuevo al más viejo.",
+            "items": {
+              "$ref": "#/components/schemas/RetiroRubroConMotivo"
+            },
+            "title": "Retiros Con Motivo",
+            "type": "array"
+          },
           "rubros_legales": {
             "description": "Los rubros legales asignados (`0104`).",
             "items": {
@@ -9972,7 +10434,8 @@
           "faltantes",
           "requisitos",
           "configuracion",
-          "salteos"
+          "salteos",
+          "retiros_con_motivo"
         ],
         "title": "ProveedorConVersiones",
         "type": "object"
@@ -10850,6 +11313,11 @@
       },
       "RespuestaSolicitud": {
         "properties": {
+          "descargable": {
+            "description": "Si quien lee lo puede descargar: disponible y con `documentos.ver`.",
+            "title": "Descargable",
+            "type": "boolean"
+          },
           "documento_id": {
             "anyOf": [
               {
@@ -10861,6 +11329,17 @@
               }
             ],
             "title": "Documento Id"
+          },
+          "estado_archivo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cómo terminó el análisis del adjunto (FL-SOL-04). Nulo sin adjunto."
           },
           "fuera_de_plazo": {
             "description": "Llegó después del vencimiento (P5).",
@@ -10917,7 +11396,9 @@
           "registrada_por_nombre",
           "registrada_en",
           "documento_id",
-          "version_documento_id"
+          "version_documento_id",
+          "estado_archivo",
+          "descargable"
         ],
         "title": "RespuestaSolicitud",
         "type": "object"
@@ -11120,6 +11601,72 @@
           "retirada_en"
         ],
         "title": "RetiroRegistrado",
+        "type": "object"
+      },
+      "RetiroRubroConMotivo": {
+        "description": "Un rubro legal quitado con documentación faltante, con el motivo (`0110`): a la vista del\nConsejo.",
+        "properties": {
+          "faltaban": {
+            "description": "Los códigos de lo que le faltaba de ese rubro.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Faltaban",
+            "type": "array"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "retirado_en": {
+            "format": "date-time",
+            "title": "Retirado En",
+            "type": "string"
+          },
+          "retirado_por_nombre": {
+            "title": "Retirado Por Nombre",
+            "type": "string"
+          },
+          "rubro_legal": {
+            "title": "Rubro Legal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proveedor_id",
+          "rubro_legal",
+          "motivo",
+          "faltaban",
+          "retirado_en",
+          "retirado_por_nombre"
+        ],
+        "title": "RetiroRubroConMotivo",
+        "type": "object"
+      },
+      "RetiroRubroLegal": {
+        "additionalProperties": false,
+        "description": "Cuerpo opcional de `DELETE …/proveedores/{p}/rubros-legales/{rubro}`: el motivo. Quitar un\nrubro al que le falta documentación lo pide (pregunta 4 del propietario, 18-11-2026:\n`motivo_requerido`); sin faltantes, no hace falta.",
+        "properties": {
+          "motivo": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo"
+          }
+        },
+        "title": "RetiroRubroLegal",
         "type": "object"
       },
       "RetiroSolicitud": {
@@ -11405,6 +11952,19 @@
       "SesionActual": {
         "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
         "properties": {
+          "alta_confirmacion_hasta": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hasta cuándo esta sesión puede activar la confirmación (aplicación o llave): sin ningún medio, 10 minutos desde que se entró; con uno, 10 minutos desde la última verificación (nulo si no hubo). Después, el alta responde 403. La pantalla no repite el plazo (FL-CTA-01). Lo informa `GET /auth/sesion`; las respuestas de entrar lo dejan nulo.",
+            "title": "Alta Confirmacion Hasta"
+          },
           "correo": {
             "title": "Correo",
             "type": "string"
@@ -12134,6 +12694,27 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VenceSalteo": {
+        "description": "Hasta cuándo sirve el salteo vigente de un proveedor bloqueado.",
+        "properties": {
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proveedor_id",
+          "vence_en"
+        ],
+        "title": "VenceSalteo",
         "type": "object"
       },
       "VerificacionSegundoFactor": {
@@ -14481,6 +15062,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/consulta-proveedores/{proveedor_id}": {
       "get": {
+        "description": "Decisión 17 del propietario (18-11-2026): el habitante autorizado no ve la historia de\nsalteos ni los retiros con motivo (nombres y motivos): solo quien ve el panel del Consejo o\nsaltea. Se filtra acá, no en la pantalla.",
         "operationId": "consultar_proveedor_api_v1_consorcios__consorcio_id__consulta_proveedores__proveedor_id__get",
         "parameters": [
           {
@@ -14910,10 +15492,10 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "Sin `contactos.gestionar` en el consorcio."
+            "description": "Sin ámbito en el consorcio."
           },
           "404": {
-            "description": "El contacto no existe en este consorcio."
+            "description": "El contacto no existe o quien pide no lo ve hoy."
           },
           "409": {
             "description": "El contacto ya no está vigente (`contacto_terminado`)."
@@ -14929,7 +15511,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Señalar un dato incorrecto, con el motivo (sin teléfonos ni correos)",
+        "summary": "Señalar un dato incorrecto, con el motivo (sin teléfonos ni correos): cualquier persona que ve los contactos",
         "tags": [
           "contactos"
         ]
@@ -15490,8 +16072,87 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}/acta": {
+      "put": {
+        "description": "FL-DEC-01 (`0110`): con los mismos permisos que registrar la decisión, una sola vez y\nsolo con un documento ya analizado (la decisión que se cerró antes de que terminara el\nantivirus, o una que quedó sin acta). Queda en la auditoría.",
+        "operationId": "adjuntar_acta_api_v1_consorcios__consorcio_id__decisiones__decision_id__acta_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActaDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `decisiones.registrar` en el consorcio."
+          },
+          "404": {
+            "description": "La decisión no existe en este consorcio."
+          },
+          "409": {
+            "description": "La decisión ya tiene su acta (`acta_ya_registrada`)."
+          },
+          "422": {
+            "description": "La huella no es la de una versión disponible de un documento vigente del consorcio (`acta_no_disponible`) o es de un documento quitado o retirado (`documento_invalido`)."
+          }
+        },
+        "summary": "Adjuntar el acta a una decisión que quedó sin ella",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/documentos": {
       "get": {
+        "description": "FL-DOC-02 (18-11-2026): a quien no carga la categoría, un documento sin ninguna versión que\npueda abrir (la base le da solo las disponibles y las que subió él) no se le lista: no tiene\nnada que hacer con él. Quien carga la categoría lo sigue viendo, para subirle el archivo.",
         "operationId": "listar_documentos_api_v1_consorcios__consorcio_id__documentos_get",
         "parameters": [
           {
@@ -16710,6 +17371,66 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones/grupos": {
+      "get": {
+        "description": "FL-LIQ-01 (18-11-2026): sin ningún grupo, el borrador no se puede repartir y no conviene\nabrirlo. Los mismos grupos que el detalle del borrador (`grupos_liquidables_lectura`), con sus\ncontroles (`0110`).",
+        "operationId": "grupos_del_periodo_api_v1_consorcios__consorcio_id__liquidaciones_grupos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodo",
+            "required": true,
+            "schema": {
+              "examples": [
+                "2026-10-01"
+              ],
+              "format": "date",
+              "title": "Periodo",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GruposDelPeriodo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Antes de abrir el borrador: los grupos con porcentajes que valen el último día del período",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/liquidaciones/ordenes-liquidables": {
       "get": {
         "operationId": "listar_ordenes_liquidables_api_v1_consorcios__consorcio_id__liquidaciones_ordenes_liquidables_get",
@@ -17107,6 +17828,7 @@
         ]
       },
       "post": {
+        "description": "Con `invitacion` (solo administrador externo; pregunta 17 del propietario, 18-11-2026,\nFL-MAN-06), el mismo acto emite la invitación, que queda por aprobar por otra persona: es la\nmisma función que emitirla después, en la misma transacción.",
         "operationId": "alta_mandato_api_v1_consorcios__consorcio_id__mandatos_post",
         "parameters": [
           {
@@ -17171,7 +17893,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/mandatos/candidatos": {
       "get": {
-        "description": "Las personas con un vínculo confirmado, vigente o futuro, en el consorcio (decisión 3).\nSin correo ni teléfono.",
+        "description": "Las personas con un vínculo confirmado, vigente o futuro, en el consorcio (decisión 3).\nSin correo ni teléfono. Con si cumplen hoy la condición del Consejo y sus mandatos (pregunta 8\ndel propietario y FL-MAN-03, 18-11-2026; `0110`).",
         "operationId": "candidatos_api_v1_consorcios__consorcio_id__mandatos_candidatos_get",
         "parameters": [
           {
@@ -21847,6 +22569,53 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/pedidos-salteo": {
+      "get": {
+        "description": "Quien saltea lee como quien saltea; si no, como quien prepara. Se elige por lo que alcanza,\ncomo `_lector`, y se verifica solo el elegido (con los dos al entrar, el Consejo, que no\nprepara, recibiría 403).",
+        "operationId": "pedidos_salteo_api_v1_consorcios__consorcio_id__pedidos_salteo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPedidosSalteo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los pedidos de salteo del consorcio, con su estado: para quien saltea (el Consejo) y para quien prepara las órdenes",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/proveedores": {
       "get": {
         "operationId": "listar_proveedores_api_v1_consorcios__consorcio_id__proveedores_get",
@@ -22310,8 +23079,94 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/pedidos-salteo": {
+      "post": {
+        "description": "El pedido no cambia ni se borra. Al Consejo le aparece pendiente; queda atendido cuando un\nmiembro registra el salteo de ese proveedor (`pedidos-salteo`).",
+        "operationId": "pedir_salteo_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__pedidos_salteo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NuevoPedidoSalteo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PedidoSalteo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "El proveedor no existe en este consorcio."
+          },
+          "409": {
+            "description": "Nada bloquea las órdenes a ese proveedor (`salteo_innecesario`), ya hay un salteo que sirve (`salteo_vigente`) o un pedido que espera (`pedido_salteo_pendiente`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pedirle al Consejo un salteo del bloqueo por documentación legal, con el motivo y el importe de la orden que se quiere preparar",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}": {
       "delete": {
+        "description": "Pregunta 4 del propietario (18-11-2026): quitar un rubro al que le falta documentación\ndestraba al proveedor, y lo hace quien prepara la orden. Pide el motivo, que queda a la vista\ndel Consejo en la ficha del proveedor (`retiros_con_motivo`).",
         "operationId": "retirar_rubro_legal_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__rubros_legales__rubro__delete",
         "parameters": [
           {
@@ -22359,6 +23214,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetiroRubroLegal",
+                "default": {}
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -22380,10 +23245,10 @@
             "description": "No tenía ese rubro (`rubro_legal_sin_cambios`)."
           },
           "422": {
-            "description": "El rubro no está en la matriz legal (`rubro_legal_invalido`)."
+            "description": "El rubro no está en la matriz legal (`rubro_legal_invalido`), o le falta documentación y no llegó el motivo (`motivo_requerido`)."
           }
         },
-        "summary": "Retirarle al proveedor un rubro legal: queda la constancia de quién y cuándo",
+        "summary": "Retirarle al proveedor un rubro legal: queda la constancia de quién y cuándo. Con documentación faltante de ese rubro, pide el motivo",
         "tags": [
           "egresos"
         ]

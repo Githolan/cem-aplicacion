@@ -476,8 +476,13 @@ def _leer(conn: Connection, sql: str, parametros: dict, ver: Permiso):
 def listar_documentos(
     ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
     restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
     motor: MotorDep,
 ) -> ListaDocumentos:
+    """FL-DOC-02 (18-11-2026): a quien no carga la categoría, un documento sin ninguna versión que
+    pueda abrir (la base le da solo las disponibles y las que subió él) no se le lista: no tiene
+    nada que hacer con él. Quien carga la categoría lo sigue viendo, para subirle el archivo."""
     ctx = ver.ctx
     ver.verificar(Entidad())
     puede = {
@@ -522,7 +527,13 @@ def listar_documentos(
                     subida_en=f["subida_en"],
                 )
             )  # fmt: skip
-    return ListaDocumentos(documentos=list(documentos.values()))
+    carga = {p.accion: p.decidir(Entidad()).permitido for p in (cargar, operativos)}
+    return ListaDocumentos(
+        documentos=[
+            d for d in documentos.values()
+            if d.versiones or any(carga[a] for a in ACCIONES_DE_CARGA[d.categoria])
+        ]
+    )  # fmt: skip
 
 
 def _disposicion(titulo: str, tipo: TipoArchivo) -> str:

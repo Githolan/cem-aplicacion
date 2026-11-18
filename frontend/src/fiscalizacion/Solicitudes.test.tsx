@@ -98,6 +98,8 @@ const ENVIADA: Solicitud = {
     registrado_en: "2026-11-01T13:00:00Z",
     documento_id: null,
     version_documento_id: null,
+    estado_archivo: null,
+    descargable: false,
   },
   acciones: ["responder"],
 };
@@ -112,6 +114,8 @@ const RESPONDIDA: Solicitud = {
     texto: "Se adjuntan los extractos.", medio: "aplicacion", respondida_el: "2026-11-14", fuera_de_plazo: false,
     registrada_por_nombre: "Estudio Ficticio", registrada_en: "2026-11-14T10:00:00Z", documento_id: DOC_RESPUESTA,
     version_documento_id: VERSION_RESPUESTA,
+    estado_archivo: "disponible",
+    descargable: true,
   },
   acciones: [],
 };
@@ -129,6 +133,7 @@ const LLENA: Lista = {
   plazo_por_defecto_dias: 15,
   plazo_minimo_dias: 5,
   plazo_maximo_dias: 60,
+  hay_administrador_vigente: true,
 };
 
 const INICIO: Respuestas = {
@@ -206,7 +211,8 @@ describe("textos", () => {
     expect(textoSituacion(ENVIADA)).toBe("Enviada, esperando respuesta. Vence el 16/11/2026.");
     const fuera = { ...ENVIADA, estado: "respondida" as const, respuesta: {
       texto: "x", medio: "aplicacion" as const, respondida_el: "2026-11-20", fuera_de_plazo: true,
-      registrada_por_nombre: null, registrada_en: "2026-11-20T10:00:00Z", documento_id: null, version_documento_id: null } };
+      registrada_por_nombre: null, registrada_en: "2026-11-20T10:00:00Z", documento_id: null, version_documento_id: null,
+      estado_archivo: null, descargable: false } };
     expect(textoSituacion(fuera)).toBe("Respondida el 20/11/2026, fuera de plazo.");
   });
 });

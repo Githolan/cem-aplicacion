@@ -18,6 +18,7 @@ export const VERBO: Record<Paso, string> = {
   enviar: "Enviar a aprobar",
   renovar: "Renovar la aprobación",
   modificar: "Modificar la orden",
+  falta_cuenta: "Falta la cuenta del proveedor",
   volver_a_pagar: "Enviar a aprobar de nuevo",
   rechazada: "Ver el motivo",
   preparar_faltante: "Preparar la orden por lo que falta",
