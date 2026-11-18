@@ -25,6 +25,10 @@ import { useIrAlInicio } from "./sesion";
 // entrada, con «Salir de esta cuenta»; si la cuenta del correo ya existe, abre «Entrar para aceptar»;
 // si la invitación la creó esta cuenta, lo dice. La aceptación vuelve a decidir: sus 409 siguen
 // teniendo su pantalla, por si algo cambió entre la consulta y el clic.
+//
+// FL-INVA-01 (decisión del propietario, 18-11-2026): para entrar con la cuenta que ya existe, el
+// correo es el invitado y no se cambia (con otro, la aceptación se rechaza), y el código se pide solo
+// al llegar: queda a la vista el campo del código.
 
 type Recibida = components["schemas"]["InvitacionRecibida"];
 type Paso = components["schemas"]["PasoInvitacion"];
@@ -82,7 +86,7 @@ export function Invitacion() {
   const [nombre, setNombre] = useState("");
   const [falla, setFalla] = useState(SIN_CONEXION_ENLACE);
   const [fallaAlAceptar, setFallaAlAceptar] = useState<string | null>(null);
-  /** El correo con el que se entra cuando ya hay una cuenta: el invitado, que la persona puede cambiar. */
+  /** El correo con el que se entra cuando ya hay una cuenta: el invitado, fijo (FL-INVA-01). */
   const [correoParaEntrar, setCorreoParaEntrar] = useState("");
   const consultada = useRef(false);
   const irAlInicio = useIrAlInicio();
@@ -244,7 +248,13 @@ export function Invitacion() {
       {estado === "requiere_sesion" && (
         <section aria-labelledby={`${id}-entrar`} className="tarjeta">
           <h2 id={`${id}-entrar`}>Entrar para aceptar</h2>
-          <FormasDeEntrar correo={correoParaEntrar} alCambiarCorreo={setCorreoParaEntrar} alEntrar={aceptarConElEnlace} />
+          <FormasDeEntrar
+            correo={correoParaEntrar}
+            alCambiarCorreo={setCorreoParaEntrar}
+            alEntrar={aceptarConElEnlace}
+            correoFijo
+            pedirAlEmpezar
+          />
         </section>
       )}
     </>

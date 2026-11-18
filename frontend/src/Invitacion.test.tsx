@@ -172,6 +172,7 @@ describe("página /invitacion", () => {
         conSesion = true;
         return Response.json({ persona_id: "11111111-1111-4111-8111-111111111111" });
       }
+      if (camino === "/api/v1/auth/enlace") return Response.json({ mensaje: "Si el correo está registrado, llega un código." });
       if (camino === "/api/v1/auth/sesion") return Response.json({});
       if (camino === "/health") return error("servicio_no_disponible", 503);
       throw new Error(`pedido no previsto: ${p.method} ${camino}`);
@@ -184,10 +185,16 @@ describe("página /invitacion", () => {
     expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
     expect(screen.queryByLabelText("Nombre")).toBeNull();
     const entrar = screen.getByRole("region", { name: "Entrar para aceptar" });
-    fireEvent.click(within(entrar).getByRole("button", { name: "Ya tengo un código" }));
-    // El correo ya viene puesto: es el de la invitación.
-    expect((within(entrar).getByLabelText("Correo") as HTMLInputElement).value).toBe(RECIBIDA.correo);
-    fireEvent.change(within(entrar).getByLabelText(/Código de/), { target: { value: "042917" } });
+    // FL-INVA-01: el código se pide solo, al correo invitado, y queda a la vista su campo.
+    const codigo = await within(entrar).findByLabelText(/Código de/);
+    const pedidosDeCodigo = pedido.mock.calls.filter(([p]) => new URL(p.url).pathname === "/api/v1/auth/enlace");
+    expect(pedidosDeCodigo).toHaveLength(1);
+    expect(await pedidosDeCodigo[0]![0].json()).toEqual({ correo: RECIBIDA.correo });
+    // El correo es el de la invitación, como texto: no se puede cambiar por otro.
+    expect(within(entrar).getByText(RECIBIDA.correo)).toBeTruthy();
+    expect(within(entrar).queryByLabelText("Correo")).toBeNull();
+    expect(within(entrar).queryByRole("button", { name: "Cambiar" })).toBeNull();
+    fireEvent.change(codigo, { target: { value: "042917" } });
     fireEvent.click(within(entrar).getByRole("button", { name: "Entrar con el código" }));
 
     expect(await screen.findByText(AVISO)).toBeTruthy();

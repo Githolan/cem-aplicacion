@@ -178,9 +178,11 @@ describe("pedir el enlace para entrar", () => {
     vi.stubGlobal("fetch", backend(aceptado, () => error("enlace_invalido", 401)));
     abrir(`/entrar#token=${TOKEN}`);
     expect(await screen.findByText(/Este enlace no sirve acá/)).toBeTruthy();
-    // El enlace rechazado lleva al código del mismo correo (AC-29); pedir otro queda a un toque.
+    // El enlace rechazado lleva al código del mismo correo (AC-29); pedir otro queda a un toque, en
+    // ese mismo paso (FL-ACC-04), y las otras formas no lo repiten (FL-ACC-03).
     expect(screen.getByRole("heading", { name: "Escribir el código del correo" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Pedir un código por correo" }));
+    expect(screen.queryByRole("button", { name: "Pedir un código por correo" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Pedir un código nuevo" }));
     expect(screen.getByRole("heading", { name: "Pedir un código para entrar" })).toBeTruthy();
   });
 
@@ -194,7 +196,7 @@ describe("pedir el enlace para entrar", () => {
     await within(await screen.findByRole("region", CODIGO)).findByText(MENSAJE);
     await sinFaltas(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Pedir un código por correo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cambiar" }));
     respuesta = () => error("validacion", 422);
     pedir(CORREO);
     await seccion().findByText(/no parece una dirección válida/);
