@@ -54,6 +54,11 @@ class FilaPadron(BaseModel):
         description="Si quien lee tiene `padron.gestionar` sobre la unidad de este vínculo"
         " (finalizar o anular). Solo para mostrar: la ruta vuelve a decidir."
     )
+    sostiene_consejo: bool = Field(
+        description="Si el vínculo es de un carácter que habilita para el Consejo y su persona"
+        " tiene hoy un mandato del Consejo vigente: si termina y no le queda otro, el mandato"
+        " pasa a revisión y deja de autorizar actos (`0023`; FL-PAD-03)."
+    )
 
 
 class Padron(BaseModel):

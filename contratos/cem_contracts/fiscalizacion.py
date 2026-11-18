@@ -289,6 +289,14 @@ class EnvioSolicitud(BaseModel):
     registrado_en: datetime
     documento_id: UUID | None = Field(description="El comprobante; nulo en `aplicacion`.")
     version_documento_id: UUID | None
+    estado_archivo: EstadoVersion | None = Field(
+        description="Cómo terminó el análisis del comprobante (FL-SOL-04): en cuarentena todavía"
+        " no se descarga, y rechazado no se descarga nunca. Nulo sin comprobante."
+    )
+    descargable: bool = Field(
+        description="Si quien lee lo puede descargar: disponible y con `documentos.ver`. Solo"
+        " para mostrar: la descarga vuelve a decidir."
+    )
 
 
 class RespuestaSolicitud(BaseModel):
@@ -302,6 +310,12 @@ class RespuestaSolicitud(BaseModel):
     registrada_en: datetime
     documento_id: UUID | None
     version_documento_id: UUID | None
+    estado_archivo: EstadoVersion | None = Field(
+        description="Cómo terminó el análisis del adjunto (FL-SOL-04). Nulo sin adjunto."
+    )
+    descargable: bool = Field(
+        description="Si quien lee lo puede descargar: disponible y con `documentos.ver`."
+    )
 
 
 class RetiroRegistrado(BaseModel):
@@ -350,6 +364,10 @@ class ListaSolicitudesFormales(BaseModel):
 
     elementos: list[SolicitudFormal] = Field(description="De la más nueva a la más vieja.")
     puede_preparar: bool
+    hay_administrador_vigente: bool = Field(
+        description="Si hoy hay un mandato de administración vigente: sin él, una solicitud se"
+        " prepara y se firma una vez, pero la segunda firma no la emite (A14; FL-SOL-05)."
+    )
     plazo_por_defecto_dias: int
     plazo_minimo_dias: int
     plazo_maximo_dias: int

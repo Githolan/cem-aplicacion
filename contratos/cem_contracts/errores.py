@@ -238,6 +238,15 @@ class CodigoError(StrEnum):
     SALTEO_DE_QUIEN_PREPARA = "salteo_de_quien_prepara"
     """El único salteo vigente lo registró quien prepara la orden: no saltea su propio bloqueo
     (`0106`)."""
+    PEDIDO_SALTEO_PENDIENTE = "pedido_salteo_pendiente"
+    """Ya hay un pedido de salteo de ese proveedor que espera al Consejo (`0110`)."""
+    MOTIVO_REQUERIDO = "motivo_requerido"
+    """Quitar un rubro legal al que le falta documentación pide el motivo (`0110`)."""
+    ACTA_YA_REGISTRADA = "acta_ya_registrada"
+    """La decisión ya tiene su acta: no se reemplaza (`0110`, FL-DEC-01)."""
+    ACTA_NO_DISPONIBLE = "acta_no_disponible"
+    """La huella no es la de una versión disponible (analizada) de un documento vigente del
+    consorcio (`0110`, FL-DEC-01)."""
     DOCUMENTACION_LEGAL_FALTANTE = "documentacion_legal_faltante"
     """Al proveedor le falta documentación que exige la ley y el consorcio está en modo
     «bloquear»: no se prepara ni se modifica una orden nueva a ese proveedor (`0104`)."""

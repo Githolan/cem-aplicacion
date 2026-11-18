@@ -172,8 +172,32 @@
     "type": "object"
   },
   "CandidatoMandato": {
+    "$defs": {
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
+      }
+    },
     "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
     "properties": {
+      "habilita_consejo": {
+        "description": "Si hoy cumple la condición para integrar el Consejo con un vínculo confirmado de un carácter del catálogo (`0023`; hoy, propietario). El alta de un «Consejo de propietarios» se ofrece solo a quien la cumple (pregunta 8 del propietario, 18-11-2026; FL-MAN-02).",
+        "title": "Habilita Consejo",
+        "type": "boolean"
+      },
+      "mandatos": {
+        "description": "Los tipos de sus mandatos vigentes o futuros, sin baja: el alta de uno superpuesto del mismo tipo, o de un Consejo con administración, se niega (FL-MAN-03).",
+        "items": {
+          "$ref": "#/$defs/TipoMandato"
+        },
+        "title": "Mandatos",
+        "type": "array"
+      },
       "nombre": {
         "title": "Nombre",
         "type": "string"
@@ -195,7 +219,9 @@
     "required": [
       "persona_id",
       "nombre",
-      "unidades"
+      "unidades",
+      "habilita_consejo",
+      "mandatos"
     ],
     "title": "CandidatoMandato",
     "type": "object"
@@ -651,6 +677,11 @@
         ],
         "title": "Sha256"
       },
+      "tiene_acta": {
+        "description": "Si ya tiene la huella del acta. Sin ella, quien registra decisiones la puede adjuntar (`PUT …/decisiones/{id}/acta`, `0110`, FL-DEC-01).",
+        "title": "Tiene Acta",
+        "type": "boolean"
+      },
       "tipo": {
         "$ref": "#/$defs/TipoDecision"
       }
@@ -662,6 +693,7 @@
       "descripcion",
       "registrada_por_vos",
       "del_equipo",
+      "tiene_acta",
       "referencia",
       "sha256"
     ],
@@ -791,6 +823,11 @@
         "title": "Registrada Por Vos",
         "type": "boolean"
       },
+      "tiene_acta": {
+        "description": "Si ya tiene la huella del acta. Sin ella, quien registra decisiones la puede adjuntar (`PUT …/decisiones/{id}/acta`, `0110`, FL-DEC-01).",
+        "title": "Tiene Acta",
+        "type": "boolean"
+      },
       "tipo": {
         "$ref": "#/$defs/TipoDecision"
       }
@@ -801,7 +838,8 @@
       "fecha",
       "descripcion",
       "registrada_por_vos",
-      "del_equipo"
+      "del_equipo",
+      "tiene_acta"
     ],
     "title": "DecisionResumen",
     "type": "object"
@@ -994,6 +1032,10 @@
           "salteo_innecesario",
           "salteo_vigente",
           "salteo_de_quien_prepara",
+          "pedido_salteo_pendiente",
+          "motivo_requerido",
+          "acta_ya_registrada",
+          "acta_no_disponible",
           "documentacion_legal_faltante",
           "aprobacion_vencida",
           "aprobacion_vigente",
@@ -1275,6 +1317,11 @@
         "title": "Nombre",
         "type": "string"
       },
+      "sostiene_consejo": {
+        "description": "Si el vínculo es de un carácter que habilita para el Consejo y su persona tiene hoy un mandato del Consejo vigente: si termina y no le queda otro, el mandato pasa a revisión y deja de autorizar actos (`0023`; FL-PAD-03).",
+        "title": "Sostiene Consejo",
+        "type": "boolean"
+      },
       "tipo": {
         "$ref": "#/$defs/TipoVinculo"
       },
@@ -1318,7 +1365,8 @@
       "confirmado",
       "iniciado",
       "confirmable_por_vos",
-      "gestionable_por_vos"
+      "gestionable_por_vos",
+      "sostiene_consejo"
     ],
     "title": "FilaPadron",
     "type": "object"
@@ -1798,6 +1846,19 @@
         "format": "date-time",
         "title": "Vence En",
         "type": "string"
+      },
+      "vinculo_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Aceptada: el vínculo que dejó la aceptación (`0110`; FL-INV-01). Si está confirmado y si quien lee lo puede confirmar lo dice su fila del padrón. Nulo si no se aceptó.",
+        "title": "Vinculo Id"
       }
     },
     "required": [
@@ -1810,7 +1871,8 @@
       "estado",
       "creada_en",
       "vence_en",
-      "importada"
+      "importada",
+      "vinculo_id"
     ],
     "title": "Invitacion",
     "type": "object"
@@ -2244,7 +2306,8 @@
           "aceptar",
           "entrar",
           "otra_cuenta",
-          "propia"
+          "propia",
+          "ya_aceptada"
         ],
         "title": "PasoInvitacion",
         "type": "string"
@@ -2329,6 +2392,19 @@
       "CandidatoMandato": {
         "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
         "properties": {
+          "habilita_consejo": {
+            "description": "Si hoy cumple la condición para integrar el Consejo con un vínculo confirmado de un carácter del catálogo (`0023`; hoy, propietario). El alta de un «Consejo de propietarios» se ofrece solo a quien la cumple (pregunta 8 del propietario, 18-11-2026; FL-MAN-02).",
+            "title": "Habilita Consejo",
+            "type": "boolean"
+          },
+          "mandatos": {
+            "description": "Los tipos de sus mandatos vigentes o futuros, sin baja: el alta de uno superpuesto del mismo tipo, o de un Consejo con administración, se niega (FL-MAN-03).",
+            "items": {
+              "$ref": "#/$defs/TipoMandato"
+            },
+            "title": "Mandatos",
+            "type": "array"
+          },
           "nombre": {
             "title": "Nombre",
             "type": "string"
@@ -2350,10 +2426,21 @@
         "required": [
           "persona_id",
           "nombre",
-          "unidades"
+          "unidades",
+          "habilita_consejo",
+          "mandatos"
         ],
         "title": "CandidatoMandato",
         "type": "object"
+      },
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
       }
     },
     "properties": {
@@ -2535,6 +2622,11 @@
             "title": "Registrada Por Vos",
             "type": "boolean"
           },
+          "tiene_acta": {
+            "description": "Si ya tiene la huella del acta. Sin ella, quien registra decisiones la puede adjuntar (`PUT …/decisiones/{id}/acta`, `0110`, FL-DEC-01).",
+            "title": "Tiene Acta",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/$defs/TipoDecision"
           }
@@ -2545,7 +2637,8 @@
           "fecha",
           "descripcion",
           "registrada_por_vos",
-          "del_equipo"
+          "del_equipo",
+          "tiene_acta"
         ],
         "title": "DecisionResumen",
         "type": "object"
@@ -2671,6 +2764,19 @@
             "format": "date-time",
             "title": "Vence En",
             "type": "string"
+          },
+          "vinculo_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aceptada: el vínculo que dejó la aceptación (`0110`; FL-INV-01). Si está confirmado y si quien lee lo puede confirmar lo dice su fila del padrón. Nulo si no se aceptó.",
+            "title": "Vinculo Id"
           }
         },
         "required": [
@@ -2683,7 +2789,8 @@
           "estado",
           "creada_en",
           "vence_en",
-          "importada"
+          "importada",
+          "vinculo_id"
         ],
         "title": "Invitacion",
         "type": "object"
@@ -2861,6 +2968,17 @@
   },
   "ListaMandatos": {
     "$defs": {
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      },
       "EstadoMandato": {
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
@@ -2902,6 +3020,22 @@
             "title": "Id",
             "type": "string"
           },
+          "invitacion": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EstadoInvitacionMandato"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El estado de la última invitación del mandato, para quien ve las asociaciones (`mandatos.ver_asociaciones`); nulo si no tiene o si quien lee no las ve (FL-MAN-04)."
+          },
+          "invitacion_emitida_por_mi": {
+            "description": "Si esa invitación la emitió quien lee: no la aprueba (cuatro ojos).",
+            "title": "Invitacion Emitida Por Mi",
+            "type": "boolean"
+          },
           "nombre": {
             "description": "El del mandatario sin cuenta (razón social) o el de la persona del mandato.",
             "title": "Nombre",
@@ -2937,7 +3071,9 @@
           "vigente_desde",
           "vigente_hasta",
           "estado",
-          "con_cuenta"
+          "con_cuenta",
+          "invitacion",
+          "invitacion_emitida_por_mi"
         ],
         "title": "MandatoResumen",
         "type": "object"
@@ -3242,6 +3378,17 @@
         "title": "CausaBaja",
         "type": "string"
       },
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      },
       "EstadoMandato": {
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
@@ -3366,6 +3513,22 @@
         ],
         "title": "Instrumento Referencia"
       },
+      "invitacion": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EstadoInvitacionMandato"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "El estado de la última invitación del mandato, para quien ve las asociaciones (`mandatos.ver_asociaciones`); nulo si no tiene o si quien lee no las ve (FL-MAN-04)."
+      },
+      "invitacion_emitida_por_mi": {
+        "description": "Si esa invitación la emitió quien lee: no la aprueba (cuatro ojos).",
+        "title": "Invitacion Emitida Por Mi",
+        "type": "boolean"
+      },
       "matricula": {
         "anyOf": [
           {
@@ -3424,6 +3587,8 @@
       "vigente_hasta",
       "estado",
       "con_cuenta",
+      "invitacion",
+      "invitacion_emitida_por_mi",
       "matricula",
       "decision_id",
       "facultades",
@@ -3440,6 +3605,37 @@
   },
   "MandatoNuevo": {
     "$defs": {
+      "InvitacionMandatoNueva": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones`.",
+        "properties": {
+          "correo": {
+            "description": "El correo del mandatario que figura en el respaldo.",
+            "examples": [
+              "administracion@estudio.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          },
+          "referencia": {
+            "description": "De dónde sale ese correo: contrato de administración, nota del administrador u otro instrumento (P1-b). Queda en la invitación, no en la auditoría.",
+            "examples": [
+              "Contrato de administración del 01-10-2026, cláusula 12"
+            ],
+            "maxLength": 300,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Referencia",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo",
+          "referencia"
+        ],
+        "title": "InvitacionMandatoNueva",
+        "type": "object"
+      },
       "TipoMandato": {
         "enum": [
           "administrador",
@@ -3510,6 +3706,18 @@
         "description": "Exclusivo (A1): el último día es el anterior.",
         "title": "Hasta"
       },
+      "invitacion": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/InvitacionMandatoNueva"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Solo para el administrador externo: el correo del mandatario y de dónde sale. Con él, el alta emite también la invitación (A7), que queda por aprobar por otra persona, como si se emitiera después (pregunta 17 del propietario, 18-11-2026; FL-MAN-06). Pide `mandatos.asociar_persona`."
+      },
       "matricula": {
         "anyOf": [
           {
@@ -3573,6 +3781,20 @@
         "format": "uuid",
         "title": "Id",
         "type": "string"
+      },
+      "invitacion_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "La invitación emitida con el alta, por aprobar; nula si no se pidió.",
+        "title": "Invitacion Id"
       }
     },
     "required": [
@@ -3583,6 +3805,17 @@
   },
   "MandatoResumen": {
     "$defs": {
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      },
       "EstadoMandato": {
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
@@ -3633,6 +3866,22 @@
         "title": "Id",
         "type": "string"
       },
+      "invitacion": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EstadoInvitacionMandato"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "El estado de la última invitación del mandato, para quien ve las asociaciones (`mandatos.ver_asociaciones`); nulo si no tiene o si quien lee no las ve (FL-MAN-04)."
+      },
+      "invitacion_emitida_por_mi": {
+        "description": "Si esa invitación la emitió quien lee: no la aprueba (cuatro ojos).",
+        "title": "Invitacion Emitida Por Mi",
+        "type": "boolean"
+      },
       "nombre": {
         "description": "El del mandatario sin cuenta (razón social) o el de la persona del mandato.",
         "title": "Nombre",
@@ -3668,7 +3917,9 @@
       "vigente_desde",
       "vigente_hasta",
       "estado",
-      "con_cuenta"
+      "con_cuenta",
+      "invitacion",
+      "invitacion_emitida_por_mi"
     ],
     "title": "MandatoResumen",
     "type": "object"
@@ -3783,6 +4034,11 @@
             "title": "Nombre",
             "type": "string"
           },
+          "sostiene_consejo": {
+            "description": "Si el vínculo es de un carácter que habilita para el Consejo y su persona tiene hoy un mandato del Consejo vigente: si termina y no le queda otro, el mandato pasa a revisión y deja de autorizar actos (`0023`; FL-PAD-03).",
+            "title": "Sostiene Consejo",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/$defs/TipoVinculo"
           },
@@ -3826,7 +4082,8 @@
           "confirmado",
           "iniciado",
           "confirmable_por_vos",
-          "gestionable_por_vos"
+          "gestionable_por_vos",
+          "sostiene_consejo"
         ],
         "title": "FilaPadron",
         "type": "object"
@@ -4032,6 +4289,20 @@
       "SesionActual": {
         "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
         "properties": {
+          "alta_confirmacion_hasta": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Hasta cuándo esta sesión puede activar la confirmación (aplicación o llave): sin ningún medio, 10 minutos desde que se entró; con uno, 10 minutos desde la última verificación (nulo si no hubo). Después, el alta responde 403. La pantalla no repite el plazo (FL-CTA-01). Lo informa `GET /auth/sesion`; las respuestas de entrar lo dejan nulo.",
+            "title": "Alta Confirmacion Hasta"
+          },
           "correo": {
             "title": "Correo",
             "type": "string"
@@ -4089,6 +4360,20 @@
   "SesionActual": {
     "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
     "properties": {
+      "alta_confirmacion_hasta": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Hasta cuándo esta sesión puede activar la confirmación (aplicación o llave): sin ningún medio, 10 minutos desde que se entró; con uno, 10 minutos desde la última verificación (nulo si no hubo). Después, el alta responde 403. La pantalla no repite el plazo (FL-CTA-01). Lo informa `GET /auth/sesion`; las respuestas de entrar lo dejan nulo.",
+        "title": "Alta Confirmacion Hasta"
+      },
       "correo": {
         "title": "Correo",
         "type": "string"
