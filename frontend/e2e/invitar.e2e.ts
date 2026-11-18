@@ -272,14 +272,16 @@ test.describe("invitar", () => {
     await fila.getByRole("button").click();
     const ficha = page.getByRole("dialog", { name: "Beto Pérez, 1° A" });
     await ficha.getByRole("button", { name: "Retirar" }).click();
-    await expect(ficha.getByText("¿Retirar la invitación de Beto Pérez a la unidad 1° A?")).toBeVisible();
+    // FL-INV-03: la pregunta va en su ventana, encima de la ficha, como en Mandatos.
+    const pregunta = page.getByRole("dialog", { name: "Retirar la invitación" });
+    await expect(pregunta.getByText(/^¿Retirar la invitación de Beto Pérez a la unidad 1° A\?/)).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
-    await ficha.getByRole("button", { name: "No" }).click();
+    await pregunta.getByRole("button", { name: "Cancelar" }).click();
     expect(retiros).toEqual([]);
 
     await ficha.getByRole("button", { name: "Retirar" }).click();
     // Con el teclado, como quien no usa el mouse (E46): el foco termina en el aviso del resultado.
-    await ficha.getByRole("button", { name: "Sí, retirarla" }).focus();
+    await pregunta.getByRole("button", { name: "Sí, retirarla" }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeVisible();
     await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeFocused();
