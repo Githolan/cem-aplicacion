@@ -283,10 +283,22 @@ def test_correo_sin_cuenta_acepta_y_queda_dentro(app, motor_migrate):  # noqa: F
     assert (mio["id"], mio["vinculos"]) == (str(e.consorcio), ["inquilino"])
     # Un solo uso (ahora con sesión, así que con su CSRF).
     assert beto.post(ACEPTAR, json={"token": token}, headers=csrf(beto)).status_code == 404
+    # FL-INVA-02 (`0110`): la cuenta del correo que la aceptó vuelve a abrirla y se le dice que
+    # ya está aceptada; a cualquier otra sesión, o sin sesión, sigue siendo inválida.
     vista = beto.post(CONSULTAR, json={"token": token}, headers=csrf(beto))
-    assert vista.json()["codigo"] == "invitacion_invalida"
+    assert vista.status_code == 200, vista.text
+    assert (vista.json()["paso"], vista.json()["correo"]) == ("ya_aceptada", nuevo)
+    for vista in (navegador(app).post(CONSULTAR, json={"token": token}),
+                  ana.post(CONSULTAR, json={"token": token}, headers=csrf(ana))):  # fmt: skip
+        assert vista.json()["codigo"] == "invitacion_invalida"
     [lista] = [x for x in ana.get(ruta(e)).json()["elementos"] if x["id"] == invitacion["id"]]
     assert lista["estado"] == "aceptada"
+    # FL-INV-01 (`0110`): la lista dice qué vínculo dejó la aceptación.
+    with motor_migrate.connect() as conn:
+        vinculo = conn.execute(text(
+            "select id from nucleo.vinculo where persona_id = :p and unidad_id = :u"),
+            {"p": persona.id, "u": e.u1}).scalar_one()  # fmt: skip
+    assert lista["vinculo_id"] == str(vinculo)
     acciones = [a["accion"] for a in auditoria_de(motor_migrate, UUID(invitacion["id"]))]
     assert acciones == ["identidad.invitacion.crear", "identidad.invitacion.aceptar"]
     aceptar = auditoria_de(motor_migrate, UUID(invitacion["id"]))[-1]

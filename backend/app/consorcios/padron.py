@@ -130,7 +130,10 @@ def padron(
                         # La misma fecha y la misma regla que nucleo.finalizar_vinculo (0020):
                         # now() es el de la transacción, el mismo que usa padron_del_consorcio.
                         " p.vigente_desde <= nucleo.hoy_del_consorcio(:c) as iniciado,"
-                        " v.persona_id, v.registrado_por, v.origen"
+                        " v.persona_id, v.registrado_por, v.origen,"
+                        # FL-PAD-03 (18-11-2026): si sostiene un mandato del Consejo (`0110`).
+                        " p.vinculo_id in (select vinculo_id"
+                        " from nucleo.vinculos_que_sostienen_consejo()) as sostiene_consejo"
                         # `left`: la función corre siempre, y su 42501 es la barrera de esta ruta.
                         " from nucleo.padron_del_consorcio() p"
                         " left join nucleo.vinculo v"
