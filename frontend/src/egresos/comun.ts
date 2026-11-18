@@ -255,6 +255,11 @@ const MENSAJES: Record<string, string> = {
     "En este edificio no se autoriza a personas: ven los proveedores los roles que fija la configuración. La cambia el equipo de soporte.",
   motivo_invalido: "Hace falta el motivo, de hasta 500 caracteres.",
   persona_sin_vinculo: "Esa persona ya no tiene un vínculo con el edificio: solo se autoriza a habitantes.",
+  // Tanda 9 (app 0110): pedido de salteo, motivo del retiro de un rubro y el acta de una decisión.
+  pedido_salteo_pendiente: "Ya hay un pedido de salteo de este proveedor que espera al Consejo.",
+  motivo_requerido: "Le falta documentación de ese rubro: quitarlo pide el motivo.",
+  acta_ya_registrada: "La decisión ya tiene su acta. La lista ya está actualizada.",
+  acta_no_disponible: "Esa acta todavía no está disponible: el antivirus la está revisando, o no es un documento vigente del edificio.",
   // Salteo por urgencia del bloqueo por documentación legal (app 0106).
   salteo_innecesario: "Nada bloquea las órdenes a este proveedor: no hace falta saltear. La ficha ya está actualizada.",
   salteo_vigente: "Ya registró un salteo de este proveedor que espera su orden. La ficha ya está actualizada.",

@@ -5642,7 +5642,7 @@ describe("flujos 18-11, tanda 1: orden a un proveedor bloqueado", () => {
   const fichaP1 = () =>
     Response.json({
       proveedor: proveedor(), versiones: [], documentacion: [], puede_cargar_documentacion: true, rubros_legales: [], faltantes: [],
-      requisitos: [], configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true }, salteos: [],
+      requisitos: [], configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true }, salteos: [], retiros_con_motivo: [],
     });
   const elegir = async (id: string) => fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: id } });
   const valor = (etiqueta: string) => (screen.getByLabelText(etiqueta) as HTMLInputElement).value;

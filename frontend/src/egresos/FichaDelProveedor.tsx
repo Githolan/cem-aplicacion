@@ -25,6 +25,7 @@ type Ficha = {
   requisitos: components["schemas"]["RequisitoLegal"][];
   rubros_legales: string[];
   salteos: Salteo[];
+  retiros_con_motivo: components["schemas"]["RetiroRubroConMotivo"][];
 };
 
 /**
@@ -108,6 +109,7 @@ export function FichaDelProveedor({
         admiteNoVence={ficha.configuracion.admite_no_vence}
         salteoVence={ficha.salteos.find((s) => s.estado === "vigente")?.vence_en ?? null}
         puedeSaltear={puedeSaltear}
+        retiros={ficha.retiros_con_motivo}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />
