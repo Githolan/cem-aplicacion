@@ -31,6 +31,22 @@ class EstadoInvitacion(StrEnum):
     vínculo."""
 
 
+class PasoInvitacion(StrEnum):
+    """Lo que pasaría al aceptar con la sesión del pedido (`0109`, el mismo orden que
+    `aceptar_invitacion`). No revela nada que la aceptación no diga ya a quien tiene el enlace."""
+
+    CREAR_CUENTA = "crear_cuenta"
+    """El correo no tiene cuenta y no hay sesión: aceptar crea la cuenta, con el nombre."""
+    ACEPTAR = "aceptar"
+    """La sesión es la de la cuenta del correo: aceptar no pide nombre."""
+    ENTRAR = "entrar"
+    """El correo ya tiene cuenta y no hay sesión: hay que entrar con ella."""
+    OTRA_CUENTA = "otra_cuenta"
+    """La sesión abierta es de otra cuenta."""
+    PROPIA = "propia"
+    """La sesión es la de quien la creó (o de su misma identidad humana): no la acepta (F9)."""
+
+
 class InvitacionNueva(BaseModel):
     """`POST /api/v1/consorcios/{consorcio_id}/invitaciones`."""
 
@@ -68,6 +84,10 @@ class Invitacion(BaseModel):
     vence_en: datetime
     aceptada_en: datetime | None = None
     revocada_en: datetime | None = None
+    importada: bool = Field(
+        description="Si salió con el padrón importado (nombra su vínculo): una invitación manual"
+        " no la reemplaza (`invitacion_importada_pendiente`).",
+    )
 
 
 class ListaInvitaciones(BaseModel):
@@ -76,6 +96,27 @@ class ListaInvitaciones(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[Invitacion]
+
+
+class ConsultaInvitacionImportada(BaseModel):
+    """`POST …/invitaciones/importada-pendiente`: antes de invitar, si la persona de ese correo ya
+    tiene una invitación del padrón importado para esa unidad y carácter. El correo va en el
+    cuerpo, nunca en la URL."""
+
+    model_config = ConfigDict(frozen=True)
+
+    unidad_id: UUID
+    tipo: TipoVinculo
+    correo: str = Field(max_length=LARGO_MAXIMO_CORREO, pattern=FORMATO_CORREO)
+
+
+class InvitacionImportadaConsultada(BaseModel):
+    """Responde lo mismo que invitar respondería (409 `invitacion_importada_pendiente`), sin
+    decir nada más de esa invitación."""
+
+    model_config = ConfigDict(frozen=True)
+
+    importada_pendiente: bool
 
 
 class TokenInvitacion(BaseModel):
@@ -116,6 +157,10 @@ class InvitacionRecibida(BaseModel):
         description="Nombre de quien invitó; nulo si la cargó el equipo de la plataforma."
     )
     vence_en: datetime
+    paso: PasoInvitacion = Field(
+        description="Lo que pasaría al aceptar con la sesión de este pedido. Solo para mostrar:"
+        " la aceptación vuelve a decidir."
+    )
 
 
 class InvitacionAceptada(BaseModel):

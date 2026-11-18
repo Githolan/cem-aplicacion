@@ -335,10 +335,15 @@ def test_sin_administrador_vigente_la_segunda_firma_se_niega_y_queda_en_borrador
     assert codigo(r) == (409, "sin_administrador_vigente")
     hoy = una(e, e.mc1, s)
     assert hoy["estado"] == "borrador" and len(hoy["firmas"]) == 1
-    # Se le ofrece igual, para que la API le diga por qué no.
-    assert "firmar" in una(e, e.mc2, s)["acciones"]
-    # Control: con un administrador vigente, la misma firma emite y fija el destinatario.
+    # Informe de fricción C8P-08: no se le ofrece; la solicitud dice qué falta.
+    vista = una(e, e.mc2, s)
+    assert "firmar" not in vista["acciones"] and vista["falta_administrador_vigente"] is True
+    # Quien ya firmó no firmaría de nuevo: a esa cuenta no le falta nada para firmar.
+    assert una(e, e.mc1, s)["falta_administrador_vigente"] is False
+    # Control: con un administrador vigente, se ofrece, la misma firma emite y fija el destinatario.
     externo(motor_app, e.cons, e.prop, decidir_equipo(motor_app, e.cons))
+    vista = una(e, e.mc2, s)
+    assert "firmar" in vista["acciones"] and vista["falta_administrador_vigente"] is False
     r = firmar(e, e.mc2, s)
     assert r.status_code == 200, r.text
     assert r.json()["estado"] == "envio_pendiente"

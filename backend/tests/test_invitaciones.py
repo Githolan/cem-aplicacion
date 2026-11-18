@@ -267,6 +267,8 @@ def test_correo_sin_cuenta_acepta_y_queda_dentro(app, motor_migrate):  # noqa: F
     assert (v["unidad"], v["tipo"], v["correo"], v["nombre"], v["invitada_por"]) == (
         "3° B", "inquilino", nuevo, "Beto", "Ana",
     )  # fmt: skip
+    # C8G-11: sin cuenta ni sesión, aceptar crea la cuenta (y la aceptación de abajo lo confirma).
+    assert v["paso"] == "crear_cuenta"
     # Consultar no la gasta.
     assert beto.post(CONSULTAR, json={"token": token}).status_code == 200
 
@@ -281,7 +283,8 @@ def test_correo_sin_cuenta_acepta_y_queda_dentro(app, motor_migrate):  # noqa: F
     assert (mio["id"], mio["vinculos"]) == (str(e.consorcio), ["inquilino"])
     # Un solo uso (ahora con sesión, así que con su CSRF).
     assert beto.post(ACEPTAR, json={"token": token}, headers=csrf(beto)).status_code == 404
-    assert beto.post(CONSULTAR, json={"token": token}).json()["codigo"] == "invitacion_invalida"
+    vista = beto.post(CONSULTAR, json={"token": token}, headers=csrf(beto))
+    assert vista.json()["codigo"] == "invitacion_invalida"
     [lista] = [x for x in ana.get(ruta(e)).json()["elementos"] if x["id"] == invitacion["id"]]
     assert lista["estado"] == "aceptada"
     acciones = [a["accion"] for a in auditoria_de(motor_migrate, UUID(invitacion["id"]))]
@@ -308,19 +311,27 @@ def test_correo_con_cuenta_pide_su_propia_sesion(app, motor_migrate):  # noqa: F
     invitar(ana, e, otro.propietaria, tipo="ocupante")
     token = token_invitacion(motor_migrate, otro.propietaria)
 
+    # C8G-11: lo que dice la consulta es lo que responde la aceptación, caso por caso.
+    assert navegador(app).post(CONSULTAR, json={"token": token}).json()["paso"] == "entrar"
     sin_sesion = navegador(app).post(ACEPTAR, json={"token": token})
     assert sin_sesion.status_code == 409
     assert sin_sesion.json()["codigo"] == "invitacion_requiere_sesion"
     assert sesiones.COOKIE_SESION not in sin_sesion.cookies
 
     # Con la sesión de otra persona (la propia Ana), tampoco.
+    vista = ana.post(CONSULTAR, json={"token": token}, headers=csrf(ana))
+    assert vista.json()["paso"] == "otra_cuenta"
     ajena = ana.post(ACEPTAR, json={"token": token}, headers=csrf(ana))
     assert ajena.status_code == 409
     assert ajena.json()["codigo"] == "invitacion_de_otra_persona"
 
     duena = entrar_como(app, motor_migrate, otro.propietaria)
-    # Con sesión pide el CSRF, como toda petición que cambia estado.
+    # Con sesión pide el CSRF, como toda petición que cambia estado; la consulta también, porque
+    # lee la sesión.
     assert duena.post(ACEPTAR, json={"token": token}).status_code == 403
+    assert duena.post(CONSULTAR, json={"token": token}).status_code == 403
+    vista = duena.post(CONSULTAR, json={"token": token}, headers=csrf(duena))
+    assert vista.json()["paso"] == "aceptar"
     # Los rechazos no gastaron la invitación.
     r = duena.post(ACEPTAR, json={"token": token, "nombre": "Otro"}, headers=csrf(duena))
     assert r.status_code == 200, r.text
@@ -337,7 +348,10 @@ def test_una_cuenta_nueva_no_acepta_con_la_sesion_de_otra_persona(app, motor_mig
     ana = entrar_como(app, motor_migrate, e.propietaria)
     nuevo = correo_nuevo()
     invitar(ana, e, nuevo)
-    r = ana.post(ACEPTAR, json={"token": token_invitacion(motor_migrate, nuevo)}, headers=csrf(ana))
+    token = token_invitacion(motor_migrate, nuevo)
+    vista = ana.post(CONSULTAR, json={"token": token}, headers=csrf(ana))
+    assert vista.json()["paso"] == "otra_cuenta"  # C8G-11
+    r = ana.post(ACEPTAR, json={"token": token}, headers=csrf(ana))
     assert r.status_code == 409
     assert r.json()["codigo"] == "invitacion_de_otra_persona"
     assert persona_por_correo(motor_migrate, nuevo) is None

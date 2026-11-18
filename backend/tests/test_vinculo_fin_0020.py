@@ -440,6 +440,13 @@ def test_un_vinculo_futuro_responde_409(escena, motor_migrate):  # noqa: F811
     assert (r.status_code, r.json()["codigo"]) == (409, "vinculo_no_iniciado")
 
 
+def gestionables(persona, cons) -> dict[str, bool]:
+    with cliente(persona) as c:
+        r = c.get(f"/api/v1/consorcios/{cons}/padron")
+    assert r.status_code == 200, r.text
+    return {f["vinculo_id"]: f["gestionable_por_vos"] for f in r.json()["elementos"]}
+
+
 def test_sin_padron_gestionar_o_fuera_de_su_unidad_responde_403(escena, motor_migrate, motor_app):  # noqa: F811
     e = escena
     with cliente(e["mc"]) as c:  # el Consejo no tiene padron.gestionar
@@ -447,6 +454,9 @@ def test_sin_padron_gestionar_o_fuera_de_su_unidad_responde_403(escena, motor_mi
     assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
     [d] = denegaciones(motor_app, e["cons"], e["admin"], e["mc"])
     assert d["accion"] == "padron.gestionar"
+    # Informe de fricción C8G-13: el padrón ya lo dice, fila por fila.
+    assert not any(gestionables(e["mc"], e["cons"]).values())
+    assert all(gestionables(e["admin"], e["cons"]).values())  # control: facultad general
     with motor_migrate.begin() as c:
         n = c.execute(
             text(
@@ -456,6 +466,8 @@ def test_sin_padron_gestionar_o_fuera_de_su_unidad_responde_403(escena, motor_mi
             {"r": f"unidad:{e['u2']}", "m": e["m_admin"]},
         ).rowcount
     assert n == 1
+    filas = gestionables(e["admin"], e["cons"])
+    assert (filas[str(e["v_inq_mc"])], filas[str(e["v_inq_admin"])]) == (False, True)
     with cliente(e["admin"]) as c:
         r = pedir_fin(c, e["cons"], e["v_inq_mc"])  # u1, fuera de su recurso
         assert r.status_code == 403

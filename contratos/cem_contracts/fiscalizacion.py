@@ -336,6 +336,10 @@ class SolicitudFormal(BaseModel):
     respuesta: RespuestaSolicitud | None
     retiro: RetiroRegistrado | None
     acciones: list[AccionSolicitud]
+    falta_administrador_vigente: bool = Field(
+        description="Si quien lee firmaría este borrador pero la firma emite y el consorcio no"
+        " tiene un administrador vigente (A14): `firmar` no se ofrece hasta que lo tenga."
+    )
 
 
 class ListaSolicitudesFormales(BaseModel):

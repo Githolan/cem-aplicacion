@@ -111,6 +111,7 @@ class Discrepancia(RuntimeError):
 def padron(
     permiso: Annotated[Permiso, Depends(requiere("padron.ver"))],
     confirmacion: Annotated[Permiso, Depends(requiere("padron.confirmar_vinculo"))],
+    gestion: Annotated[Permiso, Depends(requiere("padron.gestionar"))],
     motor: MotorDep,
 ) -> Padron:
     """Unidad, nombre, carácter, vigencia y si el vínculo está confirmado (D6). Sin correo ni
@@ -148,14 +149,17 @@ def padron(
         raise Discrepancia("padron_del_consorcio niega padron.ver y el evaluador lo concede") from e
     return Padron(
         elementos=[
-            _fila_padron(f, confirmacion)
+            _fila_padron(f, confirmacion, gestion)
             for f in filas
             if permiso.decidir(sobre_unidad(f["unidad_id"])).permitido
         ]
     )
 
 
-def _fila_padron(fila, confirmacion: Permiso) -> FilaPadron:
+def _fila_padron(fila, confirmacion: Permiso, gestion: Permiso) -> FilaPadron:
+    """`confirmable_por_vos` y `gestionable_por_vos` son solo para mostrar: se deciden fila por
+    fila sin tocar la base y sin auditar; las rutas vuelven a decidir. `gestionable_por_vos` es la
+    misma decisión con que finalizar y anular verifican la unidad (informe de fricción C8G-13)."""
     datos = dict(fila)
     vinculo = _para_confirmar(
         datos["unidad_id"], datos.pop("persona_id"), datos.pop("registrado_por"),
@@ -164,6 +168,7 @@ def _fila_padron(fila, confirmacion: Permiso) -> FilaPadron:
     return FilaPadron(
         **datos,
         confirmable_por_vos=not datos["confirmado"] and confirmacion.decidir(vinculo).permitido,
+        gestionable_por_vos=gestion.decidir(sobre_unidad(datos["unidad_id"])).permitido,
     )
 
 

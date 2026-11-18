@@ -50,6 +50,10 @@ class FilaPadron(BaseModel):
         " sobre la unidad, y ni suyo ni registrado por esa cuenta (P4). Solo para mostrar: la ruta"
         " vuelve a decidir."
     )
+    gestionable_por_vos: bool = Field(
+        description="Si quien lee tiene `padron.gestionar` sobre la unidad de este vínculo"
+        " (finalizar o anular). Solo para mostrar: la ruta vuelve a decidir."
+    )
 
 
 class Padron(BaseModel):

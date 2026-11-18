@@ -268,6 +268,11 @@ class MandatoDetalle(MandatoResumen):
         description="Si el mandato es de la cuenta de quien lee: nadie registra su propia baja (A4,"
         " por cuenta). Solo para mostrar: la ruta vuelve a decidir."
     )
+    condicion_cumplida_hoy: bool | None = Field(
+        description="En un mandato pendiente de revisión: si la persona cumple hoy una condición"
+        " para integrar el Consejo, medida del padrón como al mantenerlo (`0109`). Sin ella, la"
+        " revisión que lo mantiene se niega (`sin_condicion_habilitante`). Nulo en otro estado."
+    )
 
 
 class DecisionResumen(BaseModel):

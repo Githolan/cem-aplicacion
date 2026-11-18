@@ -1260,6 +1260,11 @@
         "title": "Designacion",
         "type": "string"
       },
+      "gestionable_por_vos": {
+        "description": "Si quien lee tiene `padron.gestionar` sobre la unidad de este vínculo (finalizar o anular). Solo para mostrar: la ruta vuelve a decidir.",
+        "title": "Gestionable Por Vos",
+        "type": "boolean"
+      },
       "iniciado": {
         "description": "Si el vínculo ya empezó en la fecha del consorcio (`vigente_desde` <= hoy en su zona horaria), con la misma regla con la que el backend decide si se puede finalizar. No concede ningún permiso.",
         "title": "Iniciado",
@@ -1312,7 +1317,8 @@
       "vigente_hasta",
       "confirmado",
       "iniciado",
-      "confirmable_por_vos"
+      "confirmable_por_vos",
+      "gestionable_por_vos"
     ],
     "title": "FilaPadron",
     "type": "object"
@@ -1750,6 +1756,11 @@
         "title": "Id",
         "type": "string"
       },
+      "importada": {
+        "description": "Si salió con el padrón importado (nombra su vínculo): una invitación manual no la reemplaza (`invitacion_importada_pendiente`).",
+        "title": "Importada",
+        "type": "boolean"
+      },
       "nombre": {
         "title": "Nombre",
         "type": "string"
@@ -1798,7 +1809,8 @@
       "nombre",
       "estado",
       "creada_en",
-      "vence_en"
+      "vence_en",
+      "importada"
     ],
     "title": "Invitacion",
     "type": "object"
@@ -2106,6 +2118,21 @@
     "type": "object"
   },
   "InvitacionMandatoRecibida": {
+    "$defs": {
+      "PasoInvitacionMandato": {
+        "description": "Lo que pasaría al aceptar con la sesión del pedido (`0109`, el mismo orden que\n`aceptar_invitacion_mandato`). Lo que depende de la cuenta solo se dice a esa cuenta.",
+        "enum": [
+          "crear_cuenta",
+          "aceptar",
+          "entrar",
+          "otra_cuenta",
+          "de_si_mismo",
+          "consejo_superpuesto"
+        ],
+        "title": "PasoInvitacionMandato",
+        "type": "string"
+      }
+    },
     "description": "Lo que ve quien abre el enlace, antes de aceptar. Sin CUIT.",
     "properties": {
       "consorcio": {
@@ -2136,6 +2163,10 @@
         "description": "Nombre del mandatario que figura en el mandato.",
         "title": "Mandatario"
       },
+      "paso": {
+        "$ref": "#/$defs/PasoInvitacionMandato",
+        "description": "Lo que pasaría al aceptar con la sesión de este pedido. Solo para mostrar: la aceptación vuelve a decidir."
+      },
       "vence_en": {
         "format": "date-time",
         "title": "Vence En",
@@ -2146,7 +2177,8 @@
       "consorcio",
       "mandatario",
       "invitada_por",
-      "vence_en"
+      "vence_en",
+      "paso"
     ],
     "title": "InvitacionMandatoRecibida",
     "type": "object"
@@ -2205,6 +2237,18 @@
   },
   "InvitacionRecibida": {
     "$defs": {
+      "PasoInvitacion": {
+        "description": "Lo que pasaría al aceptar con la sesión del pedido (`0109`, el mismo orden que\n`aceptar_invitacion`). No revela nada que la aceptación no diga ya a quien tiene el enlace.",
+        "enum": [
+          "crear_cuenta",
+          "aceptar",
+          "entrar",
+          "otra_cuenta",
+          "propia"
+        ],
+        "title": "PasoInvitacion",
+        "type": "string"
+      },
       "TipoVinculo": {
         "description": "Relación de una persona con una unidad funcional.",
         "enum": [
@@ -2247,6 +2291,10 @@
         "title": "Nombre",
         "type": "string"
       },
+      "paso": {
+        "$ref": "#/$defs/PasoInvitacion",
+        "description": "Lo que pasaría al aceptar con la sesión de este pedido. Solo para mostrar: la aceptación vuelve a decidir."
+      },
       "tipo": {
         "$ref": "#/$defs/TipoVinculo"
       },
@@ -2270,7 +2318,8 @@
       "correo",
       "nombre",
       "invitada_por",
-      "vence_en"
+      "vence_en",
+      "paso"
     ],
     "title": "InvitacionRecibida",
     "type": "object"
@@ -2580,6 +2629,11 @@
             "title": "Id",
             "type": "string"
           },
+          "importada": {
+            "description": "Si salió con el padrón importado (nombra su vínculo): una invitación manual no la reemplaza (`invitacion_importada_pendiente`).",
+            "title": "Importada",
+            "type": "boolean"
+          },
           "nombre": {
             "title": "Nombre",
             "type": "string"
@@ -2628,7 +2682,8 @@
           "nombre",
           "estado",
           "creada_en",
-          "vence_en"
+          "vence_en",
+          "importada"
         ],
         "title": "Invitacion",
         "type": "object"
@@ -3239,6 +3294,18 @@
         "title": "Con Cuenta",
         "type": "boolean"
       },
+      "condicion_cumplida_hoy": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "En un mandato pendiente de revisión: si la persona cumple hoy una condición para integrar el Consejo, medida del padrón como al mantenerlo (`0109`). Sin ella, la revisión que lo mantiene se niega (`sin_condicion_habilitante`). Nulo en otro estado.",
+        "title": "Condicion Cumplida Hoy"
+      },
       "cuit": {
         "anyOf": [
           {
@@ -3365,7 +3432,8 @@
       "instrumento_referencia",
       "motivo_fin",
       "finalizado_en",
-      "es_propio"
+      "es_propio",
+      "condicion_cumplida_hoy"
     ],
     "title": "MandatoDetalle",
     "type": "object"
@@ -3700,6 +3768,11 @@
             "title": "Designacion",
             "type": "string"
           },
+          "gestionable_por_vos": {
+            "description": "Si quien lee tiene `padron.gestionar` sobre la unidad de este vínculo (finalizar o anular). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Gestionable Por Vos",
+            "type": "boolean"
+          },
           "iniciado": {
             "description": "Si el vínculo ya empezó en la fecha del consorcio (`vigente_desde` <= hoy en su zona horaria), con la misma regla con la que el backend decide si se puede finalizar. No concede ningún permiso.",
             "title": "Iniciado",
@@ -3752,7 +3825,8 @@
           "vigente_hasta",
           "confirmado",
           "iniciado",
-          "confirmable_por_vos"
+          "confirmable_por_vos",
+          "gestionable_por_vos"
         ],
         "title": "FilaPadron",
         "type": "object"

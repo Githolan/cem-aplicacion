@@ -201,6 +201,7 @@ def test_cuatro_ojos_y_cuenta_nueva_asocian_el_mandato(app, motor_migrate, escen
     vista = beto.post(CONSULTAR, json={"token": token})
     assert vista.status_code == 200, vista.text
     assert vista.json()["mandatario"] == "Estudio X" and CUIT_X not in vista.text
+    assert vista.json()["paso"] == "crear_cuenta"  # C8G-12 y MAN-15: pide el nombre
     r = aceptar(beto, token, nombre="Beto Estudio")
     assert r.status_code == 200, r.text
     assert r.json()["cuenta_nueva"] is True and r.json()["mandato_id"] == str(e["ae"])
@@ -449,13 +450,21 @@ def test_correo_con_cuenta_pide_su_sesion(app, motor_migrate, escena):  # noqa: 
         c.execute(text("update nucleo.persona set correo = :c where id = :p"),
                   {"c": correo, "p": persona})  # fmt: skip
     _, token = emitida_y_aprobada(e, correo)
+    # C8G-12: lo que dice la consulta es lo que responde la aceptación, caso por caso.
+    assert navegador(app).post(CONSULTAR, json={"token": token}).json()["paso"] == "entrar"
     r = aceptar(navegador(app), token)
     assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_requiere_sesion")
     prop = entrar_como(app, motor_migrate, f"modo-{e['cons']}@ejemplo.com")
+    vista = prop.post(CONSULTAR, json={"token": token}, headers=csrf(prop))
+    assert vista.json()["paso"] == "otra_cuenta"
     r = prop.post(ACEPTAR, json={"token": token}, headers=csrf(prop))
     assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_de_otra_persona")
     assert mandato(motor_migrate, e["ae"])["persona_id"] is None
     dueña = entrar_como(app, motor_migrate, correo)
+    # La consulta lee la sesión: sin su CSRF se niega, como aceptar.
+    assert dueña.post(CONSULTAR, json={"token": token}).status_code == 403
+    vista = dueña.post(CONSULTAR, json={"token": token}, headers=csrf(dueña))
+    assert vista.json()["paso"] == "aceptar"  # MAN-15: la cuenta existe, sin nombre
     r = dueña.post(ACEPTAR, json={"token": token}, headers=csrf(dueña))
     assert r.status_code == 200, r.text
     assert (r.json()["cuenta_nueva"], mandato(motor_migrate, e["ae"])["persona_id"]) == (
@@ -471,6 +480,8 @@ def test_quien_emitio_o_aprobo_no_acepta_para_si(app, motor_migrate, escena):  #
         ).scalar_one()
     _, token = emitida_y_aprobada(e, correo_mc2)
     mc2 = entrar_como(app, motor_migrate, correo_mc2)
+    vista = mc2.post(CONSULTAR, json={"token": token}, headers=csrf(mc2))
+    assert vista.json()["paso"] == "de_si_mismo"  # C8G-12
     r = mc2.post(ACEPTAR, json={"token": token}, headers=csrf(mc2))
     assert (r.status_code, r.json()["codigo"]) == (409, "asociacion_de_si_mismo")
     assert mandato(motor_migrate, e["ae"])["persona_id"] is None
@@ -497,6 +508,8 @@ def test_quien_tiene_un_mandato_de_consejo_superpuesto_no_se_asocia(
          desde=desde)  # fmt: skip
     _, token = emitida_y_aprobada(e, correo)
     sesion = entrar_como(app, motor_migrate, correo)
+    vista = sesion.post(CONSULTAR, json={"token": token}, headers=csrf(sesion))
+    assert vista.json()["paso"] == "consejo_superpuesto"  # C8G-12
     r = sesion.post(ACEPTAR, json={"token": token}, headers=csrf(sesion))
     assert (r.status_code, r.json()["codigo"]) == (409, "asociacion_incompatible_con_consejo")
     assert mandato(motor_migrate, e["ae"])["persona_id"] is None
@@ -512,7 +525,11 @@ def test_si_quien_emitio_pierde_su_mandato_el_enlace_no_sirve(
     e = escena
     correo = correo_nuevo()
     _, token = emitida_y_aprobada(e, correo)
+    assert navegador(app).post(CONSULTAR, json={"token": token}).status_code == 200  # control
     baja(motor_app, e["cons"], e["mc2"], e["m_mc1"], "renuncia")
+    # C8G-12: la consulta ya responde que no sirve, como la aceptación.
+    r = navegador(app).post(CONSULTAR, json={"token": token})
+    assert (r.status_code, r.json()["codigo"]) == (404, "invitacion_invalida")
     r = aceptar(navegador(app), token)
     assert (r.status_code, r.json()["codigo"]) == (404, "invitacion_invalida")
     assert persona_por_correo(motor_migrate, correo) is None

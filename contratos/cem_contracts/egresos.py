@@ -309,6 +309,17 @@ class ListaProveedores(BaseModel):
         " rubros legales, o la tienen vencida (`0104`)."
     )
     modo_exigencia: ModoExigencia
+    con_salteo: list[UUID] = Field(
+        description="Los bloqueados (modo `bloquear` y documentación faltante) con un salteo por"
+        " urgencia vigente que sirve para una orden que prepare quien lee: lo registró otra"
+        " persona, con otra identidad humana (`0106`, `0109`). Solo para mostrar: la base vuelve"
+        " a decidir al preparar."
+    )
+    salteo_de_quien_prepara: list[UUID] = Field(
+        description="Los bloqueados cuyos salteos vigentes los registró quien lee (o su misma"
+        " identidad humana): la base no los toma para una orden que prepare esa persona"
+        " (`salteo_de_quien_prepara`)."
+    )
 
 
 class VersionProveedor(BaseModel):
@@ -585,6 +596,11 @@ class SalteoDocumentacion(BaseModel):
     orden_id: UUID | None
     version: int | None
     usado_en: datetime | None
+    propio: bool = Field(
+        description="Si lo registró la cuenta de quien lee (`0109`): mientras espera su orden,"
+        " esa cuenta no registra otro del mismo proveedor (`salteo_vigente`). Sin decir quién es"
+        " la persona."
+    )
 
 
 class NuevoSalteoDocumentacion(BaseModel):
