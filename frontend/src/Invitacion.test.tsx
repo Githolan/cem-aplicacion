@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { PREFIJO_COPIA } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { YA_HAY_CUENTA } from "./Invitacion";
+import { textoYaAceptada, YA_HAY_CUENTA } from "./Invitacion";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -256,6 +256,18 @@ describe("página /invitacion", () => {
     expect(await screen.findByText(/Esta invitación la creó esta cuenta/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
     expect(screen.getByRole("link", { name: "Ir al inicio" })).toBeTruthy();
+    expect(aceptacionesDe(pedido)).toEqual([]);
+  });
+
+  it("FL-INVA-02 (tanda 9): la cuenta que ya la aceptó la abre de nuevo: lo dice y lleva al inicio, sin pedir otra", async () => {
+    const pedido = backend(() => Response.json(ACEPTADA), () => Response.json({ ...RECIBIDA, paso: "ya_aceptada" }));
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByText(textoYaAceptada("Edificio Alvear 100"))).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Ir al inicio" })).toBeTruthy();
+    expect(screen.queryByText(/Hay que pedir una nueva/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
     expect(aceptacionesDe(pedido)).toEqual([]);
   });
 

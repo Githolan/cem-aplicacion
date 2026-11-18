@@ -42,6 +42,7 @@ type Estado =
   | "requiere_sesion"
   | "otra_persona"
   | "propia"
+  | "ya_aceptada"
   | "conflicto"
   | "sin_servicio";
 
@@ -52,6 +53,10 @@ export const TIPOS: Record<Recibida["tipo"], string> = {
 };
 
 /** Con el correo de una cuenta que ya existe: se entra acá y la invitación se acepta sola (G-35). */
+/** FL-INVA-02: la abre de nuevo la misma cuenta que ya la aceptó. */
+export const textoYaAceptada = (consorcio: string) =>
+  `Esta invitación ya está aceptada: la cuenta ya es parte de ${consorcio}.`;
+
 export const YA_HAY_CUENTA =
   "Ya hay una cuenta con este correo. Para aceptar la invitación, entrar con esa cuenta: al entrar, la invitación se acepta sola.";
 
@@ -71,8 +76,9 @@ const ESTADO_DEL_PASO: Record<Paso, Estado> = {
   entrar: "requiere_sesion",
   otra_cuenta: "otra_persona",
   propia: "propia",
-  // FL-INVA-02 (`0110`): hasta que la pantalla tenga su texto, lo mismo que antes (el 404).
-  ya_aceptada: "invalida",
+  // FL-INVA-02 (`0110`, tanda 9): la cuenta que ya la aceptó la vuelve a abrir. Se le dice y se la
+  // lleva al inicio; no se la manda a pedir otra.
+  ya_aceptada: "ya_aceptada",
 };
 
 function leerToken(): string | null {
@@ -221,6 +227,12 @@ export function Invitacion() {
               Esta invitación la creó esta cuenta: la tiene que aceptar la persona invitada, con su
               propia cuenta.
             </p>
+            <EnlaceAlInicio />
+          </>
+        )}
+        {estado === "ya_aceptada" && invitacion && (
+          <>
+            <p>{textoYaAceptada(invitacion.consorcio)}</p>
             <EnlaceAlInicio />
           </>
         )}
