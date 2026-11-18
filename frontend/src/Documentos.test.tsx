@@ -633,6 +633,18 @@ describe("página /documentos", () => {
     expect(enviarCarga()).toBeTruthy();
   });
 
+  it("Codex en #257: si la sesión vence al crear, no sube nada y la ventana queda para repetir", async () => {
+    const simulado = conLista({ [`POST ${BASE}`]: () => error("no_autenticado", 401) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(enviarCarga());
+    await waitFor(() => expect(pedidos(simulado, "POST", BASE)).toHaveLength(1));
+    // «seguir» no es el id de un documento: no hay pedido a /documentos/seguir/versiones.
+    expect(simulado.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/versiones"))).toBe(false);
+    expect(enviarCarga()).toBeTruthy();
+  });
+
   it("«Subir archivo» de un documento existente explica un 413 y un 415 del servidor", async () => {
     let respuesta = () => error("archivo_demasiado_grande", 413);
     const simulado = conLista({ [`POST ${versiones(D3)}`]: () => respuesta() });

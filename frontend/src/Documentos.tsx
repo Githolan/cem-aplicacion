@@ -647,9 +647,9 @@ export function Documentos() {
     try {
       if (formulario.tipo === "subir") return await subir(formulario.documento, formulario.titulo, archivo, false);
       const titulo = datos.titulo.trim();
-      const creado = await crear(titulo);
-      if (typeof creado !== "string") return creado;
-      return await subir(creado, titulo, archivo, true);
+      const resultado = await crear(titulo);
+      if ("fin" in resultado) return resultado.fin;
+      return await subir(resultado.creado, titulo, archivo, true);
     } finally {
       setEnviando(false);
     }
@@ -668,7 +668,8 @@ export function Documentos() {
   }
 
   /** Primer paso: crea el documento. Devuelve su id o, si no se creó, cómo sigue la ventana. */
-  async function crear(titulo: string): Promise<string | FinDeEnvio> {
+  /** El id del documento creado, o cómo termina la ventana (Codex en #257: "seguir" no es un id). */
+  async function crear(titulo: string): Promise<{ creado: string } | { fin: FinDeEnvio }> {
     claveCrear.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos", {
@@ -682,15 +683,15 @@ export function Documentos() {
         if (renovarClave(response.status, codigo)) claveCrear.current = null;
         const marcados = soloDe(erroresDe(error, REVISAR_DATO, MENSAJES_PROPIOS), TEXTO_CAMPO);
         setErrores(marcados);
-        return { rechazo: mensajeDeError(response.status, codigo, "crear", Object.keys(marcados).map((c) => `body.${c}`)) };
+        return { fin: { rechazo: mensajeDeError(response.status, codigo, "crear", Object.keys(marcados).map((c) => `body.${c}`)) } };
       }
       claveCrear.current = null;
-      return data.id;
+      return { creado: data.id };
     } catch (e: unknown) {
-      if (!(e instanceof SinSesion)) return { rechazo: SIN_CONEXION };
+      if (!(e instanceof SinSesion)) return { fin: { rechazo: SIN_CONEXION } };
       // La sesión se pide encima: lo escrito queda en la ventana para repetir el paso.
       aEntrar();
-      return "seguir";
+      return { fin: "seguir" };
     }
   }
 
