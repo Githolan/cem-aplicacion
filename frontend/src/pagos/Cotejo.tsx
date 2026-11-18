@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import { CSV } from "../archivos";
 import { CabeceraInterna } from "../CabeceraInterna";
@@ -31,7 +31,7 @@ import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { CargandoPagos } from "./CargandoPagos";
 import { FilaEnlace } from "./FilaEnlace";
 import { MONEDAS } from "./FormularioOrden";
-import { RUTA_PAGOS, RUTA_SIN_EXPLICAR, rutaFicha } from "./rutas";
+import { RUTA_COTEJO, RUTA_PAGOS, RUTA_SIN_EXPLICAR, rutaFicha } from "./rutas";
 import {
   COMPARAR,
   DESHACER_COTEJO,
@@ -44,8 +44,9 @@ import {
   textoLosDeshaceOtra,
   textoMarcarCotejados,
   textoTopeTildes,
+  textoBancoNoAca,
   TILDAR_PAGOS,
-  VER_LO_YA_COTEJADO,
+  VER_LO_COTEJADO,
   VER_SIN_EXPLICAR,
 } from "./textos";
 import { type Acto, useActo } from "./useActo";
@@ -61,6 +62,12 @@ import { type Acto, useActo } from "./useActo";
 // pie, no en la lista (COT-05). Lo ya cotejado se pide aparte, en filas compactas, y «Deshacer el
 // cotejo» está en la ficha de cada uno, con el motivo en su ventana (COT-06). Ningún botón apagado
 // porque falta algo (C8P-11, C8P-15, C8P-16).
+//
+// Flujos 18-11-2026 (tanda 5): «Ver lo cotejado» de la bandeja llega con lo cotejado a la vista
+// (FL-CON-01); quien no puede cotejar ningún pago pendiente no ve «Subir el extracto» (FL-CON-02,
+// decisión 13); una orden abierta desde acá vuelve acá, con el resultado del extracto o lo cotejado
+// como estaban (FL-CON-03); los débitos sin pago se cuentan con su enlace, sin repetir la lista
+// (FL-CON-04); y cotejado el último pago, la pantalla vuelve sola a Pagos con el «Listo» (FL-CON-06).
 
 type Elemento = components["schemas"]["PagoPorCotejar"];
 type Cotejado = components["schemas"]["PagoCotejado"];
@@ -89,6 +96,20 @@ const FALTA_IMPORTE = "Falta elegir la columna del importe.";
 
 const cantidad = (n: number, una: string, varias: string) => (n === 1 ? una : `${n} ${varias}`);
 
+/** Lo que el cotejo mostraba al abrir una orden, y con lo que vuelve (`state.volverCon` de la ficha). */
+type AlVolver = { consorcio: string; cotejados?: true; resultado?: Resultado };
+
+/** Lo que trae la navegación: lo cotejado a la vista o el resultado del extracto de antes. */
+function llegadaDe(estado: unknown): { cotejados: boolean; resultado: Resultado | null } {
+  if (typeof estado !== "object" || estado === null) return { cotejados: false, resultado: null };
+  const cotejados = "cotejados" in estado && estado.cotejados === true;
+  const resultado = "resultado" in estado && typeof estado.resultado === "object" && estado.resultado !== null ? (estado.resultado as Resultado) : null;
+  return { cotejados, resultado };
+}
+
+/** El estado de navegación de una orden abierta desde el cotejo: vuelve acá, con lo que se veía. */
+const abrirDesdeElCotejo = (volverCon: AlVolver) => ({ consorcio: volverCon.consorcio, volver: RUTA_COTEJO, volverCon });
+
 const detalle = (numero: string | null, fecha: string, nombre: string) =>
   numero === null ? fechaLegible(fecha) : `${nombre} ${numero} · ${fechaLegible(fecha)}`;
 
@@ -113,6 +134,11 @@ export function Cotejo() {
 
 function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
+  const navegar = useNavigate();
+  // Se lee una vez, al llegar.
+  const llegada = useRef(llegadaDe(useLocation().state));
+  /** El «Listo» de lo tildado, hasta saber si queda algo para cotejar (FL-CON-06). */
+  const listoPendiente = useRef<string | null>(null);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [avisoLectura, setAvisoLectura] = useState<Aviso | null>(null);
   const [despues, setDespues] = useState<string | null>(null);
@@ -127,7 +153,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** Un rechazo que llega después de pedir el código, con la ventana todavía abierta. */
   const [tardio, setTardio] = useState<string | null>(null);
-  const [resultado, setResultado] = useState<Resultado | null>(null);
+  const [resultado, setResultado] = useState<Resultado | null>(llegada.current.resultado);
   const [cotejos, setCotejos] = useState(0);
   const primerBoton = useRef<HTMLButtonElement | null>(null);
   const acto = useActo(aEntrar);
@@ -168,8 +194,16 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
             const siguen = new Set(data.elementos.map((e) => e.pago_id));
             setTildados((t) => new Set([...t].filter((id) => siguen.has(id))));
           }
+          // Cotejado lo último que le tocaba a esta cuenta, vuelve sola a Pagos con el «Listo» (FL-CON-06).
+          const listo = listoPendiente.current;
+          listoPendiente.current = null;
+          if (listo !== null && despues === null) {
+            if (nadaParaCotejar(data.elementos, data.siguiente)) navegar(RUTA_PAGOS, { state: { aviso: listo, consorcio } });
+            else setAviso({ texto: listo, ok: true });
+          }
         } else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
+          decirElListo();
           setLectura(falla);
           setAvisoLectura(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
         }
@@ -178,14 +212,21 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
         else {
+          decirElListo();
           setLectura(falla);
           setAvisoLectura(sinPisarLoHecho(SIN_CONEXION));
         }
       });
+    /** Sin la lista no se sabe si queda algo: el «Listo» se dice acá. */
+    function decirElListo() {
+      const listo = listoPendiente.current;
+      listoPendiente.current = null;
+      if (listo !== null) setAviso({ texto: listo, ok: true });
+    }
     return () => {
       vigente = false;
     };
-  }, [consorcio, despues, vuelta, aEntrar, aInicio]);
+  }, [consorcio, despues, vuelta, aEntrar, aInicio, navegar, setAviso]);
 
   /** Después de cotejar la lista cambió: se vuelve a leer desde el principio. */
   function releer() {
@@ -239,7 +280,9 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
       alTerminar: ({ cotejados }) => {
         setTildados(new Set());
         setCotejos((c) => c + 1);
-        setAviso({ texto: cotejados === 0 ? "Esos pagos ya estaban cotejados." : `Listo: ${cantidad(cotejados, "quedó cotejado 1 pago", "pagos quedaron cotejados")}.`, ok: true });
+        // Se dice al releer la lista: si no queda nada para esta cuenta, arriba de la bandeja.
+        listoPendiente.current =
+          cotejados === 0 ? "Esos pagos ya estaban cotejados." : `Listo: ${cantidad(cotejados, "quedó cotejado 1 pago", "pagos quedaron cotejados")}.`;
         releer();
       },
       alFallar: (estado) => {
@@ -373,6 +416,13 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   }
 
   const siguiente = lectura.tipo === "ok" ? lectura.siguiente : null;
+  /** Hay pagos por cotejar y ninguno es de esta cuenta: el extracto no le cotejaría nada (decisión 13). */
+  const soloDeOtra = lectura.tipo === "ok" && lectura.elementos.length > 0 && nadaParaCotejar(lectura.elementos, siguiente);
+  /** Cerrado el resultado del extracto, si no queda nada para esta cuenta, vuelve a Pagos (FL-CON-06). */
+  function cerrarResultado() {
+    setResultado(null);
+    if (lectura.tipo === "ok" && nadaParaCotejar(lectura.elementos, siguiente)) navegar(RUTA_PAGOS, { state: { consorcio } });
+  }
   const rechazoTardio = tardio !== null && (
     <p className="aviso-error" role="alert">
       {tardio}
@@ -402,11 +452,13 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
       {/* Mientras se pide el código, lo tildado sigue montado: el reintento no lo pierde. */}
       {conPantalla && (
         <div className="cotejo" hidden={pendiente !== null}>
-          <p className="salidas-pago salidas-pago--arriba">
-            <button type="button" onClick={abrirSubida}>
-              {SUBIR_EXTRACTO}
-            </button>
-          </p>
+          {!soloDeOtra && (
+            <p className="salidas-pago salidas-pago--arriba">
+              <button type="button" onClick={abrirSubida}>
+                {SUBIR_EXTRACTO}
+              </button>
+            </p>
+          )}
           <section aria-labelledby={`${id}-falta`}>
             <h2 id={`${id}-falta`} className="titulo-grupo">
               Lo que falta cotejar
@@ -450,7 +502,8 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
             )}
           </section>
           {/* Después de cotejar, lo leído quedó viejo: vuelve a pedirse. */}
-          <YaCotejados key={cotejos} consorcio={consorcio} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer} />
+          <YaCotejados key={cotejos} consorcio={consorcio} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer}
+            abierto={cotejos === 0 && llegada.current.cotejados} />
         </div>
       )}
       {/* Una sola ventana para los dos pasos: el rechazo que lleva a elegir las columnas queda a la vista. */}
@@ -504,7 +557,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           {rechazoTardio}
         </VentanaDeFormulario>
       )}
-      {resultado !== null && <ResultadoDelExtracto r={resultado} consorcio={consorcio} alCerrar={() => setResultado(null)} />}
+      {resultado !== null && <ResultadoDelExtracto r={resultado} consorcio={consorcio} alCerrar={cerrarResultado} />}
     </>
   );
 }
@@ -564,10 +617,12 @@ type PropsCotejados = {
   aEntrar: () => void;
   avisar: (aviso: Aviso) => void;
   deshacer: (pago: string, motivo: string, alListo: () => void) => Promise<FinDeEnvio>;
+  /** Llegó a ver lo cotejado («Ver lo cotejado» de la bandeja, o de vuelta de una orden): se lee al abrir. */
+  abierto: boolean;
 };
 
 /** Se lee cuando alguien lo pide: deshacer es la excepción, no la tarea de la pantalla. */
-function YaCotejados({ consorcio, aEntrar, avisar, deshacer }: PropsCotejados) {
+function YaCotejados({ consorcio, aEntrar, avisar, deshacer, abierto: abiertoAlLlegar }: PropsCotejados) {
   const id = useId();
   const [elementos, setElementos] = useState<Cotejado[] | null>(null);
   const [siguiente, setSiguiente] = useState<string | null>(null);
@@ -593,6 +648,14 @@ function YaCotejados({ consorcio, aEntrar, avisar, deshacer }: PropsCotejados) {
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : avisar({ texto: SIN_CONEXION, ok: false })));
   }
 
+  // Se lee una vez, si llegó a verlo; después, al pedirlo.
+  const leido = useRef(false);
+  useEffect(() => {
+    if (!abiertoAlLlegar || leido.current) return;
+    leido.current = true;
+    leer(null);
+  });
+
   function cerrarVentana() {
     setDeshaciendo(false);
     setMotivo("");
@@ -610,7 +673,7 @@ function YaCotejados({ consorcio, aEntrar, avisar, deshacer }: PropsCotejados) {
     return (
       <p className="salidas-pago">
         <button type="button" className="secundario" onClick={() => leer(null)}>
-          {VER_LO_YA_COTEJADO}
+          {VER_LO_COTEJADO}
         </button>
       </p>
     );
@@ -693,7 +756,7 @@ function YaCotejados({ consorcio, aEntrar, avisar, deshacer }: PropsCotejados) {
           }
         >
           <p className="ficha-registro__acciones">
-            <Link to={rutaFicha(abierto.orden_id)} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+            <Link to={rutaFicha(abierto.orden_id)} state={abrirDesdeElCotejo({ consorcio, cotejados: true })} className="enlace-boton enlace-boton--borde">
               Ver la orden
             </Link>
             <button type="button" className="secundario peligro" onClick={() => setDeshaciendo(true)}>
@@ -731,6 +794,11 @@ function pendientesDelExtracto(r: Resultado): string[] {
   return textos;
 }
 
+/** Si a esta cuenta no le queda ningún pago por cotejar: ni en la lista, ni en otra página. */
+function nadaParaCotejar(elementos: readonly Elemento[], siguiente: string | null): boolean {
+  return siguiente === null && !elementos.some((e) => e.puede_cotejar);
+}
+
 function TituloConTotal({ texto, total }: { texto: string; total: number }) {
   return (
     <h3 className="titulo-grupo">
@@ -756,7 +824,7 @@ function ResultadoDelExtracto({ r, consorcio, alCerrar }: PropsResultado) {
               <li key={p.pago_id}>
                 <FilaEnlace
                   a={rutaFicha(p.orden_id)}
-                  estadoNavegacion={{ consorcio }}
+                  estadoNavegacion={abrirDesdeElCotejo({ consorcio, resultado: r })}
                   titulo={p.proveedor}
                   resumen={`${detalle(p.numero_operacion, p.fecha_operacion, "Operación")} · ${importe(p.importe_centavos, p.moneda)}`}
                 />
@@ -766,26 +834,14 @@ function ResultadoDelExtracto({ r, consorcio, alCerrar }: PropsResultado) {
           {r.total_aca_no_banco > r.aca_no_banco.length && <p>Se ven los primeros {r.aca_no_banco.length}.</p>}
         </>
       )}
+      {/* Los débitos sin pago se cuentan y se ven en su pantalla, donde se marcan: la lista no se repite acá (FL-CON-04). */}
       {r.total_banco_no_aca > 0 && (
-        <>
-          <TituloConTotal texto="Están en el banco y no acá" total={r.total_banco_no_aca} />
-          <ul className="filas-pago">
-            {r.banco_no_aca.map((m, i) => (
-              <li key={`${m.fecha}-${m.importe_centavos}-${m.numero_operacion}-${i}`} className="fila-pago fila-pago--con-borde">
-                <span className="fila-pago__arriba">
-                  <strong>{detalle(m.numero_operacion, m.fecha, "Referencia")}</strong>
-                  <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-          {r.total_banco_no_aca > r.banco_no_aca.length && <p>Se ven los primeros {r.banco_no_aca.length}.</p>}
-          <p>
-            <Link to={RUTA_SIN_EXPLICAR} state={{ consorcio }}>
-              {VER_SIN_EXPLICAR}
-            </Link>
-          </p>
-        </>
+        <p>
+          {textoBancoNoAca(r.total_banco_no_aca)}{" "}
+          <Link to={RUTA_SIN_EXPLICAR} state={{ consorcio }}>
+            {VER_SIN_EXPLICAR}
+          </Link>
+        </p>
       )}
       {pendientes.length > 0 && (
         <>

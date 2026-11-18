@@ -106,6 +106,8 @@ test.describe("cotejar con el banco", () => {
 
     await tilde.check();
     await page.getByRole("button", { name: "Marcar 1 como cotejado" }).click();
+    // FL-CON-06: cotejado el último pago de esta cuenta, vuelve sola a Pagos con el «Listo».
+    await expect(page).toHaveURL(/\/pagos$/);
     await expect(page.getByText("Listo: quedó cotejado 1 pago.")).toBeVisible();
     await expect(tilde).toHaveCount(0);
     expect(pedidos.tildes).toEqual([{ pagos: [P1] }]);
@@ -136,12 +138,15 @@ test.describe("cotejar con el banco", () => {
     const hoja = page.getByRole("dialog", { name: /^Extracto del / });
     await expect(hoja.getByText("12 pagos coinciden con el banco y quedaron cotejados.")).toBeVisible();
     await expect(hoja.getByRole("heading", { name: /Están acá y no en el banco/ })).toBeVisible();
-    await expect(hoja.getByRole("heading", { name: /Están en el banco y no acá/ })).toBeVisible();
-    await expect(hoja.getByText(/0048213999/)).toBeVisible();
+    // FL-CON-04: los débitos sin pago se cuentan, con el enlace a su pantalla; la lista no se repite.
+    await expect(hoja.getByText(/^1 débito del banco no tiene un pago registrado acá\./)).toBeVisible();
+    await expect(hoja.getByText(/0048213999/)).toHaveCount(0);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     await hoja.getByRole("button", { name: "Listo" }).click();
     await expect(hoja).toHaveCount(0);
+    // FL-CON-06: sin nada más para esta cuenta, vuelve sola a Pagos.
+    await expect(page).toHaveURL(/\/pagos$/);
 
     const [subido] = pedidos.extracto;
     expect(subido?.cuerpo).toBe(CSV); // el archivo tal cual, sin pasar por JSON

@@ -34,3 +34,19 @@ export function FilaEnlace({ a, estadoNavegacion, titulo, resumen, estado }: Pro
     </Link>
   );
 }
+
+/** La misma fila para quien solo lee y no tiene nada que abrir (FL-CON-05, FL-PAN-02): sin botón ni
+ * enlace, para no ofrecer una ficha que no agrega nada. */
+export function FilaDeLectura({ titulo, resumen }: { titulo: ReactNode; resumen?: ReactNode }) {
+  return (
+    <div className="fila-registro fila-registro--lectura">
+      <span className="fila-registro__titulo">{titulo}</span>
+      {resumen !== undefined && (
+        <>
+          {" "}
+          <span className="fila-registro__resumen">{resumen}</span>
+        </>
+      )}
+    </div>
+  );
+}

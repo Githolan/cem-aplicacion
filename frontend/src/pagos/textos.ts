@@ -37,6 +37,8 @@ export const VERBO: Record<Paso, string> = {
 
 /** Pregunta 8 del propietario (13-11-2026): el mismo nombre en la bandeja, el cotejo y su pantalla. */
 export const TITULO_SIN_EXPLICAR = "Lo que el extracto no explica";
+/** Lo que lee la administración sobre esa lista, que solo mira (FL-CON-05, decisión 17 del 18-11). */
+export const LO_RESUELVE_QUIEN_CONCILIA = "Lo resuelve quien concilia.";
 export const VER_SIN_EXPLICAR = "Ver los débitos sin explicar";
 export const NO_ES_PAGO = "No es el pago de una orden";
 export const RETIRAR_MARCA = "Retirar la marca";
@@ -111,8 +113,8 @@ export const GUARDAR_IGUAL = "Guardar igual";
 export const VER_LA_OTRA = "Ver la otra";
 export const ENTENDIDO = "Entendido";
 export const PREPARAR_OTRA = "Preparar otra orden";
-export const textoRechazada = (proveedor: string, importe: string, fecha: string) =>
-  `Se rechazó la orden de ${proveedor} por ${importe}, del ${fecha}.`;
+export const textoRechazada = (proveedor: string, importe: string, fecha: string, concepto: string) =>
+  `Se rechazó la orden de ${proveedor} por ${importe}, del ${fecha}: «${concepto}».`;
 
 export const TEXTO_LE_TOCA_A: Record<LeTocaA, string> = {
   vos: "Le toca a esta cuenta.",
@@ -193,7 +195,6 @@ export const MARCA_REPETIDA = "Puede estar repetida";
 export const NOMBRE_MONEDA: Readonly<Record<string, string>> = { ARS: "Pesos", USD: "Dólares" };
 export const SUBIR_EXTRACTO = "Subir el extracto";
 export const COMPARAR = "Comparar";
-export const VER_LO_YA_COTEJADO = "Ver lo ya cotejado";
 export const DESHACER_COTEJO = "Deshacer el cotejo";
 export const TILDAR_PAGOS = "Tildar los pagos que figuran en el banco.";
 export const textoMarcarCotejados = (n: number) => (n === 1 ? "Marcar 1 como cotejado" : `Marcar ${n} como cotejados`);
@@ -206,6 +207,9 @@ export const FALTA_MOTIVO_DESHACER = "Falta decir por qué se deshace.";
 export const FALTA_MOTIVO = "Falta escribir el motivo.";
 export const FALTA_ARCHIVO_EXTRACTO = "Falta elegir el archivo del extracto.";
 export const textoVerMarcados = (n: number) => `Ver los marcados (${n})`;
+/** Los débitos del extracto que no son ningún pago registrado: se cuentan y se ven en su pantalla (FL-CON-04). */
+export const textoBancoNoAca = (n: number) =>
+  n === 1 ? "1 débito del banco no tiene un pago registrado acá." : `${n} débitos del banco no tienen un pago registrado acá.`;
 // Fricción 17-11, tandas 2 y 5: preparar una orden y su ficha.
 /** Lo obligatorio que falta al tocar guardar (decisión 4: el botón siempre activo). */
 export const FALTA_PROVEEDOR = "Falta elegir el proveedor.";
