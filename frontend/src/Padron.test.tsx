@@ -10,7 +10,7 @@ import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { VOLVIO_LA_RED } from "./egresos/comun";
-import { confirmablesPrimero, LO_CONFIRMA_OTRA_PERSONA, mensajeDeError } from "./Padron";
+import { AVISO_SOSTIENE_CONSEJO, confirmablesPrimero, LO_CONFIRMA_OTRA_PERSONA, mensajeDeError } from "./Padron";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -90,7 +90,7 @@ function pedidos(simulado: ReturnType<typeof vi.fn>, metodo: string, camino: str
     .filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
 }
 
-function abrir(ruta = "/padron") {
+function abrir(ruta: string | { pathname: string; state: unknown } = "/padron") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -370,6 +370,29 @@ describe("página /padron", () => {
     expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
     expect(await pedido?.json()).toEqual({ motivo: "Fin del contrato de locación" });
     await waitFor(() => expect(screen.queryByRole("button", { name: nombreDeFila("1° A: Beto Pérez") })).toBeNull());
+  });
+
+  it("FL-PAD-03: si el vínculo sostiene un mandato del Consejo, finalizar lo dice antes de enviar", async () => {
+    const conConsejo = { elementos: PADRON.elementos.map((f) => (f.vinculo_id === V_INQ ? { ...f, sostiene_consejo: true } : f)) };
+    vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(conConsejo) }));
+    abrir();
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
+    expect(within(ventanaDe("Finalizar el vínculo")).getByText(AVISO_SOSTIENE_CONSEJO)).toBeTruthy();
+  });
+
+  it("FL-PAD-03, control: sin un mandato del Consejo que dependa del vínculo, no se dice", async () => {
+    vi.stubGlobal("fetch", conPadron());
+    abrir();
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
+    expect(within(ventanaDe("Finalizar el vínculo")).queryByText(AVISO_SOSTIENE_CONSEJO)).toBeNull();
+  });
+
+  it("FL-INV-01: se llega con el vínculo a confirmar y su ficha se abre sola", async () => {
+    vi.stubGlobal("fetch", conPadron());
+    abrir({ pathname: "/padron", state: { consorcio: C1, abrir: V_INQ } });
+    expect(await screen.findByRole("dialog", { name: /Beto Pérez/ })).toBeTruthy();
   });
 
   it("«Cancelar» en la ventana de finalizar cierra la ventana sin enviar y vuelve a la ficha", async () => {

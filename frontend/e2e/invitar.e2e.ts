@@ -34,6 +34,7 @@ function invitacion(id: string, unidad: string, nombre: string, correo: string |
     vence_en: "2026-10-25T12:00:00Z",
     aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
     revocada_en: estado === "revocada" ? "2026-10-20T12:00:00Z" : null,
+    vinculo_id: null,
   };
 }
 

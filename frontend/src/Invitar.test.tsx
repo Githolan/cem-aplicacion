@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, mensajeAlInvitar, QUIEN_CONFIRMA, SIN_UNIDADES_INVITABLES } from "./Invitar";
+import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, LO_CONFIRMA_OTRA, mensajeAlInvitar, QUIEN_CONFIRMA, SIN_UNIDADES_INVITABLES } from "./Invitar";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -40,8 +40,22 @@ function invitacion(id: string, nombre: string, estado: string, correo: string |
     aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
     revocada_en: null,
     importada: false,
+    // FL-INV-01 (app 0110): el vínculo que dejó la aceptación.
+    vinculo_id: estado === "aceptada" ? VINCULO : null,
   };
 }
+
+const VINCULO = "77777777-7777-4777-8777-777777777777";
+/** La fila del Padrón del vínculo de la aceptada (FL-INV-01). */
+const padronCon = (confirmado: boolean, confirmable: boolean) => () =>
+  Response.json({
+    elementos: [
+      {
+        vinculo_id: VINCULO, unidad_id: U1, designacion: "1° A", nombre: "Carla Gómez", tipo: "inquilino", vigente_desde: "2026-10-19",
+        vigente_hasta: null, confirmado, iniciado: true, confirmable_por_vos: confirmable, gestionable_por_vos: true, sostiene_consejo: false,
+      },
+    ],
+  });
 
 const LISTA = {
   elementos: [
@@ -83,6 +97,7 @@ function conConsorcio(extra: Respuestas = {}) {
     [`GET /api/v1/consorcios/${C1}/unidades`]: () => Response.json(UNIDADES),
     [`GET ${RUTA_LISTA}`]: () => Response.json(LISTA),
     [`POST ${RUTA_IMPORTADA}`]: () => Response.json({ importada_pendiente: false }),
+    [`GET /api/v1/consorcios/${C1}/padron`]: padronCon(false, true),
     ...extra,
   });
 }
@@ -1235,12 +1250,34 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
     const aceptada = await abrirFicha("Carla Gómez, 1° A");
-    expect(within(aceptada).getByText(FALTA_CONFIRMAR, { exact: false })).toBeTruthy();
+    expect(await within(aceptada).findByText(FALTA_CONFIRMAR, { exact: false })).toBeTruthy();
     expect(within(aceptada).getByRole("link", { name: "Ir al Padrón para confirmar el vínculo" }).getAttribute("href")).toBe("/padron");
     fireEvent.click(within(aceptada).getByRole("button", { name: "Cerrar" }));
     // Control: una pendiente no lo dice.
     const pendiente = await abrirFicha("Beto Pérez, 1° A");
     expect(within(pendiente).queryByRole("link", { name: "Ir al Padrón para confirmar el vínculo" })).toBeNull();
+  });
+
+  it("FL-INV-01: con el vínculo ya confirmado, la aceptada no dice que falta confirmarlo", async () => {
+    const simulado = conConsorcio({ [`GET /api/v1/consorcios/${C1}/padron`]: padronCon(true, false) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
+    await waitFor(() => expect(pedidos(simulado, "GET", `/api/v1/consorcios/${C1}/padron`).length).toBeGreaterThan(0));
+    await waitFor(() => expect(within(aceptada).queryByText(LO_CONFIRMA_OTRA)).toBeNull());
+    expect(within(aceptada).queryByText(FALTA_CONFIRMAR, { exact: false })).toBeNull();
+  });
+
+  it("FL-INV-01: sin confirmar y sin poder confirmarlo quien mira, se dice quién lo confirma, sin enlace", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`GET /api/v1/consorcios/${C1}/padron`]: padronCon(false, false) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
+    expect(await within(aceptada).findByText(LO_CONFIRMA_OTRA)).toBeTruthy();
+    expect(within(aceptada).queryByRole("link", { name: "Ir al Padrón para confirmar el vínculo" })).toBeNull();
   });
 
   it("control G-26: sin `padron.confirmar_vinculo`, la aceptada no manda a confirmar", async () => {

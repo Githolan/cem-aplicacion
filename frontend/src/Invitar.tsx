@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 
@@ -23,7 +24,7 @@ import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { RUTA_PADRON } from "./Padron";
-import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { FallaDeLectura, mensajeDeLectura, REQUISITOS, SIN_CACHE, useEdificioElegido, usePuede } from "./permisos";
 import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
@@ -91,10 +92,15 @@ export const INVITACION_DEL_PADRON =
 /** En lugar de «Invitar a una persona» cuando el edificio no tiene ninguna unidad que la cuenta alcance (C8G-09). */
 export const SIN_UNIDADES_INVITABLES =
   "Esta cuenta no tiene unidades a las que invitar en este edificio. Las unidades se cargan con el padrón; el alcance de la cuenta lo define su mandato.";
-/** FL-PAD-02: en la ventana de invitar, quién confirma el vínculo. La regla que está en el código:
- * quien registró el vínculo (quien invita) no lo confirma. */
+/** FL-PAD-02: en la ventana de invitar, quién confirma el vínculo. La regla del backend (0014 y 0110,
+ * pregunta 7 del propietario): `padron.confirmar_vinculo` la tienen la Administración y, desde 0110, el
+ * Consejo; quien registró el vínculo (quien invita) no lo confirma. */
 export const QUIEN_CONFIRMA =
-  "Queda sin confirmar hasta que se confirme con el título. Lo confirma otra persona del edificio que confirma vínculos, no quien invita.";
+  "Queda sin confirmar hasta que se confirme con el título. Lo confirma la administración o un miembro del Consejo, nunca quien invita.";
+/** FL-INV-01: el vínculo de la aceptada sigue sin confirmar y quien mira no lo puede confirmar. */
+export const LO_CONFIRMA_OTRA =
+  "El vínculo todavía no está confirmado: lo confirma la administración o un miembro del Consejo, no quien invitó.";
+export const IR_A_CONFIRMAR = "Ir al Padrón para confirmar el vínculo";
 /** En la ficha de una invitación aceptada: lo que falta y dónde (G-26). */
 export const FALTA_CONFIRMAR =
   "Aceptada la invitación, el vínculo se confirma en el Padrón, donde figura «Sin confirmar» hasta entonces.";
@@ -693,11 +699,10 @@ export function Invitar() {
           ...(cierre ? [{ etiqueta: i.estado === "aceptada" ? "Aceptada el" : "Retirada el", valor: fecha(cierre) }] : []),
         ]}
       >
-        {/* G-26: aceptada, lo que sigue es confirmar el vínculo, en otra pantalla: se dice y se lleva. */}
-        {i.estado === "aceptada" && puede("padron.confirmar_vinculo") && (
-          <p>
-            {FALTA_CONFIRMAR} <Link to={RUTA_PADRON}>Ir al Padrón para confirmar el vínculo</Link>
-          </p>
+        {/* G-26 y FL-INV-01: aceptada, lo que sigue es confirmar el vínculo; se dice solo si sigue sin
+            confirmar, y se lleva a su ficha solo a quien lo puede confirmar. */}
+        {i.estado === "aceptada" && i.vinculo_id !== null && puede("padron.ver") && (
+          <VinculoDeLaInvitacion consorcio={consorcio} vinculoId={i.vinculo_id} />
         )}
         {retirable && (
           <p className="ficha-registro__acciones">
@@ -790,4 +795,37 @@ export function Invitar() {
       </VentanaDeFormulario>
     );
   }
+}
+
+/** FL-INV-01 (tanda 9, `Invitacion.vinculo_id`): cómo está el vínculo que dejó la aceptación, según su
+ * fila del Padrón (`confirmado`, `confirmable_por_vos`). */
+function VinculoDeLaInvitacion({ consorcio, vinculoId }: { consorcio: string; vinculoId: string }) {
+  const padron = useQuery({
+    queryKey: ["padron", consorcio],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/padron", { params: { path: { consorcio_id: consorcio } } });
+      if (data === undefined) throw new FallaDeLectura(mensajeDeFalla(response.status, codigoDe(error)));
+      return data.elementos;
+    },
+    ...SIN_CACHE,
+  });
+  if (padron.isPending) return null;
+  if (padron.isError)
+    return (
+      <p className="aviso-error" role="alert">
+        No se pudo saber si el vínculo está confirmado. {mensajeDeLectura(padron.error)}
+      </p>
+    );
+  const fila = padron.data.find((f) => f.vinculo_id === vinculoId);
+  // Confirmado, o ya terminado: no queda nada que hacer con él.
+  if (fila === undefined || fila.confirmado) return null;
+  if (!fila.confirmable_por_vos) return <p>{LO_CONFIRMA_OTRA}</p>;
+  return (
+    <p>
+      {FALTA_CONFIRMAR}{" "}
+      <Link to={RUTA_PADRON} state={{ consorcio, abrir: vinculoId }}>
+        {IR_A_CONFIRMAR}
+      </Link>
+    </p>
+  );
 }

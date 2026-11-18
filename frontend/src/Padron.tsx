@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
@@ -94,6 +94,11 @@ const TEXTO_ACCION: Record<
   },
 };
 
+/** FL-PAD-03 (tanda 9, `sostiene_consejo`, regla de 0023): terminar el vínculo que habilita a un miembro
+ * del Consejo deja su mandato en revisión, si no le queda otro que lo habilite. */
+export const AVISO_SOSTIENE_CONSEJO =
+  "Esta persona integra el Consejo por este vínculo: si no tiene otro que la habilite, su mandato queda en revisión y deja de autorizar actos.";
+
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
 const MS_POR_DIA = 86_400_000;
 /** Una fecha del contrato (AAAA-MM-DD) como «1 de marzo de 2026», sin correrse por la zona. */
@@ -184,6 +189,13 @@ export function Padron() {
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const llegada = useConsorcioDeLlegada();
+  // FL-INV-01 (tanda 9): desde la ficha de una invitación aceptada se llega con el vínculo a confirmar.
+  const estadoDeLlegada: unknown = useLocation().state;
+  const vinculoDeLlegada = useRef(
+    typeof estadoDeLlegada === "object" && estadoDeLlegada !== null && "abrir" in estadoDeLlegada && typeof estadoDeLlegada.abrir === "string"
+      ? estadoDeLlegada.abrir
+      : null,
+  );
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.padron,
@@ -193,6 +205,7 @@ export function Padron() {
   const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const fichas = useFichas<string>();
+  const abrirLaFicha = fichas.abrir;
   // La acción abierta en su ventana, encima de la ficha; nula, la ficha muestra sus datos y sus botones.
   const [accion, setAccion] = useState<Accion | null>(null);
   const [texto, setTexto] = useState("");
@@ -250,7 +263,13 @@ export function Padron() {
         exigirSesion(response);
         // E35: un padrón pedido antes de un cambio puede llegar después y mostrar el estado viejo.
         if (!vigente) return;
-        if (data !== undefined) setLectura({ tipo: "ok", filas: data.elementos });
+        if (data !== undefined) {
+          setLectura({ tipo: "ok", filas: data.elementos });
+          // La ficha del vínculo con el que se llegó se abre sola, una vez.
+          const llega = data.elementos.find((f) => f.vinculo_id === vinculoDeLlegada.current);
+          vinculoDeLlegada.current = null;
+          if (llega !== undefined) abrirLaFicha(llega.vinculo_id);
+        }
         else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
         else falloLaLectura(mensajeDeFalla(response.status, codigoDe(error)));
       })
@@ -262,7 +281,7 @@ export function Padron() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar, navegar]);
+  }, [consorcio, vuelta, aEntrar, navegar, abrirLaFicha]);
 
   /** PAD-06: el motivo va una sola vez, junto a «Consultar de nuevo»; el aviso de arriba queda para los «Listo». */
   function falloLaLectura(motivo: string) {
@@ -557,6 +576,11 @@ export function Padron() {
         alCerrar={soloLaFicha}
       >
         <p id={ayuda}>{textos.ayuda}</p>
+        {a !== "confirmar" && f.sostiene_consejo && (
+          <p className="aviso-pendiente" role="note">
+            {AVISO_SOSTIENE_CONSEJO}
+          </p>
+        )}
         <label htmlFor={idCampo}>{textos.campo}</label>
         <input
           id={idCampo}
