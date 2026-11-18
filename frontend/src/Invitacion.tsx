@@ -67,6 +67,8 @@ const ESTADO_DEL_PASO: Record<Paso, Estado> = {
   entrar: "requiere_sesion",
   otra_cuenta: "otra_persona",
   propia: "propia",
+  // FL-INVA-02 (`0110`): hasta que la pantalla tenga su texto, lo mismo que antes (el 404).
+  ya_aceptada: "invalida",
 };
 
 function leerToken(): string | null {

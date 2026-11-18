@@ -47,6 +47,7 @@ function fila(vinculo_id: string, nombre: string, extra: Partial<Fila> = {}): Fi
     vigente_hasta: null,
     confirmado: false,
     iniciado: true,
+    sostiene_consejo: false,
     ...extra,
   };
 }
@@ -666,7 +667,7 @@ describe("página /padron", () => {
     }
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(Object.keys(esquemas.FilaPadron?.properties ?? {}).sort()).toEqual(
-      ["confirmable_por_vos", "confirmado", "designacion", "gestionable_por_vos", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
+      ["confirmable_por_vos", "confirmado", "designacion", "gestionable_por_vos", "iniciado", "nombre", "sostiene_consejo", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
     );
     expect(esquemas.ConfirmacionVinculo?.properties?.referencia?.maxLength).toBe(300);
     expect(esquemas.FinVinculo?.properties?.motivo?.maxLength).toBe(300);

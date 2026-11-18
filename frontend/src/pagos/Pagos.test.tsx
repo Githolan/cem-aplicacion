@@ -130,7 +130,8 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     puede_modificar: false, puede_retirar: false, retiro: null, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
     puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
     puede_recuperar: false, puede_preparar_faltante: false, ejecucion: null, comprobante_actual: null,
-    comprobante_subido: null, lectura_comprobante: null, observacion_vigente: null, declaracion_vigente: null, diferencia_vigente: null, ...extra,
+    comprobante_subido: null, lectura_comprobante: null, observacion_vigente: null, declaracion_vigente: null, diferencia_vigente: null,
+    motivo_sin_acto: null, proveedor_admite_orden: true, ...extra,
   };
 }
 
