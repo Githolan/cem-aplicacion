@@ -1101,9 +1101,9 @@ export function Mandatos() {
     setActaEnRevision(null);
     const generacion = generacionActa.current;
     try {
-      const creada = actaCreada?.documento ?? (await crearActa(titulo, generacion));
-      if (typeof creada !== "string") return creada;
-      return await subirArchivoActa(creada, titulo, archivoActa, actaCreada === null, generacion);
+      const resultado = actaCreada !== null ? { creada: actaCreada.documento } : await crearActa(titulo, generacion);
+      if ("fin" in resultado) return resultado.fin;
+      return await subirArchivoActa(resultado.creada, titulo, archivoActa, actaCreada === null, generacion);
     } catch (e: unknown) {
       if (e instanceof SinSesion) {
         aEntrar();
@@ -1117,7 +1117,8 @@ export function Mandatos() {
 
   /** Primer paso: el documento en «Actas y decisiones», con la fecha del acto (o la de hoy si todavía
    * no se cargó). Devuelve su id o cómo sigue la ventana. */
-  async function crearActa(titulo: string, generacion: number): Promise<string | FinDeEnvio> {
+  /** El id del acta creada, o cómo termina la ventana: «seguir» no es un id (Codex en #257, mismo caso que Documentos). */
+  async function crearActa(titulo: string, generacion: number): Promise<{ creada: string } | { fin: FinDeEnvio }> {
     claveCrearActa.current ??= crypto.randomUUID();
     const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos", {
       headers: encabezadoCsrf(),
@@ -1125,16 +1126,16 @@ export function Mandatos() {
       body: { categoria: CATEGORIA_ACTAS, titulo, fecha: fechaDecision === "" ? hoyDelDispositivo() : fechaDecision },
     });
     exigirSesion(response);
-    if (generacion !== generacionActa.current) return "seguir";
+    if (generacion !== generacionActa.current) return { fin: "seguir" };
     if (data === undefined) {
       const codigo = codigoDe(error);
       if (renovarClave(response.status, codigo)) claveCrearActa.current = null;
       const campos = erroresDe(error, REVISAR_DATO, MENSAJES_PROPIOS);
       setErrorTituloActa(campos.titulo);
-      return { rechazo: mensajeDeCarga(response.status, codigo, "crear", Object.keys(campos).map((c) => `body.${c}`)) };
+      return { fin: { rechazo: mensajeDeCarga(response.status, codigo, "crear", Object.keys(campos).map((c) => `body.${c}`)) } };
     }
     claveCrearActa.current = null;
-    return data.id;
+    return { creada: data.id };
   }
 
   /** Segundo paso: el archivo crudo, con su tipo como `Content-Type`, igual que en Documentos. */
