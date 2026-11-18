@@ -112,7 +112,7 @@ test.describe("invitación de mandato", () => {
     );
     await simularSesion(page, "con_sesion");
     await page.goto(`/invitacion-mandato#token=${TOKEN}`);
-    const campo = page.getByLabel("Nombre (solo si la cuenta es nueva)");
+    const campo = page.getByLabel("Nombre", { exact: true });
     await campo.fill("Beto Estudio");
     await page.getByRole("button", { name: "Aceptar y asociar mi cuenta" }).click();
 
