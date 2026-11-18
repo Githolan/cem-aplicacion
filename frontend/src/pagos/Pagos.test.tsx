@@ -3087,8 +3087,13 @@ describe("aprobar y rechazar", () => {
     expect(await screen.findByText(/^Listo: la orden quedó aprobada por esta cuenta\. .+ Sigue este, 1 de 1\.$/)).toBeTruthy();
   });
 
+  it("FL-APR-01: la tabla del contrato encadena aprobar en serie (`despues: mismo_paso`)", () => {
+    expect(deLaTabla("en_revision", "aprobar").despues).toBe("mismo_paso");
+  });
+
   it("control de FL-APR-01: si la tabla no dice que sigue, aprobar vuelve a la bandeja", async () => {
-    abrirFicha(APROBAR, {
+    // La tabla del contrato 0.77.0 ya dice «mismo_paso»: el control fija «listo» a mano.
+    abrirFicha({ ...APROBAR, que_decir: "Falta aprobarla o rechazarla.", estado_visible: "esperando_aprobacion", despues: "listo" }, {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar", { orden_id: O2 })),
       [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
     });
