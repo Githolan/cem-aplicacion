@@ -15,6 +15,11 @@ services:
       POSTGRES_PASSWORD: postgres
     tmpfs:
       - /var/lib/postgresql
+    # Sin autovacuum: en una base descartable no hace falta, y su VACUUM ANALYZE competía con los
+    # downgrade de las pruebas de migración (deadlock intermitente del tracker; el 18-11-2026 el
+    # registro de PostgreSQL mostró `autovacuum: VACUUM ANALYZE nucleo.vinculo` contra
+    # `drop function nucleo.confirmar_vinculo`). Las bases reales lo mantienen.
+    command: ["postgres", "-c", "autovacuum=off"]
     # Replicación física para cem_copia_continua (H2c §6): la línea de `pg_hba` que tienen las
     # bases reales. Corre una sola vez, al crear el clúster.
     volumes:
