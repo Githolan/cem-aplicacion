@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CSV, problemaDelArchivo, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
-import { SubirArchivo } from "./SubirArchivo";
+import { CAMBIAR_ARCHIVO, DEJAR_ARCHIVO, SubirArchivo } from "./SubirArchivo";
 
 afterEach(() => {
   cleanup();
@@ -134,11 +135,57 @@ describe("SubirArchivo (comentario 32)", () => {
     expect(alElegir).not.toHaveBeenCalled();
   });
 
-  it("con un archivo ya elegido lo dice y la zona habla de reemplazarlo", () => {
-    documento({ reemplaza: true, elegido: "acta.pdf (1 KB)", nota: "Antes de mostrarlo lo revisa el antivirus." });
+  it("DOC-16: con un archivo ya elegido, solo su nombre y «Cambiar el archivo»", () => {
+    const alElegir = documento({ reemplaza: true, elegido: "acta.pdf (1 KB)", nota: "Antes de mostrarlo lo revisa el antivirus." });
     expect(screen.getByText("Elegido: acta.pdf (1 KB)")).toBeTruthy();
+    const botones = screen.getAllByRole("button").map((b) => b.textContent);
+    expect(botones).toEqual([CAMBIAR_ARCHIVO]);
+    expect(screen.queryByText(/^Soltar/)).toBeNull();
+    // Cerradas las opciones, soltar no hace nada: la zona se abre con «Cambiar el archivo».
+    fireEvent.drop(screen.getByRole("group", { name: "Subir el comprobante" }), { dataTransfer: { files: [PDF] } });
+    expect(alElegir).not.toHaveBeenCalled();
+
+    // «Cambiar el archivo» vuelve a abrir todas las formas de elegir, con el foco en la primera.
+    fireEvent.click(screen.getByRole("button", { name: CAMBIAR_ARCHIVO }));
+    for (const nombre of ["Sacar una foto", "Elegir de la galería", "Elegir un archivo", DEJAR_ARCHIVO])
+      expect(screen.getByRole("button", { name: nombre })).toBeTruthy();
     expect(screen.getByText("Soltar otro archivo acá")).toBeTruthy();
     expect(screen.getByText("PDF, JPEG o PNG, hasta 20 MB. Antes de mostrarlo lo revisa el antivirus.")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sacar una foto" }));
+    expect(screen.queryByRole("button", { name: CAMBIAR_ARCHIVO })).toBeNull();
+
+    // «Dejar este archivo» las cierra sin elegir nada, con el foco de vuelta en «Cambiar el archivo».
+    fireEvent.click(screen.getByRole("button", { name: DEJAR_ARCHIVO }));
+    expect(screen.queryByRole("button", { name: "Elegir un archivo" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: CAMBIAR_ARCHIVO }));
+    expect(alElegir).not.toHaveBeenCalled();
+  });
+
+  it("DOC-16: elegir otro archivo vuelve a cerrar las opciones; uno que no sirve las deja abiertas con el aviso", () => {
+    function ConEstado() {
+      const [elegido, setElegido] = useState<string | null>(null);
+      return (
+        <SubirArchivo titulo="Subir el comprobante" de="del comprobante" tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES}
+          reemplaza={elegido !== null} elegido={elegido} alElegir={(a) => setElegido(a.name)} />
+      );
+    }
+    render(<ConEstado />);
+    // Control: sin archivo, las formas de elegir como siempre.
+    expect(screen.getByRole("button", { name: "Elegir un archivo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: CAMBIAR_ARCHIVO })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [PDF] } });
+    expect(screen.getByText("Elegido: comprobante.pdf")).toBeTruthy();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([CAMBIAR_ARCHIVO]);
+
+    fireEvent.click(screen.getByRole("button", { name: CAMBIAR_ARCHIVO }));
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [TEXTO] } });
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Elegir un archivo" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [FOTO] } });
+    expect(screen.getByText("Elegido: foto.jpg")).toBeTruthy();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([CAMBIAR_ARCHIVO]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("los avisos no tutean ni vosean", () => {

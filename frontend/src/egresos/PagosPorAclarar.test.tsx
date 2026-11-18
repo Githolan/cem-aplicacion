@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
+import { CAMBIAR_ARCHIVO } from "../SubirArchivo";
 import { ContextoVersion } from "../version";
 import { VOLVIO_LA_RED } from "./comun";
 import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
@@ -252,6 +253,11 @@ describe("pagos para aclarar (app 0067)", () => {
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
     fireEvent.change(within(hoja).getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     expect(await within(hoja).findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
+    // DOC-16: subido, el nombre y un solo «Cambiar el archivo», sin las formas de elegir a la vista.
+    expect(within(hoja).getByText("Elegido: comprobante.pdf")).toBeTruthy();
+    expect(within(hoja).getByRole("button", { name: CAMBIAR_ARCHIVO })).toBeTruthy();
+    for (const nombre of ["Sacar una foto", "Elegir de la galería", "Elegir un archivo"])
+      expect(within(hoja).queryByRole("button", { name: nombre })).toBeNull();
     // ACL-05: la línea de estado alcanza, sin otro aviso que quede viejo.
     expect(screen.queryByText(/Listo: el comprobante se subió/)).toBeNull();
     const [carga] = pedidos(api, "POST", CARGA);
@@ -303,10 +309,31 @@ describe("pagos para aclarar (app 0067)", () => {
     abrir("/pagos/por-aclarar");
     const hoja = await transferencia();
     expect(within(hoja).getByText(/El antivirus rechazó el archivo/)).toBeTruthy();
+    // DOC-16, control: rechazado, hay que subir otro: las formas de elegir a la vista, sin «Cambiar el archivo».
+    expect(within(hoja).getByRole("button", { name: "Elegir un archivo" })).toBeTruthy();
+    expect(within(hoja).queryByRole("button", { name: CAMBIAR_ARCHIVO })).toBeNull();
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
     fireEvent.change(within(hoja).getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     await waitFor(() => expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1));
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/comprobante`)).toHaveLength(0);
+  });
+
+  it("DOC-16: con un comprobante subido antes, un solo «Cambiar el archivo» que abre las formas de elegir", async () => {
+    const api = backend({
+      "GET /api/v1/pagos-por-aclarar": () =>
+        Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible" }] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/por-aclarar");
+    const hoja = await transferencia();
+    const cambiar = within(hoja).getByRole("button", { name: CAMBIAR_ARCHIVO });
+    for (const nombre of ["Sacar una foto", "Elegir de la galería", "Elegir un archivo"])
+      expect(within(hoja).queryByRole("button", { name: nombre })).toBeNull();
+    // La API no informa el nombre del archivo subido antes: no se inventa uno.
+    expect(within(hoja).queryByText(/^Elegido:/)).toBeNull();
+    fireEvent.click(cambiar);
+    for (const nombre of ["Sacar una foto", "Elegir de la galería", "Elegir un archivo"])
+      expect(within(hoja).getByRole("button", { name: nombre })).toBeTruthy();
   });
 
   it("si el archivo no entró, se reintenta sin volver a elegirlo", async () => {

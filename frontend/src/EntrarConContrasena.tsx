@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
-import { codigoVerificacion } from "./SegundoFactor";
+import { codigoAplicacion, codigoVerificacion } from "./SegundoFactor";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { recordarFormaDeEntrar } from "./formaDeEntrar";
 import { useIrTrasEntrar } from "./sesion";
@@ -15,8 +15,9 @@ import { useIrTrasEntrar } from "./sesion";
 // lo mismo (401 `credenciales_invalidas`) y la página también.
 //
 // Informe de fricción: sin el párrafo que repite el título y con el botón corto (ACC-04); el paso
-// del código queda en su etiqueta y la hora límite. El código espera el botón, como en
-// EntrarConCodigo (WCAG 3.2.2).
+// del código queda en su etiqueta y la hora límite. Los seis números de la aplicación se envían
+// solos al completarlos (ACC-01), como en EntrarConCodigo: decisión del propietario, 18-11-2026,
+// deja de lado WCAG 3.2.2. El botón queda para el código de recuperación o si el envío falla.
 
 const ESTADO_INVALIDO = 400;
 const ESTADO_RECHAZADO = 401;
@@ -115,12 +116,21 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar, correoF
 
   function completar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
+    // El sexto número ya lo mandó (ACC-01): Enter o el botón no repiten el pedido en viaje.
+    if (estado === "enviando") return;
     const limpio = codigoVerificacion(codigo);
     if (!limpio) {
       setEstado("formato_codigo");
       return;
     }
     completarCon(limpio);
+  }
+
+  /** Al sexto número de la aplicación entra sin esperar el botón (ACC-01). */
+  function escribirCodigo(valor: string) {
+    setCodigo(valor);
+    const limpio = codigoAplicacion(valor);
+    if (estado !== "enviando" && limpio !== null) completarCon(limpio);
   }
 
   function completarCon(limpio: string) {
@@ -199,7 +209,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar, correoF
               aria-invalid={estado === "formato_codigo"}
               aria-describedby={estado === "formato_codigo" ? `${id}-formato` : undefined}
               value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
+              onChange={(e) => escribirCodigo(e.target.value)}
             />
             {estado === "formato_codigo" && (
               <p id={`${id}-formato`} className="aviso-error">

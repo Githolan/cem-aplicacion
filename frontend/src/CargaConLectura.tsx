@@ -74,8 +74,6 @@ export const TEXTO_DEJADO_SIN_LECTURA = "Se dejó de esperar la lectura: el arch
 export const SEGUIR_SIN_ESPERAR = "Seguir sin este archivo";
 export const SEGUIR_SIN_LECTURA = "Seguir sin la lectura";
 export const QUITAR_ARCHIVO = "Quitar el archivo";
-export const CAMBIAR_ARCHIVO = "Cambiar el archivo";
-export const NO_CAMBIAR_ARCHIVO = "Dejar este archivo";
 export const CONFIRMAR_QUITAR = "Sí, quitar el archivo";
 export const NO_QUITAR = "No, dejarlo";
 /** La pregunta antes de quitar. */
@@ -127,7 +125,6 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   const [viendo, setViendo] = useState(false);
   /** Con un archivo ya cargado, la zona para elegir otro se abre solo si se pide (ORD-04): el paso
    * siguiente es completar el formulario, no volver a subir. */
-  const [cambiando, setCambiando] = useState(false);
   /** Preguntando si se quita el archivo subido acá, o quitándolo. */
   const [quitar, setQuitar] = useState<"nada" | "preguntando" | "quitando">("nada");
   const claveQuitar = useRef<string | null>(null);
@@ -291,7 +288,6 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     setFalloQuitar(null);
     // Otro archivo cancela una pregunta de quitar abierta: se preguntaba por el anterior.
     setQuitar("nada");
-    setCambiando(false);
     void subir(archivo);
   }
 
@@ -325,9 +321,10 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   return (
     <section className="carga-con-lectura" aria-label={titulo}>
       {/* Sin la pregunta de quitar abierta (C8P-12): con ella a la vista no se elige otro archivo. */}
-      {(cargado === null || cambiando) && quitar === "nada" ? (
+      {/* Con el archivo cargado, su nombre y «Cambiar el archivo» los pone SubirArchivo (DOC-16). */}
+      {quitar === "nada" ? (
         <SubirArchivo titulo={titulo} de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={cargado !== null}
-          deshabilitada={deshabilitada || ocupada}
+          deshabilitada={deshabilitada || ocupada} elegido={cargado?.nombre ?? null}
           alElegir={elegir} />
       ) : (
         cargado !== null && (
@@ -392,11 +389,6 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
           <button type="button" className="secundario" onClick={() => setViendo(true)}>
             {textoVer}
           </button>
-          {quitar === "nada" && !ocupada && (
-            <button type="button" className="secundario" disabled={deshabilitada} onClick={() => setCambiando((c) => !c)}>
-              {cambiando ? NO_CAMBIAR_ARCHIVO : CAMBIAR_ARCHIVO}
-            </button>
-          )}
           {/* Solo el subido acá: el que trae la orden o el proveedor ya respalda algo guardado. */}
           {tocado && propio !== null && quitar === "nada" && (
             <button type="button" className="secundario peligro" disabled={deshabilitada || ocupada} onClick={() => setQuitar("preguntando")}>
