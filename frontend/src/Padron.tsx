@@ -11,7 +11,7 @@ import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe,
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
-import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { REQUISITOS, useConsorcioDeLlegada, useEdificioElegido, usePuede } from "./permisos";
 import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /padron (H2b 2b-5, corte 4; doc/diseno/H2b_5_Diseno.md §5 del repositorio CEM): el padrón
@@ -145,10 +145,14 @@ function renovarClave(estado: number, codigo: string | undefined): boolean {
   return estado < ESTADO.errorDelServidor && codigo !== "idempotencia_en_curso";
 }
 
-/** Lo que espera a quien puede confirmar va primero; después, el resto en el orden de la API. */
-export function sinConfirmarPrimero(filas: Fila[]): Fila[] {
-  return [...filas.filter((f) => !f.confirmado), ...filas.filter((f) => f.confirmado)];
+/** Lo que esa cuenta puede confirmar va primero; después, el resto en el orden de la API. Un
+ * vínculo sin confirmar que confirma otra persona no espera a quien mira (FL-PAD-01). */
+export function confirmablesPrimero(filas: Fila[]): Fila[] {
+  return [...filas.filter((f) => f.confirmable_por_vos), ...filas.filter((f) => !f.confirmable_por_vos)];
 }
+
+/** En la ficha de un vínculo sin confirmar que esa cuenta no confirma: por qué no hay «Confirmar». */
+export const LO_CONFIRMA_OTRA_PERSONA = "Lo confirma otra persona: nadie confirma su propio vínculo ni el que registró.";
 
 /** Una respuesta que deja la lista vieja: el vínculo cambió o ya no está. */
 function cambioElPadron(estado: number, codigo: string | undefined): boolean {
@@ -179,9 +183,12 @@ export function Padron() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const llegada = useConsorcioDeLlegada();
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.padron,
+    // La fila del inicio abre el edificio de la fila (FL-AVI-03).
+    llegada,
   );
   const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
@@ -464,7 +471,7 @@ export function Padron() {
             {lectura.tipo === "ok" && filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {filas.length > 0 && (
               <ul className="filas-registro" aria-label="Padrón">
-                {(puede("padron.confirmar_vinculo") ? sinConfirmarPrimero(filas) : filas).map((f) => (
+                {(puede("padron.confirmar_vinculo") ? confirmablesPrimero(filas) : filas).map((f) => (
                   <li key={f.vinculo_id}>
                     <FilaDeRegistro
                       titulo={titulo(f)}
@@ -521,6 +528,7 @@ export function Padron() {
         ]}
         ventana={accion !== null && acciones.includes(accion) && ventana(f, accion)}
       >
+        {!f.confirmado && !f.confirmable_por_vos && puede("padron.confirmar_vinculo") && <p>{LO_CONFIRMA_OTRA_PERSONA}</p>}
         {acciones.length > 0 && (
           <p className="ficha-registro__acciones">
             {acciones.map((a) => (

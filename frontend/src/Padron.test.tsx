@@ -10,7 +10,7 @@ import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { VOLVIO_LA_RED } from "./egresos/comun";
-import { mensajeDeError, sinConfirmarPrimero } from "./Padron";
+import { confirmablesPrimero, LO_CONFIRMA_OTRA_PERSONA, mensajeDeError } from "./Padron";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -452,9 +452,58 @@ describe("página /padron", () => {
     expect((screen.getByLabelText("Motivo") as HTMLInputElement).value).toBe("Venta");
   });
 
-  it("sinConfirmarPrimero conserva el orden de la API dentro de cada grupo", () => {
+  it("confirmablesPrimero conserva el orden de la API dentro de cada grupo", () => {
     const filas = [fila(V_PROP, "A", { confirmado: true }), fila(V_INQ, "B"), fila(V_OTRO, "C", { confirmado: true }), fila(V_FUT, "D")];
-    expect(sinConfirmarPrimero(filas).map((f) => f.nombre)).toEqual(["B", "D", "A", "C"]);
+    expect(confirmablesPrimero(filas).map((f) => f.nombre)).toEqual(["B", "D", "A", "C"]);
+  });
+
+  // FL-PAD-01: un vínculo sin confirmar que confirma otra persona no va arriba con los que esperan a
+  // quien mira, y su ficha dice por qué no tiene «Confirmar».
+  it("FL-PAD-01: el sin confirmar que esa cuenta no confirma va detrás y su ficha dice quién lo confirma", async () => {
+    const padron = {
+      elementos: [
+        fila(V_PROP, "Ana Ruiz", { confirmado: true }),
+        fila(V_INQ, "Beto Pérez", { confirmable_por_vos: false }),
+        fila(V_FUT, "Carla Gómez", { unidad_id: U2, designacion: "2° B" }),
+      ],
+    };
+    vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
+    abrir();
+    await filaDe("2° B: Carla Gómez");
+    const titulos = within(screen.getByRole("list", { name: "Padrón" }))
+      .getAllByRole("button")
+      .map((b) => b.textContent?.split(" ")[2]);
+    expect(titulos).toEqual(["Carla", "Ana", "Beto"]);
+
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    expect(within(beto).getByText(LO_CONFIRMA_OTRA_PERSONA)).toBeTruthy();
+    expect(within(beto).queryByRole("button", { name: "Confirmar" })).toBeNull();
+    cerrarFicha(beto);
+    // Control: el que sí confirma tiene el botón y no la línea.
+    const carla = await abrirFicha("2° B: Carla Gómez");
+    expect(within(carla).getByRole("button", { name: "Confirmar" })).toBeTruthy();
+    expect(within(carla).queryByText(LO_CONFIRMA_OTRA_PERSONA)).toBeNull();
+  });
+
+  it("FL-AVI-03: abre el edificio con el que llega desde el inicio", async () => {
+    const otro = `/api/v1/consorcios/${C2}/padron`;
+    const simulado = conPadron({
+      "GET /api/v1/me/consorcios": () => Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+      [`GET ${otro}`]: () => Response.json({ elementos: [fila(V_OTRO, "Dora Sosa")] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <ContextoVersion.Provider value={SIN_VERSION_NUEVA}>
+        <QueryClientProvider client={consultas}>
+          <MemoryRouter initialEntries={[{ pathname: "/padron", state: { consorcio: C2 } }]}>
+            <App />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </ContextoVersion.Provider>,
+    );
+    await filaDe("1° A: Dora Sosa");
+    expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(0);
   });
 
   it("un rechazo queda dentro de la ventana abierta, junto a lo escrito", async () => {

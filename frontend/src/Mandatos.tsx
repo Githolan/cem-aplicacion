@@ -28,7 +28,7 @@ import { useAlVolverLaRed, useConsultaDelAntivirus, useMiPersona } from "./egres
 import { nombreDeFacultad } from "./facultades";
 import { codigoDe, esDeConexion, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { RUTA_PADRON } from "./Padron";
-import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
+import { REQUISITOS, useAcciones, useConsorcioDeLlegada, useEdificioElegido, usePuede } from "./permisos";
 import { type Resultado as ResultadoDeUnActo, ResultadoDelActo } from "./ResultadoDelActo";
 import { SubirArchivo } from "./SubirArchivo";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
@@ -398,9 +398,12 @@ export function Mandatos() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const llegada = useConsorcioDeLlegada();
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.mandatos,
+    // La fila del inicio abre el edificio de la fila (FL-AVI-03).
+    llegada,
   );
   const sabeQueAlcanza = useAcciones(consorcio) !== null;
   const puede = usePuede(consorcio);

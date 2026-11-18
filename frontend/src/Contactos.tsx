@@ -18,7 +18,7 @@ import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { AlInicioSinEdificios, cumple, REQUISITOS, useAcciones, useEdificioElegido } from "./permisos";
+import { AlInicioSinEdificios, cumple, REQUISITOS, useAcciones, useConsorcioDeLlegada, useEdificioElegido } from "./permisos";
 
 // Página /contactos (H2b 2b-7b; doc/diseno/H2b_7_Diseno.md §5 del repositorio CEM): los contactos
 // de emergencia vigentes del edificio, que no son personales, para tenerlos a mano también sin
@@ -69,9 +69,12 @@ export function Contactos() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const llegada = useConsorcioDeLlegada();
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" || pantalla.tipo === "copias" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.contactos,
+    // La fila del inicio abre el edificio de la fila (FL-AVI-03).
+    llegada,
   );
   // Solo con la respuesta de `mis-acciones` en la mano: mientras no se sabe, no se pide la lista de
   // gestión (`usePuede` diría que sí, para que lo decida el servidor).
