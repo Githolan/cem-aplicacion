@@ -204,3 +204,22 @@ describe("inicio: vínculos que esperan confirmación (G-26)", () => {
     expect(within(screen.getByRole("main")).queryByRole("link", { name: "Padrón del edificio" })).toBeNull();
   });
 });
+
+describe("Flujos 18-11, tanda 7: el inicio del habitante autorizado", () => {
+  it("FL-VER-04: con solo la consulta de proveedores no hay sección «Gestión»: «Proveedores» está en el menú", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ["proveedores.ver", "documentos.ver"] } }));
+    abrir();
+    const menu = await screen.findByRole("navigation", { name: "Secciones" });
+    const proveedores = await within(menu).findByRole("link", { name: "Proveedores" });
+    expect(proveedores.classList.contains("navegacion__item--secundario")).toBe(false);
+    expect(screen.queryByRole("region", { name: "Gestión" })).toBeNull();
+    expect(within(screen.getByRole("main")).queryByRole("link", { name: "Proveedores" })).toBeNull();
+  });
+
+  it("FL-VER-04, control: con otra pantalla de gestión, «Proveedores» sigue en la sección «Gestión» del inicio", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ["proveedores.ver", ...SOLO_VE] }, padrones: { [C1]: filas(0, 1) } }));
+    abrir();
+    const gestion = within(await screen.findByRole("region", { name: "Gestión" }));
+    expect(await gestion.findByRole("link", { name: "Proveedores" })).toBeTruthy();
+  });
+});

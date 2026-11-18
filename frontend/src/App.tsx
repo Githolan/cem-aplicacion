@@ -28,7 +28,7 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
-import { DE_ADMINISTRACION, Navegacion, PersonaEnCabecera, useNavegacion } from "./Navegacion";
+import { DE_ADMINISTRACION, Navegacion, PersonaEnCabecera, soloConsultaProveedores, useNavegacion } from "./Navegacion";
 import { CircuitoPagos } from "./pagos/CircuitoPagos";
 import { ConsultaPagos } from "./pagos/ConsultaPagos";
 import { Cotejo } from "./pagos/Cotejo";
@@ -181,6 +181,8 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
                   : undefined;
             return ruta === undefined || pendientes.some((p) => p.ruta === ruta) ? [] : [{ ruta, texto: d.texto, icono: d.icono }];
           });
+  // FL-VER-04: con solo la consulta de proveedores, «Proveedores» es una pestaña más del menú, no Gestión.
+  const gestionDelInicio = soloConsultaProveedores(gestion.map((e) => e.ruta)) ? [] : gestion;
 
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y la
   // tarjeta de Pagos. Vuelve a pedir solo lo que falló.
@@ -259,11 +261,11 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
             )}
           </section>
         )}
-        {gestion.length > 0 && (
+        {gestionDelInicio.length > 0 && (
           <section aria-label="Gestión">
             {porEdificio !== null && <h2 className="titulo-seccion">Gestión</h2>}
             <ul className="filas-inicio">
-              {gestion.map((e) => (
+              {gestionDelInicio.map((e) => (
                 <FilaDeInicio key={e.ruta} enlace={e} />
               ))}
             </ul>

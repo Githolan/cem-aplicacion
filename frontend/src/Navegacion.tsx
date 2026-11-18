@@ -80,6 +80,14 @@ export const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_SOLICITUDES, texto: TITULO_SOLICITUDES, icono: "sobre", requisito: REQUISITOS.panel },
 ];
 
+/**
+ * FL-VER-04: quien de toda la gestión alcanza solo la consulta de proveedores (el habitante
+ * autorizado) no gestiona nada: «Proveedores» va con las principales, sin el grupo «Gestión». Recibe
+ * las rutas a las que llevan las entradas de gestión que se le ofrecen.
+ */
+export const soloConsultaProveedores = (rutas: readonly string[]): boolean =>
+  rutas.length === 1 && rutas[0] === RUTA_CONSULTA_PROVEEDORES;
+
 /** Todas las entradas del menú, en el orden en que se dibujan. */
 export const DESTINOS_DEL_MENU: readonly Destino[] = [...PRINCIPALES, ...DE_ADMINISTRACION];
 
@@ -160,7 +168,13 @@ export function Navegacion() {
       return ruta === null ? [] : [{ destino, ruta, activa: marcaLa(destino, pathname) }];
     });
   const administracion = ofrecidas(DE_ADMINISTRACION);
-  const enGestion = enAlgunaDe(DE_ADMINISTRACION, pathname);
+  const consultaPrincipal = soloConsultaProveedores(administracion.map((a) => a.ruta));
+  const enGestion = !consultaPrincipal && enAlgunaDe(DE_ADMINISTRACION, pathname);
+  const principales = ofrecidas(PRINCIPALES);
+  // La consulta, entre las principales: antes de «Cuenta», que queda última.
+  const deMiConsorcio = consultaPrincipal
+    ? [...principales.filter((d) => d.destino.ruta !== RUTA_CUENTA), ...administracion, ...principales.filter((d) => d.destino.ruta === RUTA_CUENTA)]
+    : principales;
   const marca = (
     <div className="navegacion__marca" aria-hidden="true">
       <img src="/icono.svg" alt="" width="40" height="40" />
@@ -178,14 +192,15 @@ export function Navegacion() {
     <nav className="navegacion" aria-label="Secciones">
       {marca}
       <p className="navegacion__grupo">Mi consorcio</p>
-      {ofrecidas(PRINCIPALES).map((d) => (
+      {deMiConsorcio.map((d) => (
         <Item key={d.destino.ruta} {...d} desdeInicio={d.destino.ruta === RUTA_INICIO && enGestion} />
       ))}
       {/* Neutro: el servidor dice qué alcanza la persona, no con qué papel. No se deduce acá. */}
-      {administracion.length > 0 && <p className="navegacion__grupo">Gestión</p>}
-      {administracion.map((d) => (
-        <Item key={d.destino.ruta} {...d} secundario />
-      ))}
+      {!consultaPrincipal && administracion.length > 0 && <p className="navegacion__grupo">Gestión</p>}
+      {!consultaPrincipal &&
+        administracion.map((d) => (
+          <Item key={d.destino.ruta} {...d} secundario />
+        ))}
       {/* En el inicio la falla ya la dice la pantalla, con su «Reintentar» (C1). */}
       {falla !== null && pathname !== RUTA_INICIO && (
         <p className="navegacion__falla" role="alert">
