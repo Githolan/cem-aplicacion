@@ -7,11 +7,29 @@ import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { FormasDeEntrar } from "./FormasDeEntrar";
 import { Hoja } from "./Hoja";
 import { salirDeLaCuenta } from "./sesion";
-import { comprobarSesion, faltaConocerSesion, olvidarRecuperada, olvidarSesion, salidas, useEstadoEncima } from "./sesionEncima";
+import {
+  comprobarSesion,
+  faltaConocerSesion,
+  type MotivoEncima,
+  olvidarRecuperada,
+  olvidarSesion,
+  salidas,
+  useEstadoEncima,
+} from "./sesionEncima";
 
 // La hoja de entrar encima (`sesionEncima.ts`) y el aviso de que se sigue donde se estaba. En la hoja,
 // el correo de la sesión va como texto y las otras formas plegadas (informe de fricción, ACC-05). En /entrar
 // no hace falta: la persona ya está entrando, y al terminar se suelta lo que esperaba.
+
+/** Dos causas, dos títulos (FL-ACC-02): con la sesión abierta no se dice que venció. Al entrar, lo
+ * que estaba en camino se repite solo (FL-ACC-01). */
+export const TEXTOS_HOJA: Record<MotivoEncima, { titulo: string; texto: string }> = {
+  vencida: { titulo: "La sesión venció", texto: "Hay que entrar de nuevo para seguir. Lo escrito queda acá." },
+  reciente: {
+    titulo: "Por seguridad, hay que entrar de nuevo",
+    texto: "Este paso pide haber entrado hace poco. Al entrar, sigue solo y lo escrito queda acá.",
+  },
+};
 
 /** Inicio y entrar ya preguntan por la sesión; las otras se usan sin ella: no hay nada que conservar. */
 const SIN_LECTURA_PROPIA: ReadonlySet<string> = new Set([RUTA_INICIO, RUTA_ENTRAR, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO]);
@@ -19,7 +37,7 @@ const SIN_LECTURA_PROPIA: ReadonlySet<string> = new Set([RUTA_INICIO, RUTA_ENTRA
 /** Sin respuesta tampoco se sabe nada: la sesión sigue sin conocerse y decide el servidor. */
 const leerSesion = () => api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion }).then(undefined, () => undefined);
 
-function HojaEntrar({ correo }: { correo: string }) {
+function HojaEntrar({ correo, motivo }: { correo: string; motivo: MotivoEncima }) {
   const [escrito, setEscrito] = useState<string | null>(null);
   const [falla, setFalla] = useState<string | null>(null);
   const [saliendo, setSaliendo] = useState(false);
@@ -61,8 +79,8 @@ function HojaEntrar({ correo }: { correo: string }) {
   }
 
   return (
-    <Hoja titulo="La sesión venció" encima>
-      <p>Hay que entrar de nuevo para seguir. Lo escrito queda acá.</p>
+    <Hoja titulo={TEXTOS_HOJA[motivo].titulo} encima>
+      <p>{TEXTOS_HOJA[motivo].texto}</p>
       <FormasDeEntrar correo={escrito ?? correo} alCambiarCorreo={setEscrito} alEntrar={seguir} enHoja />
       {falla !== null && (
         <>
@@ -87,7 +105,7 @@ function HojaEntrar({ correo }: { correo: string }) {
 
 export function EntrarEncima() {
   const { pathname } = useLocation();
-  const { pidiendo, correo, recuperada } = useEstadoEncima();
+  const { pidiendo, correo, recuperada, motivo } = useEstadoEncima();
 
   useEffect(() => {
     olvidarRecuperada();
@@ -115,7 +133,7 @@ export function EntrarEncima() {
           La pantalla sigue donde estaba.
         </p>
       )}
-      {pidiendo && pathname !== RUTA_ENTRAR && <HojaEntrar correo={correo} />}
+      {pidiendo && pathname !== RUTA_ENTRAR && <HojaEntrar correo={correo} motivo={motivo} />}
     </>
   );
 }
