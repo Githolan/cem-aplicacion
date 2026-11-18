@@ -36,11 +36,11 @@ const MANDATO_AE = {
 };
 
 const DECISIONES = [
-  { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true },
-  { id: D_PROPIA, tipo: "asamblea", fecha: "2026-03-05", descripcion: "Remueve al estudio", registrada_por_vos: true, del_equipo: false },
-  { id: D_NEGADA, tipo: "asamblea", fecha: "2026-03-20", descripcion: "Remueve al estudio, otra", registrada_por_vos: false, del_equipo: false },
+  { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true, tiene_acta: false },
+  { id: D_PROPIA, tipo: "asamblea", fecha: "2026-03-05", descripcion: "Remueve al estudio", registrada_por_vos: true, del_equipo: false, tiene_acta: false },
+  { id: D_NEGADA, tipo: "asamblea", fecha: "2026-03-20", descripcion: "Remueve al estudio, otra", registrada_por_vos: false, del_equipo: false, tiene_acta: false },
   // Una descripción del largo máximo (500): la opción del selector no puede ensanchar la página.
-  { id: D_LARGA, tipo: "consejo", fecha: "2026-04-01", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: false },
+  { id: D_LARGA, tipo: "consejo", fecha: "2026-04-01", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: false, tiene_acta: false },
 ];
 
 const error = (status: number, codigo: string) => ({ status, json: { codigo, mensaje: "x", id_correlacion: "c" } });

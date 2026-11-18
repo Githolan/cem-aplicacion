@@ -17,7 +17,11 @@ import {
   ALTA_SIN_DECISIONES,
   AYUDA_DESASOCIAR,
   CAUSA_REVISION,
+  ADJUNTAR_ACTA,
   ALTA_SIN_NADIE,
+  LISTO_ACTA_ADJUNTA,
+  SIN_ACTA,
+  SIN_ACTAS_DISPONIBLES,
   CORREO_ALTA,
   INVITACION_ENVIADA,
   INVITACION_POR_APROBAR,
@@ -80,8 +84,8 @@ const MANDATOS = {
 
 const DECISIONES = {
   elementos: [
-    { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true },
-    { id: D_PROPIA, tipo: "consejo", fecha: "2026-03-05", descripcion: "Contrata al estudio", registrada_por_vos: true, del_equipo: false },
+    { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true, tiene_acta: false },
+    { id: D_PROPIA, tipo: "consejo", fecha: "2026-03-05", descripcion: "Contrata al estudio", registrada_por_vos: true, del_equipo: false, tiene_acta: false },
   ],
 };
 
@@ -2118,6 +2122,58 @@ describe("tanda 6 de fricción en /mandatos", () => {
     fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 14, libro 3" } });
     return form;
   }
+
+  it("FL-DEC-01 (tanda 9): la decisión sin acta se marca y ofrece «Adjuntar el acta» con las disponibles; adjunta, se cierra con el «Listo»", async () => {
+    const RUTA_ACTA = `${RUTA_DECISIONES}/${D_EQUIPO}/acta`;
+    const simulado = conConsejo({
+      [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: DECISIONES.elementos.map((d) => ({ ...d, tiene_acta: d.id !== D_EQUIPO })) }),
+      [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json(DOCUMENTOS),
+      [`PUT ${RUTA_ACTA}`]: () => Response.json({ id: D_EQUIPO }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await cargado();
+    const fila_ = screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") });
+    expect(fila_.querySelector(".fila-registro__estado")?.textContent).toBe(SIN_ACTA);
+    fireEvent.click(fila_);
+    const ficha = await esperarFicha("Asamblea del 10 de enero de 2026");
+    fireEvent.click(await within(ficha).findByRole("button", { name: ADJUNTAR_ACTA }));
+    const ventana = await screen.findByRole("dialog", { name: ADJUNTAR_ACTA });
+    // Solo el acta disponible, ya elegida por ser la única.
+    const acta = within(ventana).getByLabelText("Acta") as HTMLSelectElement;
+    expect([...acta.options].map((o) => o.textContent)).toEqual(["Acta 14 de asamblea"]);
+    fireEvent.click(within(ventana).getByRole("button", { name: ADJUNTAR_ACTA }));
+    expect(await screen.findByText(LISTO_ACTA_ADJUNTA)).toBeTruthy();
+    const [pedido] = pedidos(simulado, "PUT", RUTA_ACTA);
+    expect(await (pedido as Request).json()).toEqual({ sha256: SHA_ACTA });
+    expect((pedido as Request).headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("FL-DEC-01: sin ninguna acta disponible, en lugar del botón se dice dónde se suben", async () => {
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json({ documentos: [] }) }));
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") }));
+    const ficha = await esperarFicha("Asamblea del 10 de enero de 2026");
+    expect(await within(ficha).findByText(SIN_ACTAS_DISPONIBLES)).toBeTruthy();
+    expect(within(ficha).queryByRole("button", { name: ADJUNTAR_ACTA })).toBeNull();
+  });
+
+  it("FL-DEC-01, control: la decisión con acta no ofrece adjuntar otra", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json(DOCUMENTOS),
+        [`GET ${RUTA_DECISIONES}/${D_EQUIPO}`]: () => Response.json({ ...detalleDecision(D_EQUIPO, false), sha256: SHA_ACTA }),
+      }),
+    );
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") }));
+    const ficha = await esperarFicha("Asamblea del 10 de enero de 2026");
+    expect(await within(ficha).findByRole("button", { name: "Ver el acta" })).toBeTruthy();
+    expect(within(ficha).queryByRole("button", { name: ADJUNTAR_ACTA })).toBeNull();
+  });
 
   it("G-15: el acta se elige de Documentos y la decisión la cita por la huella de su archivo", async () => {
     const simulado = conConsejo({

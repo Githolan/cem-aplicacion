@@ -181,10 +181,11 @@ export type Accion =
   | "invitar"
   | "aprobar_invitacion"
   | "retirar_invitacion"
-  | "desasociar";
+  | "desasociar"
+  | "acta";
 
-/** Las acciones que se hacen en una ventana sobre la ficha del mandato. */
-type AccionDeFicha = "baja" | "revision" | "invitar" | "retirar_invitacion" | "desasociar";
+/** Las acciones que se hacen en una ventana sobre la ficha del mandato (o, el acta, de la decisión). */
+type AccionDeFicha = "baja" | "revision" | "invitar" | "retirar_invitacion" | "desasociar" | "acta";
 
 const SIN_PERMISO: Record<Accion, string> = {
   decision: "Esta cuenta no tiene permiso para registrar decisiones en este edificio.",
@@ -195,6 +196,7 @@ const SIN_PERMISO: Record<Accion, string> = {
   aprobar_invitacion: "El mandato de esta cuenta no incluye aprobar esta invitación.",
   retirar_invitacion: "El mandato de esta cuenta no incluye retirar esta invitación.",
   desasociar: "El mandato de esta cuenta no incluye desasociar la cuenta de la administración.",
+  acta: "Esta cuenta no tiene permiso para registrar decisiones en este edificio.",
 };
 
 const NO_ENCONTRADO: Record<Accion, string> = {
@@ -206,6 +208,7 @@ const NO_ENCONTRADO: Record<Accion, string> = {
   aprobar_invitacion: "La invitación cambió o se retiró mientras tanto: la ficha ya está actualizada.",
   retirar_invitacion: "La invitación ya no está en este edificio: la ficha ya está actualizada.",
   desasociar: "No se encontró ese mandato en este edificio.",
+  acta: "Esa decisión ya no está en este edificio.",
 };
 
 /** El estado de un mandato del Consejo que dejó de cumplir la condición para integrarlo (G-41). Se
@@ -231,6 +234,12 @@ export const CORREO_ALTA = "Correo de la administración (opcional)";
 export const AYUDA_CORREO_ALTA = "Con el correo, el alta la invita a asociar su cuenta; la invitación sale cuando la aprueba otra persona.";
 export const textoListoConInvitacion = (nombre: string) =>
   `Listo: el mandato de ${nombre} quedó dado de alta y su invitación quedó por aprobar: la aprueba otra persona.`;
+/** FL-DEC-01 (tanda 9, `tiene_acta` y `PUT …/acta`): la decisión que quedó sin acta la recibe después. */
+export const ADJUNTAR_ACTA = "Adjuntar el acta";
+export const SIN_ACTA = "Sin acta";
+export const LISTO_ACTA_ADJUNTA = "Listo: el acta quedó adjunta a la decisión.";
+export const SIN_ACTAS_DISPONIBLES =
+  "Todavía no hay actas disponibles en Documentos: se suben en «Actas y decisiones» y, cuando el antivirus las revisa, se adjuntan desde acá.";
 /** El «Listo» de la decisión (FL-DEC-03): quién da el alta lo dice la línea de «falta una decisión
  * registrada por otra persona», y no toda decisión respalda un alta. */
 export const LISTO_DECISION = "Listo: la decisión quedó registrada.";
@@ -259,10 +268,14 @@ const FALTA = {
   referenciaDesasociar: "Falta escribir por qué esa cuenta no es la de la administración.",
   archivoActa: "Falta elegir el archivo del acta.",
   tituloActa: "Falta el título del acta.",
+  actaAdjunta: "Falta elegir el acta.",
 } as const;
 
 /** Los motivos de dominio, por el código del cuerpo uniforme. */
 const POR_CODIGO: Record<string, string> = {
+  // FL-DEC-01 (tanda 9, app 0110): el acta de una decisión que quedó sin ella.
+  acta_ya_registrada: "La decisión ya tiene su acta: la ficha ya está actualizada.",
+  acta_no_disponible: "Esa acta todavía no pasó la revisión del antivirus, o ya no es un documento vigente del edificio.",
   administracion_ocupada: "Ya hay un mandato de administración en esas fechas en este edificio.",
   mandato_superpuesto: "La persona ya tiene un mandato de ese tipo en esas fechas.",
   consejo_incompatible_con_administracion:
@@ -342,6 +355,7 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
   aprobar_invitacion: {},
   retirar_invitacion: {},
   desasociar: { referencia: "por qué esa cuenta no es la de la administración" },
+  acta: { sha256: "el acta" },
 };
 
 /** Qué decir ante el error de un envío, según el estado y el código del cuerpo uniforme. */
@@ -461,6 +475,9 @@ export function Mandatos() {
   // La ventana de la página (registrar una decisión o dar de alta) y la de la ficha, de a una.
   const [ventana, setVentana] = useState<VentanaDePagina | null>(null);
   const [accionFicha, setAccionFicha] = useState<AccionDeFicha | null>(null);
+  /** El acta elegida para adjuntar a una decisión sin ella (FL-DEC-01). */
+  const [actaAdjunta, setActaAdjunta] = useState("");
+  const claveActaAdjunta = useRef<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   /** El resultado de un acto hecho desde la ficha, que la deja abierta: sale en la ficha. */
@@ -1100,8 +1117,8 @@ export function Mandatos() {
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
           setDetalle({ tipo: "decision", datos: data });
-          // Con acta, se busca en Documentos para ofrecer verla (G-15).
-          if (data.sha256 !== null) pedirActas();
+          // Con acta, se busca en Documentos para ofrecer verla (G-15); sin ella, para adjuntarla (FL-DEC-01).
+          if (data.sha256 !== null || registraDecisiones) pedirActas();
           return;
         }
         if (response.status === ESTADO.sinPermiso) falloDetalle("Esta cuenta no tiene permiso para ver esa decisión.");
@@ -1707,6 +1724,8 @@ export function Mandatos() {
                     <FilaDeRegistro
                       titulo={tituloDeDecision(d)}
                       resumen={recortar(d.descripcion)}
+                      // FL-DEC-01: a quien registra decisiones, la que quedó sin acta se le marca.
+                      estado={registraDecisiones && veActas && !d.tiene_acta ? SIN_ACTA : undefined}
                       alAbrir={() => verDecision(d)}
                       refFila={fichas.refFila(d.id)}
                       deshabilitada={enviando}
@@ -2188,6 +2207,8 @@ export function Mandatos() {
         valor: d.registrada_por_vos ? "Esta cuenta." : d.del_equipo ? "El equipo de la plataforma." : "Otra persona del edificio.",
       },
     ];
+    // FL-DEC-01: sin acta, quien registra decisiones la adjunta, de las que ya pasaron el antivirus.
+    const adjunta = d.sha256 === null && registraDecisiones && veActas;
     return (
       <FichaDeRegistro
         titulo={tituloDeDecision(d)}
@@ -2195,12 +2216,74 @@ export function Mandatos() {
         alCerrar={() => cerrarFicha()}
         ocupada={enviando}
         ventana={
-          viendoActa !== null && (
+          viendoActa !== null ? (
             <VisorDocumento consorcio={consorcio} documento={viendoActa.documento} version={viendoActa.version} nombre={viendoActa.titulo}
               alCerrar={() => setViendoActa(null)} aEntrar={aEntrar} />
+          ) : (
+            adjunta && accionFicha === "acta" && ventanaAdjuntarActa(d)
           )
         }
-      />
+      >
+        {adjunta && actas?.tipo === "ok" && (
+          actasElegibles.length > 0 ? (
+            <p className="ficha-registro__acciones">
+              <button type="button" disabled={enviando}
+                onClick={() => {
+                  claveActaAdjunta.current = null;
+                  setActaAdjunta(actasElegibles.length === 1 ? (actasElegibles[0]?.id ?? "") : "");
+                  abrirAccionFicha("acta");
+                }}>
+                {ADJUNTAR_ACTA}
+              </button>
+            </p>
+          ) : (
+            <ComandoNoDisponible motivo={SIN_ACTAS_DISPONIBLES} />
+          )
+        )}
+      </FichaDeRegistro>
+    );
+  }
+
+  /** «Adjuntar el acta» a la decisión que quedó sin ella (FL-DEC-01), con las actas disponibles. */
+  function ventanaAdjuntarActa(d: DecisionDetalle) {
+    const idActa = `${id}-adjuntar-acta`;
+    function adjuntar(): FinDeEnvio | Promise<FinDeEnvio> {
+      if (faltan("acta", { sha256: [actaAdjunta, FALTA.actaAdjunta] })) return "seguir";
+      const elegida = actasElegibles.find((a) => a.id === actaAdjunta);
+      const huella = elegida === undefined ? undefined : disponibleDe(elegida)?.sha256;
+      if (huella === undefined) return "seguir";
+      return pedirActo(
+        claveActaAdjunta,
+        "acta",
+        (clave) =>
+          api.PUT("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}/acta", {
+            params: { path: { consorcio_id: consorcio, decision_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+            headers: encabezadoCsrf(),
+            body: { sha256: huella },
+          }),
+        () => cerrarFichaCon(LISTO_ACTA_ADJUNTA, true),
+        // Ya tenía acta: la ficha quedó vieja; se cierra con el motivo y la lista se vuelve a leer.
+        (_estado, codigo, motivo) => {
+          if (codigo !== "acta_ya_registrada") return undefined;
+          setVuelta((v) => v + 1);
+          return cerrarFichaCon(motivo, false);
+        },
+      );
+    }
+    return (
+      <VentanaDeFormulario titulo={ADJUNTAR_ACTA} textoEnviar={ADJUNTAR_ACTA} alEnviar={adjuntar} alCerrar={cerrarAccionFicha}>
+        <label htmlFor={idActa}>Acta</label>
+        <select id={idActa} data-foco {...marcaDe(idActa, errorEn("acta", "sha256"))} value={actaAdjunta}
+          onChange={(e) => cambiar(claveActaAdjunta, setActaAdjunta, "sha256")(e.target.value)}>
+          {actasElegibles.length !== 1 && <option value="">Elegir el acta</option>}
+          {actasElegibles.map((a) => (
+            <option key={a.id} value={a.id}>
+              {recortar(a.titulo)}
+            </option>
+          ))}
+        </select>
+        <ErrorDeCampo idCampo={idActa} mensaje={errorEn("acta", "sha256")} />
+      </VentanaDeFormulario>
     );
   }
 

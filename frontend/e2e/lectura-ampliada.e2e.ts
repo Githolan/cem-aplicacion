@@ -332,7 +332,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
       },
       [`GET /api/v1/consorcios/${C1}/decisiones`]: {
         // Del largo máximo (500): la opción del selector no puede ensanchar la página.
-        elementos: [{ id: DECISION, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: true }],
+        elementos: [{ id: DECISION, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: true, tiene_acta: false }],
       },
       [`GET /api/v1/consorcios/${C1}/mandatos/candidatos`]: {
         elementos: [{ persona_id: "88888888-8888-4888-8888-888888888888", nombre: "Beto Pérez", unidades: ["1° A"], habilita_consejo: true, mandatos: [] }],
