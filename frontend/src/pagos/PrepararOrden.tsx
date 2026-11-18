@@ -33,12 +33,16 @@ function ordenDe(estado: object): OrdenInicial {
     const valor = (estado as Record<string, unknown>)[campo];
     return typeof valor === "string" ? valor : undefined;
   };
+  const reserva = (estado as Record<string, unknown>).reserva;
   return {
     proveedor: texto("proveedor"),
     importe: texto("importe"),
     moneda: texto("moneda"),
     concepto: texto("concepto"),
     comprobante: texto("comprobante"),
+    // Lo que vuelve de Proveedores con la orden (FL-PRV-02, FL-ORD-04).
+    reserva: typeof reserva === "boolean" ? reserva : undefined,
+    contrato: texto("contrato"),
     factura: facturaDe((estado as Record<string, unknown>).factura),
   };
 }

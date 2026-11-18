@@ -36,6 +36,7 @@ from uuid import UUID
 
 from cem_contracts.errores import CodigoError
 from cem_contracts.mandatos import (
+    ActaDecision,
     BajaMandato,
     CandidatoMandato,
     DecisionDetalle,
@@ -63,6 +64,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
+from app.consorcios.mandatos_invitaciones import _llamar as _llamar_invitacion
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, detalle_de_campo, sin_cache
@@ -166,6 +168,13 @@ ERRORES = {
         422, CodigoError.FECHA_FUTURA,
         "La fecha de la decisión no puede ser posterior a hoy en el consorcio.",
     ),
+    "acta_ya_registrada": (
+        409, CodigoError.ACTA_YA_REGISTRADA, "La decisión ya tiene su acta: no se reemplaza.",
+    ),
+    "acta_no_disponible": (
+        422, CodigoError.ACTA_NO_DISPONIBLE,
+        "El acta tiene que ser un documento del consorcio ya analizado y disponible.",
+    ),
 }  # fmt: skip
 """Motivos de las funciones de `0014`, `0016`, `0018`, `0019` y `0023`, y del disparador del acta
 de `0089`. Los de separación
@@ -184,6 +193,7 @@ CAMPO_DEL_MOTIVO = {
     "descripcion_invalida": "descripcion",
     "referencia_invalida": "referencia",
     "sha256_invalido": "sha256",
+    "acta_no_disponible": "sha256",
     "decision_invalida": "decision_id",
     "persona_sin_vinculo": "persona_id",
     "mandato_sin_cuenta": "persona_id",
@@ -269,6 +279,50 @@ def registrar_decision(
     return responder_una_vez(motor, ctx, idempotencia, efecto)
 
 
+@router.put(
+    "/consorcios/{consorcio_id}/decisiones/{decision_id}/acta",
+    response_model=DecisionRegistrada,
+    summary="Adjuntar el acta a una decisión que quedó sin ella",
+    responses={
+        403: {"description": "Sin `decisiones.registrar` en el consorcio."},
+        404: {"description": "La decisión no existe en este consorcio."},
+        409: {"description": "La decisión ya tiene su acta (`acta_ya_registrada`)."},
+        422: {
+            "description": "La huella no es la de una versión disponible de un documento"
+            " vigente del consorcio (`acta_no_disponible`) o es de un documento quitado o"
+            " retirado (`documento_invalido`)."
+        },
+    },
+)
+def adjuntar_acta(
+    decision_id: UUID,
+    acta: ActaDecision,
+    permiso: Annotated[Permiso, Depends(requiere("decisiones.registrar"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """FL-DEC-01 (`0110`): con los mismos permisos que registrar la decisión, una sola vez y
+    solo con un documento ya analizado (la decisión que se cerró antes de que terminara el
+    antivirus, o una que quedó sin acta). Queda en la auditoría."""
+    ctx = permiso.ctx
+    permiso.verificar(Entidad(respaldo_presente=True))
+
+    def efecto(conn: Connection) -> tuple[int, DecisionRegistrada]:
+        try:
+            _llamar(
+                conn,
+                "select nucleo.adjuntar_acta_decision(:d, :s, :a, 'api')",
+                {"d": decision_id, "s": acta.sha256, "a": ctx.persona_id},
+            )
+        except ErrorApi as e:
+            if e.codigo == CodigoError.DECISION_INVALIDA:  # nombrada en la ruta
+                raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO) from e
+            raise
+        return 200, DecisionRegistrada(id=decision_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
 @router.post(
     "/consorcios/{consorcio_id}/mandatos",
     status_code=201,
@@ -286,9 +340,13 @@ def registrar_decision(
 def alta_mandato(
     nuevo: MandatoNuevo,
     permiso: Annotated[Permiso, Depends(requiere("mandatos.alta"))],
+    asociar: Annotated[Permiso, Depends(requiere("mandatos.asociar_persona"))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
+    """Con `invitacion` (solo administrador externo; pregunta 17 del propietario, 18-11-2026,
+    FL-MAN-06), el mismo acto emite la invitación, que queda por aprobar por otra persona: es la
+    misma función que emitirla después, en la misma transacción."""
     ctx = permiso.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         decision = _sobre_decision(conn, ctx.consorcio_id, nuevo.decision_id)
@@ -300,6 +358,8 @@ def alta_mandato(
             **decision,
         )
     )
+    if nuevo.invitacion is not None:
+        asociar.verificar(Entidad(respaldo_presente=True))  # el contrato exige la referencia
 
     def efecto(conn: Connection) -> tuple[int, MandatoRegistrado]:
         nuevo_id = _llamar(
@@ -310,7 +370,15 @@ def alta_mandato(
              "mat": nuevo.matricula, "d": nuevo.decision_id, "desde": nuevo.desde,
              "hasta": nuevo.hasta, "f": nuevo.facultades, "a": ctx.persona_id},
         ).scalar_one()  # fmt: skip
-        return 201, MandatoRegistrado(id=nuevo_id)
+        invitacion_id = None
+        if nuevo.invitacion is not None:
+            invitacion_id = _llamar_invitacion(
+                conn,
+                "select nucleo.invitar_a_mandato(:m, :correo, :r, null, null, null, :a, 'api')",
+                {"m": nuevo_id, "correo": nuevo.invitacion.correo,
+                 "r": nuevo.invitacion.referencia, "a": ctx.persona_id},
+            ).scalar_one()  # fmt: skip
+        return 201, MandatoRegistrado(id=nuevo_id, invitacion_id=invitacion_id)
 
     return responder_una_vez(motor, ctx, idempotencia, efecto)
 
@@ -483,14 +551,39 @@ COLUMNAS_RESUMEN = (
     responses={403: {"description": "Sin `mandatos.ver` en el consorcio."}},
 )
 def listar_mandatos(
-    permiso: Annotated[Permiso, Depends(requiere("mandatos.ver"))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere("mandatos.ver"))],
+    asociaciones: Annotated[Permiso, Depends(requiere("mandatos.ver_asociaciones"))],
+    motor: MotorDep,
 ) -> ListaMandatos:
     """Sin referencias, instrumentos ni facultades (van en el detalle); el CUIT, solo del
     administrador externo."""
     filas = _leer(
         permiso, motor, f"select {COLUMNAS_RESUMEN} from nucleo.mandatos_del_consorcio()", {}
     )
-    return ListaMandatos(elementos=[MandatoResumen(**f) for f in filas])
+    invitaciones = _invitaciones(permiso, asociaciones, motor, [f["id"] for f in filas])
+    return ListaMandatos(
+        elementos=[MandatoResumen(**f, **invitaciones.get(f["id"], SIN_INVITACION)) for f in filas]
+    )
+
+
+SIN_INVITACION = {"invitacion": None, "invitacion_emitida_por_mi": False}
+
+
+def _invitaciones(
+    permiso: Permiso, asociaciones: Permiso, motor, ids: list[UUID]
+) -> dict[UUID, dict]:
+    """FL-MAN-04 (18-11-2026): la última invitación de cada mandato, con la misma lectura que la
+    ficha (`invitaciones_de_mandato`, `0015`), para quien ve las asociaciones. Solo para mostrar."""
+    if not ids or not asociaciones.decidir(Entidad()).permitido:
+        return {}
+    filas = _leer(
+        permiso, motor,
+        "select m.id, x.estado as invitacion, x.emitida_por_mi as invitacion_emitida_por_mi"
+        " from unnest(cast(:ids as uuid[])) as m(id)"
+        " cross join lateral (select * from nucleo.invitaciones_de_mandato(m.id) limit 1) x",
+        {"ids": ids},
+    )  # fmt: skip
+    return {f["id"]: {k: v for k, v in f.items() if k != "id"} for f in filas}
 
 
 @router.get(
@@ -503,10 +596,16 @@ def candidatos(
     permiso: Annotated[Permiso, Depends(requiere("mandatos.ver_candidatos"))], motor: MotorDep
 ) -> ListaCandidatos:
     """Las personas con un vínculo confirmado, vigente o futuro, en el consorcio (decisión 3).
-    Sin correo ni teléfono."""
+    Sin correo ni teléfono. Con si cumplen hoy la condición del Consejo y sus mandatos (pregunta 8
+    del propietario y FL-MAN-03, 18-11-2026; `0110`)."""
     filas = _leer(
-        permiso, motor, "select persona_id, nombre, unidades from nucleo.candidatos_a_mandato()", {}
-    )
+        permiso, motor,
+        "select c.persona_id, c.nombre, c.unidades, d.habilita_consejo, d.mandatos"
+        " from nucleo.candidatos_a_mandato() c"
+        " join nucleo.candidatos_a_mandato_datos() d on d.persona_id = c.persona_id"
+        " order by c.nombre, c.persona_id",
+        {},
+    )  # fmt: skip
     return ListaCandidatos(elementos=[CandidatoMandato(**f) for f in filas])
 
 
@@ -522,6 +621,7 @@ def candidatos(
 def detalle_mandato(
     mandato_id: UUID,
     permiso: Annotated[Permiso, Depends(requiere("mandatos.ver"))],
+    asociaciones: Annotated[Permiso, Depends(requiere("mandatos.ver_asociaciones"))],
     motor: MotorDep,
 ) -> MandatoDetalle:
     # `es_propio` compara cuentas, como `baja_mandato` (`SOLO_POR_CUENTA`): con otra cuenta del
@@ -543,7 +643,8 @@ def detalle_mandato(
     )
     if not filas:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-    return MandatoDetalle(**filas[0])
+    invitacion = _invitaciones(permiso, asociaciones, motor, [mandato_id])
+    return MandatoDetalle(**filas[0], **invitacion.get(mandato_id, SIN_INVITACION))
 
 
 @router.get(
@@ -558,7 +659,8 @@ def listar_decisiones(
     filas = _leer(
         permiso,
         motor,
-        "select d.id, d.tipo::text as tipo, d.fecha, d.descripcion, f.registrada_por, f.origen"
+        "select d.id, d.tipo::text as tipo, d.fecha, d.descripcion, f.registrada_por, f.origen,"
+        " f.sha256_acta is not null as tiene_acta"
         # `left`: la función corre siempre, y su 42501 es la segunda barrera.
         " from nucleo.decisiones_del_consorcio() d"
         " left join nucleo.decision_formal f on f.consorcio_id = :c and f.id = d.id"
@@ -573,6 +675,7 @@ def listar_decisiones(
                 tipo=f["tipo"],
                 fecha=f["fecha"],
                 descripcion=f["descripcion"],
+                tiene_acta=f["tiene_acta"],
                 **_quien_registro(f, cuentas),
             )  # fmt: skip
             for f in filas
@@ -631,5 +734,6 @@ def detalle_decision(
         descripcion=f["descripcion"],
         referencia=f["referencia_acta"],
         sha256=f["sha256_acta"],
+        tiene_acta=f["sha256_acta"] is not None,
         **_quien_registro(f, _cuentas_humanas(permiso, motor)),
     )

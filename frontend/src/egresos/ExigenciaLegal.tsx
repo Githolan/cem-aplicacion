@@ -6,8 +6,9 @@ import { encabezadoCsrf } from "../csrf";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
-import { ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, renovarClave } from "./comun";
-import { TEXTO_TIPO, type RequisitoLegal } from "./DocumentacionProveedor";
+import { BLOQUEO_POR_DOCUMENTACION, SALTEO_EN_UNA_URGENCIA } from "../pagos/textos";
+import { ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, momento, momentoAlFinal, renovarClave } from "./comun";
+import { CARGAR, SubirDocumentacion, TEXTO_TIPO, type RequisitoLegal } from "./DocumentacionProveedor";
 import { exigirSesion, SinSesion } from "./useConsorcio";
 
 // Lo que exige la ley al proveedor (RF50 configurable; app 0104; sí del propietario del
@@ -19,19 +20,50 @@ import { exigirSesion, SinSesion } from "./useConsorcio";
 // Informe de fricción, tanda 4: agregar un rubro se hace en su ventana (SEG-01), con el botón
 // siempre activo (C8P-21); «Quitar» no repite el rubro que tiene al lado (SEG-02); y sin nada que
 // mostrar ni hacer, la sección no se dibuja (SEG-03).
+//
+// Flujos 18-11, tanda 1: el aviso dice lo mismo que el formulario de la orden y, con un salteo que
+// espera su orden, lo dice en vez del bloqueo (FL-LEG-07); cada requisito que falta se carga desde su
+// renglón, con el tipo y el requisito ya elegidos (FL-LEG-05); y agregar un rubro dice antes qué se le
+// va a exigir y qué pasa mientras falte (FL-LEG-10).
+//
+// Flujos 18-11, tanda 9 (pregunta 4 del propietario, app 0110): quitar un rubro al que le falta
+// documentación pide el motivo en una ventana (`motivo_requerido`), y esos retiros quedan a la vista
+// de quien la API se los muestra (el Consejo), con quién, cuándo, qué faltaba y por qué.
 
 type Faltante = components["schemas"]["RequisitoFaltante"];
 type Modo = components["schemas"]["ModoExigencia"];
+type Retiro = components["schemas"]["RetiroRubroConMotivo"];
 
 export const TITULO_EXIGENCIA = "Lo que exige la ley";
-export const AVISO_FALTA_BLOQUEA =
-  "Le falta documentación que exige la ley, o la tiene vencida: no se le pueden preparar órdenes nuevas hasta cargarla. Las órdenes que ya existen siguen su curso.";
+export const AVISO_FALTA_BLOQUEA = `${BLOQUEO_POR_DOCUMENTACION} Las órdenes que ya existen siguen su curso.`;
+/** FL-LEG-07: con un salteo que espera su orden, el aviso no dice que no se puede. */
+export const textoConSalteoHasta = (venceEn: string) =>
+  `Le falta documentación que exige la ley, o la tiene vencida. Hay un salteo por urgencia: se le puede preparar una orden hasta el ${momentoAlFinal(venceEn)}`;
+/** FL-LEG-10: lo que pasa a exigirse al agregar el rubro, antes de agregarlo. */
+export const textoSeLeVaAExigir = (requisitos: readonly string[], modo: Modo) =>
+  `Se le va a exigir: ${requisitos.join("; ")}. ${
+    modo === "bloquear" ? "Mientras falte, no se le pueden preparar órdenes nuevas." : "Mientras falte, queda marcado."
+  }`;
 export const AVISO_FALTA_AVISA = "Le falta documentación que exige la ley, o la tiene vencida. Se le puede seguir contratando; queda marcado.";
+/** FL-LEG-08: a quien no cambia los rubros ni saltea, lo que falta, sin lo que pasa con las órdenes. */
+export const AVISO_FALTA_SOLO_LEE = "Le falta documentación que exige la ley, o la tiene vencida:";
 export const AGREGAR_UN_RUBRO = "Agregar un rubro legal";
 export const AGREGAR_RUBRO = "Agregar el rubro";
 export const RUBRO_LEGAL = "Rubro legal";
 export const FALTA_RUBRO = "Falta elegir el rubro.";
 export const QUITAR = "Quitar";
+/** Pregunta 4 del propietario: quitar un rubro con faltantes pide el motivo. */
+export const textoQuitarRubro = (rubro: string) => `Quitar el rubro ${textoRubro(rubro)}`;
+export const CONFIRMAR_QUITAR = "Quitar el rubro";
+export const AVISO_QUITAR_CON_FALTANTES = "Le falta documentación de este rubro: quitarlo deja de exigirla. El motivo queda a la vista del Consejo.";
+export const MOTIVO_QUITAR = "Motivo";
+export const FALTA_MOTIVO_QUITAR = "Falta escribir el motivo.";
+export const TITULO_RETIROS = "Rubros quitados con documentación faltante";
+/** Un retiro con motivo, para quien lo ve: qué rubro, qué faltaba, quién, cuándo y por qué. */
+export function textoRetiro(r: Retiro, requisitos: readonly RequisitoLegal[]): string {
+  const faltaban = r.faltaban.map((c) => requisitos.find((q) => q.codigo === c)?.descripcion ?? c).join("; ");
+  return `${textoRubro(r.rubro_legal)}, quitado el ${momento(r.retirado_en)} por ${r.retirado_por_nombre} (faltaba: ${faltaban}). Motivo: ${r.motivo}`;
+}
 
 /** Los rubros de la matriz legal en palabras; uno nuevo que la pantalla no conoce va por su código. */
 export const TEXTO_RUBRO: Record<string, string> = {
@@ -48,8 +80,12 @@ export const TEXTO_RUBRO: Record<string, string> = {
 };
 export const textoRubro = (rubro: string) => TEXTO_RUBRO[rubro] ?? rubro;
 
-export function avisoDeFalta(modo: Modo): string {
-  return modo === "bloquear" ? AVISO_FALTA_BLOQUEA : AVISO_FALTA_AVISA;
+/** El aviso de lo que falta (FL-LEG-07). `salteoVence`: el vencimiento del salteo que espera su
+ * orden. `conUrgencia`: a quien prepara órdenes se le dice también la salida de una urgencia. */
+export function avisoDeFalta(modo: Modo, salteoVence: string | null = null, conUrgencia = false): string {
+  if (modo !== "bloquear") return AVISO_FALTA_AVISA;
+  if (salteoVence !== null) return textoConSalteoHasta(salteoVence);
+  return conUrgencia ? `${AVISO_FALTA_BLOQUEA} ${SALTEO_EN_UNA_URGENCIA}` : AVISO_FALTA_BLOQUEA;
 }
 
 type Props = {
@@ -61,25 +97,57 @@ type Props = {
   modo: Modo;
   /** Quien prepara órdenes asigna y quita rubros; quien consulta, no. */
   puedeCambiar: boolean;
+  /** Cargar lo que falta desde su renglón (FL-LEG-05): lo dice la API. */
+  puedeCargar: boolean;
+  /** Para la hoja de carga: a quién se le carga y si el edificio admite «No vence». */
+  razonSocial: string;
+  admiteNoVence: boolean;
+  /** El vencimiento del salteo que espera su orden, si hay uno (FL-LEG-07). */
+  salteoVence: string | null;
+  /** Quien saltea el bloqueo necesita saber qué hace la falta; quien solo lee, no (FL-LEG-08). */
+  puedeSaltear: boolean;
+  /** Los rubros quitados con faltantes y su motivo: la API los da a quien corresponde (tanda 9). */
+  retiros: readonly Retiro[];
   aEntrar: () => void;
   alCambiar: () => void;
 };
 
-export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requisitos, modo, puedeCambiar, aEntrar, alCambiar }: Props) {
+export function ExigenciaLegal({
+  consorcio,
+  proveedorId,
+  rubros,
+  faltantes,
+  requisitos,
+  modo,
+  puedeCambiar,
+  puedeSaltear,
+  puedeCargar,
+  razonSocial,
+  admiteNoVence,
+  salteoVence,
+  retiros,
+  aEntrar,
+  alCambiar,
+}: Props) {
   const id = useId();
+  /** El requisito que se está cargando desde su renglón (FL-LEG-05). */
+  const [cargando, setCargando] = useState<Faltante | null>(null);
   const [agregando, setAgregando] = useState(false);
   const [nuevo, setNuevo] = useState("");
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [quitando, setQuitando] = useState(false);
+  /** El rubro con faltantes que se está quitando, con su motivo en la ventana (pregunta 4). */
+  const [conMotivo, setConMotivo] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
   const disponibles = [...new Set(requisitos.map((r) => r.rubro_legal))].filter((r) => !rubros.includes(r));
   const ofreceAgregar = puedeCambiar && disponibles.length > 0;
   // Sin rubros, sin faltas y sin nada que agregar, la sección no tiene nada que decir (SEG-03).
-  if (rubros.length === 0 && faltantes.length === 0 && !ofreceAgregar) return null;
+  if (rubros.length === 0 && faltantes.length === 0 && !ofreceAgregar && retiros.length === 0) return null;
 
   /** Asigna o quita el rubro. Devuelve el rechazo, o null si salió bien (la ficha se vuelve a leer). */
-  async function cambiar(rubro: string, asignar: boolean): Promise<string | null> {
+  async function cambiar(rubro: string, asignar: boolean, conElMotivo: string | null = null): Promise<string | null> {
     clave.current ??= crypto.randomUUID();
     const pedido = {
       headers: encabezadoCsrf(),
@@ -89,9 +157,16 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
       },
     };
     const ruta = "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}";
-    const { data, error, response } = asignar ? await api.POST(ruta, pedido) : await api.DELETE(ruta, pedido);
+    const { data, error, response } = asignar
+      ? await api.POST(ruta, pedido)
+      : await api.DELETE(ruta, conElMotivo === null ? pedido : { ...pedido, body: { motivo: conElMotivo } });
     exigirSesion(response);
     if (data === undefined) {
+      // Le falta documentación de ese rubro (quizás desde que se abrió la ficha): se pide el motivo.
+      if (!asignar && conElMotivo === null && codigoDe(error) === "motivo_requerido") {
+        abrirQuitarConMotivo(rubro);
+        return null;
+      }
       if (renovarClave(response.status, codigoDe(error))) clave.current = null;
       return mensajeDeActo(response.status, error);
     }
@@ -100,7 +175,39 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
     return null;
   }
 
+  function abrirQuitarConMotivo(rubro: string) {
+    clave.current = null;
+    setMotivo("");
+    setErrores(SIN_ERRORES);
+    setFalla(null);
+    setConMotivo(rubro);
+  }
+
+  /** La ventana del motivo: sin él lo marca; con él, quita el rubro. */
+  async function quitarConMotivo(rubro: string): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ motivo: [motivo, FALTA_MOTIVO_QUITAR] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    try {
+      const rechazo = await cambiar(rubro, false, motivo.trim());
+      return rechazo === null ? "cerrar" : { rechazo };
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        aEntrar();
+        return "seguir";
+      }
+      return { rechazo: SIN_CONEXION };
+    }
+  }
+
   async function quitar(rubro: string) {
+    // Pregunta 4: con documentación faltante de ese rubro, el motivo va en su ventana.
+    if (faltantes.some((f) => f.rubro_legal === rubro)) {
+      abrirQuitarConMotivo(rubro);
+      return;
+    }
     setQuitando(true);
     setFalla(null);
     try {
@@ -141,6 +248,7 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
   }
 
   const idRubro = `${id}-rubro`;
+  const exigidosDelNuevo = requisitos.filter((r) => r.rubro_legal === nuevo && r.exigido).map((r) => r.descripcion);
   return (
     <section aria-labelledby={`${id}-titulo`}>
       <h3 id={`${id}-titulo`}>{TITULO_EXIGENCIA}</h3>
@@ -167,12 +275,37 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
       )}
       {faltantes.length > 0 && (
         <>
-          <p className={modo === "bloquear" ? "aviso-error" : "aviso-pendiente"}>{avisoDeFalta(modo)}</p>
+          {puedeCambiar || puedeSaltear ? (
+            <p className={modo === "bloquear" && salteoVence === null ? "aviso-error" : "aviso-pendiente"}>
+              {avisoDeFalta(modo, salteoVence, puedeCambiar)}
+            </p>
+          ) : (
+            <p className="aviso-pendiente">{AVISO_FALTA_SOLO_LEE}</p>
+          )}
           <ul className="versiones" aria-label="Lo que falta">
             {faltantes.map((f) => (
               <li key={f.codigo}>
                 {TEXTO_TIPO[f.tipo]}: {f.descripcion} ({textoRubro(f.rubro_legal)})
+                {puedeCargar && (
+                  <>
+                    {" "}
+                    {/* El renglón ya dice qué es: el nombre completo es para el lector de pantalla. */}
+                    <button type="button" className="secundario" aria-label={`${CARGAR} ${f.descripcion}`} onClick={() => setCargando(f)}>
+                      {CARGAR}
+                    </button>
+                  </>
+                )}
               </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {retiros.length > 0 && (
+        <>
+          <h4>{TITULO_RETIROS}</h4>
+          <ul className="versiones" aria-label={TITULO_RETIROS}>
+            {retiros.map((r) => (
+              <li key={`${r.rubro_legal} ${r.retirado_en}`}>{textoRetiro(r, requisitos)}</li>
             ))}
           </ul>
         </>
@@ -209,7 +342,43 @@ export function ExigenciaLegal({ consorcio, proveedorId, rubros, faltantes, requ
             ))}
           </select>
           <ErrorDeCampo idCampo={idRubro} mensaje={errores.rubro} />
+          {exigidosDelNuevo.length > 0 && (
+            <p className="aviso-pendiente" role="note">
+              {textoSeLeVaAExigir(exigidosDelNuevo, modo)}
+            </p>
+          )}
         </VentanaDeFormulario>
+      )}
+      {conMotivo !== null && (
+        <VentanaDeFormulario titulo={textoQuitarRubro(conMotivo)} textoEnviar={CONFIRMAR_QUITAR} peligro
+          alEnviar={() => quitarConMotivo(conMotivo)} alCerrar={() => setConMotivo(null)}>
+          <p id={`${id}-quitar-ayuda`}>{AVISO_QUITAR_CON_FALTANTES}</p>
+          <label htmlFor={`${id}-motivo`}>{MOTIVO_QUITAR}</label>
+          <textarea id={`${id}-motivo`} data-foco value={motivo} maxLength={500}
+            {...marcaDe(`${id}-motivo`, errores.motivo, `${id}-quitar-ayuda`)}
+            onChange={(e) => {
+              clave.current = null;
+              setErrores((actuales) => sinElDe(actuales, "motivo"));
+              setMotivo(e.target.value);
+            }} />
+          <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={errores.motivo} />
+        </VentanaDeFormulario>
+      )}
+      {cargando !== null && (
+        <SubirDocumentacion
+          consorcio={consorcio}
+          proveedor={{ id: proveedorId, razon_social: razonSocial }}
+          reemplaza={null}
+          fijo={{ tipo: cargando.tipo, requisito: cargando.codigo, descripcion: cargando.descripcion }}
+          requisitos={requisitos}
+          faltantes={faltantes}
+          admiteNoVence={admiteNoVence}
+          aEntrar={aEntrar}
+          alCerrar={(cambio) => {
+            setCargando(null);
+            if (cambio) alCambiar();
+          }}
+        />
       )}
     </section>
   );

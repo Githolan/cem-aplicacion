@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularInicioSinPendientes, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /mandatos servida por el nginx de la imagen, con su CSP real. El backend de la corrida
 // no tiene base de datos: sin sesión responde el 401 de verdad y la página manda a /entrar. Con
@@ -36,11 +36,11 @@ const MANDATO_AE = {
 };
 
 const DECISIONES = [
-  { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true },
-  { id: D_PROPIA, tipo: "asamblea", fecha: "2026-03-05", descripcion: "Remueve al estudio", registrada_por_vos: true, del_equipo: false },
-  { id: D_NEGADA, tipo: "asamblea", fecha: "2026-03-20", descripcion: "Remueve al estudio, otra", registrada_por_vos: false, del_equipo: false },
+  { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true, tiene_acta: false },
+  { id: D_PROPIA, tipo: "asamblea", fecha: "2026-03-05", descripcion: "Remueve al estudio", registrada_por_vos: true, del_equipo: false, tiene_acta: false },
+  { id: D_NEGADA, tipo: "asamblea", fecha: "2026-03-20", descripcion: "Remueve al estudio, otra", registrada_por_vos: false, del_equipo: false, tiene_acta: false },
   // Una descripción del largo máximo (500): la opción del selector no puede ensanchar la página.
-  { id: D_LARGA, tipo: "consejo", fecha: "2026-04-01", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: false },
+  { id: D_LARGA, tipo: "consejo", fecha: "2026-04-01", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: false, tiene_acta: false },
 ];
 
 const error = (status: number, codigo: string) => ({ status, json: { codigo, mensaje: "x", id_correlacion: "c" } });
@@ -85,7 +85,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
       if (camino === `${BASE}/mandatos`) return ruta.fulfill({ json: { elementos: [MANDATO_AE] } });
       if (camino === `${BASE}/decisiones`) return ruta.fulfill({ json: { elementos: DECISIONES } });
       if (camino === `${BASE}/mandatos/candidatos`)
-        return ruta.fulfill({ json: { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"] }] } });
+        return ruta.fulfill({ json: { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"], habilita_consejo: true, mandatos: [] }] } });
       // El detalle de la administración externa sin cuenta pide sus invitaciones (G-40), y el
       // formulario de decisión, las actas de Documentos (G-15): acá no hay ninguna.
       if (camino === `${BASE}/mandatos/${M_AE}/invitaciones`) return ruta.fulfill({ json: { elementos: [] } });
@@ -110,6 +110,9 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
         return ruta.fulfill({
           json: { ...decision, referencia: "Acta 14", sha256: null },
         });
+      // Lo demás que lee el inicio, sin pendientes (decisión 9, tanda 2 de flujos).
+      const inicio = simularInicioSinPendientes(ruta, camino);
+      if (inicio !== null) return inicio;
       return ruta.abort();
     }
     const csrf = (await pedido.headerValue("x-csrf-token")) ?? null;

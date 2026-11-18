@@ -10,6 +10,18 @@ export type LeTocaA = components["schemas"]["LeTocaA"];
 export type Filtro = components["schemas"]["FiltroConsultaPagos"];
 export type EstadoVisible = components["schemas"]["EstadoVisible"];
 
+export type MotivoSinActo = components["schemas"]["MotivoSinActo"];
+
+/** FL-APR-02, FL-ORD-06 y FL-ORD-08 (tanda 9, app 0110): por qué a quien mira no se le ofrece el acto
+ * del paso, cuando la razón es de esta orden y no de su rol. Una línea, debajo de lo que pasa. */
+export const TEXTO_SIN_ACTO: Record<MotivoSinActo, string> = {
+  ya_aprobaste: "Esta cuenta ya la aprobó: falta la aprobación de otra persona.",
+  cargaste_la_cuenta: "Esta cuenta cargó la cuenta destino del proveedor: la aprueba otra persona.",
+  aprobaste_la_orden: "Esta cuenta aprobó la orden: el pago lo concilia otra persona.",
+  proveedor_sin_cuenta: "El proveedor no tiene cuenta destino: así no se puede pagar. La carga quien prepara las órdenes, en la ficha del proveedor.",
+  proveedor_inactivo: "El proveedor está suspendido o de baja: no se puede enviar a aprobar de nuevo. Se lo reactiva en su ficha.",
+};
+
 export const VERBO: Record<Paso, string> = {
   pagar: "Ver la cuenta para pagar",
   tomar_pago: "Hacerse cargo de este pago",
@@ -18,6 +30,7 @@ export const VERBO: Record<Paso, string> = {
   enviar: "Enviar a aprobar",
   renovar: "Renovar la aprobación",
   modificar: "Modificar la orden",
+  falta_cuenta: "Falta la cuenta del proveedor",
   volver_a_pagar: "Enviar a aprobar de nuevo",
   rechazada: "Ver el motivo",
   preparar_faltante: "Preparar la orden por lo que falta",
@@ -37,6 +50,8 @@ export const VERBO: Record<Paso, string> = {
 
 /** Pregunta 8 del propietario (13-11-2026): el mismo nombre en la bandeja, el cotejo y su pantalla. */
 export const TITULO_SIN_EXPLICAR = "Lo que el extracto no explica";
+/** Lo que lee la administración sobre esa lista, que solo mira (FL-CON-05, decisión 17 del 18-11). */
+export const LO_RESUELVE_QUIEN_CONCILIA = "Lo resuelve quien concilia.";
 export const VER_SIN_EXPLICAR = "Ver los débitos sin explicar";
 export const NO_ES_PAGO = "No es el pago de una orden";
 export const RETIRAR_MARCA = "Retirar la marca";
@@ -111,8 +126,8 @@ export const GUARDAR_IGUAL = "Guardar igual";
 export const VER_LA_OTRA = "Ver la otra";
 export const ENTENDIDO = "Entendido";
 export const PREPARAR_OTRA = "Preparar otra orden";
-export const textoRechazada = (proveedor: string, importe: string, fecha: string) =>
-  `Se rechazó la orden de ${proveedor} por ${importe}, del ${fecha}.`;
+export const textoRechazada = (proveedor: string, importe: string, fecha: string, concepto: string) =>
+  `Se rechazó la orden de ${proveedor} por ${importe}, del ${fecha}: «${concepto}».`;
 
 export const TEXTO_LE_TOCA_A: Record<LeTocaA, string> = {
   vos: "Le toca a esta cuenta.",
@@ -193,7 +208,6 @@ export const MARCA_REPETIDA = "Puede estar repetida";
 export const NOMBRE_MONEDA: Readonly<Record<string, string>> = { ARS: "Pesos", USD: "Dólares" };
 export const SUBIR_EXTRACTO = "Subir el extracto";
 export const COMPARAR = "Comparar";
-export const VER_LO_YA_COTEJADO = "Ver lo ya cotejado";
 export const DESHACER_COTEJO = "Deshacer el cotejo";
 export const TILDAR_PAGOS = "Tildar los pagos que figuran en el banco.";
 export const textoMarcarCotejados = (n: number) => (n === 1 ? "Marcar 1 como cotejado" : `Marcar ${n} como cotejados`);
@@ -206,22 +220,43 @@ export const FALTA_MOTIVO_DESHACER = "Falta decir por qué se deshace.";
 export const FALTA_MOTIVO = "Falta escribir el motivo.";
 export const FALTA_ARCHIVO_EXTRACTO = "Falta elegir el archivo del extracto.";
 export const textoVerMarcados = (n: number) => `Ver los marcados (${n})`;
+/** Los débitos del extracto que no son ningún pago registrado: se cuentan y se ven en su pantalla (FL-CON-04). */
+export const textoBancoNoAca = (n: number) =>
+  n === 1 ? "1 débito del banco no tiene un pago registrado acá." : `${n} débitos del banco no tienen un pago registrado acá.`;
 // Fricción 17-11, tandas 2 y 5: preparar una orden y su ficha.
 /** Lo obligatorio que falta al tocar guardar (decisión 4: el botón siempre activo). */
 export const FALTA_PROVEEDOR = "Falta elegir el proveedor.";
 export const FALTA_IMPORTE = "Falta escribir el importe.";
 export const FALTA_CONCEPTO = "Falta escribir el concepto.";
-/** C8P-01: el proveedor bloqueado por documentación legal, en el desplegable y debajo de él. */
-export const MARCA_SIN_DOCUMENTACION = "(le falta documentación legal)";
-export const SIN_DOCUMENTACION =
-  "A este proveedor le falta documentación que exige la ley: no se le puede preparar una orden. Se carga en su ficha; en una urgencia, un miembro del Consejo puede registrar ahí un salteo por urgencia.";
+/** FL-LEG-07: lo que hace la documentación legal que falta en un edificio que bloquea, dicho igual en
+ * la ficha del proveedor y en el formulario de la orden. */
+export const BLOQUEO_POR_DOCUMENTACION =
+  "Le falta documentación que exige la ley, o la tiene vencida: no se le pueden preparar órdenes nuevas hasta cargarla.";
+export const SALTEO_EN_UNA_URGENCIA = "En una urgencia, un miembro del Consejo puede saltear el bloqueo para una orden, en la ficha del proveedor.";
+/** FL-ORD-03: en el desplegable, el bloqueado con un salteo que le sirve a quien prepara. */
+export const MARCA_CON_SALTEO = "(con salteo por urgencia)";
+/** FL-ORD-03: el grupo del desplegable con los proveedores a los que no se les puede preparar una orden. */
+export const GRUPO_SIN_ORDEN = "No se les puede preparar una orden";
+/** C8P-01 y FL-ORD-01: el aviso que queda solo, con el desplegable, el enlace a la ficha y «Cancelar». */
+export const SIN_DOCUMENTACION = `${BLOQUEO_POR_DOCUMENTACION} ${SALTEO_EN_UNA_URGENCIA}`;
 /** C8P-02: el único salteo vigente lo registró quien prepara; la base no lo toma. */
 export const SALTEO_PROPIO =
   "Le falta documentación legal y el salteo por urgencia que espera lo registró esta cuenta: la orden la prepara otra persona, o el salteo lo registra otro miembro del Consejo.";
-export const CON_SALTEO = "Le falta documentación legal: se prepara con el salteo por urgencia que registró el Consejo.";
-export const IR_A_PROVEEDORES = "Ir a Proveedores";
-/** C8P-06: al modificar, el proveedor de la orden ya no recibe órdenes. */
-export const PROVEEDOR_INACTIVO = "Este proveedor está suspendido o de baja: hay que elegir otro, o reactivarlo en Proveedores.";
+/** FL-SAL-03: el salteo lo usa la primera versión que se guarda, también un borrador. */
+export const CON_SALTEO =
+  "Le falta documentación legal: se prepara con el salteo por urgencia que registró el Consejo. El salteo sirve para una sola orden: se usa al guardar, también como borrador.";
+/** FL-ORD-04: el enlace del aviso abre la ficha de ese proveedor, y la ficha vuelve a la orden. */
+export const textoAbrirFicha = (razonSocial: string) => `Abrir la ficha de ${razonSocial}`;
+/** C8P-06 y FL-ORD-01: el proveedor elegido ya no recibe órdenes. */
+export const PROVEEDOR_INACTIVO = "Este proveedor está suspendido o de baja: no recibe órdenes nuevas. Se elige otro, o se lo reactiva en su ficha.";
+/** FL-ORD-06: se avisa al elegirlo y se deja guardar (decisión 2 del propietario, 18-11-2026). */
+export const SIN_CUENTA_DESTINO =
+  "Este proveedor no tiene cuenta destino: sin ella la orden no se puede pagar. Cargarla antes evita volver a aprobarla.";
+/** FL-ORD-02: la lectura de la factura no elige sola a un proveedor al que no se le puede preparar una orden. */
+export const textoLeidoSinOrden = (razonSocial: string) => `La factura es de ${razonSocial}: no se le puede preparar una orden.`;
+/** FL-PRV-01: el CUIT de la factura es de un proveedor suspendido o de baja: no se ofrece el alta. */
+export const textoLeidoInactivo = (razonSocial: string) =>
+  `El proveedor de la factura (${razonSocial}) está suspendido o de baja: se reactiva en su ficha.`;
 /** C8P-05: al modificar, todavía no se cambió nada. */
 export const SIN_CAMBIOS = "Todavía no hay cambios para guardar.";
 /** C8P-04: el contrato elegido no cubre el importe escrito. */

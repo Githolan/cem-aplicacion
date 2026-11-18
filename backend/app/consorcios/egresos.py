@@ -103,9 +103,12 @@ from cem_contracts.egresos import (
     ListaOrdenesPago,
     ListaPagosManuales,
     ListaPagosPorAclarar,
+    ListaPedidosSalteo,
     ListaProveedores,
     ListaProveedoresConsulta,
     ModoExigencia,
+    MotivoSinActo,
+    NuevoPedidoSalteo,
     NuevoSalteoDocumentacion,
     ObservacionVigente,
     OrdenConPagoManual,
@@ -124,6 +127,7 @@ from cem_contracts.egresos import (
     ParecidaAntesDeGuardar,
     PasoPago,
     PedidoCuentaPagoManual,
+    PedidoSalteo,
     Proveedor,
     ProveedorConsulta,
     ProveedorConVersiones,
@@ -141,6 +145,8 @@ from cem_contracts.egresos import (
     ResolucionDiferenciaPago,
     Retiro,
     RetiroOrdenPago,
+    RetiroRubroConMotivo,
+    RetiroRubroLegal,
     RubrosLegalesProveedor,
     SalteoDocumentacion,
     SituacionPago,
@@ -150,6 +156,7 @@ from cem_contracts.egresos import (
     TomaPagoManual,
     TomaRegistrada,
     TomaVigente,
+    VenceSalteo,
     Version,
     VersionOrdenPago,
     VersionOrdenPagoRevision,
@@ -157,7 +164,7 @@ from cem_contracts.egresos import (
     ultimos_digitos,
 )
 from cem_contracts.errores import CodigoError
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
@@ -283,6 +290,11 @@ ERRORES = {
     "salteo_vigente": (
         409, CodigoError.SALTEO_VIGENTE,
         "Ya registró un salteo de este proveedor que espera su orden: volver a abrir la ficha.",
+    ),
+    "motivo_requerido": (
+        422, CodigoError.MOTIVO_REQUERIDO,
+        "A este proveedor le falta documentación de ese rubro: quitarlo pide el motivo, que queda"
+        " a la vista del Consejo.",
     ),
     "factura_no_vigente": (
         409, CodigoError.FACTURA_NO_VIGENTE,
@@ -491,6 +503,7 @@ CAMPO_DEL_MOTIVO = {
     "no_vence_no_admitido": "vence_el",
     "requisito_invalido": "requisito",
     "motivo_invalido": "motivo",
+    "motivo_requerido": "motivo",
 }
 """El campo del cuerpo que motiva cada error de negocio que tiene uno (`detalle.campos`): la
 pantalla lo marca junto al campo. Los nombres son los de los cuerpos de los contratos.
@@ -740,35 +753,77 @@ def listar_proveedores(
         proveedores = _proveedores(c, permiso, None)
         ids = [p.id for p in proveedores]
         marcas = _marcas(c, permiso, ids)
-        salteos = _salteos_para_preparar(c, permiso, ids, marcas)
+        salteos = _salteos_para_preparar(c, permiso, ids, marcas, para_quien_lee=True)
     return ListaProveedores(elementos=proveedores, **marcas, **salteos)
 
 
 def _salteos_para_preparar(
-    c: Connection, lector: Permiso, ids: list[UUID], marcas: dict
-) -> dict[str, list[UUID]]:
+    c: Connection, lector: Permiso, ids: list[UUID], marcas: dict, *, para_quien_lee: bool
+) -> dict[str, list]:
     """Informe de fricción C8P-02 (17-11-2026): de los bloqueados, a cuáles quien lee les puede
     preparar una orden con un salteo vigente y a cuáles solo con uno suyo, que la barrera no toma
     (`salteo_de_quien_prepara`). La regla es la columna `de_quien_prepara` que da la base (`0109`):
-    acá solo se agrupa."""
+    acá solo se agrupa. Sin `para_quien_lee` (la consulta del Consejo), sirve el de cualquiera
+    (FL-VER-03). Además, hasta cuándo sirve y cuáles vencieron sin usarse (FL-SAL-01, FL-SAL-04,
+    18-11-2026)."""
+    vacio = {"con_salteo": [], "vence_salteo": [], "salteo_vencido_sin_usar": []}
+    if para_quien_lee:
+        vacio["salteo_de_quien_prepara"] = []
     if marcas["modo_exigencia"] != ModoExigencia.BLOQUEAR:
-        return {"con_salteo": [], "salteo_de_quien_prepara": []}
+        return vacio
     bloqueados = set(marcas["documentacion_faltante"])
-    vigentes = [
+    filas = [
         f for f in _filas_salteos(c, lector, proveedor=None, orden=None)
-        if f["estado"] == EstadoSalteo.VIGENTE and f["proveedor_id"] in bloqueados
+        if f["proveedor_id"] in bloqueados
     ]  # fmt: skip
-    sirven = {f["proveedor_id"] for f in vigentes if not f["de_quien_prepara"]}
-    propios = {f["proveedor_id"] for f in vigentes} - sirven
-    return {
-        "con_salteo": [p for p in ids if p in sirven],
-        "salteo_de_quien_prepara": [p for p in ids if p in propios],
+    vigentes = [f for f in filas if f["estado"] == EstadoSalteo.VIGENTE]
+    que_sirven = [f for f in vigentes if not (para_quien_lee and f["de_quien_prepara"])]
+    sirven = {f["proveedor_id"] for f in que_sirven}
+    vence = {}
+    for f in que_sirven:
+        vence[f["proveedor_id"]] = max(vence.get(f["proveedor_id"], f["vence_en"]), f["vence_en"])
+    # Las filas vienen por número: la última de cada proveedor es su último salteo.
+    ultimo = {f["proveedor_id"]: f for f in filas}
+    con_vigente = {f["proveedor_id"] for f in vigentes}
+    vencidos = {
+        p for p, f in ultimo.items() if f["estado"] == EstadoSalteo.VENCIDO and p not in con_vigente
     }
+    salteos = {
+        "con_salteo": [p for p in ids if p in sirven],
+        "vence_salteo": [
+            VenceSalteo(proveedor_id=p, vence_en=vence[p]) for p in ids if p in sirven
+        ],
+        "salteo_vencido_sin_usar": [p for p in ids if p in vencidos],
+    }
+    if para_quien_lee:
+        propios = con_vigente - sirven
+        salteos["salteo_de_quien_prepara"] = [p for p in ids if p in propios]
+    return salteos
+
+
+def _admiten_orden(c: Connection, lector: Permiso, ids: set[UUID]) -> set[UUID]:
+    """FL-ORD-05 (tanda 1, 18-11-2026): a cuáles de estos proveedores quien lee puede prepararle
+    hoy una orden nueva. Activo y, en modo `bloquear` con documentación faltante, con un salteo
+    que le sirve a esa persona: lo mismo que muestra la lista de proveedores (`_marcas` y
+    `_salteos_para_preparar`). Solo para mostrar: la base vuelve a decidir al preparar. Quien no
+    prepara, ninguno."""
+    if lector.accion != PREPARAR or not ids:
+        return set()
+    activos = [
+        p.id for p in _proveedores(c, lector, None)
+        if p.id in ids and p.estado == EstadoProveedor.ACTIVO
+    ]  # fmt: skip
+    marcas = _marcas(c, lector, activos)
+    if marcas["modo_exigencia"] != ModoExigencia.BLOQUEAR:
+        return set(activos)
+    salteos = _salteos_para_preparar(c, lector, activos, marcas, para_quien_lee=True)
+    return set(activos) - (set(marcas["documentacion_faltante"]) - set(salteos["con_salteo"]))
 
 
 def _marcas(c: Connection, lector: Permiso, ids: list[UUID]) -> dict:
     """Las marcas de la lista, en el orden de la lista: vencida, por vencer y lo que falta."""
     documentacion = _documentacion(c, lector, None)
+    configuracion = _configuracion(c, lector)
     faltan = {f.proveedor_id for f in _faltantes(c, lector, None)}
     vencida = {d.proveedor_id for d in documentacion if d.estado == VENCIDA}
     por_vencer = {d.proveedor_id for d in documentacion if d.estado == POR_VENCER} - vencida
@@ -776,7 +831,8 @@ def _marcas(c: Connection, lector: Permiso, ids: list[UUID]) -> dict:
         "documentacion_vencida": [p for p in ids if p in vencida],
         "documentacion_por_vencer": [p for p in ids if p in por_vencer],
         "documentacion_faltante": [p for p in ids if p in faltan],
-        "modo_exigencia": _configuracion(c, lector).modo_exigencia,
+        "modo_exigencia": configuracion.modo_exigencia,
+        "autoriza_por_persona": configuracion.autoriza_por_persona,
     }
 
 
@@ -800,10 +856,25 @@ def _rubros(c: Connection, lector: Permiso, proveedor: UUID) -> list[str]:
 def _configuracion(c: Connection, lector: Permiso) -> ConfiguracionProveedores:
     fila = _ejecutar(
         c, lector,
-        "select * from nucleo.configuracion_proveedores_lectura(:f, :actor, 'api', :sesion)",
+        "select *, nucleo.autoriza_por_persona_lectura(:f, :actor, 'api', :sesion)"
+        " as autoriza_por_persona"
+        " from nucleo.configuracion_proveedores_lectura(:f, :actor, 'api', :sesion)",
         {"f": LEE_COMO[lector.accion]},
     ).mappings().one()  # fmt: skip
     return ConfiguracionProveedores(**fila)
+
+
+def _retiros_con_motivo(
+    c: Connection, lector: Permiso, proveedor: UUID
+) -> list[RetiroRubroConMotivo]:
+    """Pregunta 4 del propietario (18-11-2026): los rubros quitados con documentación faltante,
+    con el motivo (`0110`)."""
+    filas = _ejecutar(
+        c, lector,
+        "select * from nucleo.retiros_rubro_con_motivo_lectura(:p, :f, :actor, 'api', :sesion)",
+        {"p": proveedor, "f": LEE_COMO[lector.accion]},
+    ).mappings()  # fmt: skip
+    return [RetiroRubroConMotivo(**f) for f in filas]
 
 
 def _requisitos(c: Connection, lector: Permiso) -> list[RequisitoLegal]:
@@ -878,11 +949,12 @@ def ver_proveedor(
         requisitos = _requisitos(c, permiso)
         configuracion = _configuracion(c, permiso)
         salteos = _salteos(c, permiso, proveedor=proveedor_id)
+        retiros = _retiros_con_motivo(c, permiso, proveedor_id)
     return ProveedorConVersiones(
         proveedor=proveedores[0], versiones=versiones, documentacion=documentacion,
         puede_cargar_documentacion=cargar.decidir(Entidad()).permitido,
         rubros_legales=rubros, faltantes=faltantes, requisitos=requisitos,
-        configuracion=configuracion, salteos=salteos,
+        configuracion=configuracion, salteos=salteos, retiros_con_motivo=retiros,
     )  # fmt: skip
 
 
@@ -1071,14 +1143,20 @@ async def subir_documentacion_proveedor(
 
 
 def _cambiar_rubro(
-    proveedor_id: UUID, rubro: str, asignar: bool, permiso: Permiso, idempotencia, motor
+    proveedor_id: UUID,
+    rubro: str,
+    asignar: bool,
+    motivo: str | None,
+    permiso: Permiso,
+    idempotencia,
+    motor,
 ) -> Response:
     def efecto(conn: Connection) -> tuple[int, RubrosLegalesProveedor]:
         _ejecutar(
             conn, permiso,
-            "select nucleo.asignar_rubro_legal_proveedor(:p, :rubro, :asignar, :actor, 'api',"
-            " :sesion)",
-            {"p": proveedor_id, "rubro": rubro, "asignar": asignar},
+            "select nucleo.asignar_rubro_legal_proveedor(:p, :rubro, :asignar, :motivo, :actor,"
+            " 'api', :sesion)",
+            {"p": proveedor_id, "rubro": rubro, "asignar": asignar, "motivo": motivo},
             {"proveedor_inexistente": ERRORES["no_encontrado"]},
         ).scalar_one()  # fmt: skip
         return 200, RubrosLegalesProveedor(
@@ -1110,17 +1188,23 @@ def asignar_rubro_legal(
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
-    return _cambiar_rubro(proveedor_id, rubro, True, permiso, idempotencia, motor)
+    return _cambiar_rubro(proveedor_id, rubro, True, None, permiso, idempotencia, motor)
+
+
+SIN_MOTIVO = RetiroRubroLegal()
+"""Sin cuerpo: un retiro sin motivo (el esquema queda como `$ref`, sin `anyOf` con nulo)."""
 
 
 @router.delete(
     "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}",
     response_model=RubrosLegalesProveedor,
-    summary="Retirarle al proveedor un rubro legal: queda la constancia de quién y cuándo",
+    summary="Retirarle al proveedor un rubro legal: queda la constancia de quién y cuándo. Con"
+    " documentación faltante de ese rubro, pide el motivo",
     responses=RESPUESTAS_ESCRITURA | {
         404: {"description": "El proveedor no existe en este consorcio."},
         409: {"description": "No tenía ese rubro (`rubro_legal_sin_cambios`)."},
-        422: {"description": "El rubro no está en la matriz legal (`rubro_legal_invalido`)."},
+        422: {"description": "El rubro no está en la matriz legal (`rubro_legal_invalido`), o le"
+                             " falta documentación y no llegó el motivo (`motivo_requerido`)."},
     },
 )  # fmt: skip
 def retirar_rubro_legal(
@@ -1129,8 +1213,12 @@ def retirar_rubro_legal(
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
+    cuerpo: Annotated[RetiroRubroLegal, Body()] = SIN_MOTIVO,
 ) -> Response:
-    return _cambiar_rubro(proveedor_id, rubro, False, permiso, idempotencia, motor)
+    """Pregunta 4 del propietario (18-11-2026): quitar un rubro al que le falta documentación
+    destraba al proveedor, y lo hace quien prepara la orden. Pide el motivo, que queda a la vista
+    del Consejo en la ficha del proveedor (`retiros_con_motivo`)."""
+    return _cambiar_rubro(proveedor_id, rubro, False, cuerpo.motivo, permiso, idempotencia, motor)
 
 
 def _consulta(c: Connection, lector: Permiso, proveedor: UUID | None) -> list[ProveedorConsulta]:
@@ -1155,8 +1243,10 @@ def consultar_proveedores(
     lista la configuración del consorcio ven los proveedores y sus seguros, sin la cuenta."""
     with _lectura(permiso, _una_foto(motor)) as c:
         proveedores = _consulta(c, permiso, None)
-        marcas = _marcas(c, permiso, [p.id for p in proveedores])
-    return ListaProveedoresConsulta(elementos=proveedores, **marcas)
+        ids = [p.id for p in proveedores]
+        marcas = _marcas(c, permiso, ids)
+        salteos = _salteos_para_preparar(c, permiso, ids, marcas, para_quien_lee=False)
+    return ListaProveedoresConsulta(elementos=proveedores, **marcas, **salteos)
 
 
 @router.get(
@@ -1169,8 +1259,17 @@ def consultar_proveedores(
 def consultar_proveedor(
     proveedor_id: UUID,
     permiso: Annotated[Permiso, Depends(requiere(VER_PROVEEDORES, al_entrar=True))],
+    panel: Annotated[Permiso, Depends(requiere("fiscalizacion.ver_panel"))],
+    saltear: Annotated[Permiso, Depends(requiere(SALTEAR_DOCUMENTACION, sin_gesto=True))],
     motor: MotorDep,
 ) -> FichaProveedorConsulta:
+    """Decisión 17 del propietario (18-11-2026): el habitante autorizado no ve la historia de
+    salteos ni los retiros con motivo (nombres y motivos): solo quien ve el panel del Consejo o
+    saltea. Se filtra acá, no en la pantalla."""
+    historia = (
+        panel.decidir(Entidad()).permitido
+        or alcanza(SALTEAR_DOCUMENTACION, saltear.ctx.autorizacion)
+    )  # fmt: skip
     with _lectura(permiso, _una_foto(motor)) as c:
         proveedores = _consulta(c, permiso, proveedor_id)
         if not proveedores:
@@ -1180,11 +1279,12 @@ def consultar_proveedor(
         faltantes = _faltantes(c, permiso, proveedor_id)
         requisitos = _requisitos(c, permiso)
         configuracion = _configuracion(c, permiso)
-        salteos = _salteos(c, permiso, proveedor=proveedor_id)
+        salteos = _salteos(c, permiso, proveedor=proveedor_id) if historia else []
+        retiros = _retiros_con_motivo(c, permiso, proveedor_id) if historia else []
     return FichaProveedorConsulta(
         proveedor=proveedores[0], documentacion=documentacion, rubros_legales=rubros,
         faltantes=faltantes, requisitos=requisitos, configuracion=configuracion,
-        salteos=salteos,
+        salteos=salteos, retiros_con_motivo=retiros,
     )  # fmt: skip
 
 
@@ -1234,6 +1334,87 @@ def saltear_documentacion(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
+# --- Pedido de salteo al Consejo (pregunta 3 del propietario, 18-11-2026; `0110`) --------------
+
+ERRORES_PEDIDO = {
+    "salteo_vigente": (
+        409, CodigoError.SALTEO_VIGENTE,
+        "Ya hay un salteo vigente que sirve para preparar la orden a este proveedor: volver a"
+        " abrir la lista de proveedores.",
+    ),
+    "pedido_pendiente": (
+        409, CodigoError.PEDIDO_SALTEO_PENDIENTE,
+        "Ya hay un pedido de salteo de este proveedor que espera al Consejo.",
+    ),
+    "proveedor_inexistente": ERRORES["no_encontrado"],
+}  # fmt: skip
+LEER_PEDIDOS = "select * from nucleo.pedidos_salteo_lectura(:f, :actor, 'api', :sesion)"
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/pedidos-salteo",
+    response_model=PedidoSalteo,
+    status_code=201,
+    summary="Pedirle al Consejo un salteo del bloqueo por documentación legal, con el motivo y el"
+    " importe de la orden que se quiere preparar",
+    responses=RESPUESTAS_ESCRITURA | {
+        404: {"description": "El proveedor no existe en este consorcio."},
+        409: {"description": "Nada bloquea las órdenes a ese proveedor (`salteo_innecesario`),"
+                             " ya hay un salteo que sirve (`salteo_vigente`) o un pedido que"
+                             " espera (`pedido_salteo_pendiente`)."},
+    },
+)  # fmt: skip
+def pedir_salteo(
+    proveedor_id: UUID,
+    cuerpo: NuevoPedidoSalteo,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """El pedido no cambia ni se borra. Al Consejo le aparece pendiente; queda atendido cuando un
+    miembro registra el salteo de ese proveedor (`pedidos-salteo`)."""
+
+    def efecto(conn: Connection) -> tuple[int, PedidoSalteo]:
+        numero = _ejecutar(
+            conn, permiso,
+            "select nucleo.pedir_salteo_documentacion(:p, :motivo, :importe, :moneda, :actor,"
+            " 'api', :sesion)",
+            {"p": proveedor_id, "motivo": cuerpo.motivo, "importe": cuerpo.importe_centavos,
+             "moneda": cuerpo.moneda},
+            ERRORES_PEDIDO,
+        ).scalar_one()  # fmt: skip
+        fila = _ejecutar(
+            conn, permiso, LEER_PEDIDOS + " where numero = :n",
+            {"f": LEE_COMO[permiso.accion], "n": numero},
+        ).mappings().one()  # fmt: skip
+        return 201, PedidoSalteo(**fila)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pedidos-salteo",
+    response_model=ListaPedidosSalteo,
+    summary="Los pedidos de salteo del consorcio, con su estado: para quien saltea (el Consejo) y"
+    " para quien prepara las órdenes",
+    responses=RESPUESTAS_LECTURA,
+)
+def pedidos_salteo(
+    preparar: Annotated[Permiso, Depends(requiere(PREPARAR, sin_gesto=True))],
+    saltear: Annotated[Permiso, Depends(requiere(SALTEAR_DOCUMENTACION, sin_gesto=True))],
+    motor: MotorDep,
+) -> ListaPedidosSalteo:
+    """Quien saltea lee como quien saltea; si no, como quien prepara. Se elige por lo que alcanza,
+    como `_lector`, y se verifica solo el elegido (con los dos al entrar, el Consejo, que no
+    prepara, recibiría 403)."""
+    lector = saltear if alcanza(SALTEAR_DOCUMENTACION, saltear.ctx.autorizacion) else preparar
+    lector.verificar()
+    facultad = SALTEAR_DOCUMENTACION if lector is saltear else LEE_COMO[PREPARAR]
+    with _lectura(lector, motor) as c:
+        filas = _ejecutar(c, lector, LEER_PEDIDOS, {"f": facultad}).mappings()
+        return ListaPedidosSalteo(elementos=[PedidoSalteo(**f) for f in filas])
+
+
 # --- Quién ve los proveedores: el Consejo autoriza a un habitante (`0105`) ----------------------
 
 
@@ -1259,9 +1440,25 @@ def autorizaciones_proveedores(
             "select * from nucleo.autorizaciones_ver_proveedores_lectura(:actor, 'api', :sesion)",
             {},
         ).mappings()  # fmt: skip
+        por_rol = _ven_por_rol(c, permiso)
         return ListaAutorizacionesVerProveedores(
-            elementos=[AutorizacionVerProveedores(**f) for f in filas]
+            elementos=[
+                AutorizacionVerProveedores(**f, ve_por_rol=f["persona_id"] in por_rol)
+                for f in filas
+            ]
         )
+
+
+def _ven_por_rol(c: Connection, permiso: Permiso) -> set[UUID]:
+    """FL-VER-02 (18-11-2026): quiénes ya ven los proveedores por su rol (`0110`)."""
+    return set(
+        _ejecutar(
+            c, permiso,
+            "select persona_id from nucleo.ven_proveedores_por_rol_lectura(:actor, 'api',"
+            " :sesion)",
+            {},
+        ).scalars()
+    )  # fmt: skip
 
 
 @router.post(
@@ -1296,7 +1493,9 @@ def cambiar_autorizacion_proveedores(
             " where persona_id = :persona",
             {"persona": persona_id},
         ).mappings().all()  # fmt: skip
-        return 200, AutorizacionVerProveedores(**filas[0])
+        return 200, AutorizacionVerProveedores(
+            **filas[0], ve_por_rol=persona_id in _ven_por_rol(conn, permiso)
+        )
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -2972,17 +3171,64 @@ def _cierres(c: Connection, lector: Permiso, orden: UUID | None) -> dict[UUID, C
 
 
 def _con_hechos(
-    ordenes: list[OrdenPago], acciones: dict, cotejadas: dict, cierres: dict
+    ordenes: list[OrdenPago],
+    acciones: dict,
+    cotejadas: dict,
+    cierres: dict,
+    sin_cuenta: frozenset[UUID] = frozenset(),
 ) -> dict[UUID, circuito_pagos.AccionesOrden]:
-    """Las acciones de la base, con los dos hechos que no salen de ella: cotejada y cerrada."""
+    """Las acciones de la base, con los hechos que no salen de ella: cotejada, cerrada y, si se
+    leyó, el proveedor sin cuenta."""
     return {
         o.id: replace(
             acciones.get(o.id, circuito_pagos.SIN_ACCIONES),
             cotejada=o.id in cotejadas,
             cerrada_sin_pago=o.id in cierres,
+            proveedor_sin_cuenta=o.id in sin_cuenta,
         )  # fmt: skip
         for o in ordenes
     }
+
+
+def _sin_cuenta(c: Connection, lector: Permiso) -> frozenset[UUID]:
+    """FL-ORD-06 (18-11-2026): las órdenes cuyo proveedor, en la versión que fijan, no tiene cuenta
+    destino: la comparación con que la base niega emitirlas (`proveedor_sin_cuenta`, `0110`)."""
+    sql = "select orden_id from nucleo.ordenes_sin_cuenta_lectura(:f, :actor, 'api', :sesion)"
+    return frozenset(_ejecutar(c, lector, sql, {"f": LEE_COMO[lector.accion]}).scalars())
+
+
+def _motivo_sin_acto(
+    c: Connection,
+    lector: Permiso,
+    orden: OrdenPago,
+    situacion: SituacionPago,
+    paso: PasoPago | None,
+    a: circuito_pagos.AccionesOrden,
+    prepara: bool,
+) -> MotivoSinActo | None:
+    """Pregunta 17 y FL-APR-02 (18-11-2026): por qué no se le ofrece a quien mira el acto del paso,
+    cuando la razón es de esta orden. Sale de lo mismo que decide: `puede_aprobar` es
+    `puede_rechazar` sin la aprobación propia ni la cuenta firmada (`_puede_decidir`,
+    `admite_aprobar`); la conciliación, de `lee_quien_aprobo_la_orden` (`0102`)."""
+    if paso == PasoPago.ESPERA_APROBAR and a.puede_rechazar and not a.puede_aprobar:
+        return (
+            MotivoSinActo.YA_APROBASTE if orden.aprobada_por_vos
+            else MotivoSinActo.CARGASTE_LA_CUENTA
+        )  # fmt: skip
+    if (
+        paso == PasoPago.ESPERA_CONCILIAR
+        and lector.accion == REVISAR
+        and alcanza(APROBAR, lector.ctx.autorizacion)
+        and _ejecutar(c, lector, APROBO, {"o": orden.id}).scalar_one()
+    ):
+        return MotivoSinActo.APROBASTE_LA_ORDEN
+    if situacion == SituacionPago.PARA_PAGAR and a.proveedor_sin_cuenta and not a.puede_pagar:
+        return MotivoSinActo.PROVEEDOR_SIN_CUENTA
+    if situacion == SituacionPago.NO_SE_PAGO and prepara and not a.cerrada_sin_pago:
+        [proveedor] = _proveedores(c, lector, orden.proveedor_id)
+        if proveedor.estado != EstadoProveedor.ACTIVO:
+            return MotivoSinActo.PROVEEDOR_INACTIVO
+    return None
 
 
 def _para_avisar(c: Connection, lector: Permiso, ordenes: list[OrdenPago]) -> set[UUID]:
@@ -3016,6 +3262,22 @@ def _por_cotejar(c: Connection, revisar: Permiso) -> int:
         if len(filas) < LIMITE_COTEJO_MAXIMO:
             return cuantos
         despues = filas[-1]["pago_id"]
+
+
+def _cuantos_cotejados(c: Connection, revisar: Permiso) -> int:
+    """Cuántos pagos cotejados y vigentes lee quien pide en «Ver lo cotejado»
+    (`cotejados_lectura`, la misma lectura de esa pantalla): sin ninguno, la bandeja no la ofrece
+    (FL-CON-01). Sin lo que pide cotejar, cero, sin preguntar."""
+    if not revisar.decidir().permitido:
+        return 0
+    cuantos, despues = 0, None
+    sql = "select pago_id from nucleo.cotejados_lectura(:d, :l, :actor, 'api', :sesion)"
+    while True:
+        filas = _ejecutar(c, revisar, sql, {"d": despues, "l": LIMITE_COTEJO_MAXIMO}).all()
+        cuantos += len(filas)
+        if len(filas) < LIMITE_COTEJO_MAXIMO:
+            return cuantos
+        despues = filas[-1].pago_id
 
 
 MOVIMIENTOS_SIN_COTEJO = (
@@ -3103,10 +3365,14 @@ def bandeja_pagos(
         ordenes = _ordenes(c, lector, None)
         acciones = _con_hechos(
             ordenes, _acciones(c, lector, None, _plazo_para_tomar(request)),
-            _cotejadas(c, lector, None), _cierres(c, lector, None),
+            _cotejadas(c, lector, None), _cierres(c, lector, None), _sin_cuenta(c, lector),
         )  # fmt: skip
         para_avisar = _para_avisar(c, lector, ordenes)
+        admiten = _admiten_orden(
+            c, lector, {o.proveedor_id for o in ordenes if o.id in para_avisar}
+        )  # fmt: skip
         por_cotejar = _por_cotejar(c, revisar)
+        cotejados = _cuantos_cotejados(c, revisar)
         cuantos_sin_explicar, marcados = _cuantos_sin_explicar(c, preparar, revisar)
     plazos = circuito_pagos.Plazos(
         cerradas_desde=ahora - timedelta(days=config.pagos_dias_bandeja),
@@ -3115,8 +3381,9 @@ def bandeja_pagos(
     )
     return BandejaPagos(
         elementos=circuito_pagos.bandeja(ordenes, acciones, prepara, plazos),
-        avisos_rechazo=circuito_pagos.avisos_de_rechazo(ordenes, prepara, para_avisar),
+        avisos_rechazo=circuito_pagos.avisos_de_rechazo(ordenes, prepara, para_avisar, admiten),
         por_cotejar=por_cotejar,
+        cotejados=cotejados,
         sin_explicar=cuantos_sin_explicar,
         marcados_no_es_pago=marcados,
     )
@@ -3244,8 +3511,9 @@ def ficha_pago(
         cierres = _cierres(c, lector, None)
         cotejadas = _cotejadas(c, lector, None)
         todas_las_acciones = _con_hechos(
-            todas, _acciones(c, lector, None, _plazo_para_tomar(request)), cotejadas, cierres
-        )
+            todas, _acciones(c, lector, None, _plazo_para_tomar(request)), cotejadas, cierres,
+            _sin_cuenta(c, lector),
+        )  # fmt: skip
         a = todas_las_acciones[orden_id]
         ejecucion = _ejecucion_vigente(c, lector, orden, a)
         ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
@@ -3268,11 +3536,13 @@ def ficha_pago(
             d for d in _documentacion(c, lector, orden.proveedor_id)
             if d.estado in (VENCIDA, POR_VENCER)
         ]  # fmt: skip
+        situacion = circuito_pagos.situacion_de(orden.estado, a)
+        paso = circuito_pagos.paso_de(situacion, a, prepara)
+        motivo_sin_acto = _motivo_sin_acto(c, lector, orden, situacion, paso, a, prepara)
+        admite_orden = orden.proveedor_id in _admiten_orden(c, lector, {orden.proveedor_id})
     carga = cargar.decidir(Entidad()).permitido
     puede_subir_factura = _puede_subir_factura(prepara, carga, orden, vigente, adjuntas)
     puede_reemplazar_factura = _puede_reemplazar_factura(prepara, carga, orden, vigente, adjuntas)
-    situacion = circuito_pagos.situacion_de(orden.estado, a)
-    paso = circuito_pagos.paso_de(situacion, a, prepara)
     situaciones = {
         o.id: circuito_pagos.situacion_de(o.estado, todas_las_acciones[o.id]) for o in todas
     }
@@ -3309,8 +3579,14 @@ def ficha_pago(
         AccionPago.CERRAR_RECLAMO: a.puede_resolver_diferencia and a.reclamo_abierto,
         AccionPago.CORREGIR_DIFERENCIA: a.puede_corregir_diferencia,
         AccionPago.PREPARAR_FALTANTE: paso == PasoPago.PREPARAR_FALTANTE,
-        AccionPago.VOLVER_A_PAGAR: puede_modificar and orden.estado == EstadoOrdenPago.FALLIDA,
-        AccionPago.PREPARAR_OTRA: prepara and orden.estado == EstadoOrdenPago.RECHAZADA,
+        # FL-ORD-08: con el proveedor suspendido o de baja, la versión nueva se niega.
+        AccionPago.VOLVER_A_PAGAR: puede_modificar
+        and orden.estado == EstadoOrdenPago.FALLIDA
+        and motivo_sin_acto != MotivoSinActo.PROVEEDOR_INACTIVO,
+        # FL-ORD-05: no se ofrece preparar otra a un proveedor que hoy no la admite.
+        AccionPago.PREPARAR_OTRA: prepara
+        and orden.estado == EstadoOrdenPago.RECHAZADA
+        and admite_orden,
         AccionPago.CERRAR_SIN_PAGAR: puede_cerrar_sin_pagar,
     }
     no_coincide = (
@@ -3359,7 +3635,8 @@ def ficha_pago(
         toma_vigente=toma, factura_adjunta=adjuntas.principal, factura_reemplazo=adjuntas.reemplazo,
         facturas_anteriores=adjuntas.anteriores, puede_subir_factura=puede_subir_factura,
         puede_reemplazar_factura=puede_reemplazar_factura,
-        documentacion_proveedor=documentacion,
+        documentacion_proveedor=documentacion, motivo_sin_acto=motivo_sin_acto,
+        proveedor_admite_orden=admite_orden,
     )  # fmt: skip
 
 
@@ -3384,7 +3661,10 @@ ERRORES_SIN_AMBITO = {
 def pagos_por_aclarar(identidad: IdentidadDep, motor: MotorDep) -> ListaPagosPorAclarar:
     with transaccion(motor, persona_id=identidad.persona_id) as c:
         filas = c.execute(
-            text("select * from nucleo.pagos_por_aclarar(:actor, 'api', :sesion)"),
+            text("select a.*, r.razon_social"
+                 " from nucleo.pagos_por_aclarar(:actor, 'api', :sesion) a"
+                 " join nucleo.razon_social_por_aclarar(:actor, 'api', :sesion) r"
+                 " on r.orden_id = a.orden_id"),
             {"actor": identidad.persona_id, "sesion": identidad.sesion_id},
         ).mappings()  # fmt: skip
         return ListaPagosPorAclarar(elementos=[PagoPorAclarar(**f) for f in filas])

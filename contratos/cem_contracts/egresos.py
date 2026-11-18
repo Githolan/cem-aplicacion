@@ -320,6 +320,27 @@ class ListaProveedores(BaseModel):
         " identidad humana): la base no los toma para una orden que prepare esa persona"
         " (`salteo_de_quien_prepara`)."
     )
+    vence_salteo: list["VenceSalteo"] = Field(
+        description="De cada uno de `con_salteo`, hasta cuándo sirve su salteo (el último en"
+        " vencer de los que sirven; FL-SAL-01, 18-11-2026)."
+    )
+    salteo_vencido_sin_usar: list[UUID] = Field(
+        description="Los bloqueados sin ningún salteo vigente cuyo último salteo venció sin que"
+        " lo usara una orden (FL-SAL-04)."
+    )
+    autoriza_por_persona: bool = Field(
+        description="Si el consorcio autoriza a personas a ver los proveedores (`0105`;"
+        " FL-VER-01): apagado, no hay a quién autorizar."
+    )
+
+
+class VenceSalteo(BaseModel):
+    """Hasta cuándo sirve el salteo vigente de un proveedor bloqueado."""
+
+    model_config = ConfigDict(frozen=True)
+
+    proveedor_id: UUID
+    vence_en: datetime
 
 
 class VersionProveedor(BaseModel):
@@ -506,6 +527,10 @@ class ConfiguracionProveedores(BaseModel):
     dias_por_vencer: int
     modo_exigencia: ModoExigencia
     admite_no_vence: bool
+    autoriza_por_persona: bool = Field(
+        description="Si el consorcio autoriza a personas a ver los proveedores (`0105`): apagado,"
+        " no se ofrece «Quién ve los proveedores» (FL-VER-01)."
+    )
 
 
 class RubrosLegalesProveedor(BaseModel):
@@ -544,6 +569,20 @@ class ListaProveedoresConsulta(BaseModel):
     documentacion_por_vencer: list[UUID]
     documentacion_faltante: list[UUID]
     modo_exigencia: ModoExigencia
+    con_salteo: list[UUID] = Field(
+        description="Los bloqueados (modo `bloquear` y documentación faltante) con un salteo por"
+        " urgencia vigente, de quien sea (FL-VER-03)."
+    )
+    vence_salteo: list[VenceSalteo] = Field(
+        description="De cada uno de `con_salteo`, hasta cuándo sirve (el último en vencer)."
+    )
+    salteo_vencido_sin_usar: list[UUID] = Field(
+        description="Los bloqueados sin salteo vigente cuyo último salteo venció sin usarse"
+        " (FL-SAL-04)."
+    )
+    autoriza_por_persona: bool = Field(
+        description="Si el consorcio autoriza a personas a ver los proveedores (FL-VER-01)."
+    )
 
 
 class AutorizacionVerProveedores(BaseModel):
@@ -558,6 +597,11 @@ class AutorizacionVerProveedores(BaseModel):
     motivo: str | None
     registrado_en: datetime | None
     registrado_por_nombre: str | None
+    ve_por_rol: bool = Field(
+        description="Si ya ve los proveedores por su rol (`roles_que_ven` de la configuración):"
+        " autorizarla no cambia lo que ve (FL-VER-02), y retirarle la autorización tampoco se"
+        " lo quita."
+    )
 
 
 class ListaAutorizacionesVerProveedores(BaseModel):
@@ -614,6 +658,90 @@ class NuevoSalteoDocumentacion(BaseModel):
     ]
 
 
+class RetiroRubroLegal(BaseModel):
+    """Cuerpo opcional de `DELETE …/proveedores/{p}/rubros-legales/{rubro}`: el motivo. Quitar un
+    rubro al que le falta documentación lo pide (pregunta 4 del propietario, 18-11-2026:
+    `motivo_requerido`); sin faltantes, no hace falta."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MOTIVO_SALTEO),
+        ]
+        | None
+    ) = None
+
+
+class RetiroRubroConMotivo(BaseModel):
+    """Un rubro legal quitado con documentación faltante, con el motivo (`0110`): a la vista del
+    Consejo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    proveedor_id: UUID
+    rubro_legal: str
+    motivo: str
+    faltaban: list[str] = Field(description="Los códigos de lo que le faltaba de ese rubro.")
+    retirado_en: datetime
+    retirado_por_nombre: str
+
+
+class EstadoPedidoSalteo(StrEnum):
+    PENDIENTE = "pendiente"
+    """Espera que el Consejo registre el salteo; el proveedor sigue bloqueado."""
+    ATENDIDO = "atendido"
+    """Se registró un salteo de ese proveedor después del pedido."""
+    SIN_BLOQUEO = "sin_bloqueo"
+    """Sin salteo, pero ya nada bloquea las órdenes a ese proveedor."""
+
+
+class NuevoPedidoSalteo(BaseModel):
+    """`POST …/proveedores/{p}/pedidos-salteo`: quien prepara pide al Consejo un salteo para un
+    proveedor bloqueado, con el motivo y el importe (pregunta 3 del propietario, 18-11-2026)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MOTIVO_SALTEO),
+    ]
+    importe_centavos: Importe
+    moneda: Moneda
+
+
+class PedidoSalteo(BaseModel):
+    """Un pedido de salteo (`0110`). No se cambia ni se borra: lo atiende el salteo que el
+    Consejo registra después."""
+
+    model_config = ConfigDict(frozen=True)
+
+    numero: int
+    proveedor_id: UUID
+    razon_social: str
+    motivo: str
+    importe_centavos: int
+    moneda: str
+    pedido_en: datetime
+    pedido_por_nombre: str
+    propio: bool = Field(description="Si lo pidió la cuenta de quien lee.")
+    estado: EstadoPedidoSalteo
+    salteo_numero: int | None = Field(description="El salteo que lo atendió.")
+    salteo_vence_en: datetime | None = Field(
+        description="Hasta cuándo espera su orden el salteo que lo atendió."
+    )
+
+
+class ListaPedidosSalteo(BaseModel):
+    """`GET …/pedidos-salteo`: los del consorcio, del más nuevo al más viejo. Los lee quien
+    saltea (el Consejo, por la configuración) y quien prepara las órdenes."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[PedidoSalteo]
+
+
 class FichaProveedorConsulta(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -627,6 +755,10 @@ class FichaProveedorConsulta(BaseModel):
     configuracion: ConfiguracionProveedores
     salteos: list[SalteoDocumentacion] = Field(
         description="Los salteos con motivo del bloqueo por documentación legal (`0106`)."
+    )
+    retiros_con_motivo: list[RetiroRubroConMotivo] = Field(
+        description="Los rubros legales que se le quitaron con documentación faltante, con el"
+        " motivo (`0110`), del más nuevo al más viejo."
     )
 
 
@@ -649,6 +781,10 @@ class ProveedorConVersiones(BaseModel):
     configuracion: ConfiguracionProveedores
     salteos: list[SalteoDocumentacion] = Field(
         description="Los salteos con motivo del bloqueo por documentación legal (`0106`)."
+    )
+    retiros_con_motivo: list[RetiroRubroConMotivo] = Field(
+        description="Los rubros legales que se le quitaron con documentación faltante, con el"
+        " motivo (`0110`), del más nuevo al más viejo."
     )
 
 
@@ -1461,6 +1597,10 @@ class PagoPorAclarar(BaseModel):
     consorcio: str
     orden_id: UUID
     version: Version
+    razon_social: str = Field(
+        description="El proveedor de la orden, sin la cuenta (pregunta 17 del propietario,"
+        " 18-11-2026; FL-ACL-03)."
+    )
     concepto: str
     importe_centavos: int
     moneda: str
@@ -1513,6 +1653,10 @@ class PasoPago(StrEnum):
     RENOVAR = "renovar"
     MODIFICAR = "modificar"
     """Aprobada, y el proveedor cambió: no se paga hasta modificarla (`proveedor_cambiado`)."""
+    FALTA_CUENTA = "falta_cuenta"
+    """Aprobada, y el proveedor no tiene cuenta destino en la versión que fija la orden: nadie la
+    puede pagar (`proveedor_sin_cuenta`). Se carga la cuenta en el proveedor y se modifica la
+    orden, que vuelve a aprobación (FL-ORD-06)."""
     VOLVER_A_PAGAR = "volver_a_pagar"
     RECHAZADA = "rechazada"
     APROBAR = "aprobar"
@@ -1768,6 +1912,11 @@ class AvisoRechazo(BaseModel):
     motivo: str
     creada_en: datetime
     rechazada_en: datetime
+    proveedor_admite_orden: bool = Field(
+        description="Si hoy se le puede preparar una orden nueva a ese proveedor (activo y, si"
+        " le falta documentación en modo «bloquear», con un salteo que sirve a quien lee): sin"
+        " eso, no se ofrece «Preparar otra orden» (FL-ORD-05). Solo para mostrar."
+    )
 
 
 class BandejaPagos(BaseModel):
@@ -1782,6 +1931,12 @@ class BandejaPagos(BaseModel):
         ge=0,
         description="Cuántos pagos conciliados puede cotejar quien pide (grupo «Para cotejar»)."
         " Cero si no puede cotejar.",
+    )
+    cotejados: int = Field(
+        ge=0,
+        description="Cuántos pagos cotejados y vigentes lee quien pide en «Ver lo cotejado»"
+        " (`…/pagos/cotejo/cotejados`): sin ninguno, esa entrada no se ofrece (FL-CON-01). Cero"
+        " si no puede cotejar.",
     )
     sin_explicar: int = Field(
         ge=0,
@@ -2013,6 +2168,36 @@ class FichaPago(BaseModel):
         description="Lo vencido y lo que vence pronto del proveedor de la orden (RF50, `0103`):"
         " marca, no impide preparar, aprobar ni pagar.",
     )
+    motivo_sin_acto: "MotivoSinActo | None" = Field(
+        description="Por qué no se le ofrece a quien mira el acto del paso en que está la orden,"
+        " cuando la razón es de esta orden y no de su rol (FL-ORD-06, FL-ORD-08, FL-APR-02). Nulo"
+        " si se le ofrece o si no es de su rol. Solo para mostrar: la ruta y la base vuelven a"
+        " decidir."
+    )
+    proveedor_admite_orden: bool = Field(
+        description="Si quien lee puede prepararle hoy una orden nueva al proveedor de esta orden"
+        " (activo y, si le falta documentación en modo «bloquear», con un salteo que le sirve)."
+        " Falso para quien no prepara. Sin eso, no se ofrece «Preparar otra orden» (FL-ORD-05)."
+        " Solo para mostrar: la base vuelve a decidir al preparar."
+    )
+
+
+class MotivoSinActo(StrEnum):
+    """Por qué no se ofrece el acto del paso (pregunta 17 del propietario, 18-11-2026)."""
+
+    YA_APROBASTE = "ya_aprobaste"
+    """Esta cuenta (o su misma identidad humana) ya aprobó la versión vigente: falta otra
+    aprobación."""
+    CARGASTE_LA_CUENTA = "cargaste_la_cuenta"
+    """Esta cuenta firmó la cuenta del proveedor que paga la orden: la aprueba otra persona."""
+    APROBASTE_LA_ORDEN = "aprobaste_la_orden"
+    """Esta cuenta aprobó la orden: el pago lo concilia otra persona (`0102`)."""
+    PROVEEDOR_SIN_CUENTA = "proveedor_sin_cuenta"
+    """El proveedor no tiene cuenta destino en la versión que fija la orden: nadie la puede
+    pagar hasta cargarla y modificar la orden."""
+    PROVEEDOR_INACTIVO = "proveedor_inactivo"
+    """El proveedor está suspendido o de baja: no recibe una versión nueva, así que la orden que
+    no se pagó no vuelve a aprobación con él."""
 
 
 class ElementoConsultaPagos(BaseModel):

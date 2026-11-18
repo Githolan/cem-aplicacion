@@ -63,6 +63,8 @@ type Respuestas = Record<string, () => Response | Promise<Response>>;
 const CON_SEGUNDO_FACTOR: Respuestas = {
   "GET /api/v1/auth/totp": () =>
     Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
+  // Los grupos con porcentajes del período (FL-LIQ-01, tanda 9): por omisión, uno.
+  [`GET /api/v1/consorcios/${C1}/liquidaciones/grupos`]: () => Response.json({ periodo: "2026-10-01", elementos: [GRUPO] }),
 };
 
 function backend(respuestas: Respuestas) {
@@ -122,16 +124,17 @@ async function ventanaAbrir() {
   return screen.findByRole("dialog", { name: ABRIR_UN_BORRADOR });
 }
 
-/** Elige el período con los dos desplegables (AC-51), en la ventana de abrir un borrador. */
+/** Elige el período en el desplegable «Período» (AC-51, FL-LIQ-02), en la ventana de abrir un borrador. */
 async function elegirPeriodo(anio: string, mes: string) {
   const ventana = await ventanaAbrir();
-  fireEvent.change(within(ventana).getByLabelText("Año"), { target: { value: anio } });
-  fireEvent.change(within(ventana).getByLabelText("Mes"), { target: { value: mes } });
+  fireEvent.change(within(ventana).getByLabelText("Período"), { target: { value: `${anio}-${mes}` } });
   return ventana;
 }
 
-/** Abre la ventana de agregar gastos desde el borrador a la vista (LIQ-03). */
+/** La ventana de agregar gastos: la que ya está abierta (FL-LIQ-03) o, si no, la abre desde el borrador (LIQ-03). */
 async function ventanaAgregar() {
+  const abierta = screen.queryByRole("dialog", { name: AGREGAR_GASTOS });
+  if (abierta !== null) return abierta;
   fireEvent.click(await screen.findByRole("button", { name: AGREGAR_GASTOS }));
   return screen.findByRole("dialog", { name: AGREGAR_GASTOS });
 }
@@ -145,6 +148,25 @@ async function volverALaLista() {
 describe("liquidación (borrador)", () => {
   it("dice el período en palabras", () => {
     expect(periodo("2026-10-01")).toBe("octubre de 2026");
+  });
+
+  it("FL-LIQ-01 (tanda 9): si el período no tiene grupos con porcentajes, la ventana lo dice y no abre el borrador", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
+      [`GET ${BASE}/liquidaciones/grupos`]: () => Response.json({ periodo: "2026-10-01", elementos: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: ABRIR_UN_BORRADOR }));
+    const ventana = await screen.findByRole("dialog", { name: ABRIR_UN_BORRADOR });
+    expect(await within(ventana).findByText(/no tiene grupos de gasto con porcentajes: sin ellos el borrador no se puede repartir\. Los carga soporte\.$/)).toBeTruthy();
+    expect(within(ventana).queryByRole("button", { name: "Abrir el borrador" })).toBeNull();
+    expect(within(ventana).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+    const [pedido] = pedidos(api, "GET", `${BASE}/liquidaciones/grupos`);
+    expect(new URL((pedido as Request).url).searchParams.get("periodo")).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(0);
   });
 
   it("abre el borrador, agrega una orden pagada con su grupo, muestra la simulación y la quita", async () => {
@@ -176,7 +198,7 @@ describe("liquidación (borrador)", () => {
 
     expect(await screen.findByText("Todavía no hay liquidaciones en este edificio.")).toBeTruthy();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     const [preparar] = pedidos(api, "POST", `${BASE}/liquidaciones`);
     expect(await preparar!.json()).toEqual({ periodo: "2026-10-01" });
@@ -192,7 +214,8 @@ describe("liquidación (borrador)", () => {
     expect(within(borrador).queryByRole("heading", { name: "Simulación del reparto" })).toBeNull();
     // LIQ-03: las órdenes se eligen en su ventana, no en el borrador.
     expect(within(borrador).queryByRole("checkbox")).toBeNull();
-    const ventana = await ventanaAgregar();
+    // FL-LIQ-03: recién creado, la ventana de agregar se abre sola, sin otro toque.
+    const ventana = await screen.findByRole("dialog", { name: AGREGAR_GASTOS });
     fireEvent.click(within(ventana).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
     // Un solo grupo vigente: va ese, sin desplegable (AC-48).
     expect(within(ventana).queryByLabelText("Grupo de gasto")).toBeNull();
@@ -203,7 +226,8 @@ describe("liquidación (borrador)", () => {
     const [agregar] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
     expect(await agregar!.json()).toEqual({ orden_id: O1, grupo: "expensas_comunes" });
     // P3 139: la fecha con la que el gasto entra en el período, sin pasarla por la hora local.
-    expect(within(borrador).getByText(/pagada el 30 de octubre de 2026\)/)).toBeTruthy();
+    // FL-LIQ-06: fila compacta, con concepto, grupo y fecha debajo del proveedor y el importe.
+    expect(within(borrador).getByText("Limpieza de octubre · Expensas comunes · pagada el 30 de octubre de 2026")).toBeTruthy();
 
     const tabla = await screen.findByRole("table");
     const filas = within(tabla).getAllByRole("row");
@@ -270,7 +294,7 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    expect(await screen.findByText(/Limpieza Ficticia SRL: /)).toBeTruthy();
+    expect(await screen.findByText("Limpieza Ficticia SRL")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Quitar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: AGREGAR_GASTOS })).toBeNull();
   });
@@ -391,16 +415,22 @@ describe("liquidación (borrador)", () => {
     expect(await screen.findByRole("button", { name: ABRIR_UN_BORRADOR })).toBeTruthy();
     expect(screen.queryByLabelText("Mes")).toBeNull();
     const ventana = await ventanaAbrir();
-    // AC-51: el período se elige con dos desplegables, sin escribir «2026-10», y empieza en el mes anterior.
-    const mes = within(ventana).getByLabelText("Mes") as HTMLSelectElement;
-    const anio = within(ventana).getByLabelText("Año") as HTMLSelectElement;
-    expect(mes.tagName).toBe("SELECT");
-    expect(anio.tagName).toBe("SELECT");
+    // AC-51: el período se elige en un desplegable, sin escribir «2026-10», y empieza en el mes anterior.
+    // FL-LIQ-02: uno solo, «Período», y el más nuevo que ofrece es el mes que viene (el servidor no admite otro).
+    expect(within(ventana).queryByLabelText("Mes")).toBeNull();
+    expect(within(ventana).queryByLabelText("Año")).toBeNull();
+    const elegido = within(ventana).getByLabelText("Período") as HTMLSelectElement;
+    expect(elegido.tagName).toBe("SELECT");
     const hoy = new Date();
     const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-    expect(mes.value).toBe(String(anterior.getMonth() + 1).padStart(2, "0"));
-    expect(anio.value).toBe(String(anterior.getFullYear()));
-    expect(mes.options[0]?.textContent).toBe("Enero");
+    const siguiente = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1);
+    const enPalabras = (d: Date) => {
+      const texto = periodo(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+      return texto.charAt(0).toUpperCase() + texto.slice(1);
+    };
+    expect(elegido.value).toBe(`${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, "0")}`);
+    expect(elegido.options[0]?.textContent).toBe(enPalabras(siguiente));
+    expect(elegido.options[elegido.selectedIndex]?.textContent).toBe(enPalabras(anterior));
     // Ya no hay un campo de texto con formato técnico ni un error de formato que mostrar arriba.
     expect(screen.queryByPlaceholderText("AAAA-MM")).toBeNull();
     expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
@@ -441,12 +471,12 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
-      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
       [`POST ${BASE}/liquidaciones`]: () => error("liquidacion_no_admite", 409),
     }));
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText(/ya hay un borrador de ese período/)).toBeTruthy();
   });
 
@@ -461,7 +491,7 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
   });
@@ -473,12 +503,13 @@ describe("liquidación (borrador)", () => {
     const api = backend({
       ...LISTAS,
       [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [otra] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
       [`POST ${BASE}/liquidaciones`]: () => error("liquidacion_no_admite", 409),
     });
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(1));
   });
 
@@ -486,19 +517,20 @@ describe("liquidación (borrador)", () => {
     const api = backend({
       ...LISTAS,
       [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
       [`POST ${BASE}/liquidaciones`]: () => error("error_interno", 500),
     });
     const intentos = () => pedidos(api, "POST", `${BASE}/liquidaciones`);
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await screen.findByText(/El servicio no está disponible/);
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(intentos()).toHaveLength(2));
     await screen.findByText(/El servicio no está disponible/);
     await elegirPeriodo("2026", "11");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(intentos()).toHaveLength(3));
     const [primera, segunda, tercera] = intentos().map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
@@ -510,7 +542,7 @@ describe("liquidación (borrador)", () => {
     const api = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
-      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
       [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
       [`POST ${BASE}/liquidaciones`]: () => {
         liquidaciones = [LIQUIDACION];
@@ -520,9 +552,13 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    // FL-LIQ-03: se abre sola la ventana de agregar; «Cancelar» deja el borrador a la vista.
+    const agregar = await screen.findByRole("dialog", { name: AGREGAR_GASTOS });
+    fireEvent.click(within(agregar).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // LIQ-01: con el borrador a la vista no se ofrece abrir otro; se vuelve a la lista.
     expect(screen.queryByRole("button", { name: ABRIR_UN_BORRADOR })).toBeNull();
     await volverALaLista();
@@ -530,14 +566,12 @@ describe("liquidación (borrador)", () => {
     // Vuelve al mes anterior, como al abrir uno que ya existía: nada vacío ni a medias.
     const hoy = new Date();
     const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-    const anio = String(anterior.getFullYear());
-    expect((within(ventana).getByLabelText("Año") as HTMLSelectElement).value).toBe(anio);
-    expect((within(ventana).getByLabelText("Mes") as HTMLSelectElement).value).toBe(String(anterior.getMonth() + 1).padStart(2, "0"));
-    // Cambiar solo el mes deja un período completo, con el año que se ve.
-    fireEvent.change(within(ventana).getByLabelText("Mes"), { target: { value: "03" } });
-    fireEvent.click(within(ventana).getByRole("button", { name: "Abrir el borrador" }));
+    expect((within(ventana).getByLabelText("Período") as HTMLSelectElement).value)
+      .toBe(`${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, "0")}`);
+    fireEvent.change(within(ventana).getByLabelText("Período"), { target: { value: "2026-11" } });
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
-    expect(await pedidos(api, "POST", `${BASE}/liquidaciones`)[1]!.json()).toEqual({ periodo: `${anio}-03-01` });
+    expect(await pedidos(api, "POST", `${BASE}/liquidaciones`)[1]!.json()).toEqual({ periodo: "2026-11-01" });
   });
 
   it("si falló el detalle de la abierta, se repite solo al volver la red", async () => {
@@ -909,7 +943,7 @@ describe("claves retenidas (Codex en #242)", () => {
     const api = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
-      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
       [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json({ ...SIN_GASTOS, liquidacion: { ...LIQUIDACION, estado: "descartada" } }),
       [`GET ${BASE}/liquidaciones/${L2}`]: () => Response.json({ ...SIN_GASTOS, liquidacion: noviembre }),
       [`POST ${BASE}/liquidaciones`]: () => {
@@ -924,7 +958,7 @@ describe("claves retenidas (Codex en #242)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     const ventana = screen.getByRole("dialog", { name: ABRIR_UN_BORRADOR });
     await within(ventana).findByRole("alert");
     fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
@@ -940,7 +974,7 @@ describe("claves retenidas (Codex en #242)", () => {
     await volverALaLista();
     expect(await screen.findByText("Ver descartados (1)")).toBeTruthy();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
     const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones`).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).not.toBe(primera);
@@ -951,7 +985,7 @@ describe("claves retenidas (Codex en #242)", () => {
       ...{
         "GET /api/v1/me/consorcios": CONSORCIOS,
         [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
-        [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+        [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
       },
       [`POST ${BASE}/liquidaciones`]: () => {
         throw new TypeError("Failed to fetch");
@@ -960,9 +994,9 @@ describe("claves retenidas (Codex en #242)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     await elegirPeriodo("2026", "10");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await screen.findByRole("alert");
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
     await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
     const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones`).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
@@ -1023,5 +1057,125 @@ describe("errores al descartar, dentro de la hoja (Codex en #242)", () => {
     const mensaje = document.getElementById(campo.getAttribute("aria-describedby") ?? "");
     expect(mensaje?.textContent).toBe("Falta el motivo.");
     expect(within(hoja).queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("revisión por flujos del 18-11, tanda 6", () => {
+  const LISTAS_CON = (liquidables: unknown[], liquidaciones: unknown[] = [], detalle: Detalle = SIN_GASTOS): Respuestas => ({
+    "GET /api/v1/me/consorcios": CONSORCIOS,
+    [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
+    [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: liquidables }),
+    [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(detalle),
+  });
+
+  it("FL-LIQ-01: sin órdenes pagadas hasta el fin del período no se abre el borrador: queda el aviso y «Cancelar»", async () => {
+    // Pagada en noviembre: no entra en octubre, sí en noviembre.
+    const enNoviembre = { ...LIQUIDABLE, pagada_el: "2026-11-02" };
+    const api = backend(LISTAS_CON([enNoviembre]));
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const ventana = await elegirPeriodo("2026", "10");
+    expect(within(ventana).getByText("No hay órdenes pagadas hasta el fin de octubre de 2026 para liquidar.")).toBeTruthy();
+    expect(within(ventana).queryByRole("button", { name: "Abrir el borrador" })).toBeNull();
+    expect(within(ventana).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+    // Control: con un período que sí la incluye, vuelve el botón y se pide el borrador.
+    fireEvent.change(within(ventana).getByLabelText("Período"), { target: { value: "2026-11" } });
+    expect(within(ventana).queryByText(/No hay órdenes pagadas/)).toBeNull();
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Abrir el borrador" }));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(1));
+  });
+
+  it("FL-LIQ-01: el borrador que el período ya tiene se abre aunque no haya órdenes", async () => {
+    vi.stubGlobal("fetch", backend(LISTAS_CON([], [LIQUIDACION])));
+    abrir();
+    const ventana = await elegirPeriodo("2026", "10");
+    expect(within(ventana).queryByText(/No hay órdenes pagadas/)).toBeNull();
+    fireEvent.click(await within(ventana).findByRole("button", { name: "Abrir el borrador" }));
+    expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
+  });
+
+  it("FL-LIQ-03: recién creado sin porcentajes cargados, la ventana de agregar no se abre sola", async () => {
+    let liquidaciones: unknown[] = [];
+    vi.stubGlobal("fetch", backend({
+      ...LISTAS_CON([LIQUIDABLE], [], { ...SIN_GASTOS, grupos: [] }),
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
+      [`POST ${BASE}/liquidaciones`]: () => {
+        liquidaciones = [LIQUIDACION];
+        return Response.json({ id: L1 }, { status: 201 });
+      },
+    }));
+    abrir();
+    await elegirPeriodo("2026", "10");
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir el borrador" }));
+    const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    expect(await within(borrador).findByText(/Faltan los porcentajes de cada unidad/)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("FL-LIQ-04: con órdenes de dos monedas y el borrador sin gastos, primero se elige la moneda", async () => {
+    const O2 = O1.replace("3333-4333", "3334-4333");
+    const enDolares = { ...LIQUIDABLE, orden_id: O2, moneda: "USD", razon_social: "Proveedor en dólares SRL" };
+    const api = backend({
+      ...LISTAS_CON([LIQUIDABLE, enDolares], [LIQUIDACION]),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => Response.json({ id: G1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const ventana = await ventanaAgregar();
+    const moneda = within(ventana).getByLabelText("Moneda de los gastos") as HTMLSelectElement;
+    expect([...moneda.options].map((o) => o.textContent)).toEqual(["Elegir la moneda", "Pesos", "Dólares"]);
+    // Sin moneda, ninguna orden a la vista; enviar marca la moneda y no manda nada.
+    expect(within(ventana).queryByRole("checkbox")).toBeNull();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar el gasto" }));
+    expect(await within(ventana).findByText("Falta elegir la moneda.")).toBeTruthy();
+    expect(moneda.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(moneda, { target: { value: "USD" } });
+    const opciones = within(ventana).getAllByRole("checkbox").map((c) => c.closest("label")?.textContent);
+    expect(opciones).toHaveLength(1);
+    expect(opciones[0]).toContain("Proveedor en dólares SRL");
+    fireEvent.click(within(ventana).getByRole("checkbox", { name: /Proveedor en dólares SRL/ }));
+    fireEvent.click(within(ventana).getByRole("button", { name: "Agregar el gasto" }));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(1));
+    expect(await pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)[0]!.json()).toEqual({ orden_id: O2, grupo: "expensas_comunes" });
+  });
+
+  it("FL-LIQ-04, control: con una sola moneda no se pregunta", async () => {
+    vi.stubGlobal("fetch", backend(LISTAS_CON([LIQUIDABLE], [LIQUIDACION])));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const ventana = await ventanaAgregar();
+    expect(within(ventana).queryByLabelText("Moneda de los gastos")).toBeNull();
+    expect(within(ventana).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+  });
+
+  it("FL-LIQ-05: un borrador sin gastos no ofrece imprimir; con gastos, sí", async () => {
+    vi.stubGlobal("fetch", backend(LISTAS_CON([LIQUIDABLE], [LIQUIDACION])));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    expect(within(borrador).getByText("Todavía no hay gastos agregados.")).toBeTruthy();
+    expect(within(borrador).queryByRole("button", { name: "Imprimir o guardar como PDF" })).toBeNull();
+    expect(within(borrador).getByRole("button", { name: "Descartar el borrador" })).toBeTruthy();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend(LISTAS_CON([], [LIQUIDACION], CON_GASTO)));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const conGasto = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    expect(within(conGasto).getByRole("button", { name: "Imprimir o guardar como PDF" })).toBeTruthy();
+  });
+
+  it("FL-LIQ-06: cada gasto es una fila compacta, con «Quitar» al costado como acción secundaria", async () => {
+    vi.stubGlobal("fetch", backend(LISTAS_CON([], [LIQUIDACION], CON_GASTO)));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const lista = await screen.findByRole("list", { name: "Gastos del borrador" });
+    const [fila] = within(lista).getAllByRole("listitem");
+    expect(within(fila!).getByText("Limpieza Ficticia SRL").tagName).toBe("STRONG");
+    expect(within(fila!).getByText("Limpieza de octubre · Expensas comunes · pagada el 30 de octubre de 2026")).toBeTruthy();
+    const quitar = within(fila!).getByRole("button", { name: /^Quitar Limpieza Ficticia SRL/ });
+    // Con borde, no lleno: el principal de la pantalla no es quitar (pregunta 13: el negativo va en rojo).
+    expect(quitar.classList.contains("secundario")).toBe(true);
   });
 });

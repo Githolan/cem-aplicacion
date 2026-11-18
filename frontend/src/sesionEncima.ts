@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 
 import { guardarAdondeIba } from "./adondeIba";
 import { borrarCopias } from "./copiaContactos";
+import { ENCABEZADO_CSRF, encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 
 // Entrar encima (decisión del propietario del 05-11-2026, §10; rediseño de pagos, §12): si la sesión
@@ -10,9 +11,13 @@ import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 //
 // Todo pedido pasa por `pedirConSesion`, así que ninguna pantalla tiene que acordarse. Un 401 de una
 // sesión que este navegador conocía, o una sesión que ya no sirve para el acto, abre la hoja. Una
-// lectura espera a que la persona entre y se repite sola: la pantalla nunca se entera. Un pedido que
-// escribe devuelve la respuesta y no se manda de nuevo: lo repite la persona, con la misma clave de
-// idempotencia que ya tenía su pantalla.
+// pedido, lectura o escritura, espera a que la persona entre y se repite solo: la pantalla nunca se
+// entera (decisión del propietario del 18-11-2026, pregunta 11; FL-ACC-01). El servidor no lo hizo
+// (respondió 401 o 403), así que repetirlo no lo duplica; va con la misma clave de idempotencia y con
+// el CSRF de la sesión nueva.
+//
+// La hoja dice por qué se abrió (FL-ACC-02): con un 401 la sesión venció; con un 403 de entrada
+// reciente la sesión sigue abierta, pero el acto pide haber entrado hace poco.
 //
 // Quien entra puede ser otra persona. Lo que hay en la pantalla no es suyo: si cambió, la aplicación
 // se carga de cero en el inicio, sin nada de la anterior.
@@ -36,12 +41,16 @@ type Sesion = { persona: string; correo: string; id: string };
 type Pedido = { antes: Sesion | null; seguir: Promise<void>; soltar: () => void };
 type Cuerpo = { codigo?: string; detalle?: { falta?: string } };
 
-export type EstadoEncima = { pidiendo: boolean; correo: string; recuperada: boolean };
+/** Por qué se pide entrar: la sesión venció (401) o el acto pide una entrada reciente (403). */
+export type MotivoEncima = "vencida" | "reciente";
+
+export type EstadoEncima = { pidiendo: boolean; correo: string; recuperada: boolean; motivo: MotivoEncima };
 
 let activa = false;
 let conocida: Sesion | null = null;
 let pedido: Pedido | null = null;
-let foto: EstadoEncima = { pidiendo: false, correo: "", recuperada: false };
+const SIN_PEDIDO: EstadoEncima = { pidiendo: false, correo: "", recuperada: false, motivo: "vencida" };
+let foto: EstadoEncima = SIN_PEDIDO;
 const oyentes = new Set<() => void>();
 
 /** Las salidas que recargan la página, aparte para poder observarlas en las pruebas. */
@@ -62,7 +71,7 @@ export function activarEntrarEncima(): () => void {
     activa = false;
     conocida = null;
     pedido = null;
-    foto = { pidiendo: false, correo: "", recuperada: false };
+    foto = SIN_PEDIDO;
   };
 }
 
@@ -104,14 +113,21 @@ export function useAEntrar(antes?: () => void): () => void {
   }, [antes, navegar]);
 }
 
-function abrir() {
+function abrir(motivo: MotivoEncima) {
   if (pedido !== null) return;
   let soltar = () => {};
   const seguir = new Promise<void>((resolver) => {
     soltar = resolver;
   });
   pedido = { antes: conocida, seguir, soltar };
-  publicar({ pidiendo: true, correo: conocida?.correo ?? "", recuperada: false });
+  publicar({ pidiendo: true, correo: conocida?.correo ?? "", recuperada: false, motivo });
+}
+
+/** FL-CTA-01 (tanda 9): abre la hoja de entrar de nuevo sin esperar un 403, para un acto que ya se
+ * sabe que pide una entrada reciente. Se resuelve al entrar con la misma persona. */
+export function pedirEntrarDeNuevo(): Promise<void> {
+  abrir("reciente");
+  return (pedido as Pedido).seguir;
 }
 
 function terminar({ antes, soltar }: Pedido, nueva: Sesion) {
@@ -142,15 +158,26 @@ async function cuerpoDe(respuesta: Response): Promise<Cuerpo> {
   return (await respuesta.clone().json().catch(() => ({}))) as Cuerpo;
 }
 
-async function pideEntrar(ruta: string, respuesta: Response): Promise<boolean> {
+/** Si la respuesta pide entrar de nuevo, y por qué; null si no. */
+async function pideEntrar(ruta: string, respuesta: Response): Promise<MotivoEncima | null> {
   if (respuesta.status === ESTADO_SIN_SESION) {
-    if (conocida === null || RUTAS_DE_ENTRADA.has(ruta)) return false;
-    return (await cuerpoDe(respuesta)).codigo === "no_autenticado";
+    if (conocida === null || RUTAS_DE_ENTRADA.has(ruta)) return null;
+    return (await cuerpoDe(respuesta)).codigo === "no_autenticado" ? "vencida" : null;
   }
-  if (respuesta.status !== ESTADO_SIN_PERMISO) return false;
+  if (respuesta.status !== ESTADO_SIN_PERMISO) return null;
   const { codigo, detalle } = await cuerpoDe(respuesta);
-  if (codigo === "sesion_reciente_requerida") return true;
-  return codigo === "reautenticacion_requerida" && (detalle?.falta ?? FALTA_ENTRAR) === FALTA_ENTRAR;
+  if (codigo === "sesion_reciente_requerida") return "reciente";
+  return codigo === "reautenticacion_requerida" && (detalle?.falta ?? FALTA_ENTRAR) === FALTA_ENTRAR ? "reciente" : null;
+}
+
+/** El mismo pedido para la sesión nueva: el CSRF está ligado a la sesión, así que va el de ahora. */
+function paraLaSesionNueva(pedir: Request): Request {
+  if (!pedir.headers.has(ENCABEZADO_CSRF)) return pedir;
+  const encabezados = new Headers(pedir.headers);
+  const csrf = encabezadoCsrf()[ENCABEZADO_CSRF];
+  if (csrf === undefined) encabezados.delete(ENCABEZADO_CSRF);
+  else encabezados.set(ENCABEZADO_CSRF, csrf);
+  return new Request(pedir, { headers: encabezados });
 }
 
 /**
@@ -166,16 +193,23 @@ export async function comprobarSesion(pedir: Request): Promise<Response> {
 
 /** El `fetch` del cliente de la API. */
 export async function pedirConSesion(pedir: Request): Promise<Response> {
-  const repetible = activa && pedir.method === "GET" ? pedir.clone() : null;
-  const respuesta = await globalThis.fetch(pedir);
-  if (!activa) return respuesta;
+  // El cuerpo se lee al mandarlo: la copia para repetirlo se hace antes. Se lee entero primero, no con
+  // `clone()`: la copia de un cuerpo es un flujo, y el navegador lo manda como flujo (sin poder verlo
+  // las herramientas del navegador ni las pruebas e2e). Los cuerpos de la API son JSON chicos o un
+  // adjunto de hasta 20 MB, que queda en memoria mientras dura el pedido.
+  const cuerpo = activa && pedir.body !== null ? await pedir.arrayBuffer() : null;
+  const mandar = cuerpo === null ? pedir : new Request(pedir, { body: cuerpo });
+  const repetible = activa ? (cuerpo === null ? pedir.clone() : new Request(pedir, { body: cuerpo })) : null;
+  const respuesta = await globalThis.fetch(mandar);
+  if (repetible === null) return respuesta;
   const ruta = new URL(pedir.url).pathname;
   if (ruta === RUTA_SESION) await anotarSesion(respuesta);
   // Si salir falló, la sesión sigue y puede vencer con algo escrito.
   if (ruta === RUTA_SALIR && (respuesta.ok || respuesta.status === ESTADO_SIN_SESION)) conocida = null;
-  if (!(await pideEntrar(ruta, respuesta))) return respuesta;
-  abrir();
-  if (repetible === null || pedido === null) return respuesta;
+  const motivo = await pideEntrar(ruta, respuesta);
+  if (motivo === null) return respuesta;
+  abrir(motivo);
+  if (pedido === null) return respuesta;
   await pedido.seguir;
-  return pedirConSesion(repetible);
+  return pedirConSesion(paraLaSesionNueva(repetible));
 }

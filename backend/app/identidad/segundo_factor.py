@@ -205,6 +205,18 @@ def tiene_medio(conn: Connection) -> bool:
     ).scalar_one()
 
 
+def alta_permitida_hasta(conn: Connection, identidad: Identidad) -> datetime | None:
+    """Hasta cuándo esta sesión puede dar de alta un medio, con la regla de
+    `exigir_permiso_de_alta`: sin medio, desde que empezó la sesión; con uno, desde la última
+    verificación (nulo si nunca se verificó). Lo informa `GET /auth/sesion` (FL-CTA-01): la
+    pantalla no repite los 10 minutos."""
+    desde = "segundo_factor_en" if tiene_medio(conn) else "creada_en"
+    return conn.execute(
+        text(f"select {desde} + :v from nucleo.sesion where id = :s"),
+        {"s": sesion_de(identidad), "v": VIGENCIA_VERIFICACION},
+    ).scalar_one()
+
+
 def exigir_permiso_de_alta(conn: Connection, identidad: Identidad) -> None:
     """Con un medio activo, sumar otro pide verificarse con él: una entrada por el correo no
     alcanza para agregar un medio a una cuenta que ya tiene uno. Sin ninguno, una entrada

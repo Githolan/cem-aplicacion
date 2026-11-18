@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
-
 import { ActivarLlave } from "../ActivarLlave";
+import { ActivarAplicacion } from "../AltaAplicacion";
+import { EntrarParaActivar, useAltaVencida } from "../altaDeConfirmacion";
 import { api } from "../api/cliente";
 import { CodigosRecuperacion } from "../CodigosRecuperacion";
 import { encabezadoCsrf } from "../csrf";
@@ -10,7 +10,7 @@ import { Hoja } from "../Hoja";
 import { confirmarConLlave, esDeEsteDispositivo, llaveDisponible } from "../llaveAcceso";
 import { type MetodoConfirmar, recordarMetodo, ultimoMetodo } from "../metodoConfirmar";
 import { FallaDeLectura, mensajeDeLectura } from "../permisos";
-import { codigoAplicacion, codigoVerificacion, RUTA_SEGUNDO_FACTOR } from "../SegundoFactor";
+import { codigoAplicacion, codigoVerificacion } from "../SegundoFactor";
 import { mensajeDeError } from "./comun";
 
 // Confirmar en el momento (rediseño de pagos, §12): ante `segundo_factor_requerido` aparece directo
@@ -27,6 +27,10 @@ import { mensajeDeError } from "./comun";
 // directo en un código de recuperación (se gasta uno): la hoja lo explica y lo ofrece. Quien no
 // tiene nada activado activa la llave en la misma hoja, sin salir de la pantalla y sin perder lo
 // escrito; el alta deja la sesión verificada y el acto sigue.
+//
+// FL-CTA-03: la aplicación de códigos también se activa ahí mismo, en una ventana encima del acto
+// (`ActivarAplicacion`), en vez de mandar a otra página que vuelve con la pantalla montada de nuevo y
+// lo escrito perdido. Su alta también deja la sesión verificada.
 
 interface Props {
   /** Qué se va a reintentar, en palabras («aprobar la orden»). */
@@ -47,7 +51,7 @@ type Paso =
   | { tipo: "otro" }
   | { tipo: "llave_lejos" }
   | { tipo: "sin_alta" }
-  | { tipo: "codigos"; codigos: string[] };
+  | { tipo: "codigos"; codigos: string[]; medio: "llave" | "aplicacion" };
 
 const TEXTO_METODO: Record<MetodoConfirmar, string> = {
   llave: "PIN, huella o cara",
@@ -93,30 +97,6 @@ async function primerMetodo(activos: Activos): Promise<MetodoConfirmar | null> {
   return (["aplicacion", "llave", "recuperacion"] as const).find((m) => activos[m]) ?? null;
 }
 
-/** Sin ningún método no hay nada que pedir: el camino es darlo de alta, acá mismo si se puede. */
-function SinAlta({ conLlave, activando }: { conLlave: boolean; activando: boolean }) {
-  const { pathname } = useLocation();
-  // Con el alta de la llave en camino, el enlace no está: irse perdería los códigos (revisión de #237).
-  if (activando) return null;
-  return conLlave ? (
-    <p>
-      Otras opciones:{" "}
-      <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
-        la página de confirmación con PIN, huella o código
-      </Link>
-      . Lo escrito en esta pantalla puede perderse.
-    </p>
-  ) : (
-    <p role="alert" className="aviso-error">
-      Todavía no está activada.{" "}
-      <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
-        Activarla
-      </Link>{" "}
-      y volver a este paso.
-    </p>
-  );
-}
-
 export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const id = useId();
   const [paso, setPaso] = useState<Paso>({ tipo: "leyendo" });
@@ -130,6 +110,10 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   // El alta de la llave en curso: la hoja no se cierra hasta que termine (y, con códigos, hasta
   // «Códigos guardados: seguir»). Revisión de #237.
   const [activando, setActivando] = useState(false);
+  // Con el alta de la llave en camino no se ofrece la otra: irse a ella perdería los códigos.
+  const [llaveEnCurso, setLlaveEnCurso] = useState(false);
+  // FL-CTA-01 (tanda 9): sin ningún método, si el plazo de esta sesión para activar ya pasó.
+  const alta = useAltaVencida(paso.tipo === "sin_alta");
   const campo = useRef<HTMLInputElement>(null);
   const llave = useRef<AbortController | null>(null);
 
@@ -327,8 +311,10 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   if (paso.tipo === "codigos")
     return (
       <Hoja key="codigos" titulo="Guardar los códigos de recuperación">
-        <p className="aviso-ok">Listo: la llave quedó activada.</p>
-        <CodigosRecuperacion codigos={paso.codigos} medio="llave" alGuardar={alVerificar} />
+        <p className="aviso-ok">
+          {paso.medio === "llave" ? "Listo: la llave quedó activada." : "Listo: la confirmación con código quedó activada."}
+        </p>
+        <CodigosRecuperacion codigos={paso.codigos} medio={paso.medio} alGuardar={alVerificar} />
       </Hoja>
     );
 
@@ -337,14 +323,31 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
     return (
       <Hoja key="sin_alta" titulo="Falta la confirmación con PIN, huella o código" alEscapar={activando ? undefined : alCancelar}>
         <p>
-          Para {acto}.
-          {conLlave && " Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo."}
+          Para {acto}.{" "}
+          {conLlave
+            ? "Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo, o con una aplicación de códigos."
+            : "Se activa acá mismo, con una aplicación de códigos en el teléfono."}
         </p>
-        <ActivarLlave
-          alOcupar={setActivando}
-          alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos }))}
-        />
-        <SinAlta conLlave={conLlave} activando={activando} />
+        {alta.vencida === true ? (
+          <EntrarParaActivar plazo={alta.plazo} />
+        ) : (
+          <>
+            <ActivarLlave
+              alOcupar={(ocupado) => {
+                setActivando(ocupado);
+                setLlaveEnCurso(ocupado);
+              }}
+              alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos, medio: "llave" }))}
+            />
+            {!llaveEnCurso && (
+              <ActivarAplicacion
+                secundario={conLlave}
+                alOcupar={setActivando}
+                alActivar={(codigos) => setPaso({ tipo: "codigos", codigos, medio: "aplicacion" })}
+              />
+            )}
+          </>
+        )}
         <div className="formulario">
           <div className="acciones">
             <button type="button" className="secundario" disabled={activando} onClick={alCancelar}>

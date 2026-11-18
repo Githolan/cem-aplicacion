@@ -8,21 +8,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import type { components } from "../api/tipos";
+import { hoyDelDispositivo } from "../archivos";
 import { ContextoVersion } from "../version";
 import {
+  ARCHIVO_EN_REVISION,
+  ARCHIVO_RECHAZADO,
   DOS_FIRMAS,
+  DESDE_EL_PANEL,
+  EMITE_AL_FIRMAR,
   FALTA_ADMINISTRADOR,
   FIRMAR,
+  FIRMAR_Y_EMITIR,
   IR_A_MANDATOS,
   PREPARAR,
   REGISTRAR_ENVIO,
   RESPONDER,
+  REGISTRAR_RESPUESTA,
   RETIRAR,
+  SIN_ADMINISTRADOR_AL_PREPARAR,
   SIN_SOLICITUDES,
   TEXTO_ESTADO,
   textoSituacion,
   TITULO_SOLICITUDES,
 } from "./Solicitudes";
+import { TITULO_PANEL } from "../panel/Panel";
 
 // Solicitudes formales (RF49, app 0108). Datos ficticios: ningún edificio, persona ni documento real.
 
@@ -91,6 +100,8 @@ const ENVIADA: Solicitud = {
     registrado_en: "2026-11-01T13:00:00Z",
     documento_id: null,
     version_documento_id: null,
+    estado_archivo: null,
+    descargable: false,
   },
   acciones: ["responder"],
 };
@@ -105,6 +116,8 @@ const RESPONDIDA: Solicitud = {
     texto: "Se adjuntan los extractos.", medio: "aplicacion", respondida_el: "2026-11-14", fuera_de_plazo: false,
     registrada_por_nombre: "Estudio Ficticio", registrada_en: "2026-11-14T10:00:00Z", documento_id: DOC_RESPUESTA,
     version_documento_id: VERSION_RESPUESTA,
+    estado_archivo: "disponible",
+    descargable: true,
   },
   acciones: [],
 };
@@ -122,6 +135,7 @@ const LLENA: Lista = {
   plazo_por_defecto_dias: 15,
   plazo_minimo_dias: 5,
   plazo_maximo_dias: 60,
+  hay_administrador_vigente: true,
 };
 
 const INICIO: Respuestas = {
@@ -146,7 +160,7 @@ function error(codigo: string, status: number, mensaje = "x") {
   return Response.json({ codigo, mensaje, detalle: null, id_correlacion: "c" }, { status });
 }
 
-function abrir(ruta = "/solicitudes") {
+function abrir(ruta: string | { pathname: string; state: unknown } = "/solicitudes") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -199,7 +213,8 @@ describe("textos", () => {
     expect(textoSituacion(ENVIADA)).toBe("Enviada, esperando respuesta. Vence el 16/11/2026.");
     const fuera = { ...ENVIADA, estado: "respondida" as const, respuesta: {
       texto: "x", medio: "aplicacion" as const, respondida_el: "2026-11-20", fuera_de_plazo: true,
-      registrada_por_nombre: null, registrada_en: "2026-11-20T10:00:00Z", documento_id: null, version_documento_id: null } };
+      registrada_por_nombre: null, registrada_en: "2026-11-20T10:00:00Z", documento_id: null, version_documento_id: null,
+      estado_archivo: null, descargable: false } };
     expect(textoSituacion(fuera)).toBe("Respondida el 20/11/2026, fuera de plazo.");
   });
 });
@@ -490,5 +505,182 @@ describe("solicitudes formales", () => {
     const borrador = await abrirFicha(3);
     expect(borrador.queryByText("Firmas")).toBeNull();
     expect(borrador.getByText("Preparó")).toBeTruthy();
+  });
+});
+
+describe("el círculo de volver (FL-SOL-07)", () => {
+  it("desde el Resumen de pagos vuelve al Resumen, en todos los anchos", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir({ pathname: "/solicitudes", state: { consorcio: C1, desde: DESDE_EL_PANEL } });
+    await fila(1);
+    const volver = screen.getByRole("link", { name: `Volver a ${TITULO_PANEL}` });
+    expect(volver.getAttribute("href")).toBe("/panel");
+    expect(volver.classList.contains("cabecera-interna__volver--angosto")).toBe(false);
+  });
+
+  it("control: llegando de otro lado vuelve al inicio, y ese círculo es solo para el teléfono y la tablet", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    await fila(1);
+    const volver = screen.getByRole("link", { name: "Volver a Inicio" });
+    expect(volver.getAttribute("href")).toBe("/");
+    expect(volver.classList.contains("cabecera-interna__volver--angosto")).toBe(true);
+  });
+});
+
+describe("Flujos 18-11, tanda 7", () => {
+  const CON_UNA_FIRMA: Solicitud = {
+    ...BORRADOR,
+    firmas: [{ nombre: "Eva Ficticia", firmada_en: "2026-11-16T10:00:00Z", propia: false }],
+  };
+  const manana = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d;
+  };
+
+  it("FL-SOL-01: con una firma puesta, el botón dice «Firmar y emitir» y avisa que no se puede retirar", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_UNA_FIRMA] }) }));
+    abrir();
+    const ficha = await abrirFicha(3);
+    expect(ficha.getByRole("button", { name: FIRMAR_Y_EMITIR })).toBeTruthy();
+    expect(ficha.getByText(EMITE_AL_FIRMAR)).toBeTruthy();
+    expect(ficha.queryByRole("button", { name: FIRMAR })).toBeNull();
+  });
+
+  it("FL-SOL-01, control: la primera firma sigue diciendo «Firmar», sin el aviso", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    const ficha = await abrirFicha(3);
+    expect(ficha.getByRole("button", { name: FIRMAR })).toBeTruthy();
+    expect(ficha.queryByText(EMITE_AL_FIRMAR)).toBeNull();
+  });
+
+  it("FL-SOL-02: emitida con el envío pendiente, la ficha queda abierta con el resultado, el texto y «Registrar el envío»", async () => {
+    const emitida: Solicitud = { ...PENDIENTE, id: S1, numero: 3, firmas: [...CON_UNA_FIRMA.firmas, { nombre: "Yo Ficticia", firmada_en: "2026-11-17T10:00:00Z", propia: true }] };
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_UNA_FIRMA] }),
+      [`POST ${BASE}/${S1}/firma`]: () => Response.json(emitida),
+    }));  // prettier-ignore
+    abrir();
+    const ficha = await abrirFicha(3);
+    fireEvent.click(ficha.getByRole("button", { name: FIRMAR_Y_EMITIR }));
+    expect(await ficha.findByText(/^Quedó emitida\. El administrador no tiene cuenta/)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: /^N\.º 3 ·/ })).toBeTruthy();
+    expect(ficha.getByText("Texto emitido")).toBeTruthy();
+    expect(ficha.getByRole("button", { name: REGISTRAR_ENVIO })).toBeTruthy();
+  });
+
+  it("FL-SOL-02, control: emitida a quien tiene cuenta, la ficha se cierra y el resultado queda en la lista", async () => {
+    const enviada: Solicitud = { ...ENVIADA, id: S1, numero: 3, acciones: [] };
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_UNA_FIRMA] }),
+      [`POST ${BASE}/${S1}/firma`]: () => Response.json(enviada),
+    }));  // prettier-ignore
+    abrir();
+    const ficha = await abrirFicha(3);
+    fireEvent.click(ficha.getByRole("button", { name: FIRMAR_Y_EMITIR }));
+    expect(await screen.findByText(/^Quedó emitida y enviada/)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("FL-SOL-06: la fecha del envío va de la emisión a hoy; fuera de eso se marca sin mandar nada", async () => {
+    const api = backend({ [LISTA]: () => Response.json(LLENA) });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const pendiente = await abrirFicha(2);
+    fireEvent.click(pendiente.getByRole("button", { name: REGISTRAR_ENVIO }));
+    const ventana = within(await screen.findByRole("dialog", { name: REGISTRAR_ENVIO }));
+    const fecha = ventana.getByLabelText("Fecha del envío") as HTMLInputElement;
+    expect(fecha.min).toBe(hoyDelDispositivo(new Date(PENDIENTE.emitida_en!)));
+    expect(fecha.max).toBe(hoyDelDispositivo());
+    fireEvent.change(ventana.getByLabelText("Archivo del comprobante del envío", { selector: "input" }), {
+      target: { files: [new File(["%PDF"], "carta.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.change(fecha, { target: { value: "2026-11-01" } });
+    fireEvent.click(ventana.getByRole("button", { name: "Registrar el envío" }));
+    expect(await ventana.findByText(/^La fecha va desde la emisión \(.+\) hasta hoy\.$/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/${S2}/adjuntos`)).toHaveLength(0);
+  });
+
+  it("FL-SOL-06: la respuesta recibida va del envío a hoy; un día futuro se marca sin mandar nada", async () => {
+    const vencida: Solicitud = {
+      ...ENVIADA, estado: "vencida", destinatario_con_cuenta: false,
+      envio: { ...ENVIADA.envio!, medio: "carta_documento" }, acciones: ["registrar_respuesta"],
+    };  // prettier-ignore
+    const api = backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [vencida] }) });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const ficha = await abrirFicha(1);
+    fireEvent.click(ficha.getByRole("button", { name: REGISTRAR_RESPUESTA }));
+    const ventana = within(await screen.findByRole("dialog", { name: REGISTRAR_RESPUESTA }));
+    const fecha = ventana.getByLabelText("Fecha en que llegó") as HTMLInputElement;
+    expect(fecha.min).toBe("2026-11-01");
+    expect(fecha.max).toBe(hoyDelDispositivo());
+    fireEvent.change(ventana.getByLabelText("Lo que respondió la administración"), { target: { value: "Llegó por carta." } });
+    fireEvent.change(fecha, { target: { value: hoyDelDispositivo(manana()) } });
+    fireEvent.click(ventana.getByRole("button", { name: "Registrar la respuesta" }));
+    expect(await ventana.findByText(/^La fecha va desde el envío \(01\/11\/2026\) hasta hoy\.$/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/${S3}/respuesta-recibida`)).toHaveLength(0);
+  });
+
+  it("decisión 15 y FL-SOL-05 (tanda 9): sin administrador vigente, la ventana de preparar lo dice y deja guardar el borrador", async () => {
+    // La lista lo dice aunque ningún borrador lo muestre todavía (app 0110).
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, hay_administrador_vigente: false }) }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: PREPARAR }));
+    const ventana = within(await screen.findByRole("dialog", { name: PREPARAR }));
+    const linea = ventana.getByText(new RegExp(`^${SIN_ADMINISTRADOR_AL_PREPARAR.slice(0, 40)}`));
+    expect(within(linea).getByRole("link", { name: IR_A_MANDATOS }).getAttribute("href")).toBe("/mandatos");
+    expect(ventana.getByRole("button", { name: "Guardar el borrador" })).toBeTruthy();
+  });
+
+  it("FL-SOL-04 (tanda 9): el adjunto en revisión o rechazado no se ofrece para bajar y se dice por qué; sin permiso, ni el enlace", async () => {
+    const adjunto = { documento_id: DOC_RESPUESTA, version_documento_id: VERSION_RESPUESTA };
+    const conEnvio = (numero: number, envio: Partial<NonNullable<Solicitud["envio"]>>): Solicitud => ({
+      ...ENVIADA, id: `dddddddd-dddd-4ddd-8ddd-00000000000${numero}`, numero, acciones: [],
+      envio: { ...ENVIADA.envio!, ...adjunto, ...envio },
+    });  // prettier-ignore
+    const elementos = [
+      conEnvio(1, { estado_archivo: "en_cuarentena", descargable: false }),
+      conEnvio(2, { estado_archivo: "rechazado", descargable: false }),
+      conEnvio(3, { estado_archivo: "disponible", descargable: false }),
+      conEnvio(4, { estado_archivo: "disponible", descargable: true }),
+    ];
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos }) }));
+    abrir();
+
+    const enRevision = await abrirFicha(1);
+    expect(enRevision.getByText(ARCHIVO_EN_REVISION)).toBeTruthy();
+    expect(enRevision.queryByRole("link", { name: "Descargar el comprobante" })).toBeNull();
+    fireEvent.click(enRevision.getByRole("button", { name: "Cerrar" }));
+    const rechazado = await abrirFicha(2);
+    expect(rechazado.getByText(ARCHIVO_RECHAZADO)).toBeTruthy();
+    expect(rechazado.queryByRole("link", { name: "Descargar el comprobante" })).toBeNull();
+    fireEvent.click(rechazado.getByRole("button", { name: "Cerrar" }));
+    const sinPermiso = await abrirFicha(3);
+    expect(sinPermiso.queryByRole("link", { name: "Descargar el comprobante" })).toBeNull();
+    expect(sinPermiso.queryByText(ARCHIVO_EN_REVISION)).toBeNull();
+    fireEvent.click(sinPermiso.getByRole("button", { name: "Cerrar" }));
+    // Control: disponible y con permiso, el enlace.
+    const lista = await abrirFicha(4);
+    expect(lista.getByRole("link", { name: "Descargar el comprobante" })).toBeTruthy();
+  });
+
+  it("P15 (tanda 9): con destinatario con cuenta, la vencida ofrece registrar la respuesta que llegó por otro medio", async () => {
+    const vencida: Solicitud = { ...ENVIADA, estado: "vencida", destinatario_con_cuenta: true, acciones: ["registrar_respuesta"] };
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [vencida] }) }));
+    abrir();
+    const ficha = await abrirFicha(1);
+    fireEvent.click(ficha.getByRole("button", { name: REGISTRAR_RESPUESTA }));
+    expect(await screen.findByRole("dialog", { name: REGISTRAR_RESPUESTA })).toBeTruthy();
+  });
+
+  it("decisión 15, control: con administrador vigente, la ventana no lo menciona", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: PREPARAR }));
+    const ventana = within(await screen.findByRole("dialog", { name: PREPARAR }));
+    expect(ventana.queryByText(new RegExp(`^${SIN_ADMINISTRADOR_AL_PREPARAR.slice(0, 40)}`))).toBeNull();
   });
 });

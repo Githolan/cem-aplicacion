@@ -45,6 +45,24 @@ def version_a_mano(motor_migrate, e, doc, quien: UUID, sha: str | None = None) -
         }).scalar_one())  # fmt: skip
 
 
+DISPONIBLE_A_MANO = text(
+    "insert into nucleo.version_documento (consorcio_id, documento_id, estado, tipo, tamano,"
+    " sha256, clave_objeto, subida_por, antivirus, firmas_en, analizada_en)"
+    " values (:c, :d, 'disponible', 'application/pdf', 10, :s, :k, :p, 'ClamAV SINTETICO',"
+    " now(), now()) returning id"
+)
+
+
+def disponible_a_mano(motor_migrate, cons, doc, quien: UUID) -> str:
+    """Datos sintéticos: una versión ya analizada, insertada directo. Desde `0110` (FL-DOC-02) a
+    quien solo lee no se le lista un documento sin nada que abrir."""
+    with motor_migrate.begin() as c:
+        return str(c.execute(DISPONIBLE_A_MANO, {
+            "c": cons, "d": doc, "s": uuid4().hex * 2, "k": f"cem/sintetica/{uuid4()}",
+            "p": quien,
+        }).scalar_one())  # fmt: skip
+
+
 def lista(e, quien: UUID, sesion: UUID | None = None) -> dict[str, dict]:
     r = get(e, quien, "documentos", sesion)
     assert r.status_code == 200, r.text
@@ -86,6 +104,7 @@ def test_respalda_dice_cual_cita_algo_y_coincide_con_retirar(motor_migrate, e):
 
 def test_respalda_va_nulo_a_quien_no_tiene_la_facultad_de_retirar(motor_migrate, e):
     doc = documento_comun(e, "actas_y_decisiones")
+    disponible_a_mano(motor_migrate, e.cons, doc, e.adm)
     # Datos sintéticos: el propietario de la escena lee por su vínculo, sin la facultad.
     sesion = nueva_sesion(motor_migrate, e.prop)
     del_vinculo = lista(e, e.prop, sesion)
@@ -137,7 +156,9 @@ def test_sin_ninguna_carga_es_403(motor_migrate, e):
     version = version_a_mano(motor_migrate, e, doc, e.adm)
     # El propietario de la escena participa del edificio y lee por su vínculo, pero no carga.
     sesion = nueva_sesion(motor_migrate, e.prop)
-    assert lista(e, e.prop, sesion)  # control: participa y lee la lista
+    # Control: participa y lee la lista (200). Desde `0110` (FL-DOC-02) no recibe este documento:
+    # su única versión sigue en análisis.
+    assert doc not in lista(e, e.prop, sesion)
     assert estado(e, e.prop, doc, version, sesion).status_code == 403
     # Quien no participa del edificio no sabe ni que existe (como en el resto de la API).
     nadie = otra_persona(motor_migrate, e.cons)

@@ -20,7 +20,7 @@ from typing import Annotated
 from uuid import UUID
 
 import anyio
-from cem_contracts.documentos import Titulo, VersionCargada
+from cem_contracts.documentos import EstadoVersion, Titulo, VersionCargada
 from cem_contracts.errores import CodigoError
 from cem_contracts.fiscalizacion import (
     PLAZO_MAXIMO_DIAS,
@@ -195,6 +195,7 @@ class Permisos:
     retirar: Permiso
     registrar_envio: Permiso
     registrar_respuesta: Permiso
+    ver_documentos: Permiso
 
 
 def _permisos(
@@ -204,8 +205,11 @@ def _permisos(
     retirar: Annotated[Permiso, Depends(requiere(RETIRAR))],
     registrar_envio: Annotated[Permiso, Depends(requiere(REGISTRAR_ENVIO))],
     registrar_respuesta: Annotated[Permiso, Depends(requiere(REGISTRAR_RESPUESTA))],
+    ver_documentos: Annotated[Permiso, Depends(requiere("documentos.ver"))],
 ) -> Permisos:
-    return Permisos(responder, preparar, firmar, retirar, registrar_envio, registrar_respuesta)
+    return Permisos(
+        responder, preparar, firmar, retirar, registrar_envio, registrar_respuesta, ver_documentos
+    )
 
 
 PermisosDep = Annotated[Permisos, Depends(_permisos)]
@@ -264,9 +268,14 @@ def _acciones(fila, firmar_decision, puede: dict[str, bool]) -> list[AccionSolic
     elif estado is EstadoSolicitudFormal.ENVIO_PENDIENTE and puede[REGISTRAR_ENVIO]:
         acciones.append(AccionSolicitud.REGISTRAR_ENVIO)
     elif estado in {EstadoSolicitudFormal.ENVIADA, EstadoSolicitudFormal.VENCIDA}:
+        # Pregunta 15 del propietario (18-11-2026): vencida, el Consejo registra la respuesta
+        # que llegó por otro medio también cuando el destinatario tiene cuenta (`0110`).
+        por_otro_medio = (
+            fila["destinatario_con_cuenta"] is False or estado is EstadoSolicitudFormal.VENCIDA
+        )
         if fila["destinatario_es_actor"]:
             acciones.append(AccionSolicitud.RESPONDER)
-        elif fila["destinatario_con_cuenta"] is False and puede[REGISTRAR_RESPUESTA]:
+        elif por_otro_medio and puede[REGISTRAR_RESPUESTA]:
             acciones.append(AccionSolicitud.REGISTRAR_RESPUESTA)
     return acciones
 
@@ -290,6 +299,7 @@ def _solicitudes(
         for p in (permisos.retirar, permisos.registrar_envio, permisos.registrar_respuesta)
     }
     yo = permisos.responder.ctx.persona_id
+    lee = permisos.ver_documentos.decidir(Entidad()).permitido
     return [
         SolicitudFormal(
             id=f["id"], numero=f["numero"], objeto=f["objeto"], referencia=f["referencia"],
@@ -304,14 +314,22 @@ def _solicitudes(
             destinatario_con_cuenta=f["destinatario_con_cuenta"],
             emitida_en=f["emitida_en"], texto_emitido=f["texto_emitido"],
             huella_texto=f["huella_texto"],
-            envio=EnvioSolicitud(**f["envio"]) if f["envio"] else None,
-            respuesta=RespuestaSolicitud(**f["respuesta"]) if f["respuesta"] else None,
+            envio=EnvioSolicitud(**_con_archivo(f["envio"], lee)) if f["envio"] else None,
+            respuesta=(
+                RespuestaSolicitud(**_con_archivo(f["respuesta"], lee)) if f["respuesta"] else None
+            ),
             retiro=RetiroRegistrado(**f["retiro"]) if f["retiro"] else None,
             acciones=_acciones(f, decision, puede),
             falta_administrador_vigente=_falta_administrador(f, decision),
         )
         for f, decision in zip(filas, firmar, strict=True)
     ]  # fmt: skip
+
+
+def _con_archivo(datos: dict, lee: bool) -> dict:
+    """FL-SOL-04 (18-11-2026): el adjunto se descarga si el antivirus lo aprobó y quien lee tiene
+    `documentos.ver`. Solo para mostrar: la descarga vuelve a decidir."""
+    return datos | {"descargable": lee and datos.get("estado_archivo") == EstadoVersion.DISPONIBLE}
 
 
 def _una(conn: Connection, permisos: Permisos, solicitud: UUID) -> SolicitudFormal:
@@ -349,6 +367,7 @@ def listar_solicitudes(permisos: PermisosDep, motor: MotorDep) -> ListaSolicitud
     return ListaSolicitudesFormales(
         elementos=elementos,
         puede_preparar=permisos.preparar.decidir().permitido,
+        hay_administrador_vigente=permisos.responder.ctx.hay_administrador_vigente,
         plazo_por_defecto_dias=PLAZO_POR_DEFECTO_DIAS,
         plazo_minimo_dias=PLAZO_MINIMO_DIAS,
         plazo_maximo_dias=PLAZO_MAXIMO_DIAS,

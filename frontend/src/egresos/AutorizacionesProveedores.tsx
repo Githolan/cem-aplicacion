@@ -61,9 +61,11 @@ export const LARGO_MOTIVO = 500;
 export const AUTORIZADO = "Autorizado";
 export const SIN_AUTORIZACION = "Sin autorización";
 export const RETIRADA = "Autorización retirada";
+/** FL-VER-02 (tanda 9, `ve_por_rol`, app 0110): ya los ve por su rol; autorizarla no cambia nada. */
+export const VE_POR_ROL = "Los ve por su rol";
 
-/** El estado en una palabra, para la fila (AUT-01). */
-export const estadoCorto = (a: Autorizacion) => (a.autorizada ? AUTORIZADO : SIN_AUTORIZACION);
+/** El estado en una palabra, para la fila (AUT-01). Sin autorización y con un rol que ya los ve, eso. */
+export const estadoCorto = (a: Autorizacion) => (a.autorizada ? AUTORIZADO : a.ve_por_rol ? VE_POR_ROL : SIN_AUTORIZACION);
 
 /** El estado en la ficha: si nunca se registró nada, solo eso; si no, también desde cuándo, quién y por qué. */
 function datosDe(a: Autorizacion) {
@@ -71,6 +73,7 @@ function datosDe(a: Autorizacion) {
   return [
     { etiqueta: "Unidades", valor: a.unidades.join(", ") },
     { etiqueta: "Estado", valor: a.autorizada ? AUTORIZADO : registrado ? RETIRADA : SIN_AUTORIZACION },
+    ...(a.ve_por_rol ? [{ etiqueta: "Por su rol", valor: VE_POR_ROL }] : []),
     ...(registrado
       ? [
           { etiqueta: "Desde", valor: fechaCorta(a.registrado_en as string) },
@@ -253,11 +256,15 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           ocupada={enviando}
           ventana={ventana && ventanaDe(enFicha)}
         >
-          <p className="ficha-registro__acciones">
-            <button type="button" className={enFicha.autorizada ? "secundario peligro" : undefined} onClick={abrirVentana}>
-              {enFicha.autorizada ? RETIRAR : AUTORIZAR}
-            </button>
-          </p>
+          {/* FL-VER-02: a quien ya los ve por su rol no se le ofrece «Autorizar» (no cambia nada); retirar
+              una autorización registrada, sí. */}
+          {(enFicha.autorizada || !enFicha.ve_por_rol) && (
+            <p className="ficha-registro__acciones">
+              <button type="button" className={enFicha.autorizada ? "secundario peligro" : undefined} onClick={abrirVentana}>
+                {enFicha.autorizada ? RETIRAR : AUTORIZAR}
+              </button>
+            </p>
+          )}
         </FichaDeRegistro>
       )}
     </>

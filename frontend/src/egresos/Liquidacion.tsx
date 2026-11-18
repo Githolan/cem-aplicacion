@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
@@ -7,7 +8,7 @@ import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { ErrorDeCampo, type ErroresDeCampo, erroresDe, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
-import { codigoDe, esPasajera, SIN_CONEXION } from "../fallas";
+import { codigoDe, esPasajera, mensajeDeFalla, SIN_CONEXION } from "../fallas";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import {
@@ -25,7 +26,8 @@ import {
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura, Reintentar } from "./EstadoPantalla";
-import { REQUISITOS } from "../permisos";
+import { NOMBRE_MONEDA } from "../pagos/textos";
+import { FallaDeLectura as FallaDeLaLectura, mensajeDeLectura, REQUISITOS, SIN_CACHE } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
 import { useCodigoEnMedio } from "./useCodigoEnMedio";
 import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } from "./useConsorcio";
@@ -45,6 +47,13 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } f
 // órdenes se agregan en su ventana (LIQ-03, C8P-19) y el descarte también (C8P-20), con los botones
 // siempre activos; el resultado sale en el borrador, donde se actuó (LIQ-06). Sin gastos no hay
 // simulación que mostrar (LIQ-05) y «es un borrador» se dice una sola vez, en la lista (LIQ-04).
+//
+// Revisión por flujos del 18-11-2026, tanda 6: no se abre un borrador de un período sin órdenes
+// pagadas para liquidar; la ventana lo dice y queda «Cancelar» (FL-LIQ-01, decisión 14). El período se
+// elige en un solo desplegable que ofrece solo los que el servidor admite (FL-LIQ-02). Creado el
+// borrador, se abre sola «Agregar gastos» (FL-LIQ-03); con órdenes de dos monedas, primero se elige la
+// moneda (FL-LIQ-04). Imprimir se ofrece solo con gastos (FL-LIQ-05) y cada gasto es una fila compacta
+// (FL-LIQ-06).
 
 type Resumen = components["schemas"]["Liquidacion"];
 type Detalle = components["schemas"]["LiquidacionDetalle"];
@@ -53,6 +62,9 @@ type EstadoLiquidacion = Resumen["estado"];
 
 export const RUTA_LIQUIDACION = "/liquidacion";
 export const ABRIR_UN_BORRADOR = "Abrir un borrador";
+/** FL-LIQ-01 (tanda 9, `GET …/liquidaciones/grupos`): sin grupos con porcentajes, el borrador no se reparte. */
+export const textoSinGrupos = (p: string) =>
+  `${conMayuscula(p)} no tiene grupos de gasto con porcentajes: sin ellos el borrador no se puede repartir. Los carga soporte.`;
 export const AGREGAR_GASTOS = "Agregar gastos";
 export const DESCARTAR = "Descartar el borrador";
 
@@ -72,21 +84,24 @@ type Acto =
 /** La ventana abierta: elegir el período, agregar gastos o descartar el borrador. */
 type Ventana = "abrir" | "agregar" | "descartar";
 
-/** Los meses del desplegable «Mes» (AC-51): el período se elige, no se escribe como «2026-10». */
-const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-/** Años hacia atrás que ofrece «Año», además del actual y el siguiente. */
+/** Años hacia atrás que ofrece «Período»: desde enero de ese año. */
 const ANIOS_ATRAS = 3;
+
+/** «2026-10»: el mes de una fecha, en la hora local. */
+const aaaamm = (fecha: Date) => `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}`;
 
 /** «2026-10»: el mes anterior al de hoy, que es el que se suele liquidar. */
 function mesAnterior(hoy = new Date()): string {
-  const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-  return `${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, "0")}`;
+  return aaaamm(new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1));
 }
 
-/** Del anterior más viejo que se ofrece al siguiente al actual. */
-function aniosOfrecidos(hoy = new Date()): string[] {
-  const actual = hoy.getFullYear();
-  return Array.from({ length: ANIOS_ATRAS + 2 }, (_, i) => String(actual - ANIOS_ATRAS + i));
+/** Los períodos del desplegable «Período» (AC-51, FL-LIQ-02), «AAAA-MM», del más nuevo al más viejo:
+ * desde el mes que viene, el último que admite el servidor, hasta enero de hace `ANIOS_ATRAS` años. */
+export function periodosOfrecidos(hoy = new Date()): string[] {
+  const lista: string[] = [];
+  for (let d = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1); d.getFullYear() >= hoy.getFullYear() - ANIOS_ATRAS; d = new Date(d.getFullYear(), d.getMonth() - 1, 1))
+    lista.push(aaaamm(d));
+  return lista;
 }
 
 const FORMATO_PERIODO = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -166,6 +181,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   /** Las órdenes tildadas para agregar (AC-48). */
   const [elegidas, setElegidas] = useState<readonly string[]>([]);
   const [grupo, setGrupo] = useState("");
+  /** La moneda elegida para un borrador sin gastos cuando hay órdenes de más de una (FL-LIQ-04). */
+  const [monedaElegida, setMonedaElegida] = useState("");
+  /** El borrador recién creado: al llegar su detalle, se abre sola «Agregar gastos» (FL-LIQ-03). */
+  const [agregarAlAbrir, setAgregarAlAbrir] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
   const [ventana, setVentana] = useState<Ventana | null>(null);
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
@@ -186,6 +205,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setFallaDetalle(null);
     setElegidas([]);
     setGrupo("");
+    setMonedaElegida("");
+    setAgregarAlAbrir(null);
     setMotivo("");
     setVentana(null);
     setErrores(SIN_ERRORES);
@@ -195,6 +216,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   function volverALaLista(devolverFoco = true) {
     fichas.cerrar(devolverFoco);
     setVentana(null);
+    setAgregarAlAbrir(null);
     setDetalle(null);
     setFallaDetalle(null);
   }
@@ -321,6 +343,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             // Vuelve a un período completo: los desplegables nunca quedan vacíos ni a medias (Codex en #236).
             setMes(mesAnterior());
             abrir(data.id);
+            setAgregarAlAbrir(data.id);
             setResultado({ texto: "Listo: el borrador del período quedó abierto.", ok: true });
           } else if (acto.tipo === "quitar") setResultado({ texto: "Listo: el gasto salió del borrador.", ok: true });
           else {
@@ -377,7 +400,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   async function preparar(): Promise<FinDeEnvio> {
     const periodoElegido = `${mes}-01`;
     // Un período admite un solo borrador: si ya lo tiene, se abre ese y no se pide otro.
-    const existente = liquidaciones.find((l) => l.periodo === periodoElegido && l.estado === "borrador");
+    const existente = borradorDe(periodoElegido);
     if (existente !== undefined) {
       setMes(mesAnterior());
       abrir(existente.id);
@@ -390,9 +413,11 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
    * siempre. Que una orden no entre no frena a las demás; una falla pasajera (red, límite, servicio)
    * sí, y las que faltan quedan elegidas para repetir con las mismas claves. Si entraron todas, la
    * ventana se cierra y el «Listo» sale en el borrador; si no, la ventana dice cuáles no. */
-  async function agregar(liquidacion: string, ordenes: readonly Liquidable[], grupoDeGasto: string): Promise<FinDeEnvio> {
+  async function agregar(liquidacion: string, ordenes: readonly Liquidable[], grupoDeGasto: string, faltaMoneda: boolean): Promise<FinDeEnvio> {
     const faltan: Record<string, string> = {};
-    if (ordenes.length === 0) faltan.ordenes = "Falta tildar las órdenes para agregar.";
+    // Sin moneda elegida todavía no hay órdenes a la vista para tildar: se marca solo la moneda.
+    if (faltaMoneda) faltan.moneda = "Falta elegir la moneda.";
+    else if (ordenes.length === 0) faltan.ordenes = "Falta tildar las órdenes para agregar.";
     if (grupoDeGasto === "") faltan.grupo = "Falta elegir el grupo de gasto.";
     if (hayErrores(faltan)) {
       setErrores(faltan);
@@ -481,6 +506,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   const liquidaciones = lectura.tipo === "ok" ? lectura.liquidaciones : [];
   const liquidables = lectura.tipo === "ok" ? lectura.liquidables : [];
+  /** El borrador que ya tiene un período: un período admite uno solo. */
+  const borradorDe = (periodoElegido: string) => liquidaciones.find((l) => l.periodo === periodoElegido && l.estado === "borrador");
   // El detalle a la vista es el de la abierta: mientras llega el de otra, no se muestra el anterior.
   const visto = detalle !== null && detalle.liquidacion.id === abierta ? detalle : null;
   const simulacion = visto?.simulacion;
@@ -491,18 +518,34 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const monedaBorrador = visto?.gastos[0]?.moneda ?? null;
   // Como la regla del backend (0058): entra solo lo pagado hasta el último día del período (P3 136).
   const hasta = visto === null ? null : mesSiguiente(visto.liquidacion.periodo);
-  const ofrecibles = liquidables.filter(
+  const disponibles = liquidables.filter(
     (o) => (monedaBorrador === null || o.moneda === monedaBorrador) && (hasta === null || o.pagada_el < hasta),
   );
+  // Sin gastos y con órdenes de más de una moneda, primero se elige la moneda y se listan solo las
+  // de ella: el servidor rechaza la segunda moneda (FL-LIQ-04).
+  const monedasDisponibles = [...new Set(disponibles.map((o) => o.moneda))];
+  const hayQueElegirMoneda = monedasDisponibles.length > 1;
+  const ofrecibles = hayQueElegirMoneda ? disponibles.filter((o) => o.moneda === monedaElegida) : disponibles;
   // Solo cuentan las tildadas que siguen ofrecidas: lo que se agrega es lo que se ve tildado.
   const aAgregar = ofrecibles.filter((o) => elegidas.includes(o.orden_id));
   const todas = ofrecibles.length > 0 && aAgregar.length === ofrecibles.length;
   // Sin órdenes para ofrecer (entraron todas, o la lectura ya las muestra en el borrador), la
   // ventana de agregar no tiene qué mostrar: se cierra y no vuelve sola cuando haya otras.
-  const sinQueAgregar = ventana === "agregar" && visto !== null && ofrecibles.length === 0;
+  const sinQueAgregar = ventana === "agregar" && visto !== null && disponibles.length === 0;
   useEffect(() => {
     if (sinQueAgregar) setVentana(null);
   }, [sinQueAgregar]);
+  // Recién creado el borrador, lo único que se puede hacer es agregarle gastos: la ventana se abre
+  // sola en cuanto llega su detalle, si hay órdenes para ofrecer y grupos con porcentajes (FL-LIQ-03).
+  const agregarYa =
+    agregarAlAbrir !== null && visto?.liquidacion.id === agregarAlAbrir
+      ? visto.liquidacion.estado === "borrador" && disponibles.length > 0 && visto.grupos.length > 0
+      : null;
+  useEffect(() => {
+    if (agregarYa === null) return;
+    setAgregarAlAbrir(null);
+    if (agregarYa) setVentana("agregar");
+  }, [agregarYa]);
   // Con un solo grupo vigente no hay nada que elegir: va ese (AC-48, «un grupo por defecto»).
   const unicoGrupo = visto !== null && visto.grupos.length === 1 ? visto.grupos[0]!.grupo : null;
   const grupoDeGasto = unicoGrupo ?? grupo;
@@ -519,6 +562,12 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   /** La lista: abrir un borrador nuevo y las liquidaciones del edificio. */
   function vistaLista() {
+    // Un borrador nuevo sin órdenes pagadas hasta el último día de su período queda vacío para
+    // siempre (FL-LIQ-01, decisión 14): no se abre. El que ya existe sí se abre, como siempre.
+    const periodoElegido = `${mes}-01`;
+    const hastaElegido = mesSiguiente(periodoElegido);
+    const sinOrdenesDelPeriodo =
+      borradorDe(periodoElegido) === undefined && !liquidables.some((o) => o.pagada_el < hastaElegido);
     return (
       <>
         {/* «Es un borrador» se dice una vez, acá (LIQ-04). */}
@@ -548,28 +597,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           </details>
         )}
         {ventana === "abrir" && (
-          <VentanaDeFormulario titulo={ABRIR_UN_BORRADOR} textoEnviar="Abrir el borrador" alEnviar={preparar} alCerrar={() => setVentana(null)}>
-            <label htmlFor={`${id}-mes`}>Mes</label>
-            <select id={`${id}-mes`} data-foco value={mes.slice(5, 7)}
-              onChange={(e) => {
-                const elegido = e.target.value;
-                setMes((actual) => `${actual.slice(0, 4)}-${elegido}`);
-              }}>
-              {MESES.map((nombre, i) => (
-                <option key={nombre} value={String(i + 1).padStart(2, "0")}>{nombre}</option>
-              ))}
-            </select>
-            <label htmlFor={`${id}-anio`}>Año</label>
-            <select id={`${id}-anio`} value={mes.slice(0, 4)}
-              onChange={(e) => {
-                const elegido = e.target.value;
-                setMes((actual) => `${elegido}-${actual.slice(5, 7)}`);
-              }}>
-              {aniosOfrecidos().map((anio) => (
-                <option key={anio} value={anio}>{anio}</option>
-              ))}
-            </select>
-          </VentanaDeFormulario>
+          <VentanaAbrir consorcio={consorcio} mes={mes} setMes={setMes} sinOrdenes={sinOrdenesDelPeriodo}
+            nuevo={borradorDe(periodoElegido) === undefined} preparar={preparar} alCerrar={() => setVentana(null)} />
         )}
       </>
     );
@@ -581,7 +610,25 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     const marcaOrdenes = marcaDe(idOrdenes, errores.ordenes);
     return (
       <VentanaDeFormulario titulo={AGREGAR_GASTOS} textoEnviar={aAgregar.length > 1 ? `Agregar ${aAgregar.length} gastos` : "Agregar el gasto"}
-        alEnviar={() => agregar(d.liquidacion.id, aAgregar, grupoDeGasto)} alCerrar={() => setVentana(null)} ancha>
+        alEnviar={() => agregar(d.liquidacion.id, aAgregar, grupoDeGasto, hayQueElegirMoneda && monedaElegida === "")}
+        alCerrar={() => setVentana(null)} ancha>
+        {hayQueElegirMoneda && (
+          <>
+            <label htmlFor={`${id}-moneda`}>Moneda de los gastos</label>
+            <select id={`${id}-moneda`} data-foco value={monedaElegida} {...marcaDe(`${id}-moneda`, errores.moneda)}
+              onChange={(e) => {
+                setMonedaElegida(e.target.value);
+                setErrores((actuales) => sinElDe(sinElDe(actuales, "moneda"), "ordenes"));
+              }}>
+              <option value="">Elegir la moneda</option>
+              {monedasDisponibles.map((m) => (
+                <option key={m} value={m}>{NOMBRE_MONEDA[m] ?? m}</option>
+              ))}
+            </select>
+            <ErrorDeCampo idCampo={`${id}-moneda`} mensaje={errores.moneda} />
+          </>
+        )}
+        {ofrecibles.length > 0 && (
         <fieldset>
           <legend>Órdenes pagadas para agregar</legend>
           {ofrecibles.length > 1 && (
@@ -615,6 +662,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           </ul>
           <ErrorDeCampo idCampo={idOrdenes} mensaje={errores.ordenes} />
         </fieldset>
+        )}
         {unicoGrupo === null ? (
           <>
             <label htmlFor={`${id}-grupo`}>Grupo de gasto</label>
@@ -700,7 +748,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
           <div className="liquidacion__titulo-gastos">
             <h3>Gastos</h3>
-            {borrador && ofrecibles.length > 0 && visto.grupos.length > 0 && (
+            {borrador && disponibles.length > 0 && visto.grupos.length > 0 && (
               <button type="button" className="secundario no-imprimir" disabled={enviando}
                 onClick={() => abrirVentana("agregar")}>
                 {AGREGAR_GASTOS}
@@ -709,14 +757,23 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           </div>
           {visto.gastos.length === 0 ? (
             // Un solo mensaje de vacío (LIQ-05): sin órdenes para ofrecer, ese lo dice todo.
-            borrador && ofrecibles.length === 0 ? sinOrdenes : <p>Todavía no hay gastos agregados.</p>
+            borrador && disponibles.length === 0 ? sinOrdenes : <p>Todavía no hay gastos agregados.</p>
           ) : (
             <>
-              <ul className="versiones" aria-label="Gastos del borrador">
+              {/* Fila compacta, como el Padrón (FL-LIQ-06): proveedor e importe; concepto, grupo y fecha
+                  debajo; «Quitar» al costado, con borde: es un acto negativo y va en rojo (pregunta 13). */}
+              <ul className="gastos-liquidacion" aria-label="Gastos del borrador">
                 {visto.gastos.map((g) => (
-                  <li key={g.id}>
-                    {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} ({nombreDeGrupo(g.grupo)},
-                    pagada el {dia(g.pagada_el)}){" "}
+                  <li key={g.id} className="gasto-liquidacion">
+                    <span className="gasto-liquidacion__datos">
+                      <span className="fila-pago__arriba">
+                        <strong>{g.razon_social}</strong>
+                        <span className="fila-pago__importe">{importe(g.importe_centavos, g.moneda)}</span>
+                      </span>
+                      <span className="gasto-liquidacion__resumen">
+                        {g.concepto} · {nombreDeGrupo(g.grupo)} · pagada el {dia(g.pagada_el)}
+                      </span>
+                    </span>
                     {borrador && (
                       <button type="button" className="secundario peligro no-imprimir" disabled={enviando}
                         aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
@@ -727,10 +784,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   </li>
                 ))}
               </ul>
-              {borrador && ofrecibles.length === 0 && sinOrdenes}
+              {borrador && disponibles.length === 0 && sinOrdenes}
             </>
           )}
-          {borrador && ofrecibles.length > 0 && visto.grupos.length === 0 && (
+          {borrador && disponibles.length > 0 && visto.grupos.length === 0 && (
             <p className="no-imprimir">
               Faltan los porcentajes de cada unidad para este período: sin ellos no se puede repartir. Los carga soporte.
             </p>
@@ -780,17 +837,22 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             </>
           )}
 
-          <div className="acciones no-imprimir">
-            <button type="button" className="secundario" onClick={() => window.print()}>
-              Imprimir o guardar como PDF
-            </button>
-            {borrador && (
-              <button type="button" className="secundario peligro" disabled={enviando}
-                onClick={() => abrirVentana("descartar")}>
-                {DESCARTAR}
-              </button>
-            )}
-          </div>
+          {(visto.gastos.length > 0 || borrador) && (
+            <div className="acciones no-imprimir">
+              {/* Sin gastos no hay nada que imprimir (FL-LIQ-05). */}
+              {visto.gastos.length > 0 && (
+                <button type="button" className="secundario" onClick={() => window.print()}>
+                  Imprimir o guardar como PDF
+                </button>
+              )}
+              {borrador && (
+                <button type="button" className="secundario peligro" disabled={enviando}
+                  onClick={() => abrirVentana("descartar")}>
+                  {DESCARTAR}
+                </button>
+              )}
+            </div>
+          )}
         </section>
         {borrador && ventana === "agregar" && !sinQueAgregar && ventanaAgregar(visto)}
         {borrador && ventana === "descartar" && ventanaDescartar(visto)}
@@ -842,5 +904,62 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       )}
       {codigo.hoja}
     </>
+  );
+}
+
+/** La ventana de abrir un borrador (FL-LIQ-01): sin órdenes pagadas, o sin grupos con porcentajes en
+ * el período, no se abre; queda el aviso y «Cancelar» (C9). El borrador que ya existe se abre igual. */
+function VentanaAbrir({
+  consorcio,
+  mes,
+  setMes,
+  sinOrdenes,
+  nuevo,
+  preparar,
+  alCerrar,
+}: {
+  consorcio: string;
+  mes: string;
+  setMes: (mes: string) => void;
+  sinOrdenes: boolean;
+  nuevo: boolean;
+  preparar: () => Promise<FinDeEnvio>;
+  alCerrar: () => void;
+}) {
+  const id = useId();
+  const periodoElegido = `${mes}-01`;
+  const grupos = useQuery({
+    queryKey: ["grupos-liquidacion", consorcio, periodoElegido],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/liquidaciones/grupos", {
+        params: { path: { consorcio_id: consorcio }, query: { periodo: periodoElegido } },
+      });
+      if (data === undefined) throw new FallaDeLaLectura(mensajeDeFalla(response.status, codigoDe(error)));
+      return data.elementos;
+    },
+    enabled: nuevo && !sinOrdenes,
+    ...SIN_CACHE,
+  });
+  const sinGrupos = nuevo && !sinOrdenes && grupos.data !== undefined && grupos.data.length === 0;
+  const consultando = nuevo && !sinOrdenes && grupos.isPending;
+  return (
+    <VentanaDeFormulario titulo={ABRIR_UN_BORRADOR} textoEnviar="Abrir el borrador" alEnviar={preparar} alCerrar={alCerrar}
+      sinEnviar={sinOrdenes || sinGrupos || consultando}>
+      <label htmlFor={`${id}-periodo`}>Período</label>
+      <select id={`${id}-periodo`} data-foco value={mes} onChange={(e) => setMes(e.target.value)}>
+        {periodosOfrecidos().map((p) => (
+          <option key={p} value={p}>{conMayuscula(periodo(`${p}-01`))}</option>
+        ))}
+      </select>
+      {/* C9: sin órdenes pagadas para liquidar no se abre el borrador; queda el aviso y «Cancelar». */}
+      {sinOrdenes && nuevo && <p role="status">No hay órdenes pagadas hasta el fin de {periodo(periodoElegido)} para liquidar.</p>}
+      {consultando && <p role="status">Consultando los grupos de gasto del período…</p>}
+      {sinGrupos && <p role="status">{textoSinGrupos(periodo(periodoElegido))}</p>}
+      {grupos.isError && (
+        <p className="aviso-error" role="alert">
+          No se pudo saber si el período tiene grupos de gasto con porcentajes. {mensajeDeLectura(grupos.error)}
+        </p>
+      )}
+    </VentanaDeFormulario>
   );
 }

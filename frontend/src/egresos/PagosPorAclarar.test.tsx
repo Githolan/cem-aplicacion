@@ -7,10 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
+import { FALTA_CODIGO_MONEDA } from "../pagos/CampoMonedaSalida";
 import { CAMBIAR_ARCHIVO } from "../SubirArchivo";
 import { ContextoVersion } from "../version";
 import { VOLVIO_LA_RED } from "./comun";
-import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
+import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, resumenDe, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
 
 // Pagos para aclarar (app 0067). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -131,6 +132,7 @@ const POR_ACLARAR = {
   orden_id: O1,
   version: 1,
   concepto: "Limpieza de octubre",
+  razon_social: "Limpieza Ficticia SRL",
   importe_centavos: 1_500_000,
   moneda: "ARS",
   cuenta_vista_en: "2026-10-31T13:00:00Z",
@@ -170,6 +172,17 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(within(ficha).getByRole("button", { name: NO_SE_TRANSFIRIO })).toBeTruthy();
     expect(within(ficha).getByRole("button", { name: SI_SE_TRANSFIRIO })).toBeTruthy();
     await sinFaltasDeAccesibilidad(document.body);
+  });
+
+  it("FL-ACL-03 (tanda 9): la fila y la ficha dicen a qué proveedor era el pago", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [POR_ACLARAR] }) }));
+    abrir("/pagos/por-aclarar");
+    const lista = await screen.findByRole("list", { name: "Pagos para aclarar" });
+    expect(within(lista).getByRole("button").textContent).toContain(resumenDe(POR_ACLARAR));
+    expect(resumenDe(POR_ACLARAR)).toContain("Limpieza Ficticia SRL");
+    const ficha = await abrirFicha();
+    expect(within(ficha).getByText("Proveedor")).toBeTruthy();
+    expect(within(ficha).getByText("Limpieza Ficticia SRL")).toBeTruthy();
   });
 
   it("quien dejó de administrar declara que no transfirió, con el código si hace falta y la misma clave", async () => {
@@ -386,7 +399,7 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/pago`)).toHaveLength(0);
   });
 
-  it("«Se transfirió otro importe o a otra cuenta» trae la moneda de la orden y se puede cambiar", async () => {
+  it("FL-ACL-02: «Se transfirió otro importe o a otra cuenta» trae la moneda de la orden, por su nombre, y se puede cambiar", async () => {
     const DIFERENCIA = `${BASE}/pagos-por-aclarar/${O1}/diferencia`;
     const api = backend({
       "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible" }] }),
@@ -397,9 +410,13 @@ describe("pagos para aclarar (app 0067)", () => {
     const ventana = await transferencia();
     expect(within(ventana).queryByLabelText("Moneda que salió del banco")).toBeNull(); // el registro común no la pide
     fireEvent.click(within(ventana).getByRole("button", { name: OTRA_COSA }));
-    const moneda = within(ventana).getByLabelText("Moneda que salió del banco") as HTMLInputElement;
+    const moneda = within(ventana).getByLabelText("Moneda que salió del banco") as HTMLSelectElement;
+    expect(moneda.tagName).toBe("SELECT");
     expect(moneda.value).toBe("ARS");
-    fireEvent.change(moneda, { target: { value: "usd" } });
+    expect([...moneda.options].map((o) => o.text)).toEqual(["Pesos", "Dólares", "Otra"]);
+    // El código se escribe solo si fue otra moneda.
+    expect(within(ventana).queryByLabelText("Código de la moneda")).toBeNull();
+    fireEvent.change(moneda, { target: { value: "USD" } });
     expect(moneda.value).toBe("USD");
     fireEvent.change(within(ventana).getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
     fireEvent.change(within(ventana).getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
@@ -409,6 +426,32 @@ describe("pagos para aclarar (app 0067)", () => {
     fireEvent.click(within(ventana).getByRole("button", { name: "Registrar lo que pasó" }));
     await waitFor(() => expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(1));
     expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ moneda: "USD" });
+  });
+
+  it("FL-ACL-02: con «Otra», el código se escribe aparte y, si falta, se marca junto al campo", async () => {
+    const DIFERENCIA = `${BASE}/pagos-por-aclarar/${O1}/diferencia`;
+    const api = backend({
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible" }] }),
+      [`POST ${DIFERENCIA}`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    fireEvent.click(within(ventana).getByRole("button", { name: OTRA_COSA }));
+    fireEvent.change(within(ventana).getByLabelText("Moneda que salió del banco"), { target: { value: "otra" } });
+    fireEvent.change(within(ventana).getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(within(ventana).getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(within(ventana).getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
+    fireEvent.change(within(ventana).getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.change(within(ventana).getByLabelText("Qué pasó"), { target: { value: "SINTETICO: salió en euros" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar lo que pasó" }));
+    expect(await within(ventana).findByText(FALTA_CODIGO_MONEDA)).toBeTruthy();
+    expect(within(ventana).getByLabelText("Código de la moneda").getAttribute("aria-invalid")).toBe("true");
+    expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Código de la moneda"), { target: { value: "eur" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar lo que pasó" }));
+    await waitFor(() => expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(1));
+    expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ moneda: "EUR" });
   });
 
   it("sin pagos para aclarar lo dice", async () => {

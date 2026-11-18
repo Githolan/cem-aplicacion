@@ -2156,3 +2156,80 @@ a.fila-registro:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Flujos 18-11, tanda 2 */
+/* El círculo que vuelve al inicio, solo donde no hay barra lateral (FL-SOL-07). */
+@media (min-width: 1025px) {
+  .cabecera-interna__volver--angosto {
+    display: none;
+  }
+}
+
+/* Sin nada pendiente, una línea en el inicio (FL-INI-01). */
+.inicio-nada {
+  margin: var(--space-4) 0;
+  color: var(--ink-muted);
+}
+
+/* Flujos 18-11, tanda 1 */
+/* FL-ORD-01: con el proveedor que no admite la orden, sus campos se esconden sin desmontarse (lo
+   escrito y la factura subida se conservan). A la vista, son parte de la grilla del formulario. */
+.campos-de-la-orden {
+  display: contents;
+}
+
+.campos-de-la-orden[hidden] {
+  display: none;
+}
+
+/* Flujos 18-11, tanda 5 */
+
+/* La fila de quien solo lee (pagos/FilaEnlace.tsx, FilaDeLectura): el mismo dibujo que
+   button.fila-registro, sin nada que tocar (FL-CON-05, FL-PAN-02). */
+div.fila-registro--lectura {
+  display: grid;
+  gap: 0.125rem;
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* Flujos 18-11, tanda 6 */
+
+/* Liquidación: cada gasto del borrador en una fila compacta, como el Padrón (FL-LIQ-06): proveedor
+   e importe arriba; concepto, grupo y fecha debajo; «Quitar» al costado. */
+.gastos-liquidacion {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.gasto-liquidacion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.gasto-liquidacion__datos {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gasto-liquidacion__resumen {
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}

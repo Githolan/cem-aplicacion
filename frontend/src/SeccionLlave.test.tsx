@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +23,12 @@ const FALTA = () =>
   Response.json({ codigo: "segundo_factor_requerido", mensaje: "x", id_correlacion: "c" }, { status: 403 });
 
 function mostrar(alTerminar: (aviso: string) => void = () => undefined) {
-  return render(<SeccionLlave alCambiar={() => undefined} alCodigos={() => undefined} alTerminar={alTerminar} />);
+  // La confirmación (PedirCodigo) lee el plazo para activar con una consulta (FL-CTA-01): va dentro de su proveedor.
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <SeccionLlave alCambiar={() => undefined} alCodigos={() => undefined} alTerminar={alTerminar} />
+    </QueryClientProvider>,
+  );
 }
 
 const TOTP = () => Response.json({ activo: false, llaves: 1, codigos_recuperacion_restantes: 5, verificado_en: null });

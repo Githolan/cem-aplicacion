@@ -125,8 +125,11 @@ function AvisoDeRechazo({ aviso, consorcio, aEntrar, alCambiar }: PropsAviso) {
 
   return (
     <div className="tarjeta aviso-rechazo" role="status">
+      {/* El aviso abre la orden rechazada, para ver su factura o su concepto (FL-BAN-01). */}
       <p>
-        {textoRechazada(aviso.proveedor, importe(aviso.importe_centavos, aviso.moneda), fechaCorta(aviso.creada_en))}
+        <Link to={rutaFicha(aviso.orden_id)} state={{ consorcio }}>
+          {textoRechazada(aviso.proveedor, importe(aviso.importe_centavos, aviso.moneda), fechaCorta(aviso.creada_en), aviso.concepto)}
+        </Link>
       </p>
       <p>
         <strong>Motivo:</strong> {aviso.motivo}
@@ -137,14 +140,17 @@ function AvisoDeRechazo({ aviso, consorcio, aEntrar, alCambiar }: PropsAviso) {
         </p>
       )}
       <div className="acciones">
-        <button
-          type="button"
-          className="secundario"
-          disabled={enviando}
-          onClick={() => darPorVisto(() => navegar(RUTA_NUEVA, { state: { consorcio, proveedor: aviso.proveedor_id } }))}
-        >
-          {PREPARAR_OTRA}
-        </button>
+        {/* FL-ORD-05 (tanda 9): solo si hoy se le puede preparar una orden a ese proveedor. */}
+        {aviso.proveedor_admite_orden && (
+          <button
+            type="button"
+            className="secundario"
+            disabled={enviando}
+            onClick={() => darPorVisto(() => navegar(RUTA_NUEVA, { state: { consorcio, proveedor: aviso.proveedor_id } }))}
+          >
+            {PREPARAR_OTRA}
+          </button>
+        )}
         <button type="button" className="secundario" disabled={enviando} onClick={() => darPorVisto(alCambiar)}>
           {ENTENDIDO}
         </button>
@@ -228,8 +234,9 @@ export function Bandeja({ bandeja, consorcio, aEntrar, alCambiar }: Props) {
             {sinExplicar > 0 ? `${TITULO_SIN_EXPLICAR} (${sinExplicar})` : TITULO_SIN_EXPLICAR}
           </Link>
         )}
-        {coteja && porCotejar === 0 && (
-          <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+        {/* Llega con lo cotejado ya a la vista (FL-CON-01); sin nada cotejado, no se ofrece (tanda 9). */}
+        {coteja && porCotejar === 0 && bandeja.cotejados > 0 && (
+          <Link to={RUTA_COTEJO} state={{ consorcio, cotejados: true }} className="enlace-boton enlace-boton--borde">
             {VER_LO_COTEJADO}
           </Link>
         )}

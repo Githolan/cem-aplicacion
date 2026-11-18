@@ -210,7 +210,7 @@ def crear(
         .mappings()
         .one()
     )
-    invitacion = Invitacion(**fila)
+    invitacion = Invitacion(**fila, vinculo_id=None)
     # Soporte de plataforma no escribe eventos de auditoría funcional (decisión del propietario
     # del 26-10-2026, corte S2a): la invitación del equipo queda con `invitada_por` nulo.
     if origen != "soporte":
@@ -385,8 +385,10 @@ def listar(
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         filas = conn.execute(
             text(
-                f"select {COLUMNAS_LISTA} from nucleo.invitacion i"
+                f"select {COLUMNAS_LISTA}, x.vinculo_id from nucleo.invitacion i"
                 " join nucleo.unidad u on u.id = i.unidad_id"
+                # FL-INV-01 (18-11-2026): el vínculo que dejó la aceptación (`0110`).
+                " left join nucleo.vinculos_de_invitaciones() x on x.invitacion_id = i.id"
                 " where i.consorcio_id = :c"
                 " order by i.creada_en desc, i.id desc"
             ),
@@ -520,6 +522,9 @@ def consultar(
         ).one()
     if r.resultado != "ok":
         log.info("invitación consultada sin servir: %s", r.resultado)
+        aceptada = _aceptada_por(motor, token, persona_sesion)
+        if aceptada is not None:
+            return aceptada
         raise _invitacion_invalida()
     return InvitacionRecibida(
         consorcio=r.consorcio,
@@ -530,6 +535,31 @@ def consultar(
         invitada_por=r.invitada_por,
         vence_en=r.vence,
         paso=PasoInvitacion(r.paso),
+    )
+
+
+def _aceptada_por(motor, token: bytes, persona_sesion: UUID | None) -> InvitacionRecibida | None:
+    """FL-INVA-02 (18-11-2026): la cuenta del correo que ya aceptó la invitación vuelve a abrir el
+    enlace con su sesión: se le dice que ya está aceptada (`0110`). A cualquier otra persona, la
+    consulta responde 404 como siempre."""
+    if persona_sesion is None:
+        return None
+    with transaccion(motor, persona_id=None) as conn:
+        r = conn.execute(
+            text("select * from nucleo.invitacion_aceptada_por(:t, :p)"),
+            {"t": token, "p": persona_sesion},
+        ).one_or_none()
+    if r is None:
+        return None
+    return InvitacionRecibida(
+        consorcio=r.consorcio,
+        unidad=r.unidad,
+        tipo=TipoVinculo(r.tipo),
+        correo=r.correo,
+        nombre=r.nombre,
+        invitada_por=r.invitada_por,
+        vence_en=r.vence,
+        paso=PasoInvitacion.YA_ACEPTADA,
     )
 
 

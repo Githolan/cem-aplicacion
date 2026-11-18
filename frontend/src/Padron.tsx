@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
@@ -11,7 +11,7 @@ import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe,
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
-import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { REQUISITOS, useConsorcioDeLlegada, useEdificioElegido, usePuede } from "./permisos";
 import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /padron (H2b 2b-5, corte 4; doc/diseno/H2b_5_Diseno.md §5 del repositorio CEM): el padrón
@@ -94,6 +94,11 @@ const TEXTO_ACCION: Record<
   },
 };
 
+/** FL-PAD-03 (tanda 9, `sostiene_consejo`, regla de 0023): terminar el vínculo que habilita a un miembro
+ * del Consejo deja su mandato en revisión, si no le queda otro que lo habilite. */
+export const AVISO_SOSTIENE_CONSEJO =
+  "Esta persona integra el Consejo por este vínculo: si no tiene otro que la habilite, su mandato queda en revisión y deja de autorizar actos.";
+
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
 const MS_POR_DIA = 86_400_000;
 /** Una fecha del contrato (AAAA-MM-DD) como «1 de marzo de 2026», sin correrse por la zona. */
@@ -145,10 +150,14 @@ function renovarClave(estado: number, codigo: string | undefined): boolean {
   return estado < ESTADO.errorDelServidor && codigo !== "idempotencia_en_curso";
 }
 
-/** Lo que espera a quien puede confirmar va primero; después, el resto en el orden de la API. */
-export function sinConfirmarPrimero(filas: Fila[]): Fila[] {
-  return [...filas.filter((f) => !f.confirmado), ...filas.filter((f) => f.confirmado)];
+/** Lo que esa cuenta puede confirmar va primero; después, el resto en el orden de la API. Un
+ * vínculo sin confirmar que confirma otra persona no espera a quien mira (FL-PAD-01). */
+export function confirmablesPrimero(filas: Fila[]): Fila[] {
+  return [...filas.filter((f) => f.confirmable_por_vos), ...filas.filter((f) => !f.confirmable_por_vos)];
 }
+
+/** En la ficha de un vínculo sin confirmar que esa cuenta no confirma: por qué no hay «Confirmar». */
+export const LO_CONFIRMA_OTRA_PERSONA = "Lo confirma otra persona: nadie confirma su propio vínculo ni el que registró.";
 
 /** Una respuesta que deja la lista vieja: el vínculo cambió o ya no está. */
 function cambioElPadron(estado: number, codigo: string | undefined): boolean {
@@ -179,13 +188,24 @@ export function Padron() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const llegada = useConsorcioDeLlegada();
+  // FL-INV-01 (tanda 9): desde la ficha de una invitación aceptada se llega con el vínculo a confirmar.
+  const estadoDeLlegada: unknown = useLocation().state;
+  const vinculoDeLlegada = useRef(
+    typeof estadoDeLlegada === "object" && estadoDeLlegada !== null && "abrir" in estadoDeLlegada && typeof estadoDeLlegada.abrir === "string"
+      ? estadoDeLlegada.abrir
+      : null,
+  );
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.padron,
+    // La fila del inicio abre el edificio de la fila (FL-AVI-03).
+    llegada,
   );
   const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const fichas = useFichas<string>();
+  const abrirLaFicha = fichas.abrir;
   // La acción abierta en su ventana, encima de la ficha; nula, la ficha muestra sus datos y sus botones.
   const [accion, setAccion] = useState<Accion | null>(null);
   const [texto, setTexto] = useState("");
@@ -243,7 +263,13 @@ export function Padron() {
         exigirSesion(response);
         // E35: un padrón pedido antes de un cambio puede llegar después y mostrar el estado viejo.
         if (!vigente) return;
-        if (data !== undefined) setLectura({ tipo: "ok", filas: data.elementos });
+        if (data !== undefined) {
+          setLectura({ tipo: "ok", filas: data.elementos });
+          // La ficha del vínculo con el que se llegó se abre sola, una vez.
+          const llega = data.elementos.find((f) => f.vinculo_id === vinculoDeLlegada.current);
+          vinculoDeLlegada.current = null;
+          if (llega !== undefined) abrirLaFicha(llega.vinculo_id);
+        }
         else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
         else falloLaLectura(mensajeDeFalla(response.status, codigoDe(error)));
       })
@@ -255,7 +281,7 @@ export function Padron() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar, navegar]);
+  }, [consorcio, vuelta, aEntrar, navegar, abrirLaFicha]);
 
   /** PAD-06: el motivo va una sola vez, junto a «Consultar de nuevo»; el aviso de arriba queda para los «Listo». */
   function falloLaLectura(motivo: string) {
@@ -464,7 +490,7 @@ export function Padron() {
             {lectura.tipo === "ok" && filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {filas.length > 0 && (
               <ul className="filas-registro" aria-label="Padrón">
-                {(puede("padron.confirmar_vinculo") ? sinConfirmarPrimero(filas) : filas).map((f) => (
+                {(puede("padron.confirmar_vinculo") ? confirmablesPrimero(filas) : filas).map((f) => (
                   <li key={f.vinculo_id}>
                     <FilaDeRegistro
                       titulo={titulo(f)}
@@ -521,6 +547,7 @@ export function Padron() {
         ]}
         ventana={accion !== null && acciones.includes(accion) && ventana(f, accion)}
       >
+        {!f.confirmado && !f.confirmable_por_vos && puede("padron.confirmar_vinculo") && <p>{LO_CONFIRMA_OTRA_PERSONA}</p>}
         {acciones.length > 0 && (
           <p className="ficha-registro__acciones">
             {acciones.map((a) => (
@@ -549,6 +576,11 @@ export function Padron() {
         alCerrar={soloLaFicha}
       >
         <p id={ayuda}>{textos.ayuda}</p>
+        {a !== "confirmar" && f.sostiene_consejo && (
+          <p className="aviso-pendiente" role="note">
+            {AVISO_SOSTIENE_CONSEJO}
+          </p>
+        )}
         <label htmlFor={idCampo}>{textos.campo}</label>
         <input
           id={idCampo}

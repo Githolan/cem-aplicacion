@@ -127,7 +127,9 @@ def test_la_cuarentena_la_ve_solo_quien_subio(escena, bucket, motor_app):
         return [(x["id"], x["estado"]) for x in d["versiones"]]
 
     assert versiones(e["mc"]) == [(v, "en_cuarentena")]
-    assert versiones(e["prop"]) == []  # el documento figura, su versión todavía no
+    # FL-DOC-02 (`0110`): a quien solo lee, un documento sin nada que abrir no se le lista.
+    r = listar(e["prop"], e["cons"])
+    assert r.status_code == 200 and doc not in {d["id"] for d in r.json()["documentos"]}
     assert analizar(motor_app) == 1
     assert versiones(e["prop"]) == [(v, "disponible")]  # control: aprobada, la ve
 

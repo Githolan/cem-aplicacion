@@ -72,6 +72,9 @@ class HechosPago:
     """El pago de la orden pagada se cotejó con el banco y el cotejo sigue vigente (P-05)."""
     cerrada_sin_pago: bool = False
     """No se pagó y alguien la cerró porque ya no hace falta pagarla (decisión 12, `0096`)."""
+    proveedor_sin_cuenta: bool = False
+    """El proveedor no tiene cuenta destino en la versión que fija la orden: nadie la paga
+    (`proveedor_sin_cuenta`; FL-ORD-06, `0110`)."""
 
 
 @dataclass(frozen=True)
@@ -191,7 +194,11 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
                 return PasoPago.RENOVAR
             if a.proveedor_cambiado:
                 return PasoPago.MODIFICAR
-            return PasoPago.PAGAR if ofrece_pagar(situacion, a) else None
+            if ofrece_pagar(situacion, a):
+                return PasoPago.PAGAR
+            # FL-ORD-06: nadie la puede pagar; la arregla quien prepara (cargar la cuenta y
+            # modificar la orden).
+            return PasoPago.FALTA_CUENTA if prepara and a.proveedor_sin_cuenta else None
         case SituacionPago.PAGANDO:
             if a.puede_subir_comprobante:
                 return PasoPago.SUBIR_COMPROBANTE
@@ -375,10 +382,11 @@ def parecida_a(
 
 
 def avisos_de_rechazo(
-    ordenes: list[OrdenPago], prepara: bool, para_avisar: set[UUID]
+    ordenes: list[OrdenPago], prepara: bool, para_avisar: set[UUID], admiten: set[UUID]
 ) -> list[AvisoRechazo]:
     """Las rechazadas que se avisan arriba de la bandeja (decisión 3): `para_avisar` son las que
-    preparó quien pide y todavía no vio. De la más nueva a la más vieja."""
+    preparó quien pide y todavía no vio. De la más nueva a la más vieja. `admiten`: los
+    proveedores a los que hoy se les puede preparar otra (FL-ORD-05)."""
     if not prepara or not fila_de(SituacionPago.RECHAZADA, PasoPago.RECHAZADA).aviso_una_vez:
         return []
     avisos = [
@@ -392,6 +400,7 @@ def avisos_de_rechazo(
             motivo=o.motivo_rechazo or "",
             creada_en=o.creada_en,
             rechazada_en=o.actualizada_en,
+            proveedor_admite_orden=o.proveedor_id in admiten,
         )  # fmt: skip
         for o in ordenes
         if o.estado == EstadoOrdenPago.RECHAZADA and o.id in para_avisar

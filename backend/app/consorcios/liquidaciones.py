@@ -26,6 +26,7 @@ from cem_contracts.liquidaciones import (
     GastoLiquidacion,
     GastoNuevo,
     GrupoLiquidable,
+    GruposDelPeriodo,
     GrupoSimulado,
     Liquidacion,
     LiquidacionCreada,
@@ -35,10 +36,11 @@ from cem_contracts.liquidaciones import (
     ListaLiquidaciones,
     ListaOrdenesLiquidables,
     OrdenLiquidable,
+    Periodo,
     SimulacionLiquidacion,
     UnidadSimulada,
 )
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import Connection, text
 
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
@@ -212,6 +214,30 @@ def listar_ordenes_liquidables(
             {}, ERRORES,
         ).mappings()  # fmt: skip
         return ListaOrdenesLiquidables(elementos=[OrdenLiquidable(**f) for f in filas])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/liquidaciones/grupos",
+    response_model=GruposDelPeriodo,
+    summary="Antes de abrir el borrador: los grupos con porcentajes que valen el último día del"
+    " período",
+    responses=RESPUESTAS_LECTURA,
+)
+def grupos_del_periodo(
+    periodo: Annotated[Periodo, Query(examples=["2026-10-01"])],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
+) -> GruposDelPeriodo:
+    """FL-LIQ-01 (18-11-2026): sin ningún grupo, el borrador no se puede repartir y no conviene
+    abrirlo. Los mismos grupos que el detalle del borrador (`grupos_liquidables_lectura`), con sus
+    controles (`0110`)."""
+    with _lectura(permiso, motor) as c:
+        filas = _ejecutar(
+            c, permiso,
+            "select * from nucleo.grupos_del_periodo_lectura(:p, :actor, 'api', :sesion)",
+            {"p": periodo}, ERRORES,
+        ).mappings()  # fmt: skip
+        return GruposDelPeriodo(periodo=periodo, elementos=[GrupoLiquidable(**f) for f in filas])
 
 
 @router.get(

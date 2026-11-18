@@ -78,8 +78,11 @@ def subir_con(e, **params):
 
 def test_los_valores_por_defecto(motor_migrate, motor_app, e, bucket):
     f = ficha(e)
-    assert f["configuracion"] == {"dias_por_vencer": 30, "modo_exigencia": "bloquear",
-                                  "admite_no_vence": True}  # fmt: skip
+    # `autoriza_por_persona` desde `0110` (FL-VER-01): por defecto, sí (`0105`).
+    assert f["configuracion"] == {
+        "dias_por_vencer": 30, "modo_exigencia": "bloquear", "admite_no_vence": True,
+        "autoriza_por_persona": True,
+    }  # fmt: skip
     exigido = {r["codigo"]: r["exigido"] for r in f["requisitos"]}
     assert exigido["general.seguro_rc"] is True
     # Las «SIN VERIFICAR» no se exigen; control: están en la matriz.
@@ -262,7 +265,12 @@ def test_los_rubros_se_asignan_y_retiran_con_sus_controles(motor_migrate, motor_
     assert rubro(e, "gas").status_code == 200
     assert codigo(rubro(e, "gas")) == (409, "rubro_legal_sin_cambios")
     assert ficha(e)["rubros_legales"] == ["gas"]
-    r = rubro(e, "gas", asignar=False)
+    # Con lo que le falta de gas, quitarlo pide el motivo (pregunta 4, `0110`).
+    assert codigo(rubro(e, "gas", asignar=False)) == (422, "motivo_requerido")
+    with cliente(e.adm, e.sesion[e.adm]) as c:
+        r = c.request("DELETE", f"/api/v1/consorcios/{e.cons}/proveedores/{e.proveedor}"
+                      "/rubros-legales/gas", json={"motivo": "SINTETICO: se cargó mal"},
+                      headers=clave_idempotencia())  # fmt: skip
     assert r.status_code == 200, r.text
     assert (r.json()["rubros_legales"], r.json()["faltantes"]) == ([], [])
     with motor_migrate.connect() as c:

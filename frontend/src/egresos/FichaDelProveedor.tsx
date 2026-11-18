@@ -25,6 +25,7 @@ type Ficha = {
   requisitos: components["schemas"]["RequisitoLegal"][];
   rubros_legales: string[];
   salteos: Salteo[];
+  retiros_con_motivo: components["schemas"]["RetiroRubroConMotivo"][];
 };
 
 /**
@@ -59,6 +60,8 @@ type Props = {
   puedeCargar: boolean;
   /** Lo que la configuración deja saltear (solo para mostrar: decide la API). */
   puedeSaltear: boolean;
+  /** Quien prepara órdenes pide el salteo al Consejo (tanda 9): las monedas del edificio. */
+  pedirConMonedas?: readonly [string, ...string[]];
   /** Los botones de las acciones de quien gestiona. */
   acciones?: ReactNode;
   /** La historia de versiones (solo gestión). */
@@ -79,6 +82,7 @@ export function FichaDelProveedor({
   puedeCambiar,
   puedeCargar,
   puedeSaltear,
+  pedirConMonedas,
   acciones,
   historia,
   ventana,
@@ -100,6 +104,12 @@ export function FichaDelProveedor({
         requisitos={ficha.requisitos}
         modo={ficha.configuracion.modo_exigencia}
         puedeCambiar={puedeCambiar}
+        puedeCargar={puedeCargar}
+        razonSocial={p.razon_social}
+        admiteNoVence={ficha.configuracion.admite_no_vence}
+        salteoVence={ficha.salteos.find((s) => s.estado === "vigente")?.vence_en ?? null}
+        puedeSaltear={puedeSaltear}
+        retiros={ficha.retiros_con_motivo}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />
@@ -110,6 +120,7 @@ export function FichaDelProveedor({
         modo={ficha.configuracion.modo_exigencia}
         hayFaltantes={ficha.faltantes.length > 0}
         puedeSaltear={puedeSaltear}
+        pedir={pedirConMonedas === undefined || p.estado !== "activo" ? null : { monedas: pedirConMonedas, razonSocial: p.razon_social }}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />
@@ -119,6 +130,7 @@ export function FichaDelProveedor({
         documentacion={ficha.documentacion}
         puedeCargar={puedeCargar}
         requisitos={ficha.requisitos}
+        faltantes={ficha.faltantes}
         admiteNoVence={ficha.configuracion.admite_no_vence}
         aEntrar={aEntrar}
         alCambiar={alCambiar}

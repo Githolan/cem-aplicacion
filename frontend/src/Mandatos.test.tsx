@@ -10,15 +10,29 @@ import contrato from "../../contratos/openapi.json";
 import { accionesDeLasPoliticas, alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { CUIT_INVALIDO } from "./CampoCuit";
+import { hoyDelDispositivo } from "./archivos";
 import { VOLVIO_LA_RED } from "./egresos/comun";
 import {
   ALTA_SIN_DECISION_USABLE,
   ALTA_SIN_DECISIONES,
   AYUDA_DESASOCIAR,
   CAUSA_REVISION,
+  ADJUNTAR_ACTA,
+  ALTA_SIN_NADIE,
+  LISTO_ACTA_ADJUNTA,
+  SIN_ACTA,
+  SIN_ACTAS_DISPONIBLES,
+  CORREO_ALTA,
+  INVITACION_ENVIADA,
+  INVITACION_POR_APROBAR,
+  textoListoConInvitacion,
+  CONSEJO_SIN_CANDIDATOS,
+  DECISION_ESPERA_EL_ACTA,
   LISTO_DECISION,
+  LISTO_DECISION_CON_ACTA,
   mensajeDeError,
   RECIEN_DADO_DE_ALTA,
+  REMOCION_SIN_ASAMBLEA,
   SIN_CONDICION_PARA_MANTENER,
 } from "./Mandatos";
 import { ContextoVersion } from "./version";
@@ -70,12 +84,12 @@ const MANDATOS = {
 
 const DECISIONES = {
   elementos: [
-    { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true },
-    { id: D_PROPIA, tipo: "consejo", fecha: "2026-03-05", descripcion: "Contrata al estudio", registrada_por_vos: true, del_equipo: false },
+    { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true, tiene_acta: false },
+    { id: D_PROPIA, tipo: "consejo", fecha: "2026-03-05", descripcion: "Contrata al estudio", registrada_por_vos: true, del_equipo: false, tiene_acta: false },
   ],
 };
 
-const CANDIDATOS = { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"] }] };
+const CANDIDATOS = { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"], habilita_consejo: true, mandatos: [] }] };
 
 function detalleDecision(id: string, registradaPorVos: boolean) {
   const resumen = DECISIONES.elementos.find((d) => d.id === id);
@@ -611,7 +625,8 @@ describe("página /mandatos", () => {
     expect(boton("Registrar una decisión").className).toBe("");
     // MAN-13: quién da el alta se dice una sola vez, en el «Listo» de la decisión, no en su ventana.
     expect(within(seccion("Registrar una decisión")).queryByText(/no puede usarla/)).toBeNull();
-    expect(LISTO_DECISION).toMatch(/El alta que respalda la da otra persona/);
+    // FL-DEC-03: el «Listo» no repite quién da el alta (no toda decisión respalda un alta).
+    expect(LISTO_DECISION).toBe("Listo: la decisión quedó registrada.");
   });
 
   it("C8G-01, control: sin ninguna decisión, quien registra lee dónde se registra; con una usable, el botón", async () => {
@@ -652,6 +667,70 @@ describe("página /mandatos", () => {
     expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
   });
 
+  it("FL-MAN-01: con una administración sin fecha de fin, no se ofrece otra ni se piden sus datos; se dice y se abre su ficha", async () => {
+    const sinFin = { ...en(MANDATOS.elementos, 1), vigente_hasta: null };
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${RUTA_MANDATOS}`]: () => Response.json({ elementos: [en(MANDATOS.elementos, 0), sinFin] }),
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json({ ...DETALLE_AE, vigente_hasta: null }),
+      }),
+    );
+    abrir();
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    // Solo el Consejo: las dos administraciones chocarían con cualquier «Desde».
+    expect(within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
+      "miembro_consejo",
+    ]);
+    expect(
+      within(alta).getByText(
+        "Ya hay una administración sin fecha de fin: Estudio Sur, desde el 1 de febrero de 2026. Para dar otra administración, antes hay que darla de baja desde su ficha.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(alta).getByRole("button", { name: "Abrir su ficha" }));
+    expect(screen.queryByRole("dialog", { name: "Dar de alta un mandato" })).toBeNull();
+    expect(await esperarFicha("Estudio Sur, Administración externa")).toBeTruthy();
+  });
+
+  it("FL-MAN-01: una administración sin fecha de fin que empieza más adelante deja nombrar otra que termine antes (Codex en app #259)", async () => {
+    const futura = { ...en(MANDATOS.elementos, 1), vigente_desde: "2099-12-01", vigente_hasta: null };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: () => Response.json({ elementos: [en(MANDATOS.elementos, 0), futura] }) }));
+    abrir();
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    expect(within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"))).toContain(
+      "administrador_externo",
+    );
+    expect(within(alta).queryByText(/^Ya hay una administración sin fecha de fin/)).toBeNull();
+    fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+    fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2099-01-01" } });
+    // Sin «Hasta» se pisa con la futura: lo dicen las fechas.
+    expect(within(alta).getByText(/^Ya hay una administración en esas fechas: Estudio Sur/)).toBeTruthy();
+    // Control: terminando antes de que empiece, no choca y se piden sus datos.
+    fireEvent.change(within(alta).getByLabelText("Hasta (opcional; ese día ya no rige)"), { target: { value: "2099-12-01" } });
+    expect(within(alta).queryByText(/^Ya hay una administración/)).toBeNull();
+    expect(within(alta).getByLabelText("Razón social o nombre")).toBeTruthy();
+  });
+
+  it("FL-MAN-01: con otra administración con fecha de fin, una administración pide primero las fechas; si chocan, nada más", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+    const etiquetas = () => [...alta.querySelectorAll("label")].map((l) => l.textContent);
+    // Las fechas van antes que los datos de la administración.
+    expect(etiquetas().indexOf("Desde")).toBeLessThan(etiquetas().indexOf("Razón social o nombre"));
+    fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2026-11-01" } });
+    expect(within(alta).getByText(/^Ya hay una administración en esas fechas: Estudio Sur/)).toBeTruthy();
+    expect(within(alta).queryByLabelText("Razón social o nombre")).toBeNull();
+    expect(within(alta).queryByLabelText("Decisión que lo respalda")).toBeNull();
+    // Control: con fechas que no chocan, vuelven los datos.
+    fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2027-02-01" } });
+    expect(within(alta).getByLabelText("Razón social o nombre")).toBeTruthy();
+  });
+
   it("C8G-05, control: el Consejo no choca con una administración", async () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
@@ -661,8 +740,27 @@ describe("página /mandatos", () => {
     expect(within(alta).getByRole("button", { name: "Dar de alta" })).toBeTruthy();
   });
 
+  it("FL-MAN-05: con una sola decisión que se puede usar, ya va elegida; con dos, hay que elegirla", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    seccion("Dar de alta un mandato");
+    expect(opciones("Decisión que lo respalda")).toEqual([D_EQUIPO]);
+    expect((screen.getByLabelText("Decisión que lo respalda") as HTMLSelectElement).value).toBe(D_EQUIPO);
+    cleanup();
+    // Control: con dos, la persona elige.
+    const otra = { id: D_OTRA, tipo: "asamblea", fecha: "2026-04-01", descripcion: "Renueva el Consejo", registrada_por_vos: false, del_equipo: false };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: [...DECISIONES.elementos, otra] }) }));
+    abrir();
+    await cargado();
+    seccion("Dar de alta un mandato");
+    expect((screen.getByLabelText("Decisión que lo respalda") as HTMLSelectElement).value).toBe("");
+  });
+
   it("decisión 4: el alta sin decisión ni fecha marca los dos campos y no manda nada", async () => {
-    const simulado = conConsejo();
+    // Dos decisiones que se pueden usar: ninguna va elegida (FL-MAN-05).
+    const otra = { id: D_OTRA, tipo: "asamblea", fecha: "2026-04-01", descripcion: "Renueva el Consejo", registrada_por_vos: false, del_equipo: false };
+    const simulado = conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: [...DECISIONES.elementos, otra] }) });
     vi.stubGlobal("fetch", simulado);
     abrir();
     await cargado();
@@ -755,6 +853,14 @@ describe("página /mandatos", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Cancelar" }));
     const otra = seccion("Registrar una decisión");
     expect(within(otra).getByLabelText("Fecha del acto").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("FL-DEC-04: la fecha del acto no ofrece días después de hoy", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    const form = seccion("Registrar una decisión");
+    expect(within(form).getByLabelText("Fecha del acto").getAttribute("max")).toBe(hoyDelDispositivo());
   });
 
   it("G-49: los motivos de dominio no usan «facultad» ni «instrumento»", () => {
@@ -870,7 +976,8 @@ describe("página /mandatos", () => {
     fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     await desplegarBaja();
     fireEvent.change(screen.getByLabelText("Causa"), { target: { value: "remocion" } });
-    expect(opciones("Asamblea que lo remueve")).toEqual(["", D_EQUIPO]);
+    // FL-MAN-05: la única asamblea que se puede usar ya va elegida.
+    expect(opciones("Asamblea que lo remueve")).toEqual([D_EQUIPO]);
     fireEvent.change(screen.getByLabelText("Asamblea que lo remueve"), { target: { value: D_EQUIPO } });
     fireEvent.change(screen.getByLabelText("Por qué termina"), { target: { value: "Remoción" } });
     fireEvent.click(boton("Dar de baja"));
@@ -897,18 +1004,23 @@ describe("página /mandatos", () => {
       await abrirElDetalle(() => Response.json({ elementos: [soloPropia] }));
       expect(opciones("Causa")).not.toContain("remocion");
       expect(opciones("Causa")).toContain("renuncia");
-      expect(screen.getByText(/^La remoción por asamblea pide una asamblea registrada por otra persona/)).toBeTruthy();
+      // FL-MAN-08: la línea no va en la ventana de la baja, que se abre por otra causa, sino en la ficha.
+      const ventana = screen.getByRole("dialog", { name: /^Dar de baja el mandato de/ });
+      expect(within(ventana).queryByText(REMOCION_SIN_ASAMBLEA)).toBeNull();
+      expect(within(screen.getByRole("dialog", { name: "Estudio Sur, Administración externa" })).getByText(REMOCION_SIN_ASAMBLEA)).toBeTruthy();
     });
 
     it("control: con una asamblea que puede usar, se ofrece, sin la línea", async () => {
       await abrirElDetalle(() => Response.json(DECISIONES));
       expect(opciones("Causa")).toContain("remocion");
-      expect(screen.queryByText(/^La remoción por asamblea pide/)).toBeNull();
+      expect(screen.queryByText(REMOCION_SIN_ASAMBLEA)).toBeNull();
     });
 
     it("C8G-03: si las decisiones no llegaron, no se ofrece y una línea dice por qué", async () => {
       await abrirElDetalle(() => error("error_interno", 500));
       expect(opciones("Causa")).not.toContain("remocion");
+      const ventana = screen.getByRole("dialog", { name: /^Dar de baja el mandato de/ });
+      expect(within(ventana).queryByText(/^No se pudieron consultar las decisiones/)).toBeNull();
       expect(screen.getByText("No se pudieron consultar las decisiones: sin ellas no se ofrece la remoción por asamblea.")).toBeTruthy();
     });
   });
@@ -1191,9 +1303,10 @@ describe("página /mandatos", () => {
       fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
       // MAN-13: sin la ayuda fija de la administración externa; los campos ya lo dicen.
       expect(within(alta).queryByText(/se carga por su razón social y su CUIT/)).toBeNull();
+      // FL-MAN-01: con otra administración que ocupa fechas, primero las fechas.
+      fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2027-03-01" } });
       fireEvent.change(within(alta).getByLabelText("Razón social o nombre"), { target: { value: "Estudio Norte" } });
       fireEvent.change(within(alta).getByLabelText("CUIT (11 números, sin guiones)"), { target: { value: CUIT } });
-      fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2027-03-01" } });
       fireEvent.click(boton("Dar de alta"));
       // MAN-09: el «Listo» no repite cómo se asocia la cuenta: la fila lo dice («Sin cuenta asociada»).
       expect(await screen.findByText("Listo: el mandato de Estudio Norte quedó dado de alta y ya está en la lista.")).toBeTruthy();
@@ -1201,7 +1314,8 @@ describe("página /mandatos", () => {
       const despues = seccion("Dar de alta un mandato");
       expect(valor(despues, "Tipo de mandato")).toBe("miembro_consejo");
       expect(valor(despues, "Persona (con vínculo confirmado en el edificio)")).toBe(VECINA);
-      expect(valor(despues, "Decisión que lo respalda")).toBe("");
+      // FL-MAN-05: con una sola decisión que se puede usar, vuelve a estar elegida.
+      expect(valor(despues, "Decisión que lo respalda")).toBe(D_EQUIPO);
       expect(valor(despues, "Desde")).toBe("");
       expect(valor(despues, "Hasta (opcional; ese día ya no rige)")).toBe("");
       expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
@@ -1370,7 +1484,7 @@ describe("página /mandatos", () => {
 
   describe("a quién se le da el alta", () => {
     const YO = "99999999-9999-4999-8999-999999999999";
-    const YO_CANDIDATO = { persona_id: YO, nombre: "Zoe Mira", unidades: ["3° C"] };
+    const YO_CANDIDATO = { persona_id: YO, nombre: "Zoe Mira", unidades: ["3° C"], habilita_consejo: true, mandatos: [] };
     const PERSONA = "Persona (con vínculo confirmado en el edificio)";
     const opciones = () => within(screen.getByLabelText(PERSONA)).getAllByRole("option").map((o) => o.textContent);
 
@@ -1405,7 +1519,7 @@ describe("página /mandatos", () => {
       expect(opciones()).toEqual(["Zoe Mira (3° C)", "Beto Pérez (1° A)"]);
     });
 
-    it("si el único candidato es quien mira, lo dice y no hay botón", async () => {
+    it("si el único candidato es quien mira, lo dice y el Consejo y la administración no se ofrecen (FL-MAN-09)", async () => {
       vi.stubGlobal(
         "fetch",
         conConsejo({
@@ -1417,22 +1531,77 @@ describe("página /mandatos", () => {
       await cargado();
       const alta = seccion("Dar de alta un mandato");
       expect(await within(alta).findByText(/nadie se da un mandato a sí mismo/)).toBeTruthy();
-      expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+      expect(within(alta).queryByLabelText("Persona (con vínculo confirmado en el edificio)")).toBeNull();
+      expect((within(alta).getByLabelText("Tipo de mandato") as HTMLSelectElement).value).toBe("administrador_externo");
     });
 
-    it("sin candidatos no hay «Dar de alta» para el Consejo; la administración externa lo conserva", async () => {
+    it("FL-MAN-09: sin candidatos, el alta abre en la administración externa, el único tipo posible, y dice por qué faltan los otros", async () => {
       vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [] }) }));
       abrir();
       await cargado();
       const alta = seccion("Dar de alta un mandato");
-      expect(await within(alta).findByText(/Nadie tiene todavía un vínculo confirmado/)).toBeTruthy();
-      expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
-      // C8G-02: sin a quién dárselo, solo el tipo y dónde se resuelve; sin los campos de un alta imposible.
+      // Antes se abría en «Consejo de propietarios», que ya se sabía imposible.
+      expect(within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
+        "administrador_externo",
+      ]);
+      expect(within(alta).getByText(ALTA_SIN_NADIE, { exact: false })).toBeTruthy();
       expect(within(alta).getByRole("link", { name: "Ir al Padrón" }).getAttribute("href")).toBe("/padron");
-      expect(within(alta).queryByLabelText("Decisión que lo respalda")).toBeNull();
-      expect(within(alta).queryByLabelText("Desde")).toBeNull();
-      fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+      // Los campos son los de la externa, el tipo que sí se puede dar.
+      expect(within(alta).getByLabelText("Razón social o nombre")).toBeTruthy();
       expect(within(alta).getByRole("button", { name: "Dar de alta" })).toBeTruthy();
+    });
+
+    it("FL-MAN-09, control: con candidatos se ofrecen los tres tipos, sin la línea", async () => {
+      vi.stubGlobal("fetch", conConsejo());
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      expect(within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
+        "miembro_consejo",
+        "administrador",
+        "administrador_externo",
+      ]);
+      expect(within(alta).queryByText(ALTA_SIN_NADIE, { exact: false })).toBeNull();
+    });
+
+    it("pregunta 8: el Consejo se ofrece solo a quien cumple la condición (`habilita_consejo`)", async () => {
+      const INQUILINA = { persona_id: YO.replace(/.$/, "f"), nombre: "Inés Inquilina", unidades: ["2° B"], habilita_consejo: false, mandatos: [] };
+      vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [...CANDIDATOS.elementos, INQUILINA] }) }));
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      const personas = () => within(within(alta).getByLabelText(/^Persona/)).getAllByRole("option").map((o) => o.textContent);
+      expect(personas()).toEqual(["Beto Pérez (1° A)"]);
+      // La administración sí se le puede dar a cualquiera con vínculo confirmado.
+      fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador" } });
+      expect(personas()).toEqual(["Beto Pérez (1° A)", "Inés Inquilina (2° B)"]);
+    });
+
+    it("pregunta 8: si nadie cumple la condición del Consejo, no se ofrece y se dice por qué", async () => {
+      const sinConsejo = { elementos: CANDIDATOS.elementos.map((c) => ({ ...c, habilita_consejo: false })) };
+      vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => Response.json(sinConsejo) }));
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      const tipos = within(within(alta).getByLabelText("Tipo de mandato")).getAllByRole("option").map((o) => o.getAttribute("value"));
+      expect(tipos).toEqual(["administrador", "administrador_externo"]);
+      expect(within(alta).getByText(CONSEJO_SIN_CANDIDATOS, { exact: false })).toBeTruthy();
+    });
+
+    it("FL-MAN-09: sin candidatos y con una administración sin fecha de fin, no se ofrece el alta y se dice por qué", async () => {
+      const sinFin = { ...en(MANDATOS.elementos, 1), vigente_hasta: null };
+      vi.stubGlobal(
+        "fetch",
+        conConsejo({
+          [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [] }),
+          [`GET ${RUTA_MANDATOS}`]: () => Response.json({ elementos: [en(MANDATOS.elementos, 0), sinFin] }),
+        }),
+      );
+      abrir();
+      await cargado();
+      expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeNull();
+      expect(screen.getByText(ALTA_SIN_NADIE, { exact: false })).toBeTruthy();
+      expect(screen.getByText(/^Ya hay una administración sin fecha de fin: Estudio Sur/)).toBeTruthy();
     });
   });
 
@@ -1974,6 +2143,58 @@ describe("tanda 6 de fricción en /mandatos", () => {
     return form;
   }
 
+  it("FL-DEC-01 (tanda 9): la decisión sin acta se marca y ofrece «Adjuntar el acta» con las disponibles; adjunta, se cierra con el «Listo»", async () => {
+    const RUTA_ACTA = `${RUTA_DECISIONES}/${D_EQUIPO}/acta`;
+    const simulado = conConsejo({
+      [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: DECISIONES.elementos.map((d) => ({ ...d, tiene_acta: d.id !== D_EQUIPO })) }),
+      [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json(DOCUMENTOS),
+      [`PUT ${RUTA_ACTA}`]: () => Response.json({ id: D_EQUIPO }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await cargado();
+    const fila_ = screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") });
+    expect(fila_.querySelector(".fila-registro__estado")?.textContent).toBe(SIN_ACTA);
+    fireEvent.click(fila_);
+    const ficha = await esperarFicha("Asamblea del 10 de enero de 2026");
+    fireEvent.click(await within(ficha).findByRole("button", { name: ADJUNTAR_ACTA }));
+    const ventana = await screen.findByRole("dialog", { name: ADJUNTAR_ACTA });
+    // Solo el acta disponible, ya elegida por ser la única.
+    const acta = within(ventana).getByLabelText("Acta") as HTMLSelectElement;
+    expect([...acta.options].map((o) => o.textContent)).toEqual(["Acta 14 de asamblea"]);
+    fireEvent.click(within(ventana).getByRole("button", { name: ADJUNTAR_ACTA }));
+    expect(await screen.findByText(LISTO_ACTA_ADJUNTA)).toBeTruthy();
+    const [pedido] = pedidos(simulado, "PUT", RUTA_ACTA);
+    expect(await (pedido as Request).json()).toEqual({ sha256: SHA_ACTA });
+    expect((pedido as Request).headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("FL-DEC-01: sin ninguna acta disponible, en lugar del botón se dice dónde se suben", async () => {
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json({ documentos: [] }) }));
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") }));
+    const ficha = await esperarFicha("Asamblea del 10 de enero de 2026");
+    expect(await within(ficha).findByText(SIN_ACTAS_DISPONIBLES)).toBeTruthy();
+    expect(within(ficha).queryByRole("button", { name: ADJUNTAR_ACTA })).toBeNull();
+  });
+
+  it("FL-DEC-01, control: la decisión con acta no ofrece adjuntar otra", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json(DOCUMENTOS),
+        [`GET ${RUTA_DECISIONES}/${D_EQUIPO}`]: () => Response.json({ ...detalleDecision(D_EQUIPO, false), sha256: SHA_ACTA }),
+      }),
+    );
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") }));
+    const ficha = await esperarFicha("Asamblea del 10 de enero de 2026");
+    expect(await within(ficha).findByRole("button", { name: "Ver el acta" })).toBeTruthy();
+    expect(within(ficha).queryByRole("button", { name: ADJUNTAR_ACTA })).toBeNull();
+  });
+
   it("G-15: el acta se elige de Documentos y la decisión la cita por la huella de su archivo", async () => {
     const simulado = conConsejo({
       [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json(DOCUMENTOS),
@@ -2205,6 +2426,8 @@ describe("tanda 6 de fricción en /mandatos", () => {
       fireEvent.click(within(ficha).getByRole("button", { name: "Mantener el mandato…" }));
       const ventana = await screen.findByRole("dialog", { name: "Mantener el mandato" });
       expect(within(ventana).getByText(CAUSA_REVISION)).toBeTruthy();
+      // FL-DEC-04: «Desde cuándo vuelve a operar» no ofrece días antes de hoy.
+      expect(within(ventana).getByLabelText("Desde cuándo vuelve a operar").getAttribute("min")).toBe(hoyDelDispositivo());
       fireEvent.change(within(ventana).getByLabelText("Asamblea que lo mantiene"), { target: { value: D_EQUIPO } });
       fireEvent.change(within(ventana).getByLabelText("Desde cuándo vuelve a operar"), { target: { value: "2026-11-20" } });
       fireEvent.click(within(ventana).getByRole("button", { name: "Mantener el mandato" }));
@@ -2584,7 +2807,38 @@ describe("tanda 11 de fricción en /mandatos", () => {
       expect(screen.queryByText(LISTO_ELEGIDA)).toBeNull();
     });
 
-    it("registrada la decisión sin el acta en revisión, la respuesta que estaba en camino no la elige (Codex en #245)", async () => {
+    it("FL-DEC-01: con el acta en revisión, la decisión no se manda sin ella: espera y se registra sola con el acta", async () => {
+      let soltar: (r: Response) => void = () => undefined;
+      let estado = "en_cuarentena";
+      const simulado = conSubida(() => estado, {
+        [`GET ${ESTADO_VERSION}`]: () => new Promise<Response>((r) => (soltar = r)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      await within(form).findByText(LISTO_SUBIDA);
+      // Ya no se invita a registrarla sin el acta.
+      expect(within(form).queryByText(/se puede registrar sin el acta/)).toBeNull();
+      fireEvent.click(boton("Registrar decisión"));
+      expect(await within(form).findByText(DECISION_ESPERA_EL_ACTA)).toBeTruthy();
+      // Esperando, no hay un botón que la registre de nuevo; queda «Cancelar».
+      expect(within(form).queryByRole("button", { name: "Registrar decisión" })).toBeNull();
+      expect(within(form).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(pedidos(simulado, "POST", RUTA_DECISIONES)).toHaveLength(0);
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0));
+      estado = "disponible";
+      soltar(Response.json({ estado: "disponible", motivo_rechazo: null }));
+      expect(await screen.findByText(LISTO_DECISION_CON_ACTA)).toBeTruthy();
+      expect(screen.queryByRole("dialog", { name: "Registrar una decisión" })).toBeNull();
+      const decisiones = pedidos(simulado, "POST", RUTA_DECISIONES);
+      expect(decisiones).toHaveLength(1);
+      const cuerpo = (await en(decisiones, 0).json()) as Record<string, unknown>;
+      expect(cuerpo.sha256).toBe(SHA_NUEVA);
+    });
+
+    it("FL-DEC-01: si el antivirus rechaza el acta que la decisión esperaba, no se registra, se dice y vuelve el botón", async () => {
       let soltar: (r: Response) => void = () => undefined;
       const simulado = conSubida(() => "en_cuarentena", {
         [`GET ${ESTADO_VERSION}`]: () => new Promise<Response>((r) => (soltar = r)),
@@ -2594,16 +2848,60 @@ describe("tanda 11 de fricción en /mandatos", () => {
       const form = await llenarDecision();
       fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
       await within(form).findByText(LISTO_SUBIDA);
-      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0));
       fireEvent.click(boton("Registrar decisión"));
-      await screen.findByText(LISTO_DECISION);
-      const cuerpo = (await en(pedidos(simulado, "POST", RUTA_DECISIONES), 0).json()) as Record<string, unknown>;
-      expect(cuerpo.sha256 ?? null).toBeNull();
-      const antes = pedidos(simulado, "GET", RUTA_DOCUMENTOS).length;
+      await within(form).findByText(DECISION_ESPERA_EL_ACTA);
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0));
+      soltar(Response.json({ estado: "rechazado", motivo_rechazo: "infectado" }));
+      expect(await within(form).findByText(/no pasó la revisión del antivirus y no se puede usar: hay que subir otro\. La decisión no se registró\.$/)).toBeTruthy();
+      expect(within(form).queryByText(DECISION_ESPERA_EL_ACTA)).toBeNull();
+      expect(within(form).getByRole("button", { name: "Registrar decisión" })).toBeTruthy();
+      expect(pedidos(simulado, "POST", RUTA_DECISIONES)).toHaveLength(0);
+    });
+
+    it("FL-DEC-01: cambiar un dato mientras espera deja de esperar, y cerrar la ventana no registra nada", async () => {
+      let soltar: (r: Response) => void = () => undefined;
+      let estado = "en_cuarentena";
+      const simulado = conSubida(() => estado, {
+        [`GET ${ESTADO_VERSION}`]: () => new Promise<Response>((r) => (soltar = r)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      await within(form).findByText(LISTO_SUBIDA);
+      fireEvent.click(boton("Registrar decisión"));
+      await within(form).findByText(DECISION_ESPERA_EL_ACTA);
+      fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "Otra cosa" } });
+      expect(within(form).queryByText(DECISION_ESPERA_EL_ACTA)).toBeNull();
+      expect(within(form).getByRole("button", { name: "Registrar decisión" })).toBeTruthy();
+      fireEvent.click(boton("Registrar decisión"));
+      await within(form).findByText(DECISION_ESPERA_EL_ACTA);
+      // La consulta del antivirus sale mientras la ventana está abierta; su respuesta llega cerrada.
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0));
+      fireEvent.click(within(form).getByRole("button", { name: "Cancelar" }));
+      estado = "disponible";
       soltar(Response.json({ estado: "disponible", motivo_rechazo: null }));
       await new Promise((r) => setTimeout(r, 50));
-      expect(pedidos(simulado, "GET", RUTA_DOCUMENTOS)).toHaveLength(antes);
-      expect(screen.queryByText(LISTO_ELEGIDA)).toBeNull();
+      expect(pedidos(simulado, "POST", RUTA_DECISIONES)).toHaveLength(0);
+      expect(screen.queryByText(LISTO_DECISION_CON_ACTA)).toBeNull();
+    });
+
+    it("FL-DEC-02: «Subir el acta» sin la fecha del acto marca la fecha y no abre la ventana", async () => {
+      const simulado = conSubida(() => "disponible");
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.change(within(form).getByLabelText("Fecha del acto"), { target: { value: "" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Subir el acta" }));
+      expect(screen.queryByRole("dialog", { name: "Subir el acta" })).toBeNull();
+      const fecha = within(form).getByLabelText("Fecha del acto");
+      expect(fecha.getAttribute("aria-invalid")).toBe("true");
+      expect(within(form).getByText("Falta la fecha del acto.")).toBeTruthy();
+      expect(document.activeElement).toBe(fecha);
+      // Control: con la fecha, se abre.
+      fireEvent.change(fecha, { target: { value: "2026-10-01" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Subir el acta" }));
+      expect(screen.getByRole("dialog", { name: "Subir el acta" })).toBeTruthy();
     });
 
     it("un archivo rechazado por el antivirus lo dice, no se ofrece, y recién ahí se puede subir otro (MAN-05)", async () => {
@@ -2674,6 +2972,99 @@ describe("tanda 11 de fricción en /mandatos", () => {
       expect(within(form).getByLabelText("Acta (opcional)")).toBeTruthy();
       expect(within(form).queryByRole("button", { name: "Subir el acta" })).toBeNull();
     });
+  });
+
+  /** El alta de una administración externa, con los datos escritos (el correo, si se pasa). */
+  async function altaExterna(correo = "", referencia = "") {
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+    fireEvent.change(within(alta).getByLabelText("Desde"), { target: { value: "2027-03-01" } });
+    fireEvent.change(within(alta).getByLabelText("Razón social o nombre"), { target: { value: "Estudio Norte" } });
+    fireEvent.change(within(alta).getByLabelText("CUIT (11 números, sin guiones)"), { target: { value: CUIT } });
+    if (correo !== "") fireEvent.change(within(alta).getByLabelText(CORREO_ALTA), { target: { value: correo } });
+    if (referencia !== "") fireEvent.change(within(alta).getByLabelText(/^De dónde sale ese correo/), { target: { value: referencia } });
+    fireEvent.click(boton("Dar de alta"));
+  }
+
+  it("FL-MAN-06 (tanda 9): el alta de una administración externa con el correo deja la invitación por aprobar en un solo acto", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO, invitacion_id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await altaExterna("admin@estudio-norte.example", "Contrato SINTETICO, cláusula 3");
+    await screen.findByText(textoListoConInvitacion("Estudio Norte"));
+    const cuerpo = await (pedidos(simulado, "POST", RUTA_MANDATOS)[0] as Request).json();
+    expect(cuerpo.invitacion).toEqual({ correo: "admin@estudio-norte.example", referencia: "Contrato SINTETICO, cláusula 3" });
+    // Ya no hay un segundo paso desde el «Listo».
+    expect(screen.queryByRole("button", { name: "Invitar a la administración" })).toBeNull();
+  });
+
+  it("FL-MAN-06: con el correo y sin de dónde sale, lo marca y no manda nada", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await altaExterna("admin@estudio-norte.example");
+    expect(await screen.findByText("Falta escribir de dónde sale ese correo.")).toBeTruthy();
+    expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(0);
+  });
+
+  it("FL-MAN-06, control: sin el correo, el alta no lleva invitación", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await altaExterna();
+    await screen.findByText("Listo: el mandato de Estudio Norte quedó dado de alta y ya está en la lista.");
+    expect(await (pedidos(simulado, "POST", RUTA_MANDATOS)[0] as Request).json()).not.toHaveProperty("invitacion");
+  });
+
+  it("FL-MAN-04: la fila dice el paso de la invitación; la por aprobar se destaca para quien la aprueba y no la emitió", async () => {
+    const conInvitacion = (invitacion: string, porMi: boolean) => () =>
+      Response.json({
+        elementos: MANDATOS.elementos.map((m) => (m.id === M_AE ? { ...m, invitacion, invitacion_emitida_por_mi: porMi } : m)),
+      });
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: conInvitacion("por_aprobar", false) }));
+    abrir();
+    await cargado();
+    let externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__estado")?.textContent).toBe(INVITACION_POR_APROBAR);
+    cleanup();
+    // La emitió quien mira: no la aprueba, va en el resumen sin destacar.
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: conInvitacion("por_aprobar", true) }));
+    abrir();
+    await cargado();
+    externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__estado")).toBeNull();
+    expect(externo.querySelector(".fila-registro__resumen")?.textContent).toBe(`Vigente · ${INVITACION_POR_APROBAR}`);
+    cleanup();
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: conInvitacion("pendiente", false) }));
+    abrir();
+    await cargado();
+    externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__resumen")?.textContent).toBe(`Vigente · ${INVITACION_ENVIADA}`);
+  });
+
+  it("FL-MAN-06, control: el «Listo» del alta del Consejo no trae la invitación", async () => {
+    vi.stubGlobal("fetch", conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) }));
+    abrir();
+    await completarAlta();
+    fireEvent.click(boton("Dar de alta"));
+    await screen.findByText(LISTO_ALTA);
+    expect(screen.queryByRole("button", { name: "Invitar a la administración" })).toBeNull();
+  });
+
+  it("FL-MAN-10: «Sin cuenta asociada» se destaca solo para quien puede invitar; para el resto va en el resumen", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${BASE}/mis-acciones`]: () =>
+          Response.json({ acciones: accionesDeLasPoliticas().filter((a) => a !== "mandatos.asociar_persona") }),
+      }),
+    );
+    abrir();
+    await cargado();
+    const externo = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.querySelector(".fila-registro__estado")).toBeNull();
+    expect(externo.querySelector(".fila-registro__resumen")?.textContent).toBe("Vigente · Sin cuenta asociada");
   });
 
   it("G-44: la fila del mandato nuevo queda resaltada, a la vista y dicha en palabras hasta el próximo paso", async () => {

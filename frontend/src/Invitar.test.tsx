@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, mensajeAlInvitar, SIN_UNIDADES_INVITABLES } from "./Invitar";
+import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, LO_CONFIRMA_OTRA, mensajeAlInvitar, QUIEN_CONFIRMA, SIN_UNIDADES_INVITABLES } from "./Invitar";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -40,8 +40,22 @@ function invitacion(id: string, nombre: string, estado: string, correo: string |
     aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
     revocada_en: null,
     importada: false,
+    // FL-INV-01 (app 0110): el vínculo que dejó la aceptación.
+    vinculo_id: estado === "aceptada" ? VINCULO : null,
   };
 }
+
+const VINCULO = "77777777-7777-4777-8777-777777777777";
+/** La fila del Padrón del vínculo de la aceptada (FL-INV-01). */
+const padronCon = (confirmado: boolean, confirmable: boolean) => () =>
+  Response.json({
+    elementos: [
+      {
+        vinculo_id: VINCULO, unidad_id: U1, designacion: "1° A", nombre: "Carla Gómez", tipo: "inquilino", vigente_desde: "2026-10-19",
+        vigente_hasta: null, confirmado, iniciado: true, confirmable_por_vos: confirmable, gestionable_por_vos: true, sostiene_consejo: false,
+      },
+    ],
+  });
 
 const LISTA = {
   elementos: [
@@ -83,6 +97,7 @@ function conConsorcio(extra: Respuestas = {}) {
     [`GET /api/v1/consorcios/${C1}/unidades`]: () => Response.json(UNIDADES),
     [`GET ${RUTA_LISTA}`]: () => Response.json(LISTA),
     [`POST ${RUTA_IMPORTADA}`]: () => Response.json({ importada_pendiente: false }),
+    [`GET /api/v1/consorcios/${C1}/padron`]: padronCon(false, true),
     ...extra,
   });
 }
@@ -204,9 +219,7 @@ describe("página /invitaciones", () => {
     expect(unidades.map((o) => o.textContent)).toEqual(["1° A", "2° B"]);
     // INV-03: una línea junto al vínculo, que describe el campo.
     const tipo = within(ventana).getByLabelText("Vínculo con la unidad");
-    expect(document.getElementById(tipo.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
-      "Queda sin confirmar hasta que se confirme con el título.",
-    );
+    expect(document.getElementById(tipo.getAttribute("aria-describedby") ?? "")?.textContent).toBe(QUIEN_CONFIRMA);
     expect(within(ventana).getAllByRole("button").map((b) => b.textContent)).toEqual(["Invitar", "Cancelar"]);
     fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
     const beto = await abrirFicha("Beto Pérez, 1° A");
@@ -251,10 +264,57 @@ describe("página /invitaciones", () => {
     const aceptada = await abrirFicha("Carla Gómez, 1° A");
     expect(within(aceptada).getByText("Aceptada el")).toBeTruthy();
     cerrar(aceptada);
-    // Una vencida se puede retirar desde el historial, como antes.
+    // FL-INV-02: una vencida no se retira (no cambia nada útil): se invita de nuevo.
     const vencida = await abrirFicha("Elsa Sosa, 1° A");
     expect(within(vencida).getByText("Venció")).toBeTruthy();
-    expect(within(vencida).getByRole("button", { name: "Retirar" })).toBeTruthy();
+    expect(within(vencida).queryByRole("button", { name: "Retirar" })).toBeNull();
+    expect(within(vencida).getByRole("button", { name: "Invitar de nuevo" })).toBeTruthy();
+  });
+
+  it("FL-INV-02: «Invitar de nuevo» abre la ventana con la unidad, el vínculo, el nombre y el correo de la vencida", async () => {
+    const vencidaConCorreo = { ...invitacion(VENCIDA, "Elsa Sosa", "vencida", "elsa@ejemplo.com"), unidad_id: U2, unidad: "2° B", tipo: "propietario" };
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => Response.json({ elementos: [en(LISTA.elementos, 0), vencidaConCorreo] }),
+      [`POST ${RUTA_LISTA}`]: () => Response.json(invitacion(NUEVA, "Elsa Sosa", "pendiente", "elsa@ejemplo.com"), { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const vencida = await abrirFicha("Elsa Sosa, 2° B");
+    fireEvent.click(within(vencida).getByRole("button", { name: "Invitar de nuevo" }));
+    const ventana = screen.getByRole("dialog", { name: "Invitar a una persona" });
+    // La ficha se cerró: la ventana es de la página.
+    expect(screen.queryByRole("dialog", { name: "Elsa Sosa, 2° B" })).toBeNull();
+    expect((within(ventana).getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2);
+    expect((within(ventana).getByLabelText("Vínculo con la unidad") as HTMLSelectElement).value).toBe("propietario");
+    expect((within(ventana).getByLabelText("Nombre") as HTMLInputElement).value).toBe("Elsa Sosa");
+    expect((within(ventana).getByLabelText("Correo") as HTMLInputElement).value).toBe("elsa@ejemplo.com");
+    fireEvent.click(invitarBoton());
+    await screen.findByText("Listo: la invitación a Elsa Sosa quedó enviada.");
+    expect(await en(pedidos(simulado, "POST", RUTA_LISTA), 0).json()).toEqual({
+      unidad_id: U2,
+      tipo: "propietario",
+      correo: "elsa@ejemplo.com",
+      nombre: "Elsa Sosa",
+    });
+  });
+
+  it("FL-INV-02, control: si la cuenta ya no alcanza la unidad de la vencida, no se ofrece invitar de nuevo", async () => {
+    const lista = { elementos: [en(LISTA.elementos, 0), invitacion(VENCIDA, "Elsa Sosa", "vencida", null)] };
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        [`GET ${RUTA_LISTA}`]: () => Response.json(lista),
+        [`GET ${RUTA_UNIDADES}`]: () => Response.json({ elementos: [{ id: U2, designacion: "2° B", invitable: true }] }),
+      }),
+    );
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const vencida = await abrirFicha("Elsa Sosa, 1° A");
+    expect(within(vencida).queryByRole("button", { name: "Invitar de nuevo" })).toBeNull();
+    expect(within(vencida).queryByRole("button", { name: "Retirar" })).toBeNull();
   });
 
   it("INV-04: sin pendientes no hay aviso de lista vacía; queda el historial plegado", async () => {
@@ -613,8 +673,12 @@ describe("página /invitaciones", () => {
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
-    expect(screen.getByText("¿Retirar la invitación de Beto Pérez a la unidad 1° A?")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    // FL-INV-03: la pregunta va en su ventana, encima de la ficha, como en Mandatos.
+    const pregunta = screen.getByRole("dialog", { name: "Retirar la invitación" });
+    expect(within(pregunta).getByText(/^¿Retirar la invitación de Beto Pérez a la unidad 1° A\? Si el correo ya salió/)).toBeTruthy();
+    expect(within(pregunta).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sí, retirarla", "Cancelar"]);
+    fireEvent.click(within(pregunta).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog", { name: "Retirar la invitación" })).toBeNull();
     expect(pedidos(simulado, "POST", ruta)).toHaveLength(0);
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
@@ -1186,12 +1250,34 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
     const aceptada = await abrirFicha("Carla Gómez, 1° A");
-    expect(within(aceptada).getByText(FALTA_CONFIRMAR, { exact: false })).toBeTruthy();
+    expect(await within(aceptada).findByText(FALTA_CONFIRMAR, { exact: false })).toBeTruthy();
     expect(within(aceptada).getByRole("link", { name: "Ir al Padrón para confirmar el vínculo" }).getAttribute("href")).toBe("/padron");
     fireEvent.click(within(aceptada).getByRole("button", { name: "Cerrar" }));
     // Control: una pendiente no lo dice.
     const pendiente = await abrirFicha("Beto Pérez, 1° A");
     expect(within(pendiente).queryByRole("link", { name: "Ir al Padrón para confirmar el vínculo" })).toBeNull();
+  });
+
+  it("FL-INV-01: con el vínculo ya confirmado, la aceptada no dice que falta confirmarlo", async () => {
+    const simulado = conConsorcio({ [`GET /api/v1/consorcios/${C1}/padron`]: padronCon(true, false) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
+    await waitFor(() => expect(pedidos(simulado, "GET", `/api/v1/consorcios/${C1}/padron`).length).toBeGreaterThan(0));
+    await waitFor(() => expect(within(aceptada).queryByText(LO_CONFIRMA_OTRA)).toBeNull());
+    expect(within(aceptada).queryByText(FALTA_CONFIRMAR, { exact: false })).toBeNull();
+  });
+
+  it("FL-INV-01: sin confirmar y sin poder confirmarlo quien mira, se dice quién lo confirma, sin enlace", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`GET /api/v1/consorcios/${C1}/padron`]: padronCon(false, false) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
+    expect(await within(aceptada).findByText(LO_CONFIRMA_OTRA)).toBeTruthy();
+    expect(within(aceptada).queryByRole("link", { name: "Ir al Padrón para confirmar el vínculo" })).toBeNull();
   });
 
   it("control G-26: sin `padron.confirmar_vinculo`, la aceptada no manda a confirmar", async () => {

@@ -347,6 +347,16 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "   end if;"
                 # Los rubros legales del proveedor y la configuración (0104) niegan su downgrade y
                 # citan el proveedor: se borran acá.
+                # Los pedidos de salteo y los motivos de los retiros (0110) citan el proveedor
+                # y el rubro: van antes.
+                "   if to_regclass('nucleo.rubro_legal_retiro_motivo') is not null then"
+                "     alter table nucleo.rubro_legal_retiro_motivo disable trigger user;"
+                "     delete from nucleo.rubro_legal_retiro_motivo;"
+                "     alter table nucleo.rubro_legal_retiro_motivo enable trigger user;"
+                "     alter table nucleo.pedido_salteo_documentacion disable trigger user;"
+                "     delete from nucleo.pedido_salteo_documentacion;"
+                "     alter table nucleo.pedido_salteo_documentacion enable trigger user;"
+                "   end if;"
                 "   if to_regclass('nucleo.rubro_legal_proveedor') is not null then"
                 "     alter table nucleo.rubro_legal_proveedor disable trigger user;"
                 "     delete from nucleo.rubro_legal_proveedor;"

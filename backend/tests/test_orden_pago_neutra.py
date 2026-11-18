@@ -960,9 +960,11 @@ RUTAS = {
     # 0106: el salteo con motivo del bloqueo por documentación legal, su lectura y su configuración.
     "saltear_documentacion_legal", "salteos_documentacion_lectura",
     "configurar_salteo_documentacion",
+    # 0110: el pedido de salteo y su lectura, y quién ve los proveedores por su rol.
+    "pedir_salteo_documentacion", "pedidos_salteo_lectura", "ven_proveedores_por_rol_lectura",
 }  # fmt: skip
 """Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093`, `0099`,
-`0103`, `0104`, `0105` y `0106`)."""
+`0103`, `0104`, `0105`, `0106` y `0110`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):

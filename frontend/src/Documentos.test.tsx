@@ -1050,16 +1050,15 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
     );
     abrir();
     expect(within(await tarjeta("Acta sin archivo")).getByRole("button", { name: "Subir archivo" })).toBeTruthy();
-    // Control: el documento de otra categoría también espera su archivo, y no se ofrece.
-    const contrato = await tarjeta("Contrato sin archivo");
-    expect(within(contrato).getByText("Todavía no tiene un archivo.")).toBeTruthy();
-    expect(within(contrato).queryByRole("button", { name: "Subir archivo" })).toBeNull();
+    // Control: el documento de otra categoría también espera su archivo; quien no lo carga no lo ve
+    // en la lista, porque no tiene nada que abrir ni que hacer (FL-DOC-02).
+    expect(screen.queryByRole("button", { name: /^Contrato sin archivo / })).toBeNull();
   });
 
   it("solo con `documentos.ver` no hay carga, ni formulario ni «Subir archivo»", async () => {
     vi.stubGlobal("fetch", conAcciones("documentos.ver"));
     abrir();
-    await tarjeta("Contrato de limpieza");
+    await tarjeta("Acta de asamblea ordinaria");
     expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Subir archivo" })).toBeNull();
   });
@@ -1208,7 +1207,8 @@ describe("tanda 7 de fricción en la ficha del documento", () => {
   });
 
   it("C8G-08, control: sin carga de esa categoría no se explica nada", async () => {
-    const lista = { documentos: [documento(D1, "Acta de asamblea ordinaria", { versiones: [version(V1, { estado: "en_cuarentena" })] })] };
+    // Con el vigente disponible: sin él, quien no carga ni ve el documento (FL-DOC-02).
+    const lista = { documentos: [documento(D1, "Acta de asamblea ordinaria", { versiones: [version(V2, { estado: "en_cuarentena" }), version(V1)] })] };
     vi.stubGlobal("fetch", conLista({
       [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.ver"),
       [`GET ${BASE}`]: () => Response.json(lista),
@@ -1357,7 +1357,8 @@ describe("«Retirar el documento» (0089)", () => {
     abrir();
     expect(within(await tarjeta("Acta de asamblea ordinaria")).getByRole("button", { name: "Retirar el documento" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
-    expect(within(await tarjeta("Contrato de limpieza")).queryByRole("button", { name: "Retirar el documento" })).toBeNull();
+    // El contrato no tiene archivo y no carga esa categoría: ni siquiera lo ve en la lista (FL-DOC-02).
+    expect(screen.queryByRole("button", { name: /^Contrato de limpieza / })).toBeNull();
   });
 
   it("sin faltas de accesibilidad detectables por axe con el formulario abierto, y sin voseo", async () => {
@@ -1637,3 +1638,128 @@ describe("tanda 6 de fricción en /documentos", () => {
   });
 });
 
+
+describe("Flujos 18-11, tanda 7", () => {
+  it("FL-DOC-01: con la lista a la vista, el rechazo del antivirus se avisa con su botón en lugar del «Listo»", async () => {
+    let estado: "en_cuarentena" | "rechazado" = "en_cuarentena";
+    let subido = false;
+    const simulado = conLista({
+      [`GET ${BASE}`]: () =>
+        Response.json({
+          documentos: subido
+            ? [documento(D3, "Presupuesto de pintura", { categoria: "presupuestos",
+                versiones: [version(V4, { estado, motivo_rechazo: estado === "rechazado" ? "pdf_cifrado" : null })] })]
+            : [],
+        }),
+      [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+      [`POST ${versiones(D3)}`]: () => {
+        subido = true;
+        return Response.json({ id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) }, { status: 201 });
+      },
+    });  // prettier-ignore
+    vi.stubGlobal("fetch", simulado);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    abrir();
+    await completarNuevo();
+    fireEvent.click(enviarCarga());
+    const LISTO = "Listo: el archivo de «Presupuesto de pintura» se subió.";
+    await screen.findByText(LISTO);
+    await fila("Presupuesto de pintura");
+    estado = "rechazado";
+    await act(() => vi.advanceTimersByTimeAsync(REFRESCO_CUARENTENA_MS));
+    expect(
+      await screen.findByText("«Rechazado»: el archivo de «Presupuesto de pintura» no pasó la revisión (el PDF tiene contraseña). No se va a mostrar: hay que subir otro."),
+    ).toBeTruthy();
+    expect(screen.queryByText(LISTO)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Subir otro archivo para «Presupuesto de pintura»" }));
+    expect(screen.getByRole("dialog", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeTruthy();
+  });
+
+  it("FL-DOC-01, control: si el antivirus lo aprueba, no queda ningún rechazo", async () => {
+    let estado: "en_cuarentena" | "disponible" = "en_cuarentena";
+    let subido = false;
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}`]: () =>
+        Response.json({ documentos: subido ? [documento(D3, "Presupuesto de pintura", { categoria: "presupuestos", versiones: [version(V4, { estado })] })] : [] }),
+      [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+      [`POST ${versiones(D3)}`]: () => {
+        subido = true;
+        return Response.json({ id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) }, { status: 201 });
+      },
+    }));  // prettier-ignore
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    abrir();
+    await completarNuevo();
+    fireEvent.click(enviarCarga());
+    await screen.findByText("Listo: el archivo de «Presupuesto de pintura» se subió.");
+    estado = "disponible";
+    await act(() => vi.advanceTimersByTimeAsync(REFRESCO_CUARENTENA_MS));
+    await waitFor(() => expect(screen.queryByText(/^Listo: el archivo/)).toBeNull());
+    expect(screen.queryByText(/«Rechazado»/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Subir otro archivo/ })).toBeNull();
+  });
+
+  it("FL-DOC-02: a quien solo lee, la lista no le muestra documentos sin un archivo disponible", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.ver") }));
+    abrir();
+    expect(await fila("Acta de asamblea ordinaria")).toBeTruthy();
+    // La póliza solo tiene un archivo rechazado y el contrato ninguno: no hay nada que abrir.
+    expect(screen.queryByRole("button", { name: /^Póliza de incendio / })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Contrato de limpieza / })).toBeNull();
+    expect(screen.queryByText(/Sin archivo/)).toBeNull();
+  });
+
+  it("FL-DOC-02: si ningún documento tiene archivo para quien solo lee, dice que no hay documentos", async () => {
+    vi.stubGlobal("fetch", conLista({
+      [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.ver"),
+      [`GET ${BASE}`]: () => Response.json({ documentos: [documento(D3, "Contrato de limpieza", { categoria: "contratos_proveedores" })] }),
+    }));  // prettier-ignore
+    abrir();
+    expect(await screen.findByText("El edificio todavía no tiene documentos cargados.")).toBeTruthy();
+  });
+
+  it("FL-DOC-02, control: quien carga la categoría ve los documentos que esperan su archivo", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.ver", "documentos.cargar") }));
+    abrir();
+    expect((await fila("Contrato de limpieza")).textContent).toMatch(/Sin archivo$/);
+    expect(await fila("Póliza de incendio")).toBeTruthy();
+  });
+
+  it("FL-DOC-03: si el archivo no entra y se cancela, el documento queda arriba con su botón y no se crea otro", async () => {
+    let intentos = 0;
+    const simulado = conLista({
+      [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
+      [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+      [`POST ${versiones(D3)}`]: () =>
+        ++intentos === 1
+          ? error("error_interno", 500)
+          : Response.json({ id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) }, { status: 201 }),
+      [`GET ${versiones(D3)}/${V4}/estado`]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(enviarCarga());
+    const ventana = await screen.findByRole("dialog", { name: "Subir el archivo de «Presupuesto de pintura»" });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByText("El documento «Presupuesto de pintura» quedó creado sin archivo.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Subir el archivo de «Presupuesto de pintura»" }));
+    const otra = screen.getByRole("dialog", { name: "Subir el archivo de «Presupuesto de pintura»" });
+    elegir(pdf());
+    fireEvent.click(within(otra).getByRole("button", { name: "Subir el archivo" }));
+    await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura» se subió/);
+    // Se completó el mismo documento: uno solo creado, y el aviso del vacío ya no está.
+    expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
+    expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(2);
+    expect(screen.queryByText(/quedó creado sin archivo/)).toBeNull();
+  });
+
+  it("FL-DOC-03, control: cancelar una carga que no creó nada no deja ningún aviso", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    await completarNuevo();
+    fireEvent.click(within(ventanaDe("Cargar un documento")).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Cargar un documento" })).toBeNull());
+    expect(screen.queryByText(/sin archivo\.$/)).toBeNull();
+  });
+});

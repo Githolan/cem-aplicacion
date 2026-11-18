@@ -25,6 +25,10 @@ import { useIrAlInicio } from "./sesion";
 // entrada, con «Salir de esta cuenta»; si la cuenta del correo ya existe, abre «Entrar para aceptar»;
 // si la invitación la creó esta cuenta, lo dice. La aceptación vuelve a decidir: sus 409 siguen
 // teniendo su pantalla, por si algo cambió entre la consulta y el clic.
+//
+// FL-INVA-01 (decisión del propietario, 18-11-2026): para entrar con la cuenta que ya existe, el
+// correo es el invitado y no se cambia (con otro, la aceptación se rechaza), y el código se pide solo
+// al llegar: queda a la vista el campo del código.
 
 type Recibida = components["schemas"]["InvitacionRecibida"];
 type Paso = components["schemas"]["PasoInvitacion"];
@@ -38,6 +42,7 @@ type Estado =
   | "requiere_sesion"
   | "otra_persona"
   | "propia"
+  | "ya_aceptada"
   | "conflicto"
   | "sin_servicio";
 
@@ -48,6 +53,10 @@ export const TIPOS: Record<Recibida["tipo"], string> = {
 };
 
 /** Con el correo de una cuenta que ya existe: se entra acá y la invitación se acepta sola (G-35). */
+/** FL-INVA-02: la abre de nuevo la misma cuenta que ya la aceptó. */
+export const textoYaAceptada = (consorcio: string) =>
+  `Esta invitación ya está aceptada: la cuenta ya es parte de ${consorcio}.`;
+
 export const YA_HAY_CUENTA =
   "Ya hay una cuenta con este correo. Para aceptar la invitación, entrar con esa cuenta: al entrar, la invitación se acepta sola.";
 
@@ -67,6 +76,9 @@ const ESTADO_DEL_PASO: Record<Paso, Estado> = {
   entrar: "requiere_sesion",
   otra_cuenta: "otra_persona",
   propia: "propia",
+  // FL-INVA-02 (`0110`, tanda 9): la cuenta que ya la aceptó la vuelve a abrir. Se le dice y se la
+  // lleva al inicio; no se la manda a pedir otra.
+  ya_aceptada: "ya_aceptada",
 };
 
 function leerToken(): string | null {
@@ -82,7 +94,7 @@ export function Invitacion() {
   const [nombre, setNombre] = useState("");
   const [falla, setFalla] = useState(SIN_CONEXION_ENLACE);
   const [fallaAlAceptar, setFallaAlAceptar] = useState<string | null>(null);
-  /** El correo con el que se entra cuando ya hay una cuenta: el invitado, que la persona puede cambiar. */
+  /** El correo con el que se entra cuando ya hay una cuenta: el invitado, fijo (FL-INVA-01). */
   const [correoParaEntrar, setCorreoParaEntrar] = useState("");
   const consultada = useRef(false);
   const irAlInicio = useIrAlInicio();
@@ -218,6 +230,12 @@ export function Invitacion() {
             <EnlaceAlInicio />
           </>
         )}
+        {estado === "ya_aceptada" && invitacion && (
+          <>
+            <p>{textoYaAceptada(invitacion.consorcio)}</p>
+            <EnlaceAlInicio />
+          </>
+        )}
         {estado === "conflicto" && (
           <>
             <p className="aviso-error">{falla}</p>
@@ -244,7 +262,13 @@ export function Invitacion() {
       {estado === "requiere_sesion" && (
         <section aria-labelledby={`${id}-entrar`} className="tarjeta">
           <h2 id={`${id}-entrar`}>Entrar para aceptar</h2>
-          <FormasDeEntrar correo={correoParaEntrar} alCambiarCorreo={setCorreoParaEntrar} alEntrar={aceptarConElEnlace} />
+          <FormasDeEntrar
+            correo={correoParaEntrar}
+            alCambiarCorreo={setCorreoParaEntrar}
+            alEntrar={aceptarConElEnlace}
+            correoFijo
+            pedirAlEmpezar
+          />
         </section>
       )}
     </>

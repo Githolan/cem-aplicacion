@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { EntrarConCodigo } from "./EntrarConCodigo";
 import { EntrarConContrasena } from "./EntrarConContrasena";
 import { ultimaFormaDeEntrar } from "./formaDeEntrar";
-import { PedirEnlace } from "./PedirEnlace";
+import { pedirCodigoPorCorreo, PedirEnlace } from "./PedirEnlace";
 
 // Las formas de entrar, de a una por vez, con un solo correo para las tres (decisión del propietario
 // del 05-11-2026, §2). Las usan /entrar y la hoja de entrar encima. La principal es el código de 6
@@ -13,6 +13,10 @@ import { PedirEnlace } from "./PedirEnlace";
 //
 // En la hoja de la sesión vencida (`enHoja`, informe de fricción ACC-05): el correo de la sesión va
 // como texto, sin tarjetas adentro de la hoja, y las otras formas quedan plegadas detrás de un enlace.
+//
+// En el paso del código, pedir otro ya está en ese paso («Cambiar», «Enviar otro código» o «Pedir un
+// código nuevo»): las otras formas no lo repiten (FL-ACC-03). La invitación a una cuenta que ya existe
+// fija el correo y pide el código sola al llegar (`pedirAlEmpezar`, FL-INVA-01).
 
 export type Metodo = "enlace" | "codigo" | "contrasena";
 
@@ -37,16 +41,50 @@ interface Props {
   inicial?: Metodo;
   /** Dentro de la hoja de la sesión vencida. */
   enHoja?: boolean;
+  /** El correo va como texto aunque no sea la hoja (la invitación: es el correo invitado). */
+  correoFijo?: boolean;
+  /** Pide el código al correo apenas se muestra y abre directo el paso del código. */
+  pedirAlEmpezar?: boolean;
 }
 
-export function FormasDeEntrar({ correo, alCambiarCorreo, alElegir, alEntrar, inicial, enHoja = false }: Props) {
+export function FormasDeEntrar({
+  correo,
+  alCambiarCorreo,
+  alElegir,
+  alEntrar,
+  inicial,
+  enHoja = false,
+  correoFijo: fijo = false,
+  pedirAlEmpezar = false,
+}: Props) {
   const id = useId();
-  const [metodo, setMetodo] = useState<Metodo>(() => inicial ?? metodoInicial());
+  const [metodo, setMetodo] = useState<Metodo>(() => (pedirAlEmpezar ? "enlace" : (inicial ?? metodoInicial())));
   const [avisoDelPedido, setAvisoDelPedido] = useState<string | null>(null);
+  /** El pedido del código que sale solo: mientras viaja, solo su estado; si falla, por qué. */
+  const [pedidoSolo, setPedidoSolo] = useState<{ enviando: boolean; falla: string | null }>({
+    enviando: pedirAlEmpezar,
+    falla: null,
+  });
   const formas = useRef<HTMLDivElement>(null);
   const eligio = useRef(false);
-  // En la hoja el correo es el de la sesión: no se vuelve a escribir.
-  const correoFijo = enHoja && correo !== "";
+  const pedido = useRef(false);
+  // En la hoja el correo es el de la sesión, y en la invitación el invitado: no se vuelve a escribir.
+  const correoFijo = (enHoja || fijo) && correo !== "";
+
+  // StrictMode monta dos veces: el pedido sale una sola.
+  useEffect(() => {
+    if (!pedirAlEmpezar || pedido.current) return;
+    pedido.current = true;
+    void pedirCodigoPorCorreo(correo.trim()).then((resultado) => {
+      if (resultado.ok) {
+        setAvisoDelPedido(resultado.mensaje);
+        setMetodo("codigo");
+        setPedidoSolo({ enviando: false, falla: null });
+      } else setPedidoSolo({ enviando: false, falla: resultado.mensaje });
+    });
+    // El correo es el de la llegada: si cambia después, no se pide de nuevo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedirAlEmpezar]);
 
   // Al cambiar de forma, el foco va al primer campo por completar: lo de arriba ya no es lo que se
   // eligió, y con el correo ya escrito lo que falta es lo que sigue.
@@ -64,7 +102,8 @@ export function FormasDeEntrar({ correo, alCambiarCorreo, alElegir, alEntrar, in
   }
 
   const otras = (Object.keys(OTRAS_FORMAS) as Metodo[])
-    .filter((forma) => forma !== metodo)
+    // En el paso del código, pedir otro ya está ahí (FL-ACC-03).
+    .filter((forma) => forma !== metodo && !(metodo === "codigo" && forma === "enlace"))
     .map((forma) => (
       <p key={forma}>
         <button type="button" className="secundario" onClick={() => elegir(forma)}>
@@ -73,8 +112,15 @@ export function FormasDeEntrar({ correo, alCambiarCorreo, alElegir, alEntrar, in
       </p>
     ));
 
+  if (pedidoSolo.enviando) return <p role="status">Enviando el código a {correo}…</p>;
+
   return (
     <>
+      {pedidoSolo.falla !== null && metodo === "enlace" && (
+        <p className="aviso-error" role="alert">
+          {pedidoSolo.falla}
+        </p>
+      )}
       <div ref={formas}>
         {metodo === "enlace" && (
           <PedirEnlace

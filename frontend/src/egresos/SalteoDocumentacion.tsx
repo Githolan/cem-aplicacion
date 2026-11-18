@@ -7,6 +7,7 @@ import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe,
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
+import { PedidoDeSalteo, pendientesDe, textoPedidoAlConsejo, usePedidosSalteo } from "./PedidoSalteo";
 import { cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, momento, momentoAlFinal, renovarClave } from "./comun";
 import { exigirSesion, SinSesion } from "./useConsorcio";
 
@@ -23,6 +24,11 @@ import { exigirSesion, SinSesion } from "./useConsorcio";
 // propietario (lección 21) e informe de fricción C8P-03: quien tiene un salteo propio que espera su
 // orden no ve otra vez el botón (la base no le deja registrar otro: `salteo_vigente`). La API dice
 // de cada salteo si es de esta cuenta (`propio`, app 0109), también al volver a abrir la pantalla.
+// Flujos 18-11, tanda 1: con cualquier salteo que espera su orden no se ofrece otro (decisión 5,
+// FL-SAL-05), y el último que venció sin usarse se dice a la vista (FL-SAL-04).
+// Flujos 18-11, tanda 9 (pregunta 3 del propietario, app 0110): quien prepara pide el salteo desde
+// acá (`PedidoDeSalteo`), y quien saltea ve los pedidos que esperan, con el importe y el motivo, y el
+// motivo del último ya escrito en la ventana (FL-SAL-01, FL-SAL-02).
 
 type Salteo = components["schemas"]["SalteoDocumentacion"];
 type Modo = components["schemas"]["ModoExigencia"];
@@ -46,6 +52,9 @@ export function textoSalteo(s: Salteo): string {
   return `Espera su orden hasta el ${momentoAlFinal(s.vence_en)} Registrado el ${quien}`;
 }
 
+/** FL-SAL-04: el último salteo venció sin que se preparara la orden. */
+export const textoVencioSinUsarse = (s: Salteo) => `El salteo del ${momento(s.registrado_en)} venció sin usarse.`;
+
 /** La línea de la ficha de la orden: la versión se preparó con un salteo. */
 export function textoSalteoDeLaVersion(s: Salteo): string {
   return `Preparada con un salteo por urgencia del bloqueo por documentación legal, registrado el ${momento(s.registrado_en)} por ${s.registrado_por_nombre}: ${s.motivo}`;
@@ -59,12 +68,14 @@ type Props = {
   hayFaltantes: boolean;
   /** Lo que la configuración del edificio deja saltear. Solo para mostrar: la API y la base deciden. */
   puedeSaltear: boolean;
+  /** Quien prepara órdenes pide el salteo al Consejo (con las monedas del edificio); el proveedor, activo. */
+  pedir?: { monedas: readonly [string, ...string[]]; razonSocial: string } | null;
   aEntrar: () => void;
   /** Se registró el salteo, o lo visto ya no es lo que hay: volver a leer la ficha. */
   alCambiar: () => void;
 };
 
-export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hayFaltantes, puedeSaltear, aEntrar, alCambiar }: Props) {
+export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hayFaltantes, puedeSaltear, pedir = null, aEntrar, alCambiar }: Props) {
   const id = useId();
   const [abierta, setAbierta] = useState(false);
   const [motivo, setMotivo] = useState("");
@@ -76,13 +87,24 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
   const anteriores = salteos.filter((s) => s.estado !== "vigente");
   /** El que se acaba de registrar, mientras la ficha vuelve a leerse y todavía no lo trae. */
   const [recien, setRecien] = useState<number | null>(null);
-  const suyoEnEspera = enEspera.some((s) => s.propio) || (recien !== null && !salteos.some((s) => s.numero === recien));
-  const ofreceSaltear = bloquea && puedeSaltear && !suyoEnEspera;
-  if (salteos.length === 0 && !ofreceSaltear && resultado === null) return null;
+  const recienSinLeer = recien !== null && !salteos.some((s) => s.numero === recien);
+  // Decisión 5 del propietario (18-11-2026, FL-SAL-05): mientras un salteo espera su orden, sea de quien
+  // sea, no se ofrece otro: un segundo habilitaría una segunda orden.
+  const ofreceSaltear = bloquea && puedeSaltear && enEspera.length === 0 && !recienSinLeer;
+  /** FL-SAL-04: el último salteo venció sin usarse y no hay otro: se dice a la vista, no solo en «Anteriores». */
+  const ultimo = salteos.reduce<Salteo | null>((a, s) => (a === null || s.numero > a.numero ? s : a), null);
+  const vencioElUltimo = bloquea && enEspera.length === 0 && ultimo?.estado === "vencido" ? ultimo : null;
+  /** Pedir el salteo (tanda 9): quien prepara, con el proveedor bloqueado y sin un salteo que espere. */
+  const ofrecePedir = bloquea && pedir !== null && enEspera.length === 0 && !recienSinLeer;
+  // Quien saltea ve los pedidos de otras personas que esperan para este proveedor (FL-SAL-02).
+  const pedidos = usePedidosSalteo(consorcio, ofreceSaltear);
+  const pedidosQueEsperan = ofreceSaltear && pedidos.data !== undefined ? pendientesDe(pedidos.data, proveedorId).filter((p) => !p.propio) : [];
+  if (salteos.length === 0 && !ofreceSaltear && !ofrecePedir && resultado === null) return null;
 
   function abrir() {
     clave.current = null;
-    setMotivo("");
+    // El motivo del pedido más nuevo, ya escrito: el Consejo lo confirma o lo corrige (FL-SAL-02).
+    setMotivo(pedidosQueEsperan[0]?.motivo ?? "");
     setErrores(SIN_ERRORES);
     setResultado(null);
     setAbierta(true);
@@ -117,6 +139,8 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
         return { rechazo: mensajeDeActo(response.status, error) };
       }
       setRecien(data.numero);
+      // El pedido que esperaba quedó atendido: se vuelve a leer.
+      if (pedidosQueEsperan.length > 0) void pedidos.refetch();
       setResultado({ texto: SALTEO_REGISTRADO, ok: true });
       alCambiar();
       return "cerrar";
@@ -133,6 +157,11 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
   return (
     <section aria-labelledby={`${id}-titulo`}>
       <h3 id={`${id}-titulo`}>{TITULO_SALTEO}</h3>
+      {vencioElUltimo !== null && (
+        <p className="aviso-pendiente" role="note">
+          {textoVencioSinUsarse(vencioElUltimo)}
+        </p>
+      )}
       {enEspera.length > 0 && (
         <ul className="versiones" aria-label="Salteos">
           {[...enEspera].reverse().map((s) => (
@@ -150,7 +179,18 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
           </ul>
         </details>
       )}
+      {pedidosQueEsperan.length > 0 && (
+        <ul className="versiones" aria-label="Pedidos de salteo">
+          {pedidosQueEsperan.map((p) => (
+            <li key={p.numero}>{textoPedidoAlConsejo(p)}</li>
+          ))}
+        </ul>
+      )}
       <ResultadoDelActo resultado={resultado} alOtroActo={() => setResultado(null)} />
+      {ofrecePedir && (
+        <PedidoDeSalteo consorcio={consorcio} proveedor={{ id: proveedorId, razon_social: pedir.razonSocial }} monedas={pedir.monedas}
+          aEntrar={aEntrar} alCambiar={alCambiar} />
+      )}
       {ofreceSaltear && (
         <button type="button" className="secundario peligro" onClick={abrir}>
           {SALTEAR}

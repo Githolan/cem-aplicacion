@@ -10,7 +10,7 @@ import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { VOLVIO_LA_RED } from "./egresos/comun";
-import { mensajeDeError, sinConfirmarPrimero } from "./Padron";
+import { AVISO_SOSTIENE_CONSEJO, confirmablesPrimero, LO_CONFIRMA_OTRA_PERSONA, mensajeDeError } from "./Padron";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -47,6 +47,7 @@ function fila(vinculo_id: string, nombre: string, extra: Partial<Fila> = {}): Fi
     vigente_hasta: null,
     confirmado: false,
     iniciado: true,
+    sostiene_consejo: false,
     ...extra,
   };
 }
@@ -89,7 +90,7 @@ function pedidos(simulado: ReturnType<typeof vi.fn>, metodo: string, camino: str
     .filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
 }
 
-function abrir(ruta = "/padron") {
+function abrir(ruta: string | { pathname: string; state: unknown } = "/padron") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -371,6 +372,29 @@ describe("página /padron", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: nombreDeFila("1° A: Beto Pérez") })).toBeNull());
   });
 
+  it("FL-PAD-03: si el vínculo sostiene un mandato del Consejo, finalizar lo dice antes de enviar", async () => {
+    const conConsejo = { elementos: PADRON.elementos.map((f) => (f.vinculo_id === V_INQ ? { ...f, sostiene_consejo: true } : f)) };
+    vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(conConsejo) }));
+    abrir();
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
+    expect(within(ventanaDe("Finalizar el vínculo")).getByText(AVISO_SOSTIENE_CONSEJO)).toBeTruthy();
+  });
+
+  it("FL-PAD-03, control: sin un mandato del Consejo que dependa del vínculo, no se dice", async () => {
+    vi.stubGlobal("fetch", conPadron());
+    abrir();
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
+    expect(within(ventanaDe("Finalizar el vínculo")).queryByText(AVISO_SOSTIENE_CONSEJO)).toBeNull();
+  });
+
+  it("FL-INV-01: se llega con el vínculo a confirmar y su ficha se abre sola", async () => {
+    vi.stubGlobal("fetch", conPadron());
+    abrir({ pathname: "/padron", state: { consorcio: C1, abrir: V_INQ } });
+    expect(await screen.findByRole("dialog", { name: /Beto Pérez/ })).toBeTruthy();
+  });
+
   it("«Cancelar» en la ventana de finalizar cierra la ventana sin enviar y vuelve a la ficha", async () => {
     const simulado = conPadron();
     vi.stubGlobal("fetch", simulado);
@@ -452,9 +476,58 @@ describe("página /padron", () => {
     expect((screen.getByLabelText("Motivo") as HTMLInputElement).value).toBe("Venta");
   });
 
-  it("sinConfirmarPrimero conserva el orden de la API dentro de cada grupo", () => {
+  it("confirmablesPrimero conserva el orden de la API dentro de cada grupo", () => {
     const filas = [fila(V_PROP, "A", { confirmado: true }), fila(V_INQ, "B"), fila(V_OTRO, "C", { confirmado: true }), fila(V_FUT, "D")];
-    expect(sinConfirmarPrimero(filas).map((f) => f.nombre)).toEqual(["B", "D", "A", "C"]);
+    expect(confirmablesPrimero(filas).map((f) => f.nombre)).toEqual(["B", "D", "A", "C"]);
+  });
+
+  // FL-PAD-01: un vínculo sin confirmar que confirma otra persona no va arriba con los que esperan a
+  // quien mira, y su ficha dice por qué no tiene «Confirmar».
+  it("FL-PAD-01: el sin confirmar que esa cuenta no confirma va detrás y su ficha dice quién lo confirma", async () => {
+    const padron = {
+      elementos: [
+        fila(V_PROP, "Ana Ruiz", { confirmado: true }),
+        fila(V_INQ, "Beto Pérez", { confirmable_por_vos: false }),
+        fila(V_FUT, "Carla Gómez", { unidad_id: U2, designacion: "2° B" }),
+      ],
+    };
+    vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
+    abrir();
+    await filaDe("2° B: Carla Gómez");
+    const titulos = within(screen.getByRole("list", { name: "Padrón" }))
+      .getAllByRole("button")
+      .map((b) => b.textContent?.split(" ")[2]);
+    expect(titulos).toEqual(["Carla", "Ana", "Beto"]);
+
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    expect(within(beto).getByText(LO_CONFIRMA_OTRA_PERSONA)).toBeTruthy();
+    expect(within(beto).queryByRole("button", { name: "Confirmar" })).toBeNull();
+    cerrarFicha(beto);
+    // Control: el que sí confirma tiene el botón y no la línea.
+    const carla = await abrirFicha("2° B: Carla Gómez");
+    expect(within(carla).getByRole("button", { name: "Confirmar" })).toBeTruthy();
+    expect(within(carla).queryByText(LO_CONFIRMA_OTRA_PERSONA)).toBeNull();
+  });
+
+  it("FL-AVI-03: abre el edificio con el que llega desde el inicio", async () => {
+    const otro = `/api/v1/consorcios/${C2}/padron`;
+    const simulado = conPadron({
+      "GET /api/v1/me/consorcios": () => Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+      [`GET ${otro}`]: () => Response.json({ elementos: [fila(V_OTRO, "Dora Sosa")] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <ContextoVersion.Provider value={SIN_VERSION_NUEVA}>
+        <QueryClientProvider client={consultas}>
+          <MemoryRouter initialEntries={[{ pathname: "/padron", state: { consorcio: C2 } }]}>
+            <App />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </ContextoVersion.Provider>,
+    );
+    await filaDe("1° A: Dora Sosa");
+    expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(0);
   });
 
   it("un rechazo queda dentro de la ventana abierta, junto a lo escrito", async () => {
@@ -666,7 +739,7 @@ describe("página /padron", () => {
     }
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(Object.keys(esquemas.FilaPadron?.properties ?? {}).sort()).toEqual(
-      ["confirmable_por_vos", "confirmado", "designacion", "gestionable_por_vos", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
+      ["confirmable_por_vos", "confirmado", "designacion", "gestionable_por_vos", "iniciado", "nombre", "sostiene_consejo", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
     );
     expect(esquemas.ConfirmacionVinculo?.properties?.referencia?.maxLength).toBe(300);
     expect(esquemas.FinVinculo?.properties?.motivo?.maxLength).toBe(300);

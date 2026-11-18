@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularInicioSinPendientes, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /invitaciones servida por el nginx de la imagen, con su CSP real. El backend de la
 // corrida no tiene base de datos: sin sesión responde el 401 de verdad y la página manda a
@@ -34,6 +34,7 @@ function invitacion(id: string, unidad: string, nombre: string, correo: string |
     vence_en: "2026-10-25T12:00:00Z",
     aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
     revocada_en: estado === "revocada" ? "2026-10-20T12:00:00Z" : null,
+    vinculo_id: null,
   };
 }
 
@@ -82,6 +83,9 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
         return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: quien === "propietaria" ? ["propietario"] : [], monedas: ["ARS"] }] });
       if (camino === `/api/v1/consorcios/${C1}/unidades`) return ruta.fulfill({ json: UNIDADES });
       if (camino === `/api/v1/consorcios/${C1}/invitaciones`) return ruta.fulfill({ json: { elementos: lista } });
+      // Lo demás que lee el inicio, sin pendientes (decisión 9, tanda 2 de flujos).
+      const inicio = simularInicioSinPendientes(ruta, camino);
+      if (inicio !== null) return inicio;
       return ruta.abort();
     }
     const csrf = (await pedido.headerValue("x-csrf-token")) ?? null;
@@ -269,14 +273,16 @@ test.describe("invitar", () => {
     await fila.getByRole("button").click();
     const ficha = page.getByRole("dialog", { name: "Beto Pérez, 1° A" });
     await ficha.getByRole("button", { name: "Retirar" }).click();
-    await expect(ficha.getByText("¿Retirar la invitación de Beto Pérez a la unidad 1° A?")).toBeVisible();
+    // FL-INV-03: la pregunta va en su ventana, encima de la ficha, como en Mandatos.
+    const pregunta = page.getByRole("dialog", { name: "Retirar la invitación" });
+    await expect(pregunta.getByText(/^¿Retirar la invitación de Beto Pérez a la unidad 1° A\?/)).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
-    await ficha.getByRole("button", { name: "No" }).click();
+    await pregunta.getByRole("button", { name: "Cancelar" }).click();
     expect(retiros).toEqual([]);
 
     await ficha.getByRole("button", { name: "Retirar" }).click();
     // Con el teclado, como quien no usa el mouse (E46): el foco termina en el aviso del resultado.
-    await ficha.getByRole("button", { name: "Sí, retirarla" }).focus();
+    await pregunta.getByRole("button", { name: "Sí, retirarla" }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeVisible();
     await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeFocused();

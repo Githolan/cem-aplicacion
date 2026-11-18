@@ -13,7 +13,7 @@ import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe,
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
-import { MONEDAS } from "../pagos/FormularioOrden";
+import { CampoMonedaSalida, FALTA_CODIGO_MONEDA, monedaValida } from "../pagos/CampoMonedaSalida";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { SubirArchivo } from "../SubirArchivo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
@@ -86,6 +86,8 @@ function textoDelComprobante(p: PorAclarar): string {
 }
 
 const tituloDe = (p: PorAclarar) => `${p.consorcio}: ${importe(p.importe_centavos, p.moneda)}`;
+/** FL-ACL-03 (tanda 9, app 0110): la fila dice a qué proveedor era, sin la cuenta. */
+export const resumenDe = (p: Pick<PorAclarar, "razon_social" | "concepto">) => `${p.razon_social} · ${p.concepto}`;
 
 export function PagosPorAclarar() {
   const id = useId();
@@ -236,7 +238,7 @@ export function PagosPorAclarar() {
     };
     if (aCentavos(registro.importe) === null)
       faltan.importe = registro.importe.trim() === "" ? "Falta escribir el importe." : "Escribir el importe con números, como 15000 o 15.000,50.";
-    if (otraCosa && !/^[A-Z]{3}$/.test(registro.moneda)) faltan.moneda = "Falta el código de tres letras de la moneda.";
+    if (otraCosa && !monedaValida(registro.moneda)) faltan.moneda = FALTA_CODIGO_MONEDA;
     return faltan;
   }
 
@@ -494,18 +496,9 @@ export function PagosPorAclarar() {
           <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={false} alCambiar={(texto) => cambiar("importe", texto)} />
         ))}
         {otraCosa &&
-          campo("moneda", "Moneda que salió del banco", () => (
-            <>
-              <input id={`${id}-moneda`} list={`${id}-monedas`} maxLength={3} autoCapitalize="characters" value={registro.moneda}
-                {...marcaDe(`${id}-moneda`, errores.moneda, `${id}-moneda-ayuda`)}
-                onChange={(e) => cambiar("moneda", e.target.value.toUpperCase())} />
-              <datalist id={`${id}-monedas`}>
-                {MONEDAS.map((mo) => (
-                  <option key={mo} value={mo} />
-                ))}
-              </datalist>
-              <p id={`${id}-moneda-ayuda`}>El código de tres letras, como {MONEDAS.join(" o ")}. Si no es la de la orden, solo se puede reclamar.</p>
-            </>
+          // Por su nombre, con la de la orden elegida (FL-ACL-02); el código, solo si fue otra.
+          campo("moneda", "Moneda que salió del banco", (m) => (
+            <CampoMonedaSalida id={`${id}-moneda`} valor={registro.moneda} marca={m} alCambiar={(codigo) => cambiar("moneda", codigo)} />
           ))}
         {campo("cuenta", "CBU/CVU de destino (como figura en el comprobante)", (m) => (
           <input id={`${id}-cuenta`} inputMode="numeric" maxLength={30} value={registro.cuenta} {...m} onChange={(e) => cambiar("cuenta", e.target.value)} />
@@ -545,6 +538,7 @@ export function PagosPorAclarar() {
         }}
         ocupada={enviando}
         datos={[
+          { etiqueta: "Proveedor", valor: p.razon_social },
           { etiqueta: "Concepto", valor: p.concepto },
           { etiqueta: "Cuenta vista el", valor: momentoAlFinal(p.cuenta_vista_en) },
         ]}
@@ -585,7 +579,7 @@ export function PagosPorAclarar() {
           <ul className="filas-registro" aria-label="Pagos para aclarar">
             {elementos.map((p) => (
               <li key={p.orden_id}>
-                <FilaDeRegistro titulo={tituloDe(p)} resumen={p.concepto} alAbrir={() => fichas.abrir(p.orden_id)}
+                <FilaDeRegistro titulo={tituloDe(p)} resumen={resumenDe(p)} alAbrir={() => fichas.abrir(p.orden_id)}
                   refFila={fichas.refFila(p.orden_id)} abierta={fichas.abierta === p.orden_id} />
               </li>
             ))}

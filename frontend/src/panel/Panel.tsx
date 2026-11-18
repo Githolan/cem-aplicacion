@@ -10,10 +10,13 @@ import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/
 import { periodo } from "../egresos/Liquidacion";
 import { exigirSesion, SinSesion, useConsorcio, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { RUTA_SOLICITUDES } from "../fiscalizacion/Solicitudes";
+import { DESDE_EL_PANEL, RUTA_SOLICITUDES } from "../fiscalizacion/Solicitudes";
 import { cumple, REQUISITOS, useAcciones } from "../permisos";
+import { FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
+import { FilaDeLectura, FilaEnlace } from "../pagos/FilaEnlace";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
 import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
+import { useAncho } from "../pagos/useAncho";
 import {
   estaVacio,
   type Faltante,
@@ -137,7 +140,7 @@ export const textoSolicitudesAbiertas = (n: number) => `Solicitudes abiertas: ${
 function LineaSolicitudes({ consorcio, abiertas }: { consorcio: string; abiertas: number }) {
   return (
     <p>
-      <Link to={RUTA_SOLICITUDES} state={{ consorcio }} className="enlace-suelto">
+      <Link to={RUTA_SOLICITUDES} state={{ consorcio, desde: DESDE_EL_PANEL }} className="enlace-suelto">
         {textoSolicitudesAbiertas(abiertas)}
       </Link>
     </p>
@@ -252,73 +255,138 @@ export function estadoDeLaFactura(f: Faltante): string | null {
  * «Estado» (PAN-04). */
 export const tituloFaltantes = (n: number) => `Facturas faltantes (${n})`;
 
+/** Desde 769 px la lista es una tabla; más angosta, filas compactas (FL-PAN-02, «Phablet»). */
+const TABLA_DE_FALTANTES = "(min-width: 48.0625em)";
+
+/** Una orden abierta desde el resumen vuelve al resumen, no a Pagos (FL-PAN-01). */
+const abrirDesdeElResumen = (consorcio: string) => ({ consorcio, volver: RUTA_PANEL, volverCon: { consorcio } });
+
 /** Las órdenes aprobadas o pagadas sin la factura. Sin ninguna, el bloque no se muestra (PAN-03). */
 function Faltantes({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCambiar }: PropsContenido) {
   const id = useId();
   const [subiendo, setSubiendo] = useState<Faltante | null>(null);
+  const enTabla = useAncho(TABLA_DE_FALTANTES);
+  const fichas = useFichas<string>();
   if (panel.comprobantes_faltantes.length === 0) return null;
+  const subida = subiendo !== null && (
+    <SubirFactura consorcio={consorcio} orden={subiendo.orden_id} version={subiendo.version} reemplaza={null}
+      descripcion={`${subiendo.proveedor}, ${importe(subiendo.importe_centavos, subiendo.moneda)}: ${subiendo.concepto}`}
+      aEntrar={aEntrar}
+      alCerrar={(cambio) => {
+        setSubiendo(null);
+        if (!cambio) return;
+        fichas.cerrar(false);
+        alCambiar();
+      }} />
+  );
+  const abierta = enTabla ? undefined : panel.comprobantes_faltantes.find((f) => f.orden_id === fichas.abierta);
   return (
     <section className="tarjeta grafico" aria-labelledby={`${id}-titulo`}>
       <h2 id={`${id}-titulo`}>{tituloFaltantes(panel.comprobantes_faltantes.length)}</h2>
       {/* Quien no las sube sabe quién lo hace, una sola vez (decisión del propietario del 13-11-2026; PAN-06). */}
       {subeFacturas === false && <p className="grafico__base">{TEXTO_LA_SUBE_LA_ADMINISTRACION}</p>}
-      <div className="tabla-lista tabla-tarjetas">
-        <table aria-label="Órdenes sin factura">
-          <thead>
-            <tr>
-              <th scope="col">Proveedor</th>
-              <th scope="col">Estado</th>
-              <th scope="col">Importe</th>
-              {subeFacturas === true && <th scope="col">Factura</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {panel.comprobantes_faltantes.map((f) => {
-              const factura = estadoDeLaFactura(f);
-              return (
-                <tr key={f.orden_id}>
-                  <th scope="row">
-                    {veRegistros ? (
-                      <Link to={rutaFicha(f.orden_id)} state={{ consorcio }} className="enlace-fila">
-                        {f.proveedor}
-                      </Link>
-                    ) : (
-                      f.proveedor
-                    )}
-                    <p className="tabla-lista__dato">{f.concepto}</p>
-                    {/* Quien no sube facturas ve solo lo que cambia: una subida en revisión o que no pasó. */}
-                    {subeFacturas !== true && factura !== null && <p className="tabla-lista__dato">{factura}</p>}
-                  </th>
-                  <td data-etiqueta="Estado">{TEXTO_ESTADO_ORDEN[f.estado]}</td>
-                  <td data-etiqueta="Importe">{importe(f.importe_centavos, f.moneda)}</td>
-                  {subeFacturas === true && (
-                    <td data-etiqueta="Factura">
-                      {factura}
-                      {/* Mientras el antivirus revisa la subida, no se ofrece otra. */}
-                      {f.factura_subida !== "en_cuarentena" && (
-                        <div className="acciones">
-                          <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
-                            {SUBIR_FACTURA}
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {subiendo !== null && (
-        <SubirFactura consorcio={consorcio} orden={subiendo.orden_id} version={subiendo.version} reemplaza={null}
-          descripcion={`${subiendo.proveedor}, ${importe(subiendo.importe_centavos, subiendo.moneda)}: ${subiendo.concepto}`}
-          aEntrar={aEntrar}
-          alCerrar={(cambio) => {
-            setSubiendo(null);
-            if (cambio) alCambiar();
-          }} />
+      {/* En el teléfono, una fila compacta por orden (FL-PAN-02): quien sube la factura lo hace desde la
+          ficha de la fila; quien solo mira, abre la orden. */}
+      {!enTabla && (
+        <ul className="filas-registro" aria-label="Órdenes sin factura">
+          {panel.comprobantes_faltantes.map((f) => {
+            const titulo = `${f.proveedor} · ${importe(f.importe_centavos, f.moneda)}`;
+            const factura = estadoDeLaFactura(f);
+            const resumen = [f.concepto, TEXTO_ESTADO_ORDEN[f.estado], factura].filter((d) => d !== null).join(" · ");
+            return (
+              <li key={f.orden_id}>
+                {subeFacturas === true ? (
+                  <FilaDeRegistro titulo={titulo} resumen={resumen} alAbrir={() => fichas.abrir(f.orden_id)}
+                    refFila={fichas.refFila(f.orden_id)} abierta={fichas.abierta === f.orden_id} />
+                ) : veRegistros ? (
+                  <FilaEnlace a={rutaFicha(f.orden_id)} estadoNavegacion={abrirDesdeElResumen(consorcio)} titulo={titulo} resumen={resumen} />
+                ) : (
+                  <FilaDeLectura titulo={titulo} resumen={resumen} />
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
+      {abierta !== undefined && (
+        <FichaDeRegistro
+          titulo={abierta.proveedor}
+          datos={[
+            { etiqueta: "Concepto", valor: abierta.concepto },
+            { etiqueta: "Estado", valor: TEXTO_ESTADO_ORDEN[abierta.estado] },
+            { etiqueta: "Importe", valor: importe(abierta.importe_centavos, abierta.moneda) },
+            ...(estadoDeLaFactura(abierta) === null ? [] : [{ etiqueta: "Factura", valor: estadoDeLaFactura(abierta) }]),
+          ]}
+          alCerrar={() => fichas.cerrar()}
+          ventana={subida}
+        >
+          <p className="ficha-registro__acciones">
+            {/* Mientras el antivirus revisa la subida, no se ofrece otra. */}
+            {abierta.factura_subida !== "en_cuarentena" && (
+              <button type="button" onClick={() => setSubiendo(abierta)}>
+                {SUBIR_FACTURA}
+              </button>
+            )}
+            {veRegistros && (
+              <Link to={rutaFicha(abierta.orden_id)} state={abrirDesdeElResumen(consorcio)} className="enlace-boton enlace-boton--borde">
+                Ver la orden
+              </Link>
+            )}
+          </p>
+        </FichaDeRegistro>
+      )}
+      {enTabla && (
+        <div className="tabla-lista tabla-tarjetas">
+          <table aria-label="Órdenes sin factura">
+            <thead>
+              <tr>
+                <th scope="col">Proveedor</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Importe</th>
+                {subeFacturas === true && <th scope="col">Factura</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {panel.comprobantes_faltantes.map((f) => {
+                const factura = estadoDeLaFactura(f);
+                return (
+                  <tr key={f.orden_id}>
+                    <th scope="row">
+                      {veRegistros ? (
+                        <Link to={rutaFicha(f.orden_id)} state={abrirDesdeElResumen(consorcio)} className="enlace-fila">
+                          {f.proveedor}
+                        </Link>
+                      ) : (
+                        f.proveedor
+                      )}
+                      <p className="tabla-lista__dato">{f.concepto}</p>
+                      {/* Quien no sube facturas ve solo lo que cambia: una subida en revisión o que no pasó. */}
+                      {subeFacturas !== true && factura !== null && <p className="tabla-lista__dato">{factura}</p>}
+                    </th>
+                    <td data-etiqueta="Estado">{TEXTO_ESTADO_ORDEN[f.estado]}</td>
+                    <td data-etiqueta="Importe">{importe(f.importe_centavos, f.moneda)}</td>
+                    {subeFacturas === true && (
+                      <td data-etiqueta="Factura">
+                        {factura}
+                        {/* Mientras el antivirus revisa la subida, no se ofrece otra. */}
+                        {f.factura_subida !== "en_cuarentena" && (
+                          <div className="acciones">
+                            <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
+                              {SUBIR_FACTURA}
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {/* En la tabla, la subida se abre desde la fila; en el teléfono, sobre la ficha. */}
+      {enTabla && subida}
     </section>
   );
 }

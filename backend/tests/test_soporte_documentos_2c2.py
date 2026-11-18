@@ -20,6 +20,7 @@ from tests.test_documentos_2c1 import crear, url
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
 from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo, hoy_de
+from tests.test_tanda6_documentos_0097 import disponible_a_mano
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
@@ -99,6 +100,7 @@ def test_el_administrador_pide_y_soporte_borra_sin_eventos(edificio, con_url, mo
                                                            capsys):  # fmt: skip
     e = edificio
     doc = documento(e)
+    disponible_a_mano(motor_migrate, e["cons"], doc, e["ad"])  # FL-DOC-02: con algo que abrir
     assert doc in visibles(e["prop"], e["cons"])
     antes = eventos(motor_migrate, e["cons"])
     assert correr(e, "borrar", doc, e["ad"]) == 0
@@ -166,6 +168,7 @@ def test_un_borrado_no_vuelve_ni_cambia_de_categoria(edificio, con_url, motor_mi
 def test_cambiar_la_categoria_deja_la_anterior_en_la_fila(edificio, con_url, motor_migrate):
     e = edificio
     doc = documento(e, "actas_y_decisiones")
+    disponible_a_mano(motor_migrate, e["cons"], doc, e["ad"])  # FL-DOC-02: con algo que abrir
     antes = eventos(motor_migrate, e["cons"])
     assert correr(e, "cambiar-categoria", doc, e["ad"], categoria="otros") == 0
     f = fila(motor_migrate, doc)

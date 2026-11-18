@@ -24,9 +24,16 @@ import {
   VOLVIO_LA_RED,
   TEXTO_SESION_VENCIDA,
 } from "./comun";
-import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, FALTA_CUIT, FALTA_RAZON, MARCA_FALTANTE, MARCA_VENCIDA, NO_CAMBIAR_CUENTA, SIN_CAMBIOS_PARA_GUARDAR } from "./Proveedores";
-import { CARGAR, FALTA_VENCIMIENTO, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO, SIN_REQUISITO, TITULO_SECCION } from "./DocumentacionProveedor";
-import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
+import {
+  ACTO_DE_ESTADO, AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, FALTA_CUIT, FALTA_RAZON, MARCA_FALTANTE, MARCA_VENCIDA, NO_CAMBIAR_CUENTA,
+  PREPARAR_LA_ORDEN, SIN_CAMBIOS_PARA_GUARDAR,
+} from "./Proveedores";
+import {
+  CARGAR, ELEGIR_REQUISITO, FALTA_REQUISITO, FALTA_VENCIMIENTO, NO_CUBRE_REQUISITO, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO,
+  SIN_REQUISITO, TITULO_SECCION,
+} from "./DocumentacionProveedor";
+import { SALTEO_EN_UNA_URGENCIA } from "../pagos/textos";
+import { MARCA_BLOQUEADO, RUTA_CONSULTA_PROVEEDORES, textoMarcaSalteo, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
 import {
   ACLARACION_RETIRO,
   AUTORIZAR,
@@ -35,12 +42,15 @@ import {
   FALTA_MOTIVO,
   MOTIVO,
   RETIRAR,
+  VE_POR_ROL,
   RUTA_AUTORIZACIONES_PROVEEDORES,
   textoAutorizado,
   textoRetirado,
   TITULO_AUTORIZACIONES_PROVEEDORES,
 } from "./AutorizacionesProveedores";
-import { AGREGAR_RUBRO, AGREGAR_UN_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, FALTA_RUBRO, TITULO_EXIGENCIA } from "./ExigenciaLegal";
+import {
+  AGREGAR_RUBRO, AGREGAR_UN_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, AVISO_FALTA_SOLO_LEE, AVISO_QUITAR_CON_FALTANTES, CONFIRMAR_QUITAR, FALTA_MOTIVO_QUITAR, FALTA_RUBRO, MOTIVO_QUITAR, textoConSalteoHasta, textoQuitarRubro, textoSeLeVaAExigir, TITULO_EXIGENCIA, TITULO_RETIROS,
+} from "./ExigenciaLegal";
 import {
   CONFIRMAR_SALTEO,
   EXPLICACION_SALTEO,
@@ -50,6 +60,7 @@ import {
   SALTEO_REGISTRADO,
   textoSalteo,
   textoSalteoDeLaVersion,
+  textoVencioSinUsarse,
   TITULO_SALTEO,
 } from "./SalteoDocumentacion";
 import { CUIT_INVALIDO } from "../CampoCuit";
@@ -85,6 +96,8 @@ const EXIGENCIA = {
   configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear" as const, admite_no_vence: true },
   // Salteo por urgencia (app 0106).
   salteos: [] as components["schemas"]["SalteoDocumentacion"][],
+  // Rubros quitados con faltantes y su motivo (app 0110).
+  retiros_con_motivo: [] as components["schemas"]["RetiroRubroConMotivo"][],
 };
 const SIN_DOCUMENTACION = { documentacion: [], puede_cargar_documentacion: true, ...EXIGENCIA };
 
@@ -149,7 +162,19 @@ type Respuestas = Record<string, () => Response | Promise<Response>>;
 const CON_SEGUNDO_FACTOR: Respuestas = {
   "GET /api/v1/auth/totp": () =>
     Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
+  // Los pedidos de salteo al Consejo (tanda 9): por defecto, ninguno.
+  [`GET /api/v1/consorcios/${C1}/pedidos-salteo`]: () => Response.json({ elementos: [] }),
 };
+
+/** Los campos que el contrato 0.77.0 sumó a las listas de proveedores (tanda 8): la prueba que no los
+ * fija los recibe vacíos, como el servidor sin salteos. */
+const LISTA_DE_PROVEEDORES = /^GET \/api\/v1\/consorcios\/[^/]+\/(consulta-)?proveedores$/;
+async function completarLista(clave: string, respuesta: Response): Promise<Response> {
+  if (!LISTA_DE_PROVEEDORES.test(clave) || !respuesta.ok) return respuesta;
+  const datos = (await respuesta.clone().json()) as Record<string, unknown>;
+  const nuevos = { con_salteo: [], vence_salteo: [], salteo_vencido_sin_usar: [], autoriza_por_persona: true };
+  return Response.json({ ...nuevos, ...datos }, { status: respuesta.status });
+}
 
 /** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
 function backend(respuestas: Respuestas) {
@@ -157,7 +182,7 @@ function backend(respuestas: Respuestas) {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
     const respuesta = respuestas[clave] ?? CON_SEGUNDO_FACTOR[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
-    return respuesta();
+    return completarLista(clave, await respuesta());
   });
 }
 
@@ -173,7 +198,9 @@ function pedidos(simulado: ReturnType<typeof vi.fn>, metodo: string, camino: str
     .filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
 }
 
-const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
+const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
+/** Para llegar a «Preparar una orden», que pregunta en qué monedas opera el edificio. */
+const CON_MONEDAS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
 
 const INICIO: Respuestas = {
   "GET /api/v1/auth/sesion": () => Response.json({}),
@@ -183,9 +210,14 @@ const INICIO: Respuestas = {
   "GET /api/v1/me/consorcios": CONSORCIOS,
   // Con todas las acciones, el inicio cuenta los vínculos sin confirmar (G-26).
   [`GET /api/v1/consorcios/${C1}/padron`]: () => Response.json({ elementos: [] }),
+  // Lo demás que lee el inicio como bandeja (decisión 9 del 18-11-2026), sin pendientes.
+  [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 }),
+  [`GET ${BASE}/solicitudes-formales`]: () => Response.json({ elementos: [] }),
+  [`GET ${BASE}/mandatos`]: () => Response.json({ elementos: [] }),
+  [`GET ${BASE}/contactos/gestion`]: () => Response.json({ elementos: [] }),
 };
 
-function abrir(ruta: string) {
+function abrir(ruta: string | { pathname: string; state: unknown }) {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -206,6 +238,8 @@ async function sinFaltasDeAccesibilidad(contenedor: HTMLElement) {
 }
 
 const volvioLaRed = () => fireEvent(window, new Event("online"));
+/** Testing Library compara con el texto del nodo ya normalizado: el momento (Intl) trae espacios duros. */
+const normalizado = (texto: string) => texto.replace(/\s+/g, " ");
 
 /** Las claves de reintento de esos pedidos, en orden. */
 
@@ -589,7 +623,8 @@ describe("página /egresos/proveedores", () => {
     const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
     expect(fila.textContent).toContain(MARCA_FALTANTE);
     fireEvent.click(fila);
-    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    // A quien prepara órdenes se le dice también la salida de una urgencia (FL-LEG-07).
+    expect(await screen.findByText(`${AVISO_FALTA_BLOQUEA} ${SALTEO_EN_UNA_URGENCIA}`)).toBeTruthy();
     expect(screen.queryByText(AVISO_FALTA_AVISA)).toBeNull();
     const falta = screen.getByRole("list", { name: "Lo que falta" });
     expect(within(falta).getByText(/Responsabilidad civil de la empresa conservadora SINTETICA/)).toBeTruthy();
@@ -652,6 +687,52 @@ describe("página /egresos/proveedores", () => {
     await waitFor(() => expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`).length).toBeGreaterThan(1));
     fireEvent.click(await screen.findByRole("button", { name: "Quitar Ascensores y montacargas" }));
     await waitFor(() => expect(pedidos(api, "DELETE", `${RUBROS}/ascensores`)).toHaveLength(1));
+  });
+
+  it("pregunta 4: quitar un rubro con faltantes pide el motivo en su ventana y lo manda", async () => {
+    const respuesta = () => Response.json({ proveedor_id: P1, rubros_legales: [], faltantes: [] });
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"], faltantes: [FALTA_SEGURO] }),
+      [`DELETE ${RUBROS}/ascensores`]: respuesta,
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar Ascensores y montacargas" }));
+    const ventana = await screen.findByRole("dialog", { name: textoQuitarRubro("ascensores") });
+    expect(within(ventana).getByText(AVISO_QUITAR_CON_FALTANTES)).toBeTruthy();
+    fireEvent.click(within(ventana).getByRole("button", { name: CONFIRMAR_QUITAR }));
+    expect(await within(ventana).findByText(FALTA_MOTIVO_QUITAR)).toBeTruthy();
+    expect(pedidos(api, "DELETE", `${RUBROS}/ascensores`)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText(MOTIVO_QUITAR), { target: { value: " SINTETICO: ya no conserva ascensores " } });
+    fireEvent.click(within(ventana).getByRole("button", { name: CONFIRMAR_QUITAR }));
+    await waitFor(() => expect(pedidos(api, "DELETE", `${RUBROS}/ascensores`)).toHaveLength(1));
+    expect(await unico(pedidos(api, "DELETE", `${RUBROS}/ascensores`)).json()).toEqual({ motivo: "SINTETICO: ya no conserva ascensores" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: textoQuitarRubro("ascensores") })).toBeNull());
+  });
+
+  it("pregunta 4: si el servidor pide el motivo (`motivo_requerido`), se abre la ventana", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"] }),
+        [`DELETE ${RUBROS}/ascensores`]: () => error("motivo_requerido", 422),
+      }),
+    );
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar Ascensores y montacargas" }));
+    expect(await screen.findByRole("dialog", { name: textoQuitarRubro("ascensores") })).toBeTruthy();
+  });
+
+  it("pregunta 4: los rubros quitados con faltantes se ven con quién, cuándo, qué faltaba y el motivo", async () => {
+    const retiro = { proveedor_id: P1, rubro_legal: "ascensores", motivo: "SINTETICO: cambió de rubro", faltaban: [ASCENSOR_SEGURO.codigo],
+      retirado_en: "2026-11-18T12:00:00Z", retirado_por_nombre: "Admin Ficticia" };  // prettier-ignore
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ retiros_con_motivo: [retiro] }) }));
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    const lista = await screen.findByRole("list", { name: TITULO_RETIROS });
+    expect(within(lista).getByText(/^Ascensores y montacargas, quitado el .+ por Admin Ficticia \(faltaba: Responsabilidad civil de la empresa conservadora SINTETICA\)\. Motivo: SINTETICO: cambió de rubro$/)).toBeTruthy();
   });
 
   it("RF50c: «No vence» deja la fecha en blanco y manda el requisito elegido del mismo tipo", async () => {
@@ -1176,6 +1257,13 @@ describe("página /egresos/proveedores", () => {
     expect(enlace.getAttribute("href")).toBe("/proveedores/quien-los-ve");
   });
 
+  it("FL-VER-01: si el edificio no autoriza por persona, la gestión no ofrece «Quién ve los proveedores»", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()], autoriza_por_persona: false }) }));
+    abrir("/egresos/proveedores");
+    await screen.findByRole("button", { name: /^Limpieza Ficticia SRL/ });
+    expect(screen.queryByRole("link", { name: "Quién ve los proveedores" })).toBeNull();
+  });
+
   it("con el campo de cuenta vacío se conserva la cuenta y no hay aviso", async () => {
     const simulado = conLista({
       [`POST ${BASE}/proveedores/${P1}/versiones`]: () => Response.json({ id: P1, version: 2 }),
@@ -1245,6 +1333,204 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     await waitFor(() => expect(screen.queryByLabelText("Rubro (opcional)")).toBeNull());
     expect(await screen.findByRole("list", { name: "Proveedores" })).toBeTruthy();
+  });
+
+  // Flujos 18-11, tanda 1 (comentario 41 del propietario: la orden a un proveedor bloqueado).
+  const SALTEO_DE_OTRO = {
+    numero: 3, proveedor_id: P1, motivo: "SINTETICO: pérdida de gas", registrado_en: "2026-11-16T15:00:00Z",
+    registrado_por_nombre: "Consejera Ficticia", vence_en: "2026-11-17T20:52:00Z", estado: "vigente" as const, orden_id: null,
+    version: null, usado_en: null, propio: false,
+  };  // prettier-ignore
+  const FALTA_GAS = { proveedor_id: P1, codigo: GAS.codigo, rubro_legal: "gas", tipo: "habilitacion" as const, descripcion: GAS.descripcion };
+  const abrirLaFicha = async () => fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+
+  it("FL-LEG-07: quien prepara lee la salida de la urgencia; con un salteo que espera, el aviso lo dice en vez del bloqueo", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"], faltantes: [FALTA_SEGURO] }) }));
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    expect(await screen.findByText(`${AVISO_FALTA_BLOQUEA} ${SALTEO_EN_UNA_URGENCIA}`)).toBeTruthy();
+    cleanup();
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"], faltantes: [FALTA_SEGURO], salteos: [SALTEO_DE_OTRO] }),
+    }));
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    expect(await screen.findByText(normalizado(textoConSalteoHasta(SALTEO_DE_OTRO.vence_en)))).toBeTruthy();
+    expect(screen.queryByText(new RegExp(`^${AVISO_FALTA_BLOQUEA.slice(0, 60)}`))).toBeNull();
+  });
+
+  it("FL-PRV-04: con un salteo de otra persona que espera su orden, la ficha ofrece prepararla", async () => {
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"], faltantes: [FALTA_SEGURO], salteos: [SALTEO_DE_OTRO] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+      "GET /api/v1/me/consorcios": CON_MONEDAS,
+    }));
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    fireEvent.click(await screen.findByRole("button", { name: PREPARAR_LA_ORDEN }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1));
+  });
+
+  it("control FL-PRV-04: sin salteo, o con uno propio, no se ofrece prepararla", async () => {
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["ascensores"], faltantes: [FALTA_SEGURO], salteos: [{ ...SALTEO_DE_OTRO, propio: true }] }),
+    }));
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    expect(await screen.findByRole("button", { name: "Cambiar los datos" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: PREPARAR_LA_ORDEN })).toBeNull();
+  });
+
+  it("FL-PRV-05: el estado no está en «Cambiar los datos»; suspender es su propio acto, con lo que pasa", async () => {
+    const api = conLista({
+      [`POST ${BASE}/proveedores/${P1}/versiones`]: () => Response.json({ id: P1, version: 2 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
+    const cambio = await screen.findByRole("dialog", { name: "Cambiar Limpieza Ficticia SRL" });
+    expect(within(cambio).queryByLabelText("Estado")).toBeNull();
+    fireEvent.click(within(cambio).getByRole("button", { name: "Cancelar" }));
+    // Activo: se ofrecen suspender y dar de baja, no reactivar.
+    expect(screen.queryByRole("button", { name: ACTO_DE_ESTADO.activo.verbo })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: ACTO_DE_ESTADO.suspendido.verbo }));
+    const ventana = await screen.findByRole("dialog", { name: `${ACTO_DE_ESTADO.suspendido.verbo}: Limpieza Ficticia SRL` });
+    expect(within(ventana).getByText(ACTO_DE_ESTADO.suspendido.consecuencia)).toBeTruthy();
+    fireEvent.click(within(ventana).getByRole("button", { name: ACTO_DE_ESTADO.suspendido.verbo }));
+    expect(await screen.findByText("Listo: Limpieza Ficticia SRL quedó suspendido.")).toBeTruthy();
+    const cuerpo = await unico(pedidos(api, "POST", `${BASE}/proveedores/${P1}/versiones`)).json();
+    expect(cuerpo).toMatchObject({ estado: "suspendido", conservar_cuenta: true, cuenta_destino: null, razon_social: "Limpieza Ficticia SRL", version_esperada: 1 });
+  });
+
+  it("FL-LEG-11: quien vino a preparar una orden a un edificio sin proveedores llega al alta", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }) }));
+    abrir({ pathname: "/egresos/proveedores", state: { consorcio: C1, paraPreparar: true } });
+    expect(await screen.findByRole("dialog", { name: "Alta de un proveedor" })).toBeTruthy();
+    cleanup();
+    // Control: llegando sin ese pedido, la lista vacía no abre nada.
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }) }));
+    abrir("/egresos/proveedores");
+    expect(await screen.findByText("El edificio no tiene proveedores cargados.")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Alta de un proveedor" })).toBeNull();
+  });
+
+  it("FL-LEG-11 y FL-PRV-01: reactivar el proveedor por el que se vino vuelve a la orden con él", async () => {
+    const suspendido = proveedor({ estado: "suspendido" });
+    let reactivado = false;
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [reactivado ? proveedor({ version: 2 }) : suspendido] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: suspendido, versiones: [], ...SIN_DOCUMENTACION }),
+      [`POST ${BASE}/proveedores/${P1}/versiones`]: () => {
+        reactivado = true;
+        return Response.json({ id: P1, version: 2 }, { status: 201 });
+      },
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+      "GET /api/v1/me/consorcios": CON_MONEDAS,
+    }));
+    abrir({ pathname: "/egresos/proveedores", state: { consorcio: C1, abrir: P1, orden: { concepto: "Reparación SINTETICA" } } });
+    // Llega con la ficha de ese proveedor abierta (FL-LEG-03).
+    const ficha = await screen.findByRole("dialog", { name: "Limpieza Ficticia SRL" });
+    fireEvent.click(within(ficha).getByRole("button", { name: ACTO_DE_ESTADO.activo.verbo }));
+    const ventana = await screen.findByRole("dialog", { name: `${ACTO_DE_ESTADO.activo.verbo}: Limpieza Ficticia SRL` });
+    fireEvent.click(within(ventana).getByRole("button", { name: ACTO_DE_ESTADO.activo.verbo }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Reparación SINTETICA"));
+  });
+
+  it("FL-LEG-05: cada requisito que falta se carga desde su renglón, con el tipo y el requisito ya elegidos", async () => {
+    const api = conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["gas"], faltantes: [FALTA_GAS] }),
+      [`POST ${BASE}/proveedores/${P1}/documentacion`]: () =>
+        Response.json({ proveedor_id: P1, constancia_id: O1, documento_id: DOC,
+          archivo: { id: DOC, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: H1 } }, { status: 201 }),  // prettier-ignore
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    const falta = await screen.findByRole("list", { name: "Lo que falta" });
+    fireEvent.click(within(falta).getByRole("button", { name: `${CARGAR} ${GAS.descripcion}` }));
+    const hoja = await screen.findByRole("dialog", { name: `${CARGAR}: ${GAS.descripcion}` });
+    expect(within(hoja).queryByLabelText("Habilitación")).toBeNull();
+    expect(within(hoja).queryByLabelText("Qué requisito de la ley cubre")).toBeNull();
+    expect((within(hoja).getByLabelText("Qué cubre") as HTMLInputElement).value).toBe(GAS.descripcion);
+    fireEvent.change(within(hoja).getByLabelText("Vence el"), { target: { value: "2027-11-01" } });
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "matricula.pdf", { type: "application/pdf" });
+    fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), { target: { files: [archivo] } });
+    expect(await within(hoja).findByText(/Listo: quedó cargado/)).toBeTruthy();
+    const url = new URL(unico(pedidos(api, "POST", `${BASE}/proveedores/${P1}/documentacion`)).url);
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ tipo: "habilitacion", requisito: GAS.codigo, vence_el: "2027-11-01" });
+  });
+
+  it("FL-LEG-06: con un solo requisito de ese tipo que falta, la hoja arranca en él; con varios, hay que elegirlo", async () => {
+    const FALTA_PERMISO = { ...FALTA_GAS, codigo: ASCENSOR_PERMISO.codigo, rubro_legal: "ascensores", descripcion: ASCENSOR_PERMISO.descripcion };
+    const api = conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["gas"], faltantes: [FALTA_GAS] }) });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
+    let hoja = await screen.findByRole("dialog", { name: "Agregar un seguro o una habilitación" });
+    fireEvent.click(within(hoja).getByLabelText("Habilitación"));
+    expect((within(hoja).getByLabelText("Qué requisito de la ley cubre") as HTMLSelectElement).value).toBe(GAS.codigo);
+    cleanup();
+    vi.stubGlobal("fetch", conLista({
+      [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({ rubros_legales: ["gas", "ascensores"], faltantes: [FALTA_GAS, FALTA_PERMISO] }),
+    }));
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un seguro o una habilitación" }));
+    hoja = await screen.findByRole("dialog", { name: "Agregar un seguro o una habilitación" });
+    fireEvent.click(within(hoja).getByLabelText("Habilitación"));
+    const requisito = within(hoja).getByLabelText("Qué requisito de la ley cubre") as HTMLSelectElement;
+    expect(requisito.value).toBe("");
+    expect(within(requisito).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      ELEGIR_REQUISITO, SIN_REQUISITO, ASCENSOR_PERMISO.descripcion, GAS.descripcion,
+    ]);
+    fireEvent.change(within(hoja).getByLabelText("Qué cubre"), { target: { value: "Matricula SINTETICA" } });
+    fireEvent.change(within(hoja).getByLabelText("Vence el"), { target: { value: "2027-11-01" } });
+    fireEvent.change(within(hoja).getByLabelText("Archivo del documento"), {
+      target: { files: [new File(["%PDF-1.4 SINTETICO"], "matricula.pdf", { type: "application/pdf" })] },
+    });
+    expect(await within(hoja).findByText(FALTA_REQUISITO)).toBeTruthy();
+    expect(requisito.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("FL-LEG-06: un documento vigente que no cubre ningún requisito, con faltantes de su tipo, lo dice", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia({
+      rubros_legales: ["gas"], faltantes: [FALTA_GAS],
+      documentacion: [documentacion({ tipo: "habilitacion", estado: "vigente", vence_el: "2027-11-01" }), documentacion({ id: O1, estado: "vigente", vence_el: "2027-11-01" })],
+    }) }));  // prettier-ignore
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    // Solo la habilitación: el seguro no tiene faltantes de su tipo (control).
+    expect(await screen.findAllByText(NO_CUBRE_REQUISITO)).toHaveLength(1);
+  });
+
+  it("FL-LEG-09: con un documento en revisión, la ficha se vuelve a leer sola", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let revisado = false;
+    const api = conLista({ [`GET ${BASE}/proveedores/${P1}`]: () => fichaConExigencia({
+      documentacion: [documentacion({ estado: revisado ? "vigente" : "en_revision", vence_el: "2027-11-01" })] })() });  // prettier-ignore
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    expect(await screen.findByText("El antivirus está revisando el archivo")).toBeTruthy();
+    revisado = true;
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(await screen.findByText("Vigente hasta el 01/11/2027")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("FL-LEG-10: al elegir el rubro, la ventana dice qué se le va a exigir y qué pasa mientras falte", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores/${P1}`]: fichaConExigencia() }));
+    abrir("/egresos/proveedores");
+    await abrirLaFicha();
+    fireEvent.click(await screen.findByRole("button", { name: AGREGAR_UN_RUBRO }));
+    const ventana = await screen.findByRole("dialog", { name: AGREGAR_UN_RUBRO });
+    expect(within(ventana).queryByText(/^Se le va a exigir/)).toBeNull();
+    fireEvent.change(within(ventana).getByLabelText("Rubro legal"), { target: { value: "gas" } });
+    expect(within(ventana).getByText(textoSeLeVaAExigir([GAS.descripcion], "bloquear"))).toBeTruthy();
   });
 });
 
@@ -1408,6 +1694,7 @@ describe("página /proveedores (consulta)", () => {
         fuente: "Fuente SINTETICA", verificado: true, exigido: true }],
       configuracion,
       salteos,
+      retiros_con_motivo: [],
     });
   const consulta = (extra: Respuestas = {}) =>
     backend({
@@ -1430,7 +1717,8 @@ describe("página /proveedores (consulta)", () => {
     const { container } = abrir(RUTA_CONSULTA_PROVEEDORES);
     const fila = await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
     expect(fila.textContent).toContain(MARCA_VENCIDA);
-    expect(fila.textContent).toContain(MARCA_FALTANTE);
+    // En «bloquear», sin salteo: bloqueado (FL-VER-03).
+    expect(fila.textContent).toContain(MARCA_BLOQUEADO);
     expect(fila.textContent).not.toContain("Cuenta");
     // «Activo» es lo esperado: no se dice (CPR-02).
     expect(fila.textContent).not.toContain("Activo");
@@ -1438,7 +1726,9 @@ describe("página /proveedores (consulta)", () => {
     const ficha = await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" });
     expect(within(ficha).getByText("Vencido el 01/11/2026")).toBeTruthy();
     expect(within(ficha).getByText("Cubre: RC SINTETICA")).toBeTruthy();
-    expect(within(ficha).getByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    // FL-LEG-08: quien no cambia ni saltea ve qué falta, sin lo que pasa con las órdenes.
+    expect(within(ficha).getByText(AVISO_FALTA_SOLO_LEE)).toBeTruthy();
+    expect(within(ficha).queryByText(AVISO_FALTA_BLOQUEA)).toBeNull();
     // Solo lo que tiene valor: sin «Estado: Activo» ni datos vacíos (CPR-02).
     expect(within(ficha).queryByText("Estado")).toBeNull();
     expect(within(ficha).queryByText("Correo")).toBeNull();
@@ -1457,7 +1747,7 @@ describe("página /proveedores (consulta)", () => {
       [`GET ${CONSULTA}`]: () => Response.json({ elementos: [suspendido], documentacion_vencida: [], documentacion_por_vencer: [],
         documentacion_faltante: [], modo_exigencia: "bloquear" }),  // prettier-ignore
       [`GET ${CONSULTA}/${P1}`]: () => Response.json({ proveedor: suspendido, documentacion: [], rubros_legales: [], faltantes: [],
-        requisitos: [], configuracion, salteos: [] }),  // prettier-ignore
+        requisitos: [], configuracion, salteos: [], retiros_con_motivo: [] }),  // prettier-ignore
     }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     const fila = await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
@@ -1497,6 +1787,33 @@ describe("página /proveedores (consulta)", () => {
     abrir(RUTA_CONSULTA_PROVEEDORES);
     const enlace = await screen.findByRole("link", { name: "Quién ve los proveedores" });
     expect(enlace.getAttribute("href")).toBe(RUTA_AUTORIZACIONES_PROVEEDORES);
+  });
+
+  it("FL-VER-01: si el edificio no autoriza por persona, la consulta no ofrece «Quién ve los proveedores»", async () => {
+    const apagada = () =>
+      Response.json({ elementos: [enConsulta], documentacion_vencida: [], documentacion_por_vencer: [], documentacion_faltante: [], modo_exigencia: "bloquear", autoriza_por_persona: false });
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("proveedores.ver", "proveedores.autorizar"), [`GET ${CONSULTA}`]: apagada }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
+    expect(screen.queryByRole("link", { name: "Quién ve los proveedores" })).toBeNull();
+  });
+
+  it("FL-VER-03: en «bloquear», la fila distingue el bloqueado del que tiene un salteo, con hasta cuándo; en «avisar», la marca de siempre", async () => {
+    const VENCE = "2026-11-19T15:00:00Z";
+    const otro = { ...enConsulta, id: C2, razon_social: "Gas Ficticio SRL" };
+    const lista = (modo: string) => () =>
+      Response.json({
+        elementos: [enConsulta, otro], documentacion_vencida: [], documentacion_por_vencer: [], documentacion_faltante: [P1, C2],
+        modo_exigencia: modo, con_salteo: [C2], vence_salteo: [{ proveedor_id: C2, vence_en: VENCE }],
+      });
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}`]: lista("bloquear") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    expect((await screen.findByRole("button", { name: /^Ascensores Ficticios SA / })).textContent).toContain(MARCA_BLOQUEADO);
+    expect(screen.getByRole("button", { name: /^Gas Ficticio SRL / }).textContent).toContain(textoMarcaSalteo(VENCE));
+    cleanup();
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}`]: lista("avisar") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    expect((await screen.findByRole("button", { name: /^Gas Ficticio SRL / })).textContent).toContain(MARCA_FALTANTE);
   });
 
   // Salteo por urgencia (app 0106; propietario, 16-11-2026: «si con motivo»).
@@ -1575,7 +1892,7 @@ describe("página /proveedores (consulta)", () => {
     expect(await screen.findByRole("button", { name: SALTEAR })).toBeTruthy();
   });
 
-  it("comentario 40: el salteo de otra persona que espera su orden no esconde el botón; la fecha lleva un solo punto", async () => {
+  it("FL-SAL-05 (decisión 5): con el salteo de otra persona esperando su orden no se ofrece otro; la fecha lleva un solo punto", async () => {
     const deOtro = { ...SALTEO, numero: 8, registrado_por_nombre: "Otro Consejero Ficticio" };
     vi.stubGlobal("fetch", consulta({
       [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
@@ -1583,24 +1900,49 @@ describe("página /proveedores (consulta)", () => {
     }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
-    // La base deja a cada miembro un salteo propio en espera: el de otro no le impide registrar el suyo.
-    expect(await screen.findByRole("button", { name: SALTEAR })).toBeTruthy();
+    // Un segundo salteo habilitaría una segunda orden: basta el renglón del que espera.
     const renglon = (await screen.findByRole("list", { name: "Salteos" })).textContent ?? "";
+    expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(renglon).toMatch(/^Espera su orden hasta el .*\. Registrado el /);
     expect(renglon).not.toMatch(/\.\./);
   });
 
-  it("sin la acción no se ofrece saltear, y la ficha muestra los salteos que hubo, plegados (SEG-07)", async () => {
-    const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
-    vi.stubGlobal("fetch", consulta());
+  it("FL-SAL-04: si el último salteo venció sin usarse, se dice a la vista y se ofrece otro", async () => {
+    const vencido = { ...SALTEO, estado: "vencido" as const };
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([vencido]),
+    }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
-    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    expect(await screen.findByText(normalizado(textoVencioSinUsarse(vencido)))).toBeTruthy();
+    expect(screen.getByRole("button", { name: SALTEAR })).toBeTruthy();
+    cleanup();
+    // Control: si el último se usó, no hay línea de vencido aunque uno anterior haya vencido.
+    vi.stubGlobal("fetch", consulta({
+      [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion"),
+      [`GET ${CONSULTA}/${P1}`]: () =>
+        fichaConsulta([{ ...vencido, numero: 1 }, { ...SALTEO, numero: 2, estado: "usado", orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" }]),
+    }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByRole("button", { name: SALTEAR })).toBeTruthy();
+    expect(screen.queryByText(/venció sin usarse\.$/)).toBeNull();
+  });
+
+  it("sin la acción no se ofrece saltear, y la ficha muestra los salteos que hubo, plegados (SEG-07)", async () => {
+    const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
+    // Quien fiscaliza (el Consejo) sin la facultad de saltear.
+    const fiscaliza = { [MIS_ACCIONES]: alcanza("proveedores.ver", "fiscalizacion.ver_panel") };
+    vi.stubGlobal("fetch", consulta(fiscaliza));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByText(AVISO_FALTA_SOLO_LEE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(screen.queryByRole("heading", { name: TITULO_SALTEO })).toBeNull();
     cleanup();
     // Control: con un salteo ya usado, se ve aunque no se pueda saltear: en «Anteriores», sin la versión.
-    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([usado]) }));
+    vi.stubGlobal("fetch", consulta({ ...fiscaliza, [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([usado]) }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
     // El momento lleva espacios finos (Intl): se compara el texto entero de la fila.
@@ -1611,6 +1953,28 @@ describe("página /proveedores (consulta)", () => {
     expect(screen.queryByRole("list", { name: "Salteos" })).toBeNull();
     expect(screen.queryByRole("button", { name: SALTEAR })).toBeNull();
     expect(textoSalteoDeLaVersion(usado)).toContain("SINTETICO: pérdida de gas");
+  });
+
+  it("FL-LEG-08: el habitante autorizado no ve la historia de salteos, con nombres y motivos", async () => {
+    const usado = { ...SALTEO, estado: "usado" as const, orden_id: O1, version: 1, usado_en: "2026-11-16T16:00:00Z" };
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}/${P1}`]: () => fichaConsulta([SALTEO, usado]) }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    const ficha = await screen.findByRole("dialog", { name: "Ascensores Ficticios SA" });
+    // Ve los datos, los seguros y lo que falta.
+    expect(within(ficha).getByText("Cubre: RC SINTETICA")).toBeTruthy();
+    expect(within(ficha).getByText(AVISO_FALTA_SOLO_LEE)).toBeTruthy();
+    expect(within(ficha).queryByRole("heading", { name: TITULO_SALTEO })).toBeNull();
+    expect(within(ficha).queryByText(/Consejera Ficticia/)).toBeNull();
+    expect(within(ficha).queryByText(/pérdida de gas/)).toBeNull();
+  });
+
+  it("FL-LEG-08, control: quien saltea ve en la ficha qué hace la falta con las órdenes", async () => {
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("proveedores.ver", "egresos.saltear_documentacion") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Ascensores Ficticios SA / }));
+    expect(await screen.findByText(AVISO_FALTA_BLOQUEA)).toBeTruthy();
+    expect(screen.queryByText(AVISO_FALTA_SOLO_LEE)).toBeNull();
   });
 
   it("sin proveedores.ver la dirección lleva al inicio", async () => {
@@ -1633,6 +1997,7 @@ describe("página /proveedores/quien-los-ve", () => {
     motivo: null,
     registrado_en: null,
     registrado_por_nombre: null,
+    ve_por_rol: false,
   };
   const autorizado = {
     ...sinAutorizar,
@@ -1676,6 +2041,24 @@ describe("página /proveedores/quien-los-ve", () => {
     expect(within(ficha).getByText("SINTETICO: comisión de obras")).toBeTruthy();
     expect(within(ficha).getByRole("button", { name: RETIRAR }).className).toBe("secundario peligro");
     await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("FL-VER-02: quien ya los ve por su rol lo dice la fila, y la ficha no ofrece «Autorizar»", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => Response.json({ elementos: [{ ...sinAutorizar, ve_por_rol: true }] }) }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    const fila = await screen.findByRole("button", { name: /^Habitante Ficticio / });
+    expect(fila.textContent).toBe(`Habitante Ficticio 3° A · ${VE_POR_ROL}`);
+    fireEvent.click(fila);
+    const ficha = await screen.findByRole("dialog", { name: "Habitante Ficticio" });
+    expect(within(ficha).queryByRole("button", { name: AUTORIZAR })).toBeNull();
+  });
+
+  it("FL-VER-02: con una autorización registrada y el rol que ya los ve, retirarla se sigue ofreciendo", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => Response.json({ elementos: [{ ...autorizado, ve_por_rol: true }] }) }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Habitante Ficticio / }));
+    const ficha = await screen.findByRole("dialog", { name: "Habitante Ficticio" });
+    expect(within(ficha).getByRole("button", { name: RETIRAR })).toBeTruthy();
   });
 
   it("autoriza con el motivo en su ventana (AUT-02): botón siempre activo, y al terminar queda la lista con el resultado", async () => {

@@ -21,6 +21,8 @@ const RUTA = `/api/v1/consorcios/${CONSORCIO}/proveedores`;
 const SESION = { persona_id: PERSONA, nombre: "Ana", correo: "ana@ejemplo.com", sesion_id: "s1", vence_en: "2026-12-01T00:00:00Z" };
 const NUEVA = { ...SESION, sesion_id: "s2" };
 const HOJA = "La sesión venció";
+/** FL-ACC-02: con la sesión abierta y un acto que pide entrada reciente, la hoja no dice que venció. */
+const HOJA_RECIENTE = "Por seguridad, hay que entrar de nuevo";
 const LISTA = { elementos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" } as unknown as Copia["lista"];
 
 const error = (codigo: string, estado: number, detalle?: object) =>
@@ -129,7 +131,7 @@ describe("entrar encima", () => {
     vi.unstubAllGlobals();
   });
 
-  it("si la sesión vence confirmando con la llave, la hoja de entrar sigue arriba y se puede usar", async () => {
+  it("si la sesión vence confirmando con la llave, la hoja de entrar va arriba y al entrar la confirmación sigue sola", async () => {
     const bytes = () => Uint8Array.from([1, 2, 3]).buffer;
     const credencial = {
       id: "AQID",
@@ -150,26 +152,33 @@ describe("entrar encima", () => {
         Response.json([{ id: "1", nombre: "Mi PC", credencial_id: "AQID", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null }]),
       "POST /api/v1/auth/llave/verificar/opciones": () =>
         Response.json({ opciones: { challenge: "AAEC", allowCredentials: [{ id: "AwQF", type: "public-key" }] } }),
-      "POST /api/v1/auth/llave/verificar": () => error("no_autenticado", 401),
+      "POST /api/v1/auth/llave/verificar": () =>
+        estado.sesion === NUEVA ? Response.json({ verificado_en: "2026-11-18T10:00:00Z" }) : error("no_autenticado", 401),
       "POST /api/v1/auth/codigo": () => {
         estado.sesion = NUEVA;
         return Response.json({ persona_id: PERSONA });
       },
     });
     await montar();
-    render(<PedirCodigo acto="aprobar la orden" alVerificar={vi.fn()} alCancelar={vi.fn()} />);
+    const alVerificar = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={vi.fn()} />
+      </QueryClientProvider>,
+    );
 
     const entrar = (await screen.findByRole("heading", { name: HOJA })).closest<HTMLElement>(".hoja-fondo")!;
-    const fallo = (await screen.findByRole("heading", { name: "No se pudo confirmar" })).closest<HTMLElement>(".hoja-fondo")!;
+    const llave = (await screen.findByRole("heading", { name: "Confirmar con PIN, huella o cara" })).closest<HTMLElement>(".hoja-fondo")!;
     expect(entrar.inert).toBeFalsy();
-    await waitFor(() => expect(fallo.inert).toBe(true));
+    await waitFor(() => expect(llave.inert).toBe(true));
     expect(entrar.contains(document.activeElement)).toBe(true);
+    expect(alVerificar).not.toHaveBeenCalled(); // control: sin entrar, no sigue
 
     await entrarConCodigo();
     await screen.findByText("La pantalla sigue donde estaba.");
     expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
-    expect(fallo.inert).toBeFalsy();
-    expect(fallo.contains(document.activeElement)).toBe(true);
+    // FL-ACC-01: el pedido que quedó en camino se repitió solo; no hubo que confirmar de nuevo.
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
   });
 
   it("una lectura de la sesión que da 401 abre la hoja, espera y se repite sola, sin ir a /entrar", async () => {
@@ -264,13 +273,18 @@ describe("entrar encima", () => {
     expect((screen.getByLabelText("Escrito") as HTMLInputElement).value).toBe("lo que escribí");
   });
 
-  it("un pedido que escribe no se manda solo: lo repite la persona, con la misma clave", async () => {
+  it("FL-ACC-01: un pedido que escribe espera en la hoja y se repite solo al entrar, con la misma clave y el CSRF nuevo", async () => {
+    // jsdom no guarda cookies `__Host-` sin https: la cookie se lee de acá.
+    let csrf = "viejo";
+    vi.spyOn(document, "cookie", "get").mockImplementation(() => `__Host-cem_csrf=${csrf}`);
     let vencida = true;
     const { estado, simulado } = backend({
       [`POST ${RUTA}`]: () => (vencida ? error("no_autenticado", 401) : Response.json({ id: "p", version: 1 }, { status: 201 })),
       "POST /api/v1/auth/codigo": () => {
         vencida = false;
         estado.sesion = NUEVA;
+        // El CSRF está ligado a la sesión: la nueva trae otro.
+        csrf = "nuevo";
         return Response.json({ persona_id: PERSONA });
       },
     });
@@ -278,22 +292,24 @@ describe("entrar encima", () => {
 
     tocar("Guardar");
     await screen.findByRole("heading", { name: HOJA });
+    expect(veces(simulado, "POST", RUTA)).toBe(1); // control: mientras la hoja está, no sale de nuevo
     await entrarConCodigo();
     await screen.findByText("La pantalla sigue donde estaba.");
-    expect(veces(simulado, "POST", RUTA)).toBe(1); // el control: no salió de nuevo
 
-    tocar("Guardar");
+    // Salió solo, sin tocar «Guardar» otra vez.
     await waitFor(() => expect(veces(simulado, "POST", RUTA)).toBe(2));
-    const claves = simulado.mock.calls
-      .filter(([p]) => p.method === "POST" && new URL(p.url).pathname === RUTA)
-      .map(([p]) => p.headers.get(ENCABEZADO_IDEMPOTENCIA));
+    const pedidos = simulado.mock.calls.filter(([p]) => p.method === "POST" && new URL(p.url).pathname === RUTA).map(([p]) => p);
+    const claves = pedidos.map((p) => p.headers.get(ENCABEZADO_IDEMPOTENCIA));
     expect(claves[0]).toBeTruthy();
     expect(claves[0]).toBe(claves[1]);
+    expect(pedidos.map((p) => p.headers.get("X-CSRF-Token"))).toEqual(["viejo", "nuevo"]);
+    expect(await pedidos[1]!.json()).toMatchObject({ cuit: "30000000007" });
   });
 
   it("la sesión que ya no sirve para el acto también pide entrar encima, y la sesión vieja no la cierra", async () => {
     const { estado } = backend({
-      [`POST ${RUTA}`]: () => error("sesion_reciente_requerida", 403),
+      [`POST ${RUTA}`]: () =>
+        estado.sesion === NUEVA ? Response.json({ id: "p", version: 1 }, { status: 201 }) : error("sesion_reciente_requerida", 403),
       "POST /api/v1/auth/codigo": () => {
         estado.sesion = NUEVA;
         return Response.json({ persona_id: PERSONA });
@@ -302,18 +318,22 @@ describe("entrar encima", () => {
     await montar();
 
     tocar("Guardar");
-    await screen.findByRole("heading", { name: HOJA });
+    // FL-ACC-02: la sesión sigue abierta: la hoja no dice que venció.
+    await screen.findByRole("heading", { name: HOJA_RECIENTE });
+    expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
     // Control: la sesión vieja sigue viva y responde 200; volver a la pestaña no da por entrado.
     fireEvent.focus(window);
     await new Promise((listo) => setTimeout(listo));
-    expect(screen.getByRole("heading", { name: HOJA })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: HOJA_RECIENTE })).toBeTruthy();
 
     await entrarConCodigo();
     expect(await screen.findByText("La pantalla sigue donde estaba.")).toBeTruthy();
   });
 
   it("si entró por el enlace en otra pestaña, al volver se cierra sola", async () => {
-    const { estado } = backend({ [`POST ${RUTA}`]: () => error("no_autenticado", 401) });
+    const { estado } = backend({
+      [`POST ${RUTA}`]: () => (estado.sesion === NUEVA ? Response.json({ id: "p", version: 1 }, { status: 201 }) : error("no_autenticado", 401)),
+    });
     await montar();
 
     tocar("Guardar");
@@ -376,12 +396,13 @@ describe("entrar encima", () => {
     expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
   });
 
-  it("control: pedir entrar de nuevo sin detalle sí la abre", async () => {
+  it("control: pedir entrar de nuevo sin detalle sí la abre, con el título de la entrada reciente", async () => {
     backend({ [`POST ${RUTA}`]: () => error("reautenticacion_requerida", 403, { falta: "entrar_de_nuevo" }) });
     await montar();
 
     tocar("Guardar");
-    expect(await screen.findByRole("heading", { name: HOJA })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: HOJA_RECIENTE })).toBeTruthy();
+    expect(screen.getByText(/Este paso pide haber entrado hace poco/)).toBeTruthy();
   });
 
   it("un código equivocado al entrar no se toma por una sesión vencida", async () => {

@@ -47,7 +47,7 @@ ESPERA_MAXIMA_S = 10
 # `gestionable_por_vos` (0.76.0), que no son datos de la persona.
 COLUMNAS_D6 = {"vinculo_id", "unidad_id", "designacion", "nombre", "tipo", "vigente_desde",
                "vigente_hasta", "confirmado", "iniciado", "confirmable_por_vos",
-               "gestionable_por_vos"}  # fmt: skip
+               "gestionable_por_vos", "sostiene_consejo"}  # fmt: skip
 COLUMNAS_CONFIRMADO = {"vinculo_id", "unidad_id", "tipo", "confirmado", "confirmado_en"}
 
 
@@ -155,6 +155,8 @@ def test_el_padron_trae_solo_d6_de_vigentes_y_futuros(motor_migrate, escena):
     }  # fmt: skip
     assert all(set(f) == COLUMNAS_D6 for f in filas)
     assert "@" not in r.text  # ningún correo
+    # FL-PAD-03 (`0110`): solo el vínculo que sostiene el mandato del Consejo lo dice.
+    assert {f["vinculo_id"] for f in filas if f["sostiene_consejo"]} == {str(e["v_prop_mc"])}
 
 
 def vinculos_de(motor_migrate, persona) -> list[UUID]:
@@ -274,10 +276,13 @@ def test_confirmable_por_vos_coincide_con_lo_que_decide_la_ruta(motor_migrate, m
     motivos = [d["motivo"] for d in denegaciones(motor_app, e["cons"], e["admin"], e["admin"])]
     assert sorted(motivos) == ["no_es_quien_registro", "no_es_su_propio_vinculo"]
 
-    # Sin la facultad, ninguno, aunque pueda leer el padrón.
-    assert not any(_confirmables(e["mc"], e["cons"]).values())
+    # Pregunta 7 del propietario (18-11-2026, `0110`): el Consejo también confirma, con las mismas
+    # barreras: no el que registró (invitó) él ni el suyo.
+    filas = _confirmables(e["mc"], e["cons"])
+    assert [filas[str(v)] for v in vinculos] == [False, True, True, False]
     with cliente(e["mc"]) as c:
-        assert confirmar(c, e["cons"], e["v_prop1"]).status_code == 403
+        assert confirmar(c, e["cons"], e["v_inq_mc"]).status_code == 403
+        assert confirmar(c, e["cons"], e["v_inq_admin"]).status_code == 200
 
     # Control: el dato dice que sí y la ruta concede, también con el vínculo del equipo. Una vez
     # confirmado, ya no se ofrece.
@@ -333,8 +338,7 @@ def test_un_vinculo_del_equipo_lo_confirma_quien_tiene_la_facultad(motor_migrate
 
 def test_sin_la_facultad_o_fuera_de_su_unidad_responde_403(motor_migrate, motor_app, escena):
     e = escena
-    with cliente(e["mc"]) as c:  # el Consejo no tiene padron.confirmar_vinculo
-        assert confirmar(c, e["cons"], e["v_prop1"]).status_code == 403
+    # Desde `0110` el Consejo confirma (pregunta 7): sin la facultad queda la propietaria.
     with cliente(e["prop2"]) as c:
         assert confirmar(c, e["cons"], e["v_prop1"]).status_code == 403
     acotar(motor_migrate, e["m_admin"], e["u2"])

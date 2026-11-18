@@ -1371,7 +1371,8 @@ SALTEAR = (
     " gas', :actor, :origen, :sesion)"
 )
 ASIGNAR_RUBRO = (
-    "select nucleo.asignar_rubro_legal_proveedor(:proveedor, 'general', true, :actor, :origen,"
+    "select nucleo.asignar_rubro_legal_proveedor(:proveedor, 'general', true, null, :actor,"
+    " :origen,"
     " :sesion)"
 )
 CARGAR_DOCUMENTACION = (

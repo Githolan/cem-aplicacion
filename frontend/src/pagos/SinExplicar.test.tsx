@@ -9,6 +9,7 @@ import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import type { components } from "../api/tipos";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
+import { LO_RESUELVE_QUIEN_CONCILIA } from "./textos";
 
 // Lo que el extracto no explica (pregunta 8 del propietario, 13-11-2026, opción c): en la bandeja de
 // quien concilia y, solo para leer, en la de la administración. Datos ficticios, banco 999. La API
@@ -150,26 +151,35 @@ describe("en la bandeja", () => {
 });
 
 describe("la pantalla", () => {
-  it("COT-07, COT-08: sin el párrafo fijo; cada débito es una fila compacta, y la administración lo lee sin acciones", async () => {
+  it("COT-07, COT-08, FL-CON-05: sin el párrafo fijo; la administración lee filas compactas sin ficha y quién lo resuelve", async () => {
     const simulado = backend({ [`GET ${BASE}/mis-acciones`]: PREPARA });
     vi.stubGlobal("fetch", simulado);
     const { container } = abrir(RUTA);
-    const fila = await filaDe(DEBITO);
-    expect(fila.textContent).toContain("Referencia 0048213999 · 02/11/2026");
-    expect(fila.textContent).not.toContain("Débito sin explicar");
-    expect(fila.textContent).not.toContain("Extracto subido");
+    expect(await screen.findByText(LO_RESUELVE_QUIEN_CONCILIA)).toBeTruthy();
+    const lista = screen.getByRole("list", { name: "Débitos sin explicar" });
+    expect(lista.textContent).toContain("12.400,00");
+    expect(lista.textContent).toContain("Referencia 0048213999 · 02/11/2026");
+    expect(lista.textContent).not.toContain("Débito sin explicar");
     expect(screen.queryByText(/ningún pago de Consorcio en Mano explica/)).toBeNull();
     expect(screen.queryByText(/desde acá no se cambia nada/)).toBeNull();
-    fireEvent.click(fila);
+    // Solo para leer: la fila no abre nada, y no hay ningún acto.
+    expect(within(lista).queryAllByRole("button")).toHaveLength(0);
+    expect(within(lista).queryAllByRole("link")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "No es el pago de una orden" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Cotejar con el banco" })).toBeNull();
+    const faltas = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(faltas.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("control de FL-CON-05: a quien concilia la fila le abre la ficha, sin la línea de quién lo resuelve", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: CONCILIA }));
+    abrir(RUTA);
+    fireEvent.click(await filaDe(DEBITO));
     const ficha = await ventana(DEBITO);
     // Un solo punto después de la hora: «a. m.» ya trae el suyo.
     const subido = ficha.getByText(/\sm\.$/);
     expect(subido.textContent).not.toContain("..");
-    // Solo para leer: la ficha no tiene ningún acto.
-    expect(ficha.queryByRole("button", { name: "No es el pago de una orden" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Cotejar con el banco" })).toBeNull();
-    const faltas = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
-    expect(faltas.violations.map((v) => v.id)).toEqual([]);
+    expect(screen.queryByText(LO_RESUELVE_QUIEN_CONCILIA)).toBeNull();
   });
 
   it("quien concilia llega desde ahí al cotejo", async () => {
@@ -300,14 +310,15 @@ describe("la pantalla", () => {
     expect(faltas.violations.map((v) => v.id)).toEqual([]);
   });
 
-  it("la administración ve las marcas sin poder retirarlas", async () => {
+  it("la administración ve las marcas, con su motivo en la fila, sin ficha ni poder retirarlas (FL-CON-05)", async () => {
     vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [MARCAS]: () => Response.json({ elementos: [MARCA], siguiente: null, total: 1 }) }));
     abrir(RUTA);
     fireEvent.click(await screen.findByRole("button", { name: "Ver los marcados (1)" }));
-    fireEvent.click(await filaDe(MARCADO));
-    const ficha = await ventana(MARCADO);
-    expect(ficha.getByText("Comisión del banco")).toBeTruthy();
-    expect(ficha.queryByRole("button", { name: "Retirar la marca" })).toBeNull();
+    const marcados = await screen.findByRole("list", { name: "Marcados como que no son el pago de una orden" });
+    expect(marcados.textContent).toContain("750,00");
+    expect(marcados.textContent).toContain("Comisión del banco");
+    expect(within(marcados).queryAllByRole("button")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Retirar la marca" })).toBeNull();
   });
 
   it("sin nada sin explicar lo dice", async () => {

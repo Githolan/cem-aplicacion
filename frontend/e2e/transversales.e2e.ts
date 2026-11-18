@@ -63,8 +63,9 @@ async function simularApi(pagina: Page, baseURL: string, alta: Alta) {
           rubros_legales: [],
           faltantes: [],
           requisitos: [],
-          configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true },
+          configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true, autoriza_por_persona: false },
           salteos: [],
+          retiros_con_motivo: [],
         },
       });
     return ruta.abort();
@@ -101,7 +102,7 @@ async function sinDesborde(pagina: Page) {
 const creado = { status: 201, json: { id: PROVEEDOR, version: 1 } };
 
 test.describe("entrar encima", () => {
-  test("con la sesión vencida entra sobre la misma pantalla, conserva lo escrito y no reenvía", async ({ page, baseURL }) => {
+  test("con la sesión vencida entra sobre la misma pantalla, conserva lo escrito y repite solo el pedido (FL-ACC-01)", async ({ page, baseURL }) => {
     const vencida = { status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } };
     const estado = await simularApi(page, baseURL!, (_pedido, intento) => (intento === 1 ? vencida : creado));
     await completarAlta(page);
@@ -128,33 +129,31 @@ test.describe("entrar encima", () => {
     // Sale solo al sexto número, sin tocar el botón (ACC-01).
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
 
-    await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
-    await expect(hoja).toHaveCount(0);
-    await expect(page.getByLabel("Razón social")).toHaveValue(RAZON);
-    expect(estado.altas).toHaveLength(1); // control: el pedido no salió solo
-
-    await guardar(page);
+    // El alta salió sola, sin tocar «Dar de alta el proveedor» otra vez, con la misma clave.
     await expect(page.getByText("Listo: el proveedor quedó dado de alta.")).toBeVisible();
+    await expect(hoja).toHaveCount(0);
     expect(estado.altas).toHaveLength(2);
     const [primera, segunda] = await Promise.all(estado.altas.map((a) => a.headerValue("idempotency-key")));
     expect(primera).toBeTruthy();
     expect(primera).toBe(segunda);
   });
 
-  test("con más de 12 horas también, sin aviso viejo al volver", async ({ page, baseURL }) => {
+  test("con más de 12 horas también, con su propio título y sin aviso viejo al volver (FL-ACC-02)", async ({ page, baseURL }) => {
     const vieja = { status: 403, json: { codigo: "sesion_reciente_requerida", mensaje: "x", id_correlacion: "c" } };
     await simularApi(page, baseURL!, (_pedido, intento) => (intento === 1 ? vieja : creado));
     await completarAlta(page);
     await guardar(page);
 
-    const hoja = page.getByRole("dialog", { name: "La sesión venció" });
+    // La sesión no venció: la hoja no lo dice.
+    const hoja = page.getByRole("dialog", { name: "Por seguridad, hay que entrar de nuevo" });
+    await expect(hoja).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "La sesión venció" })).toHaveCount(0);
     await yaTengoUnCodigo(hoja);
     // Sale solo al sexto número, sin tocar el botón (ACC-01).
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
 
-    await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
+    await expect(page.getByText("Listo: el proveedor quedó dado de alta.")).toBeVisible();
     await expect(page.getByText(/más de 12 horas/)).toHaveCount(0);
-    await expect(page.getByLabel("Razón social")).toHaveValue(RAZON);
   });
 });
 
@@ -184,7 +183,7 @@ test.describe("confirmar directo", () => {
 test.describe("hojas superpuestas", () => {
   test("si la sesión vence confirmando con la llave, entrar queda arriba y al terminar sigue la confirmación", async ({ page, baseURL }) => {
     const falta = { status: 403, json: { codigo: "segundo_factor_requerido", mensaje: "x", id_correlacion: "c" } };
-    await simularApi(page, baseURL!, () => falta);
+    const estado = await simularApi(page, baseURL!, (_pedido, intento) => (intento === 1 ? falta : creado));
     await page.addInitScript(() => {
       window.localStorage.setItem("cem.confirmar.ultimo-metodo", "llave");
       window.localStorage.setItem("cem.llaves-de-este-dispositivo", JSON.stringify(["AQID"]));
@@ -207,27 +206,29 @@ test.describe("hojas superpuestas", () => {
     await page.route("**/api/v1/auth/llave/verificar/opciones", (ruta) =>
       ruta.fulfill({ json: { opciones: { challenge: "AAEC", allowCredentials: [{ id: "AwQF", type: "public-key" }] } } }),
     );
+    // Con la sesión vieja la verificación da 401; con la nueva, sale.
     await page.route("**/api/v1/auth/llave/verificar", (ruta) =>
-      ruta.fulfill({ status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } }),
+      estado.sesionId === "sesion-nueva"
+        ? ruta.fulfill({ json: { verificado_en: "2026-11-18T10:00:00Z" } })
+        : ruta.fulfill({ status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } }),
     );
     await completarAlta(page);
     await guardar(page);
 
     const entrar = page.getByRole("dialog", { name: "La sesión venció" });
     await expect(entrar).toBeVisible();
-    const fallo = page.getByRole("dialog", { name: "No se pudo confirmar" });
     // Un clic de verdad: falla si la hoja quedó inerte o tapada por la de confirmar.
     await yaTengoUnCodigo(entrar);
     await sinFaltasDeAccesibilidad(page);
     // Sale solo al sexto número, sin tocar el botón (ACC-01).
     await entrar.getByLabel(/Código de/).fill("042917");
 
-    await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(entrar).toHaveCount(0);
-    await expect(fallo).toBeVisible();
-    await fallo.getByRole("button", { name: "Cancelar" }).click();
-    await expect(fallo).toHaveCount(0);
-    await expect(page.getByLabel("Razón social")).toHaveValue(RAZON);
+    // FL-ACC-01: la verificación en camino se repitió sola y el alta siguió con la misma clave.
+    await expect(page.getByText("Listo: el proveedor quedó dado de alta.")).toBeVisible();
+    expect(estado.altas).toHaveLength(2);
+    const [primera, segunda] = await Promise.all(estado.altas.map((a) => a.headerValue("idempotency-key")));
+    expect(primera).toBe(segunda);
   });
 });
 
@@ -247,12 +248,12 @@ test.describe("entrar encima en mi cuenta", () => {
         estado = "nueva";
         return ruta.fulfill({ json: {} });
       }
+      if (camino === "/api/v1/auth/totp")
+        return ruta.fulfill({ json: { activo: false, llaves: 0, codigos_recuperacion_restantes: 0, verificado_en: null } });
       const permisos = simularPermisos(ruta, camino);
       if (permisos !== null) return permisos;
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [] });
       if (camino === "/api/v1/auth/sesiones") return ruta.fulfill({ json: { elementos: [] } });
-      if (camino === "/api/v1/auth/totp")
-        return ruta.fulfill({ json: { activo: false, llaves: 0, codigos_recuperacion_restantes: 0, verificado_en: null } });
       if (camino === "/api/v1/auth/contrasena") return ruta.fulfill({ json: { definida: false, cambiada_en: null } });
       if (camino === "/api/v1/privacidad/casos") return ruta.fulfill({ json: { elementos: [] } });
       return ruta.abort();

@@ -234,15 +234,30 @@ const SIN_EDIFICIOS: readonly Consorcio[] = [];
 type Lectura = { tipo: "cargando" } | { tipo: "solo_carga" } | { tipo: "sin_servicio"; motivo: string } | { tipo: "ok"; documentos: Documento[] };
 
 /** La ventana abierta: la de un documento nuevo, o la de subir el archivo de uno que ya existe. */
-type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: string };
+type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: string; vacio?: boolean };
 
 type Aviso = { texto: string; ok: boolean };
 /** Un archivo subido por quien solo carga, a la espera del antivirus (G-09), con las consultas
  * seguidas que fallaron por algo pasajero y el estado de la última. */
 type Pendiente = { consorcio: string; documento: string; version: string; titulo: string; fallas: number; estadoFalla: number };
-/** Un archivo cuyo análisis terminó sin quedar disponible: rechazado (su documento espera otro
- * archivo, `ofreceOtro`) o imposible de consultar (404, 403: ya no hay nada que esperar). */
-type Rechazo = { documento: string; version: string; titulo: string; texto: string; ofreceOtro: boolean };
+/** Un documento que quedó esperando un archivo, o un archivo cuyo análisis no se puede saber:
+ * rechazado (`subir` dice el botón que lo resuelve), creado sin archivo porque la carga se canceló
+ * (FL-DOC-03), o imposible de consultar (404, 403: ya no hay nada que esperar; `subir` null). Uno
+ * por documento. */
+type Rechazo = { documento: string; titulo: string; texto: string; subir: string | null };
+
+/** El rechazo del antivirus, el mismo para quien ve la lista y para quien solo carga (FL-DOC-01). */
+export function textoDeRechazo(titulo: string, motivo: Motivo | null | undefined): string {
+  return `«Rechazado»: el archivo de «${titulo}» no pasó la revisión (${motivo ? TEXTO_MOTIVO[motivo] : "sin el motivo"}). No se va a mostrar: hay que subir otro.`;
+}
+
+/** FL-DOC-03: el documento quedó creado y la carga de su archivo se canceló. */
+export const textoSinArchivo = (titulo: string) => `El documento «${titulo}» quedó creado sin archivo.`;
+export const subirOtro = (titulo: string) => `Subir otro archivo para «${titulo}»`;
+export const subirElArchivo = (titulo: string) => `Subir el archivo de «${titulo}»`;
+
+/** Suma lo que espera un archivo, uno por documento: el más nuevo reemplaza al anterior. */
+const conRechazo = (nuevo: Rechazo) => (lista: Rechazo[]) => [...lista.filter((r) => r.documento !== nuevo.documento), nuevo];
 
 /** Consultas seguidas con una falla pasajera antes de decirlo: tres vueltas de la espera del
  * antivirus, unos 9 s. Con menos, un corte de un instante ya alarma; la consulta sigue igual. */
@@ -351,7 +366,7 @@ export function Documentos() {
   /** Por qué no se pudo bajar un archivo: se dice en su ficha, que no se cierra (DOC-05). */
   const [fallaDescarga, setFallaDescarga] = useState<{ documento: string; texto: string } | null>(null);
   /** El «Listo» de una carga y su archivo: se va cuando la lista lo muestra fuera de revisión (DOC-08). */
-  const listoDeLaCarga = useRef<{ version: string; texto: string } | null>(null);
+  const listoDeLaCarga = useRef<{ version: string; texto: string; documento: string; titulo: string } | null>(null);
   /** Los campos del documento nuevo que rechazó la API, con su motivo (G-08). */
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** La versión que se está mirando en la hoja de «Ver». */
@@ -440,10 +455,7 @@ export function Documentos() {
         setEsperando((lista) => lista.map((p) => (esta(p) ? { ...p, fallas: p.fallas + 1, estadoFalla: estado } : p)));
       const terminado = (texto: string, ofreceOtro: boolean) => {
         setEsperando(sinEsperar);
-        setRechazados((lista) => [
-          ...lista.filter((r) => r.documento !== cual.documento),
-          { documento: cual.documento, version: cual.version, titulo: cual.titulo, texto, ofreceOtro },
-        ]);
+        setRechazados(conRechazo({ documento: cual.documento, titulo: cual.titulo, texto, subir: ofreceOtro ? subirOtro(cual.titulo) : null }));
       };
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
@@ -470,8 +482,7 @@ export function Documentos() {
           }
           // Rechazado: aparte del aviso, para que otro resultado no lo tape, y sin tocar el formulario:
           // subir otro archivo para ese documento es un paso que la persona elige (revisión del PR #241).
-          const motivo = data.motivo_rechazo ? TEXTO_MOTIVO[data.motivo_rechazo] : "sin el motivo";
-          terminado(`«Rechazado»: el archivo de «${cual.titulo}» no pasó la revisión (${motivo}). No se va a mostrar: hay que subir otro.`, true);
+          terminado(textoDeRechazo(cual.titulo, data.motivo_rechazo), true);
         })
         .catch((e: unknown) => {
           // Sin sesión, a entrar; una consulta que no llegó es una falla pasajera más.
@@ -555,7 +566,9 @@ export function Documentos() {
     return () => clearTimeout(espera);
   }, [lectura]);
 
-  // DOC-08: el «Listo» de una carga se va cuando la lista ya muestra ese archivo fuera de revisión.
+  // DOC-08: el «Listo» de una carga se va cuando la lista ya muestra ese archivo fuera de revisión. Si
+  // el antivirus lo rechazó, en su lugar queda el rechazo con su botón, como para quien solo carga
+  // (FL-DOC-01): la fila sola cambiaba en silencio.
   useEffect(() => {
     const listo = listoDeLaCarga.current;
     if (listo === null || lectura.tipo !== "ok") return;
@@ -563,6 +576,13 @@ export function Documentos() {
     if (version === undefined || version.estado === "en_cuarentena") return;
     listoDeLaCarga.current = null;
     setAviso((actual) => (actual?.texto === listo.texto ? null : actual));
+    if (version.estado === "rechazado")
+      setRechazados(conRechazo({
+        documento: listo.documento,
+        titulo: listo.titulo,
+        texto: textoDeRechazo(listo.titulo, version.motivo_rechazo),
+        subir: subirOtro(listo.titulo),
+      }));
   }, [lectura]);
 
   /**
@@ -602,9 +622,18 @@ export function Documentos() {
     setAbierto(null);
   }
 
-  /** «Cancelar»: el error era del formulario y se va con él; un «Listo» anterior queda (G-13). */
+  /** «Cancelar»: el error era del formulario y se va con él; un «Listo» anterior queda (G-13). Si el
+   * documento se acababa de crear sin su archivo, queda arriba con su botón para subirlo: quien
+   * solo carga no tiene otro camino para volver a él, y cargarlo de nuevo lo duplicaría (FL-DOC-03). */
   function cancelar() {
     setAviso((actual) => (actual?.ok === true ? actual : null));
+    if (abierto?.tipo === "subir" && abierto.vacio === true)
+      setRechazados(conRechazo({
+        documento: abierto.documento,
+        titulo: abierto.titulo,
+        texto: textoSinArchivo(abierto.titulo),
+        subir: subirElArchivo(abierto.titulo),
+      }));
     cerrar();
   }
 
@@ -706,7 +735,7 @@ export function Documentos() {
     const fallo = (texto: string): FinDeEnvio => {
       if (recienCreado) {
         claveCrear.current = null;
-        setAbierto({ tipo: "subir", documento, titulo });
+        setAbierto({ tipo: "subir", documento, titulo, vacio: true });
         actualizarLista();
       }
       return { rechazo: recienCreado ? `El documento «${titulo}» quedó creado, pero el archivo no se subió. ${texto}` : texto };
@@ -742,7 +771,7 @@ export function Documentos() {
       const texto = soloCarga
         ? `Listo: el archivo de «${titulo}» se subió. Queda «En revisión» mientras el antivirus lo analiza; esta pantalla avisa cuando termina.`
         : `Listo: el archivo de «${titulo}» se subió.`;
-      listoDeLaCarga.current = soloCarga ? null : { version: data.id, texto };
+      listoDeLaCarga.current = soloCarga ? null : { version: data.id, texto, documento, titulo };
       alAviso.current = true;
       setAviso({ texto, ok: true });
       actualizarLista();
@@ -839,12 +868,12 @@ export function Documentos() {
             </p>
           ))}
         {rechazados.map((r) => (
-          <div key={r.version}>
+          <div key={r.documento}>
             <p className="aviso-error">{r.texto}</p>
-            {r.ofreceOtro && !(formulario?.tipo === "subir" && formulario.documento === r.documento) && (
+            {r.subir !== null && !(formulario?.tipo === "subir" && formulario.documento === r.documento) && (
               <button type="button" className="secundario" disabled={enviando}
                 onClick={() => abrir({ tipo: "subir", documento: r.documento, titulo: r.titulo })}>
-                Subir otro archivo para «{r.titulo}»
+                {r.subir}
               </button>
             )}
           </div>
@@ -885,8 +914,8 @@ export function Documentos() {
                       </button>
                     </>
                   )}
-                  {lectura.documentos.length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
-                  {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => categoria(c, lectura.documentos))}
+                  {aLaVista(lectura.documentos).length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
+                  {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => categoria(c, aLaVista(lectura.documentos)))}
                 </>
               )}
             </section>
@@ -907,6 +936,13 @@ export function Documentos() {
       )}
     </>
   );
+
+  /** FL-DOC-02: a quien no carga la categoría, solo los documentos con un archivo para abrir. Uno sin
+   * archivo, con el suyo en revisión o rechazado no tiene nada que mostrarle ni nada que pueda hacer:
+   * lo completa quien carga, que sí lo ve. */
+  function aLaVista(documentos: Documento[]): Documento[] {
+    return documentos.filter((d) => puede(...accionesDeCarga(d.categoria)) || d.versiones.some((v) => v.estado === "disponible"));
+  }
 
   /** Los documentos de una categoría; una categoría sin documentos no se muestra. */
   function categoria(c: Categoria, documentos: Documento[]) {

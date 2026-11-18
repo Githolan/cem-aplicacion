@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useLocation } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
@@ -29,6 +30,7 @@ import { type DatoDeFicha, FichaDeRegistro, FilaDeRegistro, useFichas } from "..
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { ComandoNoDisponible } from "../ComandoNoDisponible";
 import { RUTA_MANDATOS } from "../Mandatos";
+import { RUTA_PANEL, TITULO_PANEL } from "../panel/Panel";
 import { REQUISITOS } from "../permisos";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { SubirArchivo } from "../SubirArchivo";
@@ -61,6 +63,12 @@ export const FIRMAR = "Firmar";
 /** C8P-08: la firma emitiría y el consorcio no tiene administrador vigente (A14). */
 export const FALTA_ADMINISTRADOR = "Falta un administrador vigente para emitirla: queda en borrador, con una firma, hasta que lo tenga. Se registra en Mandatos.";
 export const IR_A_MANDATOS = "Ir a Mandatos";
+/** Decisión 15 del 18-11 (FL-SOL-05): al preparar sin administrador vigente se avisa y el borrador se guarda igual. */
+export const SIN_ADMINISTRADOR_AL_PREPARAR =
+  "Falta un administrador vigente para emitirla: el borrador se puede guardar y firmar una vez; la segunda firma, que la emite, espera a que lo haya. Se registra en Mandatos.";
+/** FL-SOL-01: con una firma puesta, la siguiente emite y envía, y ya no se puede retirar. */
+export const FIRMAR_Y_EMITIR = "Firmar y emitir";
+export const EMITE_AL_FIRMAR = "Con esta firma se emite y se le envía a la administración. Ya no se puede retirar.";
 export const RETIRAR = "Retirar el borrador";
 export const REGISTRAR_ENVIO = "Registrar el envío";
 export const RESPONDER = "Responder";
@@ -136,14 +144,54 @@ export const tituloDe = (s: Solicitud) => `N.º ${s.numero} · ${TEXTO_OBJETO[s.
 const descarga = (consorcio: string, documento: string, version: string) =>
   `/api/v1/consorcios/${consorcio}/documentos/${documento}/versiones/${version}/descargar`;
 
+/** FL-SOL-04 (tanda 9, app 0110): el archivo en revisión o rechazado no se ofrece para bajar. */
+export const ARCHIVO_EN_REVISION = "El antivirus todavía lo está revisando: se puede descargar cuando termine.";
+export const ARCHIVO_RECHAZADO = "El antivirus rechazó el archivo: no se puede descargar.";
+
+type Adjunto = Pick<NonNullable<Solicitud["envio"]>, "documento_id" | "version_documento_id" | "estado_archivo" | "descargable">;
+
+/** El enlace al archivo solo si quien mira lo puede bajar (`descargable`); si no, por qué no, salvo
+ * que sea solo por no leer Documentos: entonces no se dice nada. */
+function enlaceDelAdjunto(consorcio: string, adjunto: Adjunto, texto: string) {
+  const { documento_id: documento, version_documento_id: version } = adjunto;
+  if (!documento || !version) return null;
+  if (adjunto.descargable)
+    return (
+      <>
+        {" "}
+        <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
+          {texto}
+        </a>
+      </>
+    );
+  if (adjunto.estado_archivo === "en_cuarentena") return <span className="ayuda"> {ARCHIVO_EN_REVISION}</span>;
+  if (adjunto.estado_archivo === "rechazado") return <span className="ayuda"> {ARCHIVO_RECHAZADO}</span>;
+  return null;
+}
+
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; lista: Lista };
+
+/** Lo que pone el Resumen de pagos en `state.desde` al abrir las solicitudes: el círculo vuelve ahí. */
+export const DESDE_EL_PANEL = "panel";
 
 export function Solicitudes() {
   const elegido = useConsorcio(REQUISITOS.solicitudes);
-  return <DelEdificio key={elegido.consorcio} {...elegido} />;
+  // Se lee una vez, al llegar: `AvisoLlegada` borra el `state` apenas lo ve. Desde el Resumen de
+  // pagos, volver vuelve al Resumen (FL-SOL-07).
+  const estado: unknown = useLocation().state;
+  const desdePanel = useRef(typeof estado === "object" && estado !== null && "desde" in estado && estado.desde === DESDE_EL_PANEL);
+  return <DelEdificio key={elegido.consorcio} {...elegido} desdePanel={desdePanel.current} />;
 }
 
-function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+function DelEdificio({
+  pantalla,
+  consorcio,
+  setConsorcio,
+  aEntrar,
+  aInicio,
+  reintentar,
+  desdePanel,
+}: ReturnType<typeof useConsorcio> & { desdePanel: boolean }) {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   /** Por qué no llegó la lista. */
@@ -202,11 +250,14 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     );
   }
 
-  /** Terminó un acto en la ficha: se cierra y el resultado queda en la lista, donde ahora está. */
+  /** Terminó un acto en la ficha: se cierra y el resultado queda en la lista, donde ahora está. Si
+   * el paso siguiente es de quien actuó (registrar el envío de la recién emitida), la ficha queda
+   * abierta con el resultado adentro y el texto emitido a la vista (FL-SOL-02). */
   function alTerminar(nueva: Solicitud, texto: string) {
     conLaNueva(nueva);
-    fichas.cerrar(false);
-    setResultado({ es: { texto, ok: true }, enFicha: false });
+    const sigueEnLaFicha = nueva.acciones.includes("registrar_envio");
+    if (!sigueEnLaFicha) fichas.cerrar(false);
+    setResultado({ es: { texto, ok: true }, enFicha: sigueEnLaFicha });
   }
 
   /** Lo visto ya no es lo vigente (otra persona firmó, retiró o respondió): se dice y se relee. */
@@ -231,7 +282,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
   return (
     <>
-      <CabeceraInterna titulo={TITULO_SOLICITUDES} volver={RUTA_INICIO} destino="Inicio" />
+      <CabeceraInterna
+        titulo={TITULO_SOLICITUDES}
+        volver={desdePanel ? RUTA_PANEL : RUTA_INICIO}
+        destino={desdePanel ? TITULO_PANEL : "Inicio"}
+      />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
@@ -398,6 +453,11 @@ function VentanaPreparar({ consorcio, lista, aEntrar, alCerrar, alPreparar }: Pr
 
   return (
     <VentanaDeFormulario titulo={PREPARAR} textoEnviar="Guardar el borrador" alEnviar={guardar} alCerrar={alCerrar} ancha>
+      {/* Decisión 15: sin administrador vigente se avisa y se deja guardar. FL-SOL-05 (tanda 9,
+          app 0110): la lista dice si lo hay. */}
+      {!lista.hay_administrador_vigente && (
+        <ComandoNoDisponible motivo={SIN_ADMINISTRADOR_AL_PREPARAR} resolver={{ texto: IR_A_MANDATOS, a: RUTA_MANDATOS }} />
+      )}
       <p>{DOS_FIRMAS}</p>
       <label htmlFor={`${id}-objeto`}>Sobre qué</label>
       <select id={`${id}-objeto`} data-foco value={objeto} onChange={(ev) => setObjeto(ev.target.value as Objeto)}>
@@ -488,6 +548,8 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
 
   const cerrarVentana = () => setAbierto(null);
   const props = { consorcio, s, hacer, alCerrar: cerrarVentana, finDe };
+  /** FL-SOL-01: con una firma ya puesta, la de quien mira es la segunda: emite y envía. */
+  const emite = s.acciones.includes("firmar") && s.firmas.length > 0;
 
   return (
     <FichaDeRegistro
@@ -514,11 +576,12 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
       {s.falta_administrador_vigente && (
         <ComandoNoDisponible motivo={FALTA_ADMINISTRADOR} resolver={{ texto: IR_A_MANDATOS, a: RUTA_MANDATOS }} />
       )}
+      {emite && <p>{EMITE_AL_FIRMAR}</p>}
       {s.acciones.length > 0 && (
         <p className="ficha-registro__acciones acciones">
           {s.acciones.includes("firmar") && (
             <button type="button" disabled={firmando} onClick={() => void firmar()}>
-              {FIRMAR}
+              {emite ? FIRMAR_Y_EMITIR : FIRMAR}
             </button>
           )}
           {s.acciones.includes("registrar_envio") && (
@@ -597,27 +660,18 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
     if (s.huella_texto !== null && s.huella_texto !== undefined) datos.push({ etiqueta: "Huella SHA-256", valor: s.huella_texto });
   }
   if (s.envio) {
-    const { documento_id: documento, version_documento_id: version } = s.envio;
     datos.push({
       etiqueta: "Envío",
       valor: (
         <>
           {TEXTO_MEDIO[s.envio.medio]}
           {s.envio.detalle ? ` (${s.envio.detalle})` : ""}, el {fechaLegible(s.envio.fecha_envio)}. Vence el {fechaLegible(s.envio.vence_el)}.
-          {documento && version && (
-            <>
-              {" "}
-              <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
-                Descargar el comprobante
-              </a>
-            </>
-          )}
+          {enlaceDelAdjunto(consorcio, s.envio, "Descargar el comprobante")}
         </>
       ),
     });
   }
   if (s.respuesta) {
-    const { documento_id: documento, version_documento_id: version } = s.respuesta;
     datos.push({
       etiqueta: "Respuesta",
       valor: (
@@ -628,14 +682,7 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
             {fechaLegible(s.respuesta.respondida_el)}
             {s.respuesta.fuera_de_plazo ? ", fuera de plazo" : ""}.
           </span>
-          {documento && version && (
-            <>
-              {" "}
-              <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
-                Descargar el adjunto
-              </a>
-            </>
-          )}
+          {enlaceDelAdjunto(consorcio, s.respuesta, "Descargar el adjunto")}
         </>
       ),
     });
@@ -737,6 +784,16 @@ function useAdjunto(consorcio: string, s: Solicitud, para: "envio" | "respuesta"
 
 const DEL_ARCHIVO = new Set([408, 413, 415, 503]);
 
+/** Los días que la base acepta para la fecha del envío o de la respuesta recibida: desde un día
+ * conocido (la emisión, el envío) hasta hoy (FL-SOL-06). */
+type Rango = { desde: string | null; hasta: string };
+const rangoDeFechas = (desde: string | null): Rango => ({ desde, hasta: hoyDelDispositivo() });
+/** Las fechas `AAAA-MM-DD` se comparan como texto. */
+const fueraDe = (r: Rango, fecha: string) => (r.desde !== null && fecha < r.desde) || fecha > r.hasta;
+function textoDelRango(r: Rango, desdeQue: string): string {
+  return r.desde === null ? "La fecha no puede ser posterior a hoy." : `La fecha va desde ${desdeQue} (${fechaLegible(r.desde)}) hasta hoy.`;
+}
+
 function CampoArchivo({ id, de, archivo, alElegir, nota, falta }: { id: string; de: string; archivo: File | null; alElegir: (a: File) => void; nota?: string; falta?: string }) {
   return (
     <>
@@ -753,9 +810,12 @@ function VentanaEnvio({ consorcio, s, hacer, alCerrar, finDe, aEntrar }: PropsVe
   const [fecha, setFecha] = useState(hoyDelDispositivo());
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const adjunto = useAdjunto(consorcio, s, "envio", aEntrar);
+  // FL-SOL-06: la fecha va entre la emisión y hoy, como la controla la base.
+  const rango = rangoDeFechas(s.emitida_en === null || s.emitida_en === undefined ? null : hoyDelDispositivo(new Date(s.emitida_en)));
 
   async function registrar(): Promise<FinDeEnvio> {
     const faltan: Record<string, string> = { ...faltaCompletar({ fecha: [fecha, "Falta la fecha del envío."] }) };
+    if (faltan.fecha === undefined && fueraDe(rango, fecha)) faltan.fecha = textoDelRango(rango, "la emisión");
     if (adjunto.archivo === null) faltan.archivo = "Falta el comprobante del envío.";
     if (hayErrores(faltan) || adjunto.archivo === null) {
       setErrores(faltan);
@@ -787,7 +847,8 @@ function VentanaEnvio({ consorcio, s, hacer, alCerrar, finDe, aEntrar }: PropsVe
       <label htmlFor={`${id}-detalle`}>Detalle (por ejemplo, el número de la carta documento)</label>
       <input id={`${id}-detalle`} value={detalle} maxLength={LARGO_DETALLE} onChange={(ev) => setDetalle(ev.target.value)} />
       <label htmlFor={`${id}-fecha`}>Fecha del envío</label>
-      <input id={`${id}-fecha`} type="date" value={fecha} {...marcaDe(`${id}-fecha`, errores.fecha)}
+      <input id={`${id}-fecha`} type="date" value={fecha} min={rango.desde ?? undefined} max={rango.hasta}
+        {...marcaDe(`${id}-fecha`, errores.fecha)}
         onChange={(ev) => {
           setFecha(ev.target.value);
           setErrores((e) => sinElDe(e, "fecha"));
@@ -808,12 +869,15 @@ function VentanaRespuesta({ consorcio, s, hacer, alCerrar, finDe, aEntrar, recib
   const [fecha, setFecha] = useState(hoyDelDispositivo());
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const adjunto = useAdjunto(consorcio, s, "respuesta", aEntrar);
+  // FL-SOL-06: la respuesta recibida llega entre el envío y hoy, como lo controla la base.
+  const rango = rangoDeFechas(s.envio?.fecha_envio ?? null);
 
   async function registrar(): Promise<FinDeEnvio> {
-    const faltan = faltaCompletar({
+    const faltan: Record<string, string> = faltaCompletar({
       texto: [texto, "Falta escribir la respuesta."],
       ...(recibida ? { fecha: [fecha, "Falta la fecha en que llegó."] as const } : {}),
     });
+    if (recibida && faltan.fecha === undefined && fueraDe(rango, fecha)) faltan.fecha = textoDelRango(rango, "el envío");
     if (hayErrores(faltan)) {
       setErrores(faltan);
       return "seguir";
@@ -854,7 +918,8 @@ function VentanaRespuesta({ consorcio, s, hacer, alCerrar, finDe, aEntrar, recib
       {recibida && (
         <>
           <label htmlFor={`${id}-fecha`}>Fecha en que llegó</label>
-          <input id={`${id}-fecha`} type="date" value={fecha} {...marcaDe(`${id}-fecha`, errores.fecha)}
+          <input id={`${id}-fecha`} type="date" value={fecha} min={rango.desde ?? undefined} max={rango.hasta}
+            {...marcaDe(`${id}-fecha`, errores.fecha)}
             onChange={(ev) => {
               setFecha(ev.target.value);
               setErrores((e) => sinElDe(e, "fecha"));

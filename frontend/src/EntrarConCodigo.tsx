@@ -17,6 +17,9 @@ import { useIrTrasEntrar } from "./sesion";
 // (ACC-03); sin párrafos que repitan la etiqueta (ACC-04). Al completar los seis números (con el
 // correo escrito) se envía solo, como en egresos/PedirCodigo.tsx (ACC-01): decisión del
 // propietario, 18-11-2026, deja de lado WCAG 3.2.2. El botón queda por si el envío falla.
+//
+// Sin un pedido hecho en esta pantalla (el enlace del correo no sirvió acá, o «Ya tengo un código»),
+// pedir uno nuevo también está en este paso: «Pedir un código nuevo» (FL-ACC-04).
 
 export const DIGITOS_CODIGO = 6;
 /** Cuánto esperar el correo antes de buscar otra causa. */
@@ -196,6 +199,13 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar, alCa
         {reenvio.enviando && <p>Enviando otro código…</p>}
         {reenvio.falla !== null && <p className="aviso-error">{reenvio.falla}</p>}
       </div>
+      {avisoActual === null && estado !== "rechazado" && alCambiar !== undefined && (
+        <p>
+          <button type="button" className="sutil" onClick={alCambiar}>
+            Pedir un código nuevo
+          </button>
+        </p>
+      )}
       {avisoActual !== null && estado !== "rechazado" && (
         <>
           <button type="button" className="sutil" aria-expanded={sinCorreo} onClick={() => setSinCorreo((v) => !v)}>

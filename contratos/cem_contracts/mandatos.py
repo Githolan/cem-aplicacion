@@ -24,7 +24,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cem_contracts.estados import ModoOperacion
-from cem_contracts.mandatos_invitaciones import FORMATO_REFERENCIA, LARGO_MAXIMO_REFERENCIA
+from cem_contracts.mandatos_invitaciones import (
+    FORMATO_REFERENCIA,
+    LARGO_MAXIMO_REFERENCIA,
+    EstadoInvitacionMandato,
+    InvitacionMandatoNueva,
+)
 
 LARGO_MAXIMO_DESCRIPCION = 500
 LARGO_MAXIMO_NOMBRE_MANDATARIO = 200
@@ -88,6 +93,20 @@ class DecisionNueva(BaseModel):
     )
 
 
+class ActaDecision(BaseModel):
+    """`PUT /api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}/acta` (`0110`,
+    FL-DEC-01): ata el acta a una decisión que quedó sin ella."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sha256: str = Field(
+        pattern=FORMATO_SHA256,
+        description="Huella de una versión disponible (ya analizada) de un documento vigente del"
+        " consorcio: si no lo es, 422 `acta_no_disponible`. Una decisión con acta responde 409"
+        " `acta_ya_registrada`.",
+    )
+
+
 class DecisionRegistrada(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -133,6 +152,13 @@ class MandatoNuevo(BaseModel):
         max_length=MAXIMO_FACULTADES,
         description="Un subconjunto del paquete del tipo; sin lista, el paquete completo.",
     )
+    invitacion: InvitacionMandatoNueva | None = Field(
+        default=None,
+        description="Solo para el administrador externo: el correo del mandatario y de dónde sale."
+        " Con él, el alta emite también la invitación (A7), que queda por aprobar por otra"
+        " persona, como si se emitiera después (pregunta 17 del propietario, 18-11-2026;"
+        " FL-MAN-06). Pide `mandatos.asociar_persona`.",
+    )
 
     @model_validator(mode="after")
     def _coherente(self) -> Self:
@@ -140,6 +166,8 @@ class MandatoNuevo(BaseModel):
             raise ValueError("hasta no puede ser anterior a desde")
         if self.persona_id is None and self.nombre is None:
             raise ValueError("sin cuenta, el mandato necesita el nombre del mandatario")
+        if self.invitacion is not None and self.tipo != TipoMandato.ADMINISTRADOR_EXTERNO:
+            raise ValueError("la invitación con el alta es solo del administrador externo")
         return self
 
 
@@ -147,6 +175,10 @@ class MandatoRegistrado(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: UUID
+    invitacion_id: UUID | None = Field(
+        default=None,
+        description="La invitación emitida con el alta, por aprobar; nula si no se pidió.",
+    )
 
 
 class BajaMandato(BaseModel):
@@ -245,6 +277,14 @@ class MandatoResumen(BaseModel):
     vigente_hasta: date | None = Field(description="Exclusivo (A1).")
     estado: EstadoMandato
     con_cuenta: bool = Field(description="Si el mandato tiene una cuenta asociada.")
+    invitacion: EstadoInvitacionMandato | None = Field(
+        description="El estado de la última invitación del mandato, para quien ve las"
+        " asociaciones (`mandatos.ver_asociaciones`); nulo si no tiene o si quien lee no las ve"
+        " (FL-MAN-04)."
+    )
+    invitacion_emitida_por_mi: bool = Field(
+        description="Si esa invitación la emitió quien lee: no la aprueba (cuatro ojos)."
+    )
 
 
 class ListaMandatos(BaseModel):
@@ -289,6 +329,10 @@ class DecisionResumen(BaseModel):
         " usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir."
     )
     del_equipo: bool = Field(description="Si la cargó el equipo: no activa A15.")
+    tiene_acta: bool = Field(
+        description="Si ya tiene la huella del acta. Sin ella, quien registra decisiones la puede"
+        " adjuntar (`PUT …/decisiones/{id}/acta`, `0110`, FL-DEC-01)."
+    )
 
 
 class ListaDecisiones(BaseModel):
@@ -334,6 +378,16 @@ class CandidatoMandato(BaseModel):
     persona_id: UUID
     nombre: str
     unidades: list[str] = Field(description="Designaciones de sus unidades con vínculo confirmado.")
+    habilita_consejo: bool = Field(
+        description="Si hoy cumple la condición para integrar el Consejo con un vínculo"
+        " confirmado de un carácter del catálogo (`0023`; hoy, propietario). El alta de un"
+        " «Consejo de propietarios» se ofrece solo a quien la cumple (pregunta 8 del"
+        " propietario, 18-11-2026; FL-MAN-02)."
+    )
+    mandatos: list[TipoMandato] = Field(
+        description="Los tipos de sus mandatos vigentes o futuros, sin baja: el alta de uno"
+        " superpuesto del mismo tipo, o de un Consejo con administración, se niega (FL-MAN-03)."
+    )
 
 
 class ListaCandidatos(BaseModel):

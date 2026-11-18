@@ -94,7 +94,7 @@ test.describe("/entrar: una forma por vez", () => {
     await expect(page.getByRole("region", CONTRASENA)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
 
-    await page.getByRole("button", { name: "Pedir un código por correo" }).click();
+    await page.getByRole("button", { name: "Pedir un código nuevo" }).click();
     await expect(page.getByRole("region", ENLACE).getByLabel("Correo")).toBeFocused();
     await expect(page.getByRole("region", CODIGO)).toHaveCount(0);
   });

@@ -57,6 +57,14 @@ class SesionActual(BaseModel):
     vence_en: datetime = Field(
         description="Vencimiento deslizante: cada uso de la sesión lo vuelve a correr."
     )
+    alta_confirmacion_hasta: datetime | None = Field(
+        default=None,
+        description="Hasta cuándo esta sesión puede activar la confirmación (aplicación o llave):"
+        " sin ningún medio, 10 minutos desde que se entró; con uno, 10 minutos desde la última"
+        " verificación (nulo si no hubo). Después, el alta responde 403. La pantalla no repite"
+        " el plazo (FL-CTA-01). Lo informa `GET /auth/sesion`; las respuestas de entrar lo"
+        " dejan nulo.",
+    )
 
 
 class SesionDispositivo(BaseModel):

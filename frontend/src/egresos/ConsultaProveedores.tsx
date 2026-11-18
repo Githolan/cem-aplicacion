@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
@@ -13,6 +13,7 @@ import {
   ESTADO,
   estadoSiNoEsActivo,
   mensajeDeError,
+  momento,
   RUTA_AUTORIZACIONES_PROVEEDORES,
   RUTA_CONSULTA_PROVEEDORES,
   sinLaFalla,
@@ -37,8 +38,23 @@ import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 // Informe de fricción, tanda 4: la ficha es la misma de la gestión, en una hoja sobre la lista
 // (CPR-01), sin lo que no tiene valor ni el estado «Activo» (CPR-02). «Quién ve los proveedores» se
 // abre desde acá (MEN-05).
+//
+// Flujos 18-11, tanda 9: el pedido de salteo del inicio del Consejo llega con `state.abrir`: la ficha
+// de ese proveedor se abre sola, con el pedido a la vista y el botón del salteo.
 
 type ProveedorConsulta = components["schemas"]["ProveedorConsulta"];
+
+/** FL-VER-03: en «bloquear», el que falta está bloqueado o tiene un salteo que espera su orden. */
+export const MARCA_BLOQUEADO = "Bloqueado: le falta documentación legal";
+export const MARCA_SALTEO = "Salteo por urgencia";
+export const textoMarcaSalteo = (vence: string) => `${MARCA_SALTEO} hasta el ${momento(vence)}`;
+
+function marcaDeFalta(l: { bloquea: boolean; conSalteo: ReadonlySet<string>; venceSalteo: ReadonlyMap<string, string> }, id: string): string {
+  if (!l.bloquea) return MARCA_FALTANTE;
+  if (!l.conSalteo.has(id)) return MARCA_BLOQUEADO;
+  const vence = l.venceSalteo.get(id);
+  return vence === undefined ? MARCA_SALTEO : textoMarcaSalteo(vence);
+}
 type Ficha = components["schemas"]["FichaProveedorConsulta"];
 
 export { RUTA_CONSULTA_PROVEEDORES };
@@ -53,14 +69,38 @@ type Lectura =
       vencida: ReadonlySet<string>;
       porVencer: ReadonlySet<string>;
       faltante: ReadonlySet<string>;
+      /** FL-VER-03 (tanda 9): en «bloquear», si el que falta está bloqueado o tiene un salteo, y hasta cuándo. */
+      bloquea: boolean;
+      conSalteo: ReadonlySet<string>;
+      venceSalteo: ReadonlyMap<string, string>;
+      /** FL-VER-01: si el edificio autoriza a personas a ver los proveedores. */
+      autorizaPorPersona: boolean;
     };
+
+/** La ficha que se pidió abrir al llegar (desde el inicio), y de qué edificio. */
+function aAbrir(estado: unknown): { consorcio: string; abrir: string } | null {
+  if (typeof estado !== "object" || estado === null) return null;
+  const { abrir, consorcio } = estado as Record<string, unknown>;
+  return typeof abrir === "string" && typeof consorcio === "string" ? { consorcio, abrir } : null;
+}
 
 export function ConsultaProveedores() {
   const elegido = useConsorcio(REQUISITOS.consultaProveedores);
-  return <DelEdificio key={elegido.consorcio} {...elegido} />;
+  // Se lee una vez, al llegar: después el `state` se borra.
+  const llegada = useRef(aAbrir(useLocation().state));
+  const abrir = llegada.current?.consorcio === elegido.consorcio ? llegada.current.abrir : null;
+  return <DelEdificio key={elegido.consorcio} {...elegido} abrirAlLlegar={abrir} />;
 }
 
-function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+function DelEdificio({
+  pantalla,
+  consorcio,
+  setConsorcio,
+  aEntrar,
+  aInicio,
+  reintentar,
+  abrirAlLlegar,
+}: ReturnType<typeof useConsorcio> & { abrirAlLlegar: string | null }) {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<Ficha | null>(null);
@@ -84,6 +124,10 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
             vencida: new Set(data.documentacion_vencida),
             porVencer: new Set(data.documentacion_por_vencer),
             faltante: new Set(data.documentacion_faltante),
+            bloquea: data.modo_exigencia === "bloquear",
+            conSalteo: new Set(data.con_salteo),
+            venceSalteo: new Map(data.vence_salteo.map((v) => [v.proveedor_id, v.vence_en])),
+            autorizaPorPersona: data.autoriza_por_persona,
           });
         else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
@@ -121,6 +165,18 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
   }
 
+  // La llegada, una vez leída la lista: se abre la ficha pedida, si está en este edificio.
+  const llegadaAtendida = useRef(false);
+  const atenderLlegada = useRef<(proveedores: readonly ProveedorConsulta[]) => void>(() => undefined);
+  atenderLlegada.current = (proveedores) => {
+    if (llegadaAtendida.current) return;
+    llegadaAtendida.current = true;
+    if (abrirAlLlegar !== null && proveedores.some((p) => p.id === abrirAlLlegar)) verFicha({ id: abrirAlLlegar });
+  };
+  useEffect(() => {
+    if (lectura.tipo === "ok") atenderLlegada.current(lectura.proveedores);
+  }, [lectura]);
+
   function reintentarLectura() {
     setAviso(sinLaFalla);
     setLectura({ tipo: "cargando" });
@@ -140,8 +196,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
       {pantalla.tipo === "lista" && (
         <>
-          {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú. */}
-          {puede("proveedores.autorizar") && (
+          {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú.
+              FL-VER-01: si el edificio no autoriza por persona, no hay a quién autorizar. */}
+          {puede("proveedores.autorizar") && lectura.tipo === "ok" && lectura.autorizaPorPersona && (
             <p>
               <Link to={RUTA_AUTORIZACIONES_PROVEEDORES} state={{ consorcio }} className="enlace-suelto">
                 {TITULO_AUTORIZACIONES_PROVEEDORES}
@@ -166,7 +223,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                         p.rubro,
                         estadoSiNoEsActivo(p.estado),
                         lectura.vencida.has(p.id) ? MARCA_VENCIDA : lectura.porVencer.has(p.id) ? MARCA_POR_VENCER : null,
-                        lectura.faltante.has(p.id) ? MARCA_FALTANTE : null,
+                        lectura.faltante.has(p.id) ? marcaDeFalta(lectura, p.id) : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}
@@ -179,7 +236,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           {enFicha !== null && (
             <FichaDelProveedor
               consorcio={consorcio}
-              ficha={enFicha}
+              // FL-LEG-08 (decisión 17 del 18-11): la historia de salteos, con nombres y motivos, es
+              // para quien fiscaliza o saltea; el habitante autorizado ve datos, seguros y qué falta.
+              ficha={puede("fiscalizacion.ver_panel", "egresos.saltear_documentacion") ? enFicha : { ...enFicha, salteos: [] }}
               datos={datosDelProveedor(enFicha.proveedor)}
               puedeCambiar={false}
               puedeCargar={false}

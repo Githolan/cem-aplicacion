@@ -26,3 +26,22 @@ export async function leerComoQuedo(consorcio: string, orden: string): Promise<s
   exigirSesion(response);
   return data === undefined ? TEXTO_ENVIADA : textoComoQuedo(data);
 }
+
+/** Lo que se sabe de una aprobación si la orden no se pudo volver a leer (FL-APR-03). */
+export const TEXTO_APROBADA = "Listo: la orden quedó aprobada por esta cuenta.";
+
+/** En qué quedó la orden después de aprobarla: lista para pagar o esperando otra aprobación. */
+export function textoAlAprobar(f: FichaPago): string {
+  if (f.orden.estado === "aprobada") return `${TEXTO_APROBADA} Quedó lista para pagar.`;
+  if (f.orden.estado === "en_revision") return `${TEXTO_APROBADA} Falta otra aprobación.`;
+  return TEXTO_APROBADA;
+}
+
+/** Lee la orden recién aprobada y dice en qué quedó; sin la lectura, solo que se aprobó. `SinSesion` sube. */
+export async function leerComoQuedoAlAprobar(consorcio: string, orden: string): Promise<string> {
+  const { data, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/pagos/{orden_id}", {
+    params: { path: { consorcio_id: consorcio, orden_id: orden } },
+  });
+  exigirSesion(response);
+  return data === undefined ? TEXTO_APROBADA : textoAlAprobar(data);
+}

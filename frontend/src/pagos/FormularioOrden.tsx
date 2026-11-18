@@ -24,12 +24,14 @@ import {
   importe,
   mensajeDeActo,
   mensajeDeError,
+  momentoAlFinal,
   sinLaFalla,
   sinPisarLoHecho,
   sobreLoNuevo,
 } from "../egresos/comun";
 import { ComandoNoDisponible } from "../ComandoNoDisponible";
 import { FallaDeLectura } from "../egresos/EstadoPantalla";
+import { PedidoDeSalteo } from "../egresos/PedidoSalteo";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { exigirSesion, type MonedasDelEdificio, SinSesion } from "../egresos/useConsorcio";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
@@ -44,15 +46,19 @@ import {
   FALTA_IMPORTE,
   FALTA_PROVEEDOR,
   fechaCorta,
+  GRUPO_SIN_ORDEN,
   GUARDAR_IGUAL,
-  IR_A_PROVEEDORES,
-  MARCA_SIN_DOCUMENTACION,
+  MARCA_CON_SALTEO,
   NOMBRE_ESTADO,
   PROVEEDOR_INACTIVO,
   SIN_CAMBIOS,
+  SIN_CUENTA_DESTINO,
   SIN_DOCUMENTACION,
   SALTEO_PROPIO,
+  textoAbrirFicha,
   textoContratoExcedido,
+  textoLeidoInactivo,
+  textoLeidoSinOrden,
   textoParecidaAntes,
   TITULO_PARECIDA,
   VER_LA_OTRA,
@@ -76,6 +82,12 @@ import type { ActoEnCurso } from "./useActo";
 // 12-11-2026, P-10): son dos pedidos seguidos, y si el envío pide el segundo factor se pide ahí
 // mismo. «Guardar como borrador» queda como salida secundaria. Si el envío no sale, la orden ya
 // quedó guardada: se va a su ficha, que lo dice y tiene «Enviar a aprobar».
+//
+// Comentario 41 del propietario (flujos 18-11, tanda 1, criterio C9): elegido un proveedor al que no
+// se le puede preparar la orden, quedan el desplegable, el aviso con el enlace a SU ficha y
+// «Cancelar» (FL-ORD-01); en el desplegable van aparte (FL-ORD-03); la lectura de la factura no los
+// elige sola (FL-ORD-02); la ficha vuelve a la orden con lo escrito y la factura, y la lista se vuelve
+// a leer al volver a la pestaña (FL-ORD-04).
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
@@ -103,7 +115,29 @@ type Lectura =
       conSalteo: ReadonlySet<string>;
       /** Los bloqueados cuyo salteo vigente lo registró quien prepara: la base no lo toma (app 0109). */
       salteoPropio: ReadonlySet<string>;
+      /** Hasta cuándo sirve el salteo de cada uno de `conSalteo` (FL-SAL-01, app 0110). */
+      venceSalteo: ReadonlyMap<string, string>;
+      /** Los bloqueados cuyo último salteo venció sin usarse (FL-SAL-04, app 0110). */
+      vencidoSinUsar: ReadonlySet<string>;
     };
+
+/** Lo que el formulario toma de la lista de proveedores: la lista y sus bloqueos. */
+function deLaLista(l: components["schemas"]["ListaProveedores"]) {
+  return {
+    proveedores: l.elementos,
+    sinDocumentacion: new Set(l.documentacion_faltante),
+    modo: l.modo_exigencia,
+    conSalteo: new Set(l.con_salteo),
+    salteoPropio: new Set(l.salteo_de_quien_prepara),
+    venceSalteo: new Map(l.vence_salteo.map((v) => [v.proveedor_id, v.vence_en])),
+    vencidoSinUsar: new Set(l.salteo_vencido_sin_usar),
+  };
+}
+
+/** FL-SAL-01 (tanda 9): el aviso del salteo que sirve dice hasta cuándo. */
+export const textoConSalteo = (vence: string | undefined) => (vence === undefined ? CON_SALTEO : `${CON_SALTEO} Sirve hasta el ${momentoAlFinal(vence)}`);
+/** FL-SAL-04 (tanda 9): el último salteo venció sin que se preparara la orden. */
+export const SALTEO_VENCIDO_SIN_USAR = "El último salteo por urgencia de este proveedor venció sin usarse.";
 
 /** Qué pasa con el proveedor bloqueado (informe de fricción, C8P-01 y C8P-02): sin un salteo que le
  * sirva a quien prepara, la base no deja crear la orden, ni como borrador. Lo dice la lista de
@@ -122,6 +156,8 @@ type Datos = {
 };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
+/** El CUIT para comparar: solo sus números (la factura puede traerlo con guiones). */
+const soloDigitos = (cuit: string | null) => (cuit ?? "").replace(/\D/g, "");
 
 /** Los contratos que puede declarar una orden: vigentes, del proveedor y de la moneda elegidos.
  * La base vuelve a verificar que lo cubra (alcance, importe máximo, fechas) al evaluarla. */
@@ -181,9 +217,16 @@ export type OrdenInicial = {
   moneda?: string;
   concepto?: string;
   comprobante?: string;
-  /** La factura ya subida (vuelve del alta del proveedor). */
+  /** Lo que vuelve de Proveedores (FL-PRV-02, FL-ORD-04): nada de lo escrito se pierde en el viaje. */
+  reserva?: boolean;
+  contrato?: string;
+  /** La factura ya subida (vuelve del alta del proveedor o de su ficha). */
   factura?: Cargado;
 };
+
+/** Lo que lleva el enlace a la ficha de un proveedor para volver a la orden con lo escrito y la
+ * factura (FL-ORD-04): un estado de navegación, nada guardado en el navegador. */
+export type VueltaALaOrden = { consorcio: string; abrir: string; orden?: OrdenInicial };
 
 /** Lo que lleva la pantalla de Proveedores para dar de alta el proveedor de la factura leída y volver
  * a la orden con lo que ya estaba escrito. Nunca una cuenta: la lectura no la trae. */
@@ -212,9 +255,10 @@ function dicenLoMismo(campo: Campo, antes: string, leido: string): boolean {
 }
 
 /** Los campos que la lectura de la factura completa, con su valor en el formulario. La moneda leída,
- * solo si el edificio opera en ella: en uno que opera solo en pesos el campo no se muestra. */
-function camposLeidos(l: LecturaCarga, proveedores: Proveedor[], monedas: readonly string[]): Partial<Datos> {
-  const sugerido = proveedores.find((p) => p.id === l.proveedor_sugerido?.id && p.estado === "activo");
+ * solo si el edificio opera en ella: en uno que opera solo en pesos el campo no se muestra. El
+ * proveedor, solo si se le puede preparar una orden (FL-ORD-02): a uno bloqueado no lo elige sola. */
+function camposLeidos(l: LecturaCarga, proveedores: Proveedor[], monedas: readonly string[], admite: (p: Proveedor) => boolean): Partial<Datos> {
+  const sugerido = proveedores.find((p) => p.id === l.proveedor_sugerido?.id && admite(p));
   return {
     ...(l.importe_centavos === null ? {} : { importe: aTexto(l.importe_centavos) }),
     ...(l.moneda !== null && conCampoMoneda(monedas) && (monedasOfrecidas(monedas) as readonly string[]).includes(l.moneda)
@@ -319,13 +363,18 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const proveedorElegido = datos?.proveedor ?? "";
   // La base niega solo la versión 1 o una versión que cambia de proveedor (`exigir_documentacion_legal`, app 0104):
   // al modificar una orden sin cambiarle el proveedor no hay bloqueo (Codex en #257).
-  const mismoProveedorDeLaOrden = modificar !== undefined && proveedorElegido === modificar.version.proveedor_id;
-  const bloqueado =
+  const esBloqueado = (proveedor: string) =>
     lectura.tipo === "ok" &&
     lectura.modo === "bloquear" &&
-    proveedorElegido !== "" &&
-    !mismoProveedorDeLaOrden &&
-    lectura.sinDocumentacion.has(proveedorElegido);
+    proveedor !== "" &&
+    !(modificar !== undefined && proveedor === modificar.version.proveedor_id) &&
+    lectura.sinDocumentacion.has(proveedor);
+  /** Si se le puede preparar una orden (FL-ORD-03): activo y, bloqueado, con un salteo que le sirva. */
+  const admiteOrden = (p: Proveedor) => p.estado === "activo" && !(esBloqueado(p.id) && lectura.tipo === "ok" && !lectura.conSalteo.has(p.id));
+  const bloqueado = esBloqueado(proveedorElegido);
+  /** El proveedor de la factura leída cuando no se le puede preparar una orden (FL-ORD-02, FL-PRV-01):
+   * no se elige solo ni se ofrece darlo de alta; se dice y se lleva a su ficha. */
+  const [leidoSinOrden, setLeidoSinOrden] = useState<{ proveedor: Proveedor; inactivo: boolean } | null>(null);
 
   useEffect(() => {
     let vigente = true;
@@ -339,15 +388,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         exigirSesion(contratos.response);
         if (!vigente) return;
         if (proveedores.data !== undefined && contratos.data !== undefined) {
-          setLectura({
-            tipo: "ok",
-            proveedores: proveedores.data.elementos,
-            contratos: contratos.data.elementos,
-            sinDocumentacion: new Set(proveedores.data.documentacion_faltante),
-            modo: proveedores.data.modo_exigencia,
-            conSalteo: new Set(proveedores.data.con_salteo),
-            salteoPropio: new Set(proveedores.data.salteo_de_quien_prepara),
-          });
+          setLectura({ tipo: "ok", contratos: contratos.data.elementos, ...deLaLista(proveedores.data) });
           return;
         }
         const falla = proveedores.data === undefined ? proveedores : contratos;
@@ -371,6 +412,34 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     };
   }, [consorcio, vuelta, aEntrar, aInicio, setAviso]);
 
+  // FL-SAL-06: un salteo registrado (o la documentación cargada) mientras el formulario está abierto en
+  // otra pestaña o en otro dispositivo: al volver a esta pestaña se leen de nuevo los proveedores y sus
+  // bloqueos, sin tocar lo escrito. Volver desde la ficha del proveedor monta el formulario y lee todo.
+  useEffect(() => {
+    let vigente = true;
+    const releer = () => {
+      if (document.visibilityState !== "visible") return;
+      void api
+        .GET("/api/v1/consorcios/{consorcio_id}/proveedores", { params: { path: { consorcio_id: consorcio } } })
+        .then(({ data, error, response }) => {
+          exigirSesion(response);
+          if (!vigente) return;
+          if (data === undefined) setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigoDe(error))));
+          else setLectura((l) => (l.tipo === "ok" ? { ...l, ...deLaLista(data) } : l));
+        })
+        .catch((e: unknown) => {
+          if (!vigente) return;
+          if (e instanceof SinSesion) aEntrar();
+          else setAviso(sinPisarLoHecho(SIN_CONEXION));
+        });
+    };
+    document.addEventListener("visibilitychange", releer);
+    return () => {
+      vigente = false;
+      document.removeEventListener("visibilitychange", releer);
+    };
+  }, [consorcio, aEntrar, setAviso]);
+
   useEffect(() => {
     if (moverFoco > 0) formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
   }, [moverFoco]);
@@ -381,14 +450,18 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     if (versionVista === undefined) {
       setDatos((d) => {
         if (d !== null) return d;
-        const elegido = lectura.proveedores.find((p) => p.id === inicial?.proveedor && p.estado === "activo");
-        const { importe: importeInicial, moneda, concepto, comprobante } = inicial ?? {};
+        // Un proveedor que ya no admite órdenes también se elige: el formulario dice por qué y dónde se
+        // resuelve, en vez de abrir sin proveedor y sin decir nada (FL-ORD-05).
+        const elegido = lectura.proveedores.find((p) => p.id === inicial?.proveedor);
+        const { importe: importeInicial, moneda, concepto, comprobante, reserva, contrato } = inicial ?? {};
         return {
           ...datosVacios(elegido?.id ?? "", monedaBase),
           ...(importeInicial === undefined ? {} : { importe: importeInicial }),
           ...(moneda === undefined ? {} : { moneda }),
           ...(concepto === undefined ? {} : { concepto }),
           ...(comprobante === undefined ? {} : { comprobante }),
+          ...(reserva === undefined ? {} : { reserva }),
+          ...(contrato === undefined ? {} : { contrato }),
         };
       });
       return;
@@ -427,7 +500,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
 
   function leerFactura(l: LecturaCarga) {
     if (lectura.tipo !== "ok") return;
-    const leidos = camposLeidos(l, lectura.proveedores, monedas);
+    const leidos = camposLeidos(l, lectura.proveedores, monedas, admiteOrden);
     // Lo que ya estaba escrito y lo leído dice otra cosa. En una orden nueva, lo que sigue como al
     // abrir vacía sin que nadie lo eligiera (la moneda base por omisión) no es algo escrito; elegido a
     // propósito, aunque sea el mismo valor, sí. En una versión, todo lo es.
@@ -451,8 +524,23 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
       if (leidos.moneda !== undefined && leidos.moneda !== d.moneda) nuevo.contrato = "";
       return nuevo;
     });
+    // El servidor sugiere solo un proveedor activo: uno suspendido o de baja con ese CUIT ya está
+    // cargado, y darlo de alta terminaría en «Ya hay un proveedor con ese CUIT» (FL-PRV-01).
+    const cuitLeido = soloDigitos(l.cuit);
+    const inactivo =
+      l.proveedor_sugerido === null && cuitLeido !== ""
+        ? lectura.proveedores.find((p) => p.estado !== "activo" && soloDigitos(p.cuit) === cuitLeido)
+        : undefined;
+    const sugerido = lectura.proveedores.find((p) => p.id === l.proveedor_sugerido?.id);
+    setLeidoSinOrden(
+      inactivo !== undefined
+        ? { proveedor: inactivo, inactivo: true }
+        : sugerido !== undefined && !admiteOrden(sugerido)
+          ? { proveedor: sugerido, inactivo: sugerido.estado !== "activo" }
+          : null,
+    );
     setSinProveedor(
-      l.proveedor_sugerido === null && (l.cuit !== null || l.razon_social !== null)
+      l.proveedor_sugerido === null && inactivo === undefined && (l.cuit !== null || l.razon_social !== null)
         ? { cuit: l.cuit, razon_social: l.razon_social, domicilio: l.domicilio, telefono: l.telefono, correo: l.correo }
         : null,
     );
@@ -463,6 +551,8 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     setErrores((e) => sinElDe(e, campo));
     elegidos.current.add(campo);
     setParecida(null);
+    // Elegido a mano un proveedor, el aviso del de la factura ya no hace falta.
+    if (campo === "proveedor") setLeidoSinOrden(null);
     setDatos((d) => {
       if (d === null) return d;
       const nuevo = { ...d, [campo]: valor };
@@ -634,11 +724,13 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const contrato = contratoQueCubre(datos, centavosEscritos);
   const excedido = contrato !== datos.contrato ? lectura.contratos.find((k) => k.id === datos.contrato) : undefined;
   const ofrecidas = monedasOfrecidas(monedas);
-  /** Los obligatorios vacíos después de leer. El proveedor no cargado ya tiene su aviso con el alta. */
+  /** Los obligatorios vacíos después de leer. El proveedor no cargado, o al que no se le puede
+   * preparar una orden, ya tiene su aviso. */
   const faltan = leida
-    ? OBLIGATORIOS_LEIDOS.filter((c) => datos[c].trim() === "" && !(c === "proveedor" && sinProveedor !== null))
+    ? OBLIGATORIOS_LEIDOS.filter((c) => datos[c].trim() === "" && !(c === "proveedor" && (sinProveedor !== null || leidoSinOrden !== null)))
     : [];
-  const quedaPorRevisar = diferencias.size > 0 || faltan.length > 0 || sinProveedor !== null || cuitInvalido || monedaAjena !== null;
+  const quedaPorRevisar =
+    diferencias.size > 0 || faltan.length > 0 || sinProveedor !== null || leidoSinOrden !== null || cuitInvalido || monedaAjena !== null;
   const marca = (campo: Campo) => {
     const antes = diferencias.get(campo);
     if (antes !== undefined) return <MarcaDeDiferencia antes={antes} alRevisar={() => revisado(campo)} />;
@@ -646,16 +738,33 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
     return (faltan as readonly Campo[]).includes(campo) && errores[campo] === undefined ? <MarcaDeFalta /> : null;
   };
   const facturaVisible: Cargado | undefined = subida ?? inicial?.factura ?? facturaDeLaVersion ?? undefined;
+  /** Lo escrito y la factura, para volver a la orden desde Proveedores (FL-PRV-02, FL-ORD-04). Solo en
+   * una orden nueva: la que se modifica vive en su ficha. */
+  const loEscrito: OrdenInicial = {
+    importe: datos.importe,
+    moneda: datos.moneda,
+    concepto: datos.concepto,
+    comprobante: datos.comprobante,
+    reserva: datos.reserva,
+    factura: facturaVisible,
+  };
   const alAlta = sinProveedor === null ? null : {
     consorcio,
     alta: sinProveedor,
     documento: facturaVisible,
-    ...(modificar === undefined
-      ? { paraPreparar: true, orden: { importe: datos.importe, moneda: datos.moneda, concepto: datos.concepto, comprobante: datos.comprobante, factura: facturaVisible } }
-      : {}),
+    ...(modificar === undefined ? { paraPreparar: true, orden: loEscrito } : {}),
+  };
+  /** El enlace a la ficha de un proveedor: la abre y, en una orden nueva, vuelve con lo escrito (FL-ORD-04). */
+  const aSuFicha = (p: Proveedor) => {
+    const estado: VueltaALaOrden = {
+      consorcio,
+      abrir: p.id,
+      ...(modificar === undefined ? { orden: { ...loEscrito, ...(datos.contrato === "" ? {} : { contrato: datos.contrato }) } } : {}),
+    };
+    return { texto: textoAbrirFicha(p.razon_social), a: RUTA_PROVEEDORES, estado };
   };
   const elegido = lectura.proveedores.find((p) => p.id === datos.proveedor);
-  /** Al modificar, el proveedor de la orden puede estar suspendido o de baja (C8P-06). */
+  /** El proveedor elegido está suspendido o de baja (C8P-06; también al llegar con uno, FL-ORD-05). */
   const inactivo = elegido !== undefined && elegido.estado !== "activo";
   const salteoDelElegido: SalteoDelElegido | null = !bloqueado
     ? null
@@ -666,16 +775,25 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         : "sin_salteo";
   /** Sin un salteo que le sirva, la base no deja crear la orden (ni como borrador): no se ofrece guardar (C8P-01, C8P-02). */
   const sinSalteo = bloqueado && salteoDelElegido !== "con_salteo";
+  /** C9 (comentario 41 del propietario, FL-ORD-01): ya se sabe que la orden no se puede hacer con este
+   * proveedor. Quedan solo el desplegable (elegir otro es la salida), el aviso con el enlace a su ficha y
+   * «Cancelar». Lo demás se esconde sin perderse: al elegir otro proveedor vuelve con lo que tenía, y la
+   * factura subida sigue subida. */
+  const impedido = sinSalteo || inactivo;
   /** Al modificar, sin tocar nada no hay qué guardar (C8P-05). */
   const sinCambios =
     modificar !== undefined &&
     vistos.current !== null &&
     (Object.keys(datos) as Campo[]).every((c) => datos[c] === vistos.current?.[c]) &&
     factura === (modificar.version.factura_version_id ?? null);
-  const seGuarda = !sinSalteo && !inactivo && !sinCambios;
+  const seGuarda = !impedido && !sinCambios;
   const idProveedor = `${id}-proveedor`;
   const idImporte = `${id}-importe`;
   const idConcepto = `${id}-concepto`;
+  /** Lo que se ofrece: los activos, y el elegido aunque no lo esté. */
+  const ofrecibles = lectura.proveedores.filter((p) => p.estado === "activo" || p.id === datos.proveedor);
+  const conOrden = ofrecibles.filter(admiteOrden);
+  const sinOrden = ofrecibles.filter((p) => !admiteOrden(p));
 
   return (
     <>
@@ -683,113 +801,154 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         aria-label={modificar === undefined ? "Preparar una orden" : "Modificar la orden"}>
         {/* Se avisa al abrir, no después de completar todo (P-32). */}
         {modificar?.pierdeAprobaciones === true && <p className="aviso-info" role="note">{AVISO_MODIFICAR}</p>}
-        <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
-          deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
-          alCargar={(c) => {
-            setSubida(c);
-            cargarFactura(c);
-          }}
-          alLeer={leerFactura} alEsperar={setFacturaEnEspera} quedaPorRevisar={quedaPorRevisar} />
-        {alAlta !== null && (
-          <div className="aviso-info" role="note">
-            <p>
-              El proveedor de la factura no está cargado en este edificio
-              {sinProveedor?.razon_social != null && <> ({sinProveedor.razon_social})</>}.
-            </p>
-            <Link to={RUTA_PROVEEDORES} state={alAlta}>
-              Dar de alta el proveedor
-            </Link>
-          </div>
-        )}
+        <div className="campos-de-la-orden" hidden={impedido}>
+          <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
+            deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
+            alCargar={(c) => {
+              setSubida(c);
+              cargarFactura(c);
+            }}
+            alLeer={leerFactura} alEsperar={setFacturaEnEspera} quedaPorRevisar={quedaPorRevisar} />
+          {alAlta !== null && (
+            <div className="aviso-info" role="note">
+              <p>
+                El proveedor de la factura no está cargado en este edificio
+                {sinProveedor?.razon_social != null && <> ({sinProveedor.razon_social})</>}.
+              </p>
+              <Link to={RUTA_PROVEEDORES} state={alAlta}>
+                Dar de alta el proveedor
+              </Link>
+            </div>
+          )}
+          {leidoSinOrden !== null && (
+            <ComandoNoDisponible
+              motivo={leidoSinOrden.inactivo ? textoLeidoInactivo(leidoSinOrden.proveedor.razon_social) : textoLeidoSinOrden(leidoSinOrden.proveedor.razon_social)}
+              resolver={aSuFicha(leidoSinOrden.proveedor)}
+            />
+          )}
+        </div>
         <label htmlFor={idProveedor}>Proveedor</label>
         <select id={idProveedor} value={datos.proveedor} disabled={enviando} {...marcaDe(idProveedor, errores.proveedor)}
           onChange={(e) => cambiar("proveedor", e.target.value)}>
           <option value="" disabled>
             Elegir un proveedor
           </option>
-          {lectura.proveedores
-            .filter((p) => p.estado === "activo" || p.id === datos.proveedor)
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {lectura.modo === "bloquear" && lectura.sinDocumentacion.has(p.id) ? `${p.razon_social} ${MARCA_SIN_DOCUMENTACION}` : p.razon_social}
-              </option>
-            ))}
+          {conOrden.map((p) => (
+            <option key={p.id} value={p.id}>
+              {esBloqueado(p.id) ? `${p.razon_social} ${MARCA_CON_SALTEO}` : p.razon_social}
+            </option>
+          ))}
+          {/* Siguen en la lista (decisión 1 del propietario, 18-11-2026): elegirlo dice por qué y dónde
+              se resuelve. Van aparte y con el nombre solo, para que la marca no se corte (FL-ORD-03). */}
+          {sinOrden.length > 0 && (
+            <optgroup label={GRUPO_SIN_ORDEN}>
+              {sinOrden.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.razon_social}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         <ErrorDeCampo idCampo={idProveedor} mensaje={errores.proveedor} />
         {marca("proveedor")}
-        {inactivo && <ComandoNoDisponible motivo={PROVEEDOR_INACTIVO} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />}
-        {salteoDelElegido === "sin_salteo" && (
-          <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={{ texto: IR_A_PROVEEDORES, a: RUTA_PROVEEDORES }} />
-        )}
-        {salteoDelElegido === "salteo_propio" && <ComandoNoDisponible motivo={SALTEO_PROPIO} />}
-        {salteoDelElegido === "con_salteo" && <p className="aviso-pendiente" role="note">{CON_SALTEO}</p>}
-        <label htmlFor={idImporte}>Importe</label>
-        <CampoImporte id={idImporte} valor={datos.importe} deshabilitado={enviando} {...marcaDe(idImporte, errores.importe)}
-          alCambiar={(texto) => cambiar("importe", texto)} />
-        <ErrorDeCampo idCampo={idImporte} mensaje={errores.importe} />
-        {marca("importe")}
-        {monedaAjena !== null && (
-          <p className="marca-lectura" role="alert">
-            {textoMonedaAjena(monedaAjena, !conCampoMoneda(monedas))}{" "}
-            <button type="button" className="sutil" onClick={() => setMonedaAjena(null)}>
-              Está bien
-            </button>
-          </p>
-        )}
-        {/* Solo en un edificio que opera en más de una moneda (P-14); si no, la orden va en pesos. */}
-        {conCampoMoneda(monedas) && (
+        {elegido !== undefined && inactivo && <ComandoNoDisponible motivo={PROVEEDOR_INACTIVO} resolver={aSuFicha(elegido)} />}
+        {elegido !== undefined && !inactivo && salteoDelElegido === "sin_salteo" && (
           <>
-            <label htmlFor={`${id}-moneda`}>Moneda</label>
-            <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
-              {ofrecidas.map((m) => (
-                <option key={m} value={m}>
-                  {NOMBRE_MONEDA[m]}
-                </option>
-              ))}
-            </select>
-            {marca("moneda")}
+            <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={aSuFicha(elegido)} />
+            {lectura.vencidoSinUsar.has(elegido.id) && <p className="aviso-pendiente" role="note">{SALTEO_VENCIDO_SIN_USAR}</p>}
+            {/* Pregunta 3 del propietario (18-11-2026, tanda 9): el salteo se le pide al Consejo desde acá. */}
+            {/* Con la clave del proveedor, lo enviado para uno no queda al elegir otro (Codex en app #259). */}
+            <PedidoDeSalteo key={elegido.id} consorcio={consorcio} proveedor={elegido} monedas={monedas}
+              inicial={{ importe: datos.importe, moneda: datos.moneda }} aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
           </>
         )}
-        {/* Solo si el proveedor elegido tiene un contrato vigente en esa moneda (P-14) que cubra el importe. */}
-        {ofrecidos.length > 0 && (
-          <>
-            <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
-            <select id={`${id}-contrato`} value={contrato} disabled={enviando}
-              onChange={(e) => cambiar("contrato", e.target.value)}>
-              <option value="">Ninguno</option>
-              {ofrecidos.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.alcance} (hasta {importe(k.importe_maximo_centavos, k.moneda)})
-                </option>
-              ))}
-            </select>
-          </>
+        {elegido !== undefined && !inactivo && salteoDelElegido === "salteo_propio" && (
+          <ComandoNoDisponible motivo={SALTEO_PROPIO} resolver={aSuFicha(elegido)} />
         )}
-        {excedido !== undefined && (
-          <p className="aviso-pendiente" role="note">
-            {textoContratoExcedido(importe(excedido.importe_maximo_centavos, excedido.moneda))}
-          </p>
-        )}
-        <label htmlFor={idConcepto}>Concepto</label>
-        <input id={idConcepto} maxLength={300} value={datos.concepto} disabled={enviando} {...marcaDe(idConcepto, errores.concepto)}
-          onChange={(e) => cambiar("concepto", e.target.value)} />
-        <ErrorDeCampo idCampo={idConcepto} mensaje={errores.concepto} />
-        {marca("concepto")}
-        <label htmlFor={`${id}-comprobante`}>Número de la factura (opcional)</label>
-        <input id={`${id}-comprobante`} maxLength={200} value={datos.comprobante} disabled={enviando}
-          onChange={(e) => cambiar("comprobante", e.target.value)} />
-        {marca("comprobante")}
-        <label>
-          <input type="checkbox" checked={datos.reserva} disabled={enviando}
-            onChange={(e) => cambiar("reserva", e.target.checked)} />{" "}
-          Usa el fondo de reserva (siempre lo aprueba el Consejo)
-        </label>
-        {facturaEnEspera && (
-          <p id={`${id}-espera`} className="aviso-info">
-            {TEXTO_ESPERA_PARA_GUARDAR}
-          </p>
-        )}
-        {sinCambios && <p role="note">{SIN_CAMBIOS}</p>}
+        <div className="campos-de-la-orden" hidden={impedido}>
+          {salteoDelElegido === "con_salteo" && (
+            <p className="aviso-pendiente" role="note">
+              {textoConSalteo(lectura.venceSalteo.get(datos.proveedor))}
+            </p>
+          )}
+          {/* FL-ORD-06: sin cuenta destino la orden no se puede pagar; se avisa y se deja guardar (decisión 2). */}
+          {elegido !== undefined && elegido.cuenta_ultimos_digitos === null && (
+            <p className="aviso-pendiente" role="note">
+              {SIN_CUENTA_DESTINO}{" "}
+              <Link to={RUTA_PROVEEDORES} state={aSuFicha(elegido).estado} className="enlace-suelto">
+                {textoAbrirFicha(elegido.razon_social)}
+              </Link>
+            </p>
+          )}
+          <label htmlFor={idImporte}>Importe</label>
+          <CampoImporte id={idImporte} valor={datos.importe} deshabilitado={enviando} {...marcaDe(idImporte, errores.importe)}
+            alCambiar={(texto) => cambiar("importe", texto)} />
+          <ErrorDeCampo idCampo={idImporte} mensaje={errores.importe} />
+          {marca("importe")}
+          {monedaAjena !== null && (
+            <p className="marca-lectura" role="alert">
+              {textoMonedaAjena(monedaAjena, !conCampoMoneda(monedas))}{" "}
+              <button type="button" className="sutil" onClick={() => setMonedaAjena(null)}>
+                Está bien
+              </button>
+            </p>
+          )}
+          {/* Solo en un edificio que opera en más de una moneda (P-14); si no, la orden va en pesos. */}
+          {conCampoMoneda(monedas) && (
+            <>
+              <label htmlFor={`${id}-moneda`}>Moneda</label>
+              <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
+                {ofrecidas.map((m) => (
+                  <option key={m} value={m}>
+                    {NOMBRE_MONEDA[m]}
+                  </option>
+                ))}
+              </select>
+              {marca("moneda")}
+            </>
+          )}
+          {/* Solo si el proveedor elegido tiene un contrato vigente en esa moneda (P-14) que cubra el importe. */}
+          {ofrecidos.length > 0 && (
+            <>
+              <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
+              <select id={`${id}-contrato`} value={contrato} disabled={enviando}
+                onChange={(e) => cambiar("contrato", e.target.value)}>
+                <option value="">Ninguno</option>
+                {ofrecidos.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.alcance} (hasta {importe(k.importe_maximo_centavos, k.moneda)})
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          {excedido !== undefined && (
+            <p className="aviso-pendiente" role="note">
+              {textoContratoExcedido(importe(excedido.importe_maximo_centavos, excedido.moneda))}
+            </p>
+          )}
+          <label htmlFor={idConcepto}>Concepto</label>
+          <input id={idConcepto} maxLength={300} value={datos.concepto} disabled={enviando} {...marcaDe(idConcepto, errores.concepto)}
+            onChange={(e) => cambiar("concepto", e.target.value)} />
+          <ErrorDeCampo idCampo={idConcepto} mensaje={errores.concepto} />
+          {marca("concepto")}
+          <label htmlFor={`${id}-comprobante`}>Número de la factura (opcional)</label>
+          <input id={`${id}-comprobante`} maxLength={200} value={datos.comprobante} disabled={enviando}
+            onChange={(e) => cambiar("comprobante", e.target.value)} />
+          {marca("comprobante")}
+          <label>
+            <input type="checkbox" checked={datos.reserva} disabled={enviando}
+              onChange={(e) => cambiar("reserva", e.target.checked)} />{" "}
+            Usa el fondo de reserva (siempre lo aprueba el Consejo)
+          </label>
+          {facturaEnEspera && (
+            <p id={`${id}-espera`} className="aviso-info">
+              {TEXTO_ESPERA_PARA_GUARDAR}
+            </p>
+          )}
+          {sinCambios && <p role="note">{SIN_CAMBIOS}</p>}
+        </div>
         <div className="acciones">
           {seGuarda && (
             <button type="submit" disabled={enviando || facturaEnEspera}

@@ -132,6 +132,26 @@ describe("menú", () => {
     expect(within(enPagos).getByRole("link", { name: "Inicio" }).classList.contains("navegacion__item--desde-inicio")).toBe(false);
   });
 
+  it("FL-VER-04: quien de la gestión solo consulta proveedores la tiene con las principales, sin «Gestión»", () => {
+    consulta.actual = sabido(new Map([["e1", ["proveedores.ver", "documentos.ver", "contactos.ver"]]]));
+    const menu = menuEn("/proveedores");
+    expect(within(menu).queryByText("Gestión")).toBeNull();
+    expect(within(menu).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "Inicio", "Documentos", "Contactos de emergenciaEmergencias", "Proveedores", "Cuenta",
+    ]);  // prettier-ignore
+    const proveedores = within(menu).getByRole("link", { name: "Proveedores" });
+    expect(proveedores.classList.contains("navegacion__item--secundario")).toBe(false);
+    // Es una pestaña más: en su pantalla «Inicio» no queda marcada.
+    expect(within(menu).getByRole("link", { name: "Inicio" }).classList.contains("navegacion__item--desde-inicio")).toBe(false);
+    expect(activas(menu)).toEqual(["Proveedores"]);
+    cleanup();
+    // Control: con otra pantalla de gestión, «Proveedores» sigue en «Gestión».
+    consulta.actual = sabido(new Map([["e1", ["proveedores.ver", "padron.ver"]]]));
+    const conGestion = menuEn("/proveedores");
+    expect(within(conGestion).getByText("Gestión")).toBeTruthy();
+    expect(within(conGestion).getByRole("link", { name: "Proveedores" }).classList.contains("navegacion__item--secundario")).toBe(true);
+  });
+
   it("mientras se consulta no muestra un menú a medias, y aparece entero (MEN-06)", () => {
     consulta.actual = { ...sabido(), porEdificio: null, consultando: true };
     const menu = menuEn("/documentos");
