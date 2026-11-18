@@ -134,10 +134,9 @@ test.describe("mi cuenta", () => {
     const cerrarOtra = page
       .locator(".sesiones li", { hasText: "Firefox en Windows" })
       .getByRole("button", { name: "Cerrar" });
-    // La descripción del botón es el dispositivo de su fila (como en la prueba de Cuenta.test.tsx);
-    // el último uso se lee en la fila.
-    await expect(cerrarOtra).toHaveAccessibleDescription("Firefox en Windows");
-    await expect(page.locator(".sesiones li", { hasText: "Firefox en Windows" })).toContainText("· último uso ");
+    // La descripción del botón es la fila entera, con el último uso (como en Cuenta.test.tsx):
+    // distingue dos sesiones del mismo dispositivo.
+    await expect(cerrarOtra).toHaveAccessibleDescription("Firefox en Windows · último uso 16 de octubre de 2026, 09:00");
     await cerrarOtra.click();
     await expect(page.getByText("Listo: se cerró la sesión de Firefox en Windows.")).toBeVisible();
     expect(csrf[`/api/v1/auth/sesiones/${OTRA}/revocar`]).toBe(CSRF);

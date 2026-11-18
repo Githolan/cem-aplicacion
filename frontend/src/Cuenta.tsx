@@ -397,12 +397,13 @@ export function Cuenta() {
               {fallaDe("sesiones", lista.sesiones)}
               {lista.sesiones.ok && otras > 0 && (
                 // Una fila por sesión: el dispositivo y el último uso; la de este dispositivo sin
-                // botón, que sería lo mismo que «Salir» (CTA-03).
+                // botón, que sería lo mismo que «Salir» (CTA-03). La descripción de «Cerrar» es la fila
+                // entera, con el último uso: distingue dos sesiones del mismo dispositivo.
                 <ul className="sesiones compactas">
                   {lista.sesiones.valor.map((s) => (
                     <li key={s.id} aria-current={s.actual ? "true" : undefined}>
-                      <span>
-                        <span id={`${id}-${s.id}`}>{s.dispositivo}</span>
+                      <span id={`${id}-${s.id}`}>
+                        <span>{s.dispositivo}</span>
                         {s.actual ? (
                           <span className="sesion-actual"> (este dispositivo)</span>
                         ) : (
