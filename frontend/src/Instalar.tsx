@@ -114,9 +114,28 @@ const textoEnlace = (computadora: boolean) => `Instalar la aplicación ${computa
 // Enlace corto para el inicio y Entrar (INI-10): solo cuando se puede instalar de verdad (el
 // navegador ofrece el botón, o es un iPhone con «Agregar a inicio») y hasta que la persona dice
 // «Ahora no» en este dispositivo. El camino permanente queda en Cuenta (`EnlaceInstalarEnCuenta`).
+// Con el almacenamiento del sitio bloqueado, `localStorage` lanza `SecurityError` (Codex en #257): la
+// preferencia no se puede leer ni guardar, como en `leerGuardada()` de lecturaAmpliada.ts. Sin ella, el
+// enlace se ofrece y «Ahora no» lo esconde solo en esta pantalla.
+function descartadoGuardado(): boolean {
+  try {
+    return window.localStorage.getItem(CLAVE_DESCARTADO) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function guardarDescartado(): void {
+  try {
+    window.localStorage.setItem(CLAVE_DESCARTADO, "1");
+  } catch {
+    // Sin almacenamiento la preferencia no dura; el enlace se esconde igual en esta pantalla.
+  }
+}
+
 export function EnlaceInstalar() {
   const forma = useInstalacion();
-  const [descartado, setDescartado] = useState(() => window.localStorage.getItem(CLAVE_DESCARTADO) !== null);
+  const [descartado, setDescartado] = useState(descartadoGuardado);
   if (descartado || (forma !== "boton" && forma !== "iphone")) return null;
   return (
     <p className="enlace-instalar">
@@ -125,7 +144,7 @@ export function EnlaceInstalar() {
         type="button"
         className="sutil"
         onClick={() => {
-          window.localStorage.setItem(CLAVE_DESCARTADO, "1");
+          guardarDescartado();
           setDescartado(true);
         }}
       >

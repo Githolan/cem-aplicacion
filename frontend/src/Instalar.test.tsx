@@ -341,6 +341,32 @@ describe("enlace en el inicio (INI-10)", () => {
     expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
   });
 
+  it("Codex en #257: con el almacenamiento del sitio bloqueado, /entrar se dibuja y «Ahora no» igual lo saca", async () => {
+    // Solo `localStorage` (el caso que señaló Codex); `sessionStorage` sigue como siempre.
+    const { getItem: leer, setItem: escribir } = Storage.prototype;
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, clave: string) {
+      if (this === window.localStorage) throw new DOMException("El almacenamiento está bloqueado", "SecurityError");
+      return leer.call(this, clave);
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, clave: string, valor: string) {
+      if (this === window.localStorage) throw new DOMException("El almacenamiento está bloqueado", "SecurityError");
+      escribir.call(this, clave, valor);
+    });
+    try {
+      vi.stubGlobal("fetch", backend("sin_sesion"));
+      simularNavegador(AGENTE_IPHONE);
+      montar("/entrar");
+      expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+      await screen.findByRole("link", ENLACE_INSTALAR);
+      fireEvent.click(screen.getByRole("button", { name: "Ahora no" }));
+      expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
+      expect(setItem).toHaveBeenCalled();
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
+  });
+
   it("también está en /entrar, y ahí se oculta igual si la aplicación ya está instalada", async () => {
     vi.stubGlobal("fetch", backend("sin_sesion"));
     simularNavegador(AGENTE_IPHONE);

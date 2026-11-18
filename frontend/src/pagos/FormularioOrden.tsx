@@ -314,8 +314,15 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [salteo, setSalteo] = useState<Salteo | null>(null);
   const proveedorElegido = datos?.proveedor ?? "";
+  // La base niega solo la versión 1 o una versión que cambia de proveedor (`exigir_documentacion_legal`, app 0104):
+  // al modificar una orden sin cambiarle el proveedor no hay bloqueo (Codex en #257).
+  const mismoProveedorDeLaOrden = modificar !== undefined && proveedorElegido === modificar.version.proveedor_id;
   const bloqueado =
-    lectura.tipo === "ok" && lectura.modo === "bloquear" && proveedorElegido !== "" && lectura.sinDocumentacion.has(proveedorElegido);
+    lectura.tipo === "ok" &&
+    lectura.modo === "bloquear" &&
+    proveedorElegido !== "" &&
+    !mismoProveedorDeLaOrden &&
+    lectura.sinDocumentacion.has(proveedorElegido);
 
   // C8P-01: con el proveedor bloqueado, se mira si un salteo por urgencia espera su orden.
   useEffect(() => {

@@ -2467,6 +2467,19 @@ describe("preparar, enviar y renovar", () => {
       expect((adentro.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Otro concepto");
     });
 
+    it("Codex en #257: al modificar sin cambiar el proveedor bloqueado, se puede guardar (la base solo niega la versión 1 o el cambio de proveedor)", async () => {
+      const api = abrirFicha(BORRADOR, {
+        ...LECTURAS,
+        [`GET ${BASE}/proveedores`]: () =>
+          Response.json({ elementos: [proveedor()], documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [], modo_exigencia: "bloquear" }),
+      });
+      fireEvent.click(await boton("Modificar la orden"));
+      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
+      expect(await boton("Guardar la orden")).toBeTruthy();
+      // No hace falta mirar si hay un salteo: la orden ya existe con ese proveedor.
+      expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`)).toEqual([]);
+    });
+
     it("volver a pagar abre el formulario con los datos de la orden", async () => {
       abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), LECTURAS);
       fireEvent.click(await boton("Modificar la orden"));
