@@ -32,7 +32,7 @@ from app import limite
 from app.contexto import Identidad, IdentidadDep, MotorDep
 from app.db import fijar_ambito, transaccion
 from app.errores import ErrorApi
-from app.identidad import dispositivos, eventos, sesiones
+from app.identidad import dispositivos, eventos, segundo_factor, sesiones
 
 router = APIRouter(prefix="/api/v1/auth", tags=["identidad"])
 log = logging.getLogger("cem.identidad")
@@ -360,12 +360,14 @@ def sesion_actual(identidad: IdentidadDep, motor: MotorDep, response: Response) 
             {"s": identidad.sesion_id},
         ).scalar_one()
         nombre, correo = persona_de(conn, identidad.persona_id)
+        alta_hasta = segundo_factor.alta_permitida_hasta(conn, identidad)
     return SesionActual(
         persona_id=identidad.persona_id,
         nombre=nombre,
         correo=correo,
         sesion_id=identidad.sesion_id,
         vence_en=vence_en,
+        alta_confirmacion_hasta=alta_hasta,
     )
 
 
