@@ -11,6 +11,7 @@ import { PuntoServicio, useFallaDelServicio } from "../EstadoServicio";
 import { useSolicitudesDirigidas } from "../fiscalizacion/solicitudesDirigidas";
 import { Icono } from "../Iconos";
 import { EnlaceInstalar } from "../Instalar";
+import { FaltaConfirmacion, useFaltaConfirmacion } from "../FaltaConfirmacion";
 import { InvitacionesPropias, useMisInvitaciones } from "../InvitacionesPropias";
 import { DE_ADMINISTRACION, rutaDelDestino, soloConsultaProveedores } from "../Navegacion";
 import { CONSULTA_AL_LADO, useAncho } from "../pagos/useAncho";
@@ -116,7 +117,8 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
   const pendientes = fuentes.flatMap((f) => f.filas);
   const conFalla = fuentes.filter((f) => f.falla !== null);
   const sabido = porEdificio !== null && fuentes.every((f) => !f.cargando) && invitaciones.data !== undefined;
-  const nadaPendiente = sabido && porEdificio.size > 0 && pendientes.length === 0 && conFalla.length === 0 && invitaciones.data.length === 0;
+  const confirmacion = useFaltaConfirmacion();
+  const nadaPendiente = !confirmacion.pendiente && sabido && porEdificio.size > 0 && pendientes.length === 0 && conFalla.length === 0 && invitaciones.data.length === 0;
 
   // En el teléfono y la tablet, las pantallas de Gestión (sin pestaña) que no estén ya en «Para
   // hacer». Sin saber qué alcanza la persona el menú queda corto: los contactos guardados le sirven.
@@ -172,6 +174,7 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
+      <FaltaConfirmacion />
       {nadaPendiente && <p className="inicio-nada">{NADA_PENDIENTE}</p>}
       <div className="grupos-inicio">
         {pendientes.length > 0 && (

@@ -407,6 +407,17 @@ describe("página /cuenta", () => {
     expect(pedido(simulado, "POST", "/api/v1/auth/salir")?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
+  it("FL-CTA-04: salir no deja guardada la Cuenta: quien entra después llega al inicio", async () => {
+    vi.stubGlobal("fetch", conSesion(sesionQueSeCierra("POST /api/v1/auth/salir", sinCuerpo(204))));
+    window.history.pushState(null, "", "/cuenta");
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
+
+    await quedoEnEntrar();
+    expect(window.sessionStorage.getItem("cem.entrar.adonde_iba")).toBeNull();
+    window.history.pushState(null, "", "/");
+  });
+
   it("salir con la sesión ya vencida (401) también borra las copias", async () => {
     vi.stubGlobal(
       "fetch",

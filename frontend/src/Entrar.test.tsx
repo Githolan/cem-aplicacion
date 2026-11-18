@@ -477,7 +477,7 @@ describe("después de un enlace rechazado", () => {
     abrir(`/entrar#token=${TOKEN}`);
     await screen.findByText(RECHAZADO);
 
-    elegir("Pedir un código por correo");
+    fireEvent.click(screen.getByRole("button", { name: "Pedir un código nuevo" }));
     pedirElEnlace(CORREO);
 
     expect(await screen.findByText(MENSAJE)).toBeTruthy();
@@ -609,7 +609,9 @@ describe("/entrar: una forma por vez", () => {
 
     elegir("Ya tengo un código");
     expect(formasVisibles()).toEqual([CODIGO.name]);
-    expect(botones()).toEqual(["Pedir un código por correo", "Entrar con contraseña"]);
+    // FL-ACC-03: en el paso del código, pedir otro está en el mismo paso, no en las otras formas.
+    expect(botones()).toEqual(["Entrar con contraseña"]);
+    expect(screen.getByRole("button", { name: "Pedir un código nuevo" })).toBeTruthy();
 
     elegir("Entrar con contraseña");
     expect(formasVisibles()).toEqual([CONTRASENA.name]);
@@ -664,7 +666,7 @@ describe("/entrar: una forma por vez", () => {
     elegir("Ya tengo un código");
     escribirCorreo(CODIGO, CORREO);
 
-    elegir("Pedir un código por correo");
+    fireEvent.click(screen.getByRole("button", { name: "Pedir un código nuevo" }));
     expect(correoDe(PEDIR).value).toBe(CORREO);
 
     elegir("Entrar con contraseña");

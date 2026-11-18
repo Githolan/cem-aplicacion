@@ -1,10 +1,10 @@
-import { type ChangeEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { ALTA_VENCIDA, codigoAplicacion, VentanaAltaAplicacion } from "./AltaAplicacion";
 import { CabeceraInterna } from "./CabeceraInterna";
-import { CodigoQr } from "./CodigoQr";
 import { CodigosRecuperacion } from "./CodigosRecuperacion";
 import { useAvisoAlSalir } from "./avisoAlSalir";
 import { borrarCopias } from "./copiaContactos";
@@ -16,8 +16,8 @@ import { Hoja } from "./Hoja";
 import { llaveDisponible } from "./llaveAcceso";
 import { SeccionLlave } from "./SeccionLlave";
 import { pidiendoEntrar, useAEntrar } from "./sesionEncima";
-import { ErrorDeCampo, marcaDe } from "./ErrorDeCampo";
-import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
+
+export { codigoAplicacion, secretoEnBloques } from "./AltaAplicacion";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
@@ -49,28 +49,9 @@ export const ACTIVADO_CON_LLAVE = "Está activado con la llave de acceso: no hac
 /** Con esta cantidad o menos de códigos sin usar, se avisa cómo tener otros (AC-18). */
 export const POCOS_CODIGOS = 3;
 
-/** Una pantalla táctil (el teléfono donde está la aplicación de códigos) no puede escanear su propio QR. */
-function pantallaTactil(): boolean {
-  return window.matchMedia?.("(pointer: coarse)").matches === true;
-}
-
 const ESTADO_SIN_SESION = 401;
-const ESTADO_DEMASIADOS = 429;
-const CODIGO_INVALIDO = "segundo_factor_invalido";
-const CODIGO_SIN_ALTA = "segundo_factor_sin_alta";
 const CODIGO_YA_ACTIVO = "segundo_factor_ya_activo";
 const CODIGO_REQUERIDO = "segundo_factor_requerido";
-
-/** Agrupa el secreto en bloques de cuatro, para copiarlo a mano sin perderse. */
-export function secretoEnBloques(secreto: string): string {
-  return secreto.match(/.{1,4}/g)?.join(" ") ?? "";
-}
-
-/** El código de la aplicación (seis números) como lo escribió la persona, o null. */
-export function codigoAplicacion(valor: string): string | null {
-  const limpio = valor.replace(/[\s-]/g, "");
-  return /^[0-9]{6}$/.test(limpio) ? limpio : null;
-}
 
 /**
  * Lo que acepta la verificación: el código de la aplicación o uno de recuperación
@@ -134,10 +115,6 @@ export function SegundoFactor() {
   const [volver] = useState(() => volverDe(lugar.state));
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [conLlave, setConLlave] = useState(false);
-  const [codigo, setCodigo] = useState("");
-  // Lo escrito, leído en el mismo paso en que se completa el sexto número (el estado llega después).
-  const codigoEscrito = useRef("");
-  const [errorCodigo, setErrorCodigo] = useState<string | undefined>(undefined);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -188,18 +165,6 @@ export function SegundoFactor() {
     } else if (pantalla.tipo === "terminado") navegar(volver ?? RUTA_CUENTA, { state: { aviso: pantalla.aviso } });
   }, [pantalla, volver, navegar, aEntrar]);
 
-  /** El aviso para un código rechazado al confirmar. */
-  function avisoDeRechazo(status: number, cuerpo: unknown): Aviso {
-    if (status === ESTADO_DEMASIADOS)
-      return fallo("Hubo demasiados intentos. Reintentar en un rato.");
-    if (codigoDe(cuerpo) === CODIGO_INVALIDO)
-      return fallo(
-        "El código no sirve. Hay que revisar que la hora del teléfono esté bien y usar el código nuevo.",
-      );
-    // E53: un 5xx o un 429 no es de la conexión (regla E34 de fallas.ts).
-    return fallo(mensajeDeFalla(status, codigoDe(cuerpo)));
-  }
-
   /** Con la hoja de entrar encima, la pantalla sigue como está. */
   function sinSesion() {
     if (!pidiendoEntrar()) pasarA({ tipo: "sin_sesion" });
@@ -218,9 +183,6 @@ export function SegundoFactor() {
       .POST("/api/v1/auth/totp/alta", { headers: encabezadoCsrf() })
       .then(({ data, error, response }) => {
         if (data !== undefined) {
-          setCodigo("");
-          codigoEscrito.current = "";
-          setErrorCodigo(undefined);
           pasarA({ tipo: "alta", alta: data });
         } else if (codigoDe(error) === CODIGO_YA_ACTIVO) consultar();
         // Quien ya tiene una llave suma la aplicación confirmando con ella.
@@ -233,55 +195,8 @@ export function SegundoFactor() {
       .finally(() => setEnviando(false));
   }
 
-  /** El envío de la ventana del alta: con el código escrito hasta ahora (llega solo al sexto número). */
-  async function confirmar(): Promise<FinDeEnvio> {
-    const limpio = codigoAplicacion(codigoEscrito.current);
-    if (!limpio) {
-      setErrorCodigo("Hacen falta los seis números que muestra la aplicación.");
-      return "seguir";
-    }
-    setAviso(null);
-    setAltaEnCurso(true);
-    let respuesta;
-    try {
-      respuesta = await api.POST("/api/v1/auth/totp/confirmar", { body: { codigo: limpio }, headers: encabezadoCsrf() });
-    } catch {
-      return { rechazo: SIN_CONEXION };
-    } finally {
-      setAltaEnCurso(false);
-    }
-    const { data, error, response } = respuesta;
-    if (data !== undefined) {
-      setCodigo("");
-      setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
-      return "cerrar";
-    }
-    if (codigoDe(error) === CODIGO_SIN_ALTA) {
-      pasarA({ tipo: "inactivo" });
-      setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Hay que empezar de nuevo."));
-      return "cerrar";
-    }
-    if (response.status === ESTADO_SIN_SESION) {
-      sinSesion();
-      return "seguir";
-    }
-    return { rechazo: avisoDeRechazo(response.status, error).texto };
-  }
-
-  function escribirCodigo(evento: ChangeEvent<HTMLInputElement>) {
-    const valor = evento.target.value;
-    codigoEscrito.current = valor;
-    setCodigo(valor);
-    setErrorCodigo(undefined);
-    // Al sexto número se verifica solo, como en la hoja de confirmar (CTA-09).
-    if (codigoAplicacion(valor) !== null) evento.target.form?.requestSubmit();
-  }
-
   /** «Cancelar» o Escape en el alta: vuelve a la página sin activar nada. */
   function cancelarAlta() {
-    setCodigo("");
-    codigoEscrito.current = "";
-    setErrorCodigo(undefined);
     pasarA({ tipo: "inactivo" });
   }
 
@@ -387,72 +302,17 @@ export function SegundoFactor() {
       )}
 
       {pantalla.tipo === "alta" && (
-        <VentanaDeFormulario
-          titulo="Cargar la cuenta en la aplicación"
-          textoEnviar="Activar la aplicación"
-          alEnviar={confirmar}
+        <VentanaAltaAplicacion
+          alta={pantalla.alta}
+          alOcupar={setAltaEnCurso}
+          alActivar={(codigos) => setPantalla({ tipo: "codigos", codigos, medio: "aplicacion" })}
           alCerrar={cancelarAlta}
-        >
-          <p>
-            Con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
-            Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
-            números que cambia cada 30 segundos.
-          </p>
-          {pantallaTactil() ? (
-            // En el teléfono de la aplicación, el QR no se puede escanear: primero, abrirla desde acá.
-            <ol className="pasos">
-              <li>
-                <a href={pantalla.alta.uri} className="enlace-suelto">
-                  Abrir mi aplicación de códigos
-                </a>{" "}
-                y aceptar la cuenta nueva. Si no se abre, escribir esta clave a mano en la aplicación:{" "}
-                <code className="secreto" translate="no">
-                  {secretoEnBloques(pantalla.alta.secreto)}
-                </code>
-                <details className="historial">
-                  <summary>Estoy en otra pantalla: mostrar el código QR</summary>
-                  <CodigoQr
-                    texto={pantalla.alta.uri}
-                    descripcion="Código QR para cargar Consorcio en Mano en la aplicación de autenticación"
-                  />
-                </details>
-              </li>
-              <li>Escribir el código de seis números que muestra la aplicación.</li>
-            </ol>
-          ) : (
-            <ol className="pasos">
-              <li>
-                Abrir la aplicación de autenticación en el teléfono y elegir agregar una cuenta
-                escaneando un código QR.
-                <CodigoQr
-                  texto={pantalla.alta.uri}
-                  descripcion="Código QR para cargar Consorcio en Mano en la aplicación de autenticación"
-                />
-              </li>
-              <li>
-                Si no se puede escanear, <a href={pantalla.alta.uri}>abrir la aplicación desde acá</a>{" "}
-                o escribir esta clave a mano:{" "}
-                <code className="secreto" translate="no">
-                  {secretoEnBloques(pantalla.alta.secreto)}
-                </code>
-              </li>
-              <li>Escribir el código de seis números que muestra la aplicación.</li>
-            </ol>
-          )}
-          <label htmlFor={`${id}-codigo`}>Código de la aplicación</label>
-          <input
-            id={`${id}-codigo`}
-            data-foco
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={9}
-            value={codigo}
-            {...marcaDe(`${id}-codigo`, errorCodigo)}
-            onChange={escribirCodigo}
-          />
-          <ErrorDeCampo idCampo={`${id}-codigo`} mensaje={errorCodigo} />
-        </VentanaDeFormulario>
+          alVencer={() => {
+            pasarA({ tipo: "inactivo" });
+            setAviso(fallo(ALTA_VENCIDA));
+          }}
+          alSinSesion={sinSesion}
+        />
       )}
 
       {pantalla.tipo === "activo" && pendiente === null && (

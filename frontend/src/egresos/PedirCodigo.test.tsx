@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { recordarLlave } from "../llaveAcceso";
@@ -316,26 +316,36 @@ describe("confirmar en el momento", () => {
     await titulo(HOJA_CODIGO);
   });
 
-  it("sin ningún método lleva a darlo de alta y a volver a esta pantalla", async () => {
-    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0) });
-    function Destino() {
-      const { state } = useLocation();
-      return <p>Volver a {(state as { volver: string }).volver}</p>;
-    }
+  it("FL-CTA-03: sin llave en el navegador, la aplicación se activa encima del acto, sin salir, y el acto sigue", async () => {
+    const simulado = backend({
+      "GET /api/v1/auth/totp": estadoTotp(false, 0),
+      "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: "ABCDEFGHIJKLMNOP", uri: "otpauth://totp/CEM:ana?secret=ABCDEFGHIJKLMNOP" }),
+      "POST /api/v1/auth/totp/confirmar": () => Response.json({ codigos: ["k7m2q-x9p4t", "a2b3c-d4e5f"] }),
+    });
+    const alVerificar = vi.fn();
     render(
       <MemoryRouter initialEntries={["/pagos"]}>
         <Routes>
-          <Route
-            path="/pagos"
-            element={<PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />}
-          />
-          <Route path="/cuenta/segundo-factor" element={<Destino />} />
+          <Route path="/pagos" element={<PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={() => undefined} />} />
+          <Route path="/cuenta/segundo-factor" element={<p>Otra página</p>} />
         </Routes>
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole("link", { name: "Activarla" }));
-    expect(await screen.findByText("Volver a /pagos")).toBeTruthy();
+    await titulo("Falta la confirmación con PIN, huella o código");
+    // Ningún enlace saca de la pantalla: lo escrito en ella no se pierde.
+    expect(screen.queryByRole("link")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Usar una aplicación de códigos" }));
+    await titulo("Cargar la cuenta en la aplicación");
+    fireEvent.change(screen.getByLabelText("Código de la aplicación"), { target: { value: "123456" } });
+
+    await titulo("Guardar los códigos de recuperación");
+    expect(screen.getByText("Listo: la confirmación con código quedó activada.")).toBeTruthy();
+    expect(alVerificar).not.toHaveBeenCalled(); // control: hasta guardar los códigos, el acto espera
+    fireEvent.click(screen.getByRole("button", { name: "Códigos guardados: seguir" }));
+    expect(alVerificar).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Otra página")).toBeNull();
+    expect(pedidos(simulado, "/api/v1/auth/totp/confirmar")).toBe(1);
   });
 
   it("si la pantalla se cierra mientras espera el gesto, corta el aviso y no sigue", async () => {
@@ -513,7 +523,7 @@ describe("tanda 7, revisión de #237: el alta de la llave dentro de la hoja no s
     expect(alCancelar).not.toHaveBeenCalled();
   });
 
-  it("con el alta en camino no queda el enlace a la página de confirmación con PIN, huella o código; si falla, vuelve", async () => {
+  it("con el alta de la llave en camino no se ofrece la aplicación; si falla, vuelve", async () => {
     vi.stubGlobal("PublicKeyCredential", class {});
     let rechazar: () => void = () => undefined;
     Object.defineProperty(navigator, "credentials", {
@@ -536,16 +546,16 @@ describe("tanda 7, revisión de #237: el alta de la llave dentro de la hoja no s
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("link", { name: "la página de confirmación con PIN, huella o código" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Usar una aplicación de códigos" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Activar con PIN, huella o cara" }));
-    await waitFor(() => expect(screen.queryByRole("link", { name: "la página de confirmación con PIN, huella o código" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Usar una aplicación de códigos" })).toBeNull());
     // Cerrar la pestaña también pregunta antes.
     const salida = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(salida);
     expect(salida.defaultPrevented).toBe(true);
 
     rechazar();
-    expect(await screen.findByRole("link", { name: "la página de confirmación con PIN, huella o código" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Usar una aplicación de códigos" })).toBeTruthy();
     const otra = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(otra);
     expect(otra.defaultPrevented).toBe(false);
