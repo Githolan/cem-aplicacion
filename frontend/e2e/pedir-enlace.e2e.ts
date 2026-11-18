@@ -23,7 +23,9 @@ test.describe("pedir el enlace para entrar", () => {
     await sinFaltasDeAccesibilidad(page);
 
     const seccion = page.getByRole("region", { name: "Pedir un código para entrar" });
-    await expect(seccion.getByText(/código de 6 números para entrar desde cualquier dispositivo/)).toBeVisible();
+    // ACC-04: sin el párrafo que repetía el título; solo el campo y el botón corto.
+    await expect(seccion.getByLabel("Correo")).toBeVisible();
+    await expect(seccion.getByText(/código de 6 números/)).toHaveCount(0);
     await seccion.getByLabel("Correo").fill(CORREO);
     const pedido = page.waitForRequest((r) => new URL(r.url()).pathname === RUTA);
     await seccion.getByRole("button", { name: "Enviar", exact: true }).click();

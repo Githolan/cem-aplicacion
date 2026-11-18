@@ -382,6 +382,8 @@ test.describe("circuito de pagos", () => {
     await simularPagos(page, baseURL!, CON_COMPROBANTE);
     await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
+    // El importe se escribe en la ventana de registrar el pago (REG-01).
+    await abrirElRegistro(page, "Registrar el pago");
     const campo = page.getByLabel(/^Importe transferido/);
     await expect(campo).toHaveAttribute("inputmode", "decimal");
     await campo.fill("120000");

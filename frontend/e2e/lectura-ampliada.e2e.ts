@@ -463,6 +463,15 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: `/invitacion#token=${TOKEN_ENLACE}`,
     cargada: "Aceptar la invitación",
     api: {
+      // La sesión abierta es la del correo invitado: con la de otra cuenta la página ya no ofrece
+      // aceptar (C8G-11), y lo que se mide acá es el formulario.
+      "GET /api/v1/auth/sesion": {
+        persona_id: "99999999-9999-4999-8999-999999999999",
+        nombre: "Beto Pérez",
+        correo: CORREO_LARGO,
+        sesion_id: "11111111-1111-4111-8111-111111111111",
+        vence_en: "2026-11-15T20:00:00Z",
+      },
       "POST /api/v1/auth/invitacion/consultar": {
         consorcio: "Edificio Azul",
         unidad: "1° A",

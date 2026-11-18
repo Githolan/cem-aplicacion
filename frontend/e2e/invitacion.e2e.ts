@@ -136,7 +136,9 @@ test.describe("invitación", () => {
 
     await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toBeVisible();
     await expect(page.getByText("Buscando la invitación…")).toHaveCount(0);
-    expect(errores).toEqual([]);
+    // La consola informa el 401 de la sesión, que la página lee junto con la invitación (C8G-11);
+    // violaciones de la CSP o errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
   test("sin red: la consulta cortada se explica, sin botón de aceptar y sin salirse de 360 px", async ({
@@ -154,8 +156,9 @@ test.describe("invitación", () => {
     expect(pedidos.map((p) => p.camino)).toEqual(["/api/v1/auth/invitacion/consultar"]);
     expect(await anchoDePagina(page)).toBeLessThanOrEqual(ANCHO_TELEFONO_PX);
     await sinFaltasDeAccesibilidad(page);
-    // La consola informa el pedido cortado; violaciones de la CSP o errores de la página, ninguno.
-    expect(errores.filter((e) => !e.includes("ERR_INTERNET_DISCONNECTED"))).toEqual([]);
+    // La consola informa el pedido cortado y el 401 de la sesión (C8G-11 la lee); violaciones de la
+    // CSP o errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("ERR_INTERNET_DISCONNECTED") && !e.includes("401"))).toEqual([]);
   });
 
   test("«Reintentar» consulta de nuevo y, si responde, muestra la invitación", async ({ page, baseURL }) => {
