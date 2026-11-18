@@ -161,7 +161,11 @@ describe("entrar encima", () => {
     });
     await montar();
     const alVerificar = vi.fn();
-    render(<PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={vi.fn()} />);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={vi.fn()} />
+      </QueryClientProvider>,
+    );
 
     const entrar = (await screen.findByRole("heading", { name: HOJA })).closest<HTMLElement>(".hoja-fondo")!;
     const llave = (await screen.findByRole("heading", { name: "Confirmar con PIN, huella o cara" })).closest<HTMLElement>(".hoja-fondo")!;

@@ -34,7 +34,7 @@ const sinRed: Respuesta = () => Promise.reject(new TypeError("Failed to fetch"))
 type Acciones = Record<string, readonly string[]>;
 
 /** Una lectura vacía que sirve a todas las pantallas: trae los campos que cada contrato da siempre (la
- * bandeja de pagos, `avisos_rechazo`, `por_cotejar` y `sin_explicar`). */
+ * bandeja de pagos, `avisos_rechazo`, `por_cotejar`, `sin_explicar` y `cotejados`). */
 const LECTURA_VACIA = () =>
   Response.json({
     elementos: [],
@@ -42,6 +42,11 @@ const LECTURA_VACIA = () =>
     avisos_rechazo: [],
     por_cotejar: 0,
     sin_explicar: 0,
+    cotejados: 0,
+    // Los de la lista de proveedores (contrato 0.77.0, tanda 8 de flujos).
+    con_salteo: [],
+    vence_salteo: [],
+    salteo_vencido_sin_usar: [],
     actualizada_en: null,
     zona_horaria: "America/Argentina/Buenos_Aires",
   });

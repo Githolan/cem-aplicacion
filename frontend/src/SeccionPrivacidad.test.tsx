@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { MemoryRouter } from "react-router";
@@ -49,10 +50,13 @@ function cuerpos(simulado: ReturnType<typeof vi.fn>, metodo: string): Promise<un
 }
 
 function mostrar(contrasena = true, sinSesion: () => void = () => undefined) {
+  // La confirmación (PedirCodigo) lee el plazo para activar con una consulta (FL-CTA-01): va dentro de su proveedor.
   return render(
-    <MemoryRouter>
-      <SeccionPrivacidad contrasena={contrasena} fecha={(iso) => iso.slice(0, 10)} sinSesion={sinSesion} />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter>
+        <SeccionPrivacidad contrasena={contrasena} fecha={(iso) => iso.slice(0, 10)} sinSesion={sinSesion} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
