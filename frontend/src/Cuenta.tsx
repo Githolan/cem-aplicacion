@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { ActivarLlave } from "./ActivarLlave";
+import { olvidarAdondeIba } from "./adondeIba";
 import { api } from "./api/cliente";
 import { useListoHastaOtroActo } from "./listoHastaOtroActo";
 import type { components } from "./api/tipos";
@@ -262,6 +263,12 @@ export function Cuenta() {
       .finally(() => setEnviando(false));
   }
 
+  /** Salir no es un 401 en medio del trabajo: quien entre después llega al inicio, no a Cuenta (FL-CTA-04). */
+  function salidaElegida() {
+    aEntrar();
+    olvidarAdondeIba();
+  }
+
   function salir() {
     setEnviando(true);
     setFallaSalir(null);
@@ -269,12 +276,12 @@ export function Cuenta() {
       .POST("/api/v1/auth/salir", { headers: encabezadoCsrf() })
       .then(({ error, response }) => {
         exigirSesion(response);
-        if (response.ok) aEntrar();
+        if (response.ok) salidaElegida();
         // Junto a «Salir», no en otra tarjeta.
         else setFallaSalir(mensajeDeFalla(response.status, codigoDe(error)));
       })
       .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
+        if (e instanceof SinSesion) salidaElegida();
         else setFallaSalir(SIN_CONEXION);
       })
       .finally(() => setEnviando(false));
