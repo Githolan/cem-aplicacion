@@ -11,7 +11,7 @@ import { FALTA_CODIGO_MONEDA } from "../pagos/CampoMonedaSalida";
 import { CAMBIAR_ARCHIVO } from "../SubirArchivo";
 import { ContextoVersion } from "../version";
 import { VOLVIO_LA_RED } from "./comun";
-import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
+import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, resumenDe, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
 
 // Pagos para aclarar (app 0067). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -132,6 +132,7 @@ const POR_ACLARAR = {
   orden_id: O1,
   version: 1,
   concepto: "Limpieza de octubre",
+  razon_social: "Limpieza Ficticia SRL",
   importe_centavos: 1_500_000,
   moneda: "ARS",
   cuenta_vista_en: "2026-10-31T13:00:00Z",
@@ -171,6 +172,17 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(within(ficha).getByRole("button", { name: NO_SE_TRANSFIRIO })).toBeTruthy();
     expect(within(ficha).getByRole("button", { name: SI_SE_TRANSFIRIO })).toBeTruthy();
     await sinFaltasDeAccesibilidad(document.body);
+  });
+
+  it("FL-ACL-03 (tanda 9): la fila y la ficha dicen a qué proveedor era el pago", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [POR_ACLARAR] }) }));
+    abrir("/pagos/por-aclarar");
+    const lista = await screen.findByRole("list", { name: "Pagos para aclarar" });
+    expect(within(lista).getByRole("button").textContent).toContain(resumenDe(POR_ACLARAR));
+    expect(resumenDe(POR_ACLARAR)).toContain("Limpieza Ficticia SRL");
+    const ficha = await abrirFicha();
+    expect(within(ficha).getByText("Proveedor")).toBeTruthy();
+    expect(within(ficha).getByText("Limpieza Ficticia SRL")).toBeTruthy();
   });
 
   it("quien dejó de administrar declara que no transfirió, con el código si hace falta y la misma clave", async () => {

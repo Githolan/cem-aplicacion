@@ -59,6 +59,7 @@ import {
   AVISO_OBSERVAR,
   AVISO_RECLAMO,
   AVISO_SIN_CUENTA,
+  TEXTO_SIN_ACTO,
   AVISO_SIN_SALIDA_CAUSA,
   AVISO_TOMAR,
   AVISO_VER_LA_CUENTA_QUEDA,
@@ -995,6 +996,13 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
             <p>
               {ficha.que_decir}
               {ficha.esperando_desde !== null && ` Desde el ${fechaCorta(ficha.esperando_desde)}.`}
+            </p>
+          )}
+          {/* FL-APR-02, FL-ORD-06 (tanda 9): por qué no se le ofrece el acto. Con el paso «Falta la
+              cuenta», lo que pasa ya lo dice: no se repite. */}
+          {ficha.motivo_sin_acto != null && !(ficha.motivo_sin_acto === "proveedor_sin_cuenta" && paso === "falta_cuenta") && (
+            <p className="aviso-info" role="note">
+              {TEXTO_SIN_ACTO[ficha.motivo_sin_acto]}
             </p>
           )}
           {repetida !== null && (

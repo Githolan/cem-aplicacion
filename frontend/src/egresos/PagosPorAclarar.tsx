@@ -86,6 +86,8 @@ function textoDelComprobante(p: PorAclarar): string {
 }
 
 const tituloDe = (p: PorAclarar) => `${p.consorcio}: ${importe(p.importe_centavos, p.moneda)}`;
+/** FL-ACL-03 (tanda 9, app 0110): la fila dice a qué proveedor era, sin la cuenta. */
+export const resumenDe = (p: Pick<PorAclarar, "razon_social" | "concepto">) => `${p.razon_social} · ${p.concepto}`;
 
 export function PagosPorAclarar() {
   const id = useId();
@@ -536,6 +538,7 @@ export function PagosPorAclarar() {
         }}
         ocupada={enviando}
         datos={[
+          { etiqueta: "Proveedor", valor: p.razon_social },
           { etiqueta: "Concepto", valor: p.concepto },
           { etiqueta: "Cuenta vista el", valor: momentoAlFinal(p.cuenta_vista_en) },
         ]}
@@ -576,7 +579,7 @@ export function PagosPorAclarar() {
           <ul className="filas-registro" aria-label="Pagos para aclarar">
             {elementos.map((p) => (
               <li key={p.orden_id}>
-                <FilaDeRegistro titulo={tituloDe(p)} resumen={p.concepto} alAbrir={() => fichas.abrir(p.orden_id)}
+                <FilaDeRegistro titulo={tituloDe(p)} resumen={resumenDe(p)} alAbrir={() => fichas.abrir(p.orden_id)}
                   refFila={fichas.refFila(p.orden_id)} abierta={fichas.abierta === p.orden_id} />
               </li>
             ))}

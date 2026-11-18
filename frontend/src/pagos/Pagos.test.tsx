@@ -22,7 +22,7 @@ import { cambiosDeVersion, cambiosEntreVersiones, NO_ESTA_EN_NINGUNO } from "./F
 import { contratosAplicables, textoMonedaAjena } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
 import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_LISTO } from "./SubirFactura";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, MARCA_REPETIDA, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, MARCA_REPETIDA, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, TEXTO_SIN_ACTO, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
 import { TEXTO_ACCION, TITULO_PLEGADAS } from "./textosDeAcciones";
 import {
   AVISO_DESHACE_DECLARACION, AVISO_SIN_SALIDA_CAUSA, AVISO_RECLAMO, AVISO_VER_LA_CUENTA_QUEDA, CON_SALTEO, DAR_POR_PAGADO, FALTA_CONCEPTO, FALTA_IMPORTE, FALTA_LA_CUENTA, FALTA_MOTIVO,
@@ -218,7 +218,7 @@ function error(codigo: string, status: number) {
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
 const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
-const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos, avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 });
+const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos, avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0, cotejados: 0 });
 const VERIFICADO = () =>
   Response.json({ verificado_en: "2026-10-31T12:00:00Z", vale_hasta: "2026-10-31T12:10:00Z", codigos_recuperacion_restantes: 9 });
 
@@ -4633,6 +4633,7 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
   const AVISO = {
     orden_id: O2, proveedor: "Plomería Ficticia SRL", proveedor_id: P1, concepto: "Destapación", importe_centavos: 4_500_000,
     moneda: "ARS", creada_en: "2026-11-09T15:00:00Z", rechazada_en: "2026-11-10T15:00:00Z", motivo: "Falta la factura",
+    proveedor_admite_orden: true,
   };
   const marcas = () =>
     within(screen.getByRole("list", { name: "Por dónde va la orden" })).getAllByRole("listitem").map((li) => li.getAttribute("data-estado"));
@@ -4734,7 +4735,8 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
   });
 
   it("sin pagos por cotejar, quien coteja llega igual a lo cotejado; quien no coteja, no (Codex en #238)", async () => {
-    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon() }));
+    const conCotejados = () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0, cotejados: 3 });
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: conCotejados }));
     abrir("/pagos");
     const enlace = await screen.findByRole("link", { name: VER_LO_COTEJADO });
     expect(enlace.getAttribute("href")).toBe("/pagos/cotejo");
@@ -4743,12 +4745,30 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     cleanup();
     // Control: quien solo prepara no ve ni el uno ni el otro.
     vi.stubGlobal("fetch", backend({
-      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
+      [`GET ${BASE}/pagos/bandeja`]: conCotejados,
       [`GET ${BASE}/mis-acciones`]: alcanza("egresos.preparar_orden"),
     }));
     abrir("/pagos");
     await screen.findByRole("link", { name: "Consultar pagos" });
     expect(screen.queryByRole("link", { name: VER_LO_COTEJADO })).toBeNull();
+  });
+
+  it("FL-CON-01 (tanda 9): sin nada cotejado, quien coteja no ve «Ver lo cotejado»", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon() }));
+    abrir("/pagos");
+    await screen.findByRole("link", { name: "Consultar pagos" });
+    expect(screen.queryByRole("link", { name: VER_LO_COTEJADO })).toBeNull();
+  });
+
+  it("FL-ORD-05 (tanda 9): si el proveedor hoy no admite una orden, el aviso del rechazo no ofrece «Preparar otra orden»", async () => {
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        Response.json({ elementos: [], avisos_rechazo: [{ ...AVISO, proveedor_admite_orden: false }], por_cotejar: 0, sin_explicar: 0, cotejados: 0 }),
+    }));
+    abrir("/pagos");
+    await screen.findByText(/^Se rechazó la orden de Plomería Ficticia SRL/);
+    expect(screen.getByRole("button", { name: ENTENDIDO })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: PREPARAR_OTRA })).toBeNull();
   });
 
   describe("orden parecida antes de guardar (decisión 4 del 13-11)", () => {
@@ -5770,5 +5790,36 @@ describe("flujos 18-11, tanda 1: orden a un proveedor bloqueado", () => {
     expect(within(aviso).getByRole("link", { name: ENLACE })).toBeTruthy();
     expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
     expect(await boton("Guardar como borrador")).toBeTruthy();
+  });
+});
+
+// Tanda 9 de flujos (18-11-2026): lo que la tanda 8 sumó a la ficha del pago (app 0110).
+describe("tanda 9: por qué no se ofrece el acto (FL-APR-02, FL-ORD-06)", () => {
+  const EN_REVISION = { orden: orden({ estado: "en_revision" }), situacion: "en_revision", paso: "espera_aprobar", le_toca_a: "consejo" } as const;
+
+  it("FL-APR-02: a quien ya aprobó se le dice por qué no aprueba otra vez", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha({ ...EN_REVISION, motivo_sin_acto: "ya_aprobaste" })) }));
+    abrir(`/pagos/${O1}`);
+    expect(await screen.findByText(TEXTO_SIN_ACTO.ya_aprobaste)).toBeTruthy();
+  });
+
+  it("FL-APR-02, control: sin motivo, ninguna de esas líneas", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha(EN_REVISION)) }));
+    abrir(`/pagos/${O1}`);
+    await screen.findByRole("heading", { name: "Limpieza Ficticia SRL" });
+    for (const texto of Object.values(TEXTO_SIN_ACTO)) expect(screen.queryByText(texto)).toBeNull();
+  });
+
+  it("FL-ORD-06: a quien paga, sin cuenta destino del proveedor, se le dice; a quien prepara, el paso ya lo dice y no se repite", async () => {
+    const sinCuenta = { situacion: "para_pagar", motivo_sin_acto: "proveedor_sin_cuenta" } as const;
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha({ ...sinCuenta, paso: null })) }));
+    abrir(`/pagos/${O1}`);
+    expect(await screen.findByText(TEXTO_SIN_ACTO.proveedor_sin_cuenta)).toBeTruthy();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha({ ...sinCuenta, paso: "falta_cuenta", puede_modificar: true })) }));
+    abrir(`/pagos/${O1}`);
+    expect(await screen.findByText(deLaTabla("para_pagar", "falta_cuenta").que_decir)).toBeTruthy();
+    expect(screen.queryByText(TEXTO_SIN_ACTO.proveedor_sin_cuenta)).toBeNull();
   });
 });

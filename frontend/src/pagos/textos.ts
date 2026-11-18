@@ -10,6 +10,18 @@ export type LeTocaA = components["schemas"]["LeTocaA"];
 export type Filtro = components["schemas"]["FiltroConsultaPagos"];
 export type EstadoVisible = components["schemas"]["EstadoVisible"];
 
+export type MotivoSinActo = components["schemas"]["MotivoSinActo"];
+
+/** FL-APR-02, FL-ORD-06 y FL-ORD-08 (tanda 9, app 0110): por qué a quien mira no se le ofrece el acto
+ * del paso, cuando la razón es de esta orden y no de su rol. Una línea, debajo de lo que pasa. */
+export const TEXTO_SIN_ACTO: Record<MotivoSinActo, string> = {
+  ya_aprobaste: "Esta cuenta ya la aprobó: falta la aprobación de otra persona.",
+  cargaste_la_cuenta: "Esta cuenta cargó la cuenta destino del proveedor: la aprueba otra persona.",
+  aprobaste_la_orden: "Esta cuenta aprobó la orden: el pago lo concilia otra persona.",
+  proveedor_sin_cuenta: "El proveedor no tiene cuenta destino: así no se puede pagar. La carga quien prepara las órdenes, en la ficha del proveedor.",
+  proveedor_inactivo: "El proveedor está suspendido o de baja: no se puede enviar a aprobar de nuevo. Se lo reactiva en su ficha.",
+};
+
 export const VERBO: Record<Paso, string> = {
   pagar: "Ver la cuenta para pagar",
   tomar_pago: "Hacerse cargo de este pago",
