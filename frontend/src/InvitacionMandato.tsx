@@ -14,11 +14,16 @@ import { useIrAlInicio } from "./sesion";
 // de la URL y lo manda en el cuerpo de dos POST: consultar y, cuando la persona confirma, aceptar.
 //
 // La página no decide nada: la base valida el enlace, el mandato, la cuenta y la separación con el
-// Consejo, y la página solo explica la respuesta. Si el correo ya tiene cuenta, se entra acá mismo
-// y la aceptación se repite sola con el mismo enlace (G-35): no hace falta volver a abrir el correo.
-// Diseño provisorio: el definitivo llega con G3.
+// Consejo. La consulta, con la sesión de este navegador (y su CSRF), dice lo que pasaría al aceptar
+// (`paso`, informe de fricción C8G-12 y MAN-15, app 0109): la página ofrece «Aceptar y asociar mi
+// cuenta» solo si va a servir, pide el nombre solo si la cuenta se va a crear, y si no, dice de
+// entrada el motivo con su salida. Si el correo ya tiene cuenta, se entra acá mismo y la aceptación
+// sale sola con el mismo enlace (G-35). La aceptación vuelve a decidir: sus 409 siguen teniendo su
+// pantalla, por si algo cambió entre la consulta y el clic. Diseño provisorio: el definitivo llega
+// con G3.
 
 type Recibida = components["schemas"]["InvitacionMandatoRecibida"];
+type Paso = components["schemas"]["PasoInvitacionMandato"];
 
 type Rechazo =
   | "invitacion_requiere_sesion"
@@ -38,6 +43,16 @@ const RECHAZOS: readonly Rechazo[] = [
 /** Con el correo de una cuenta que ya existe: se entra acá y la invitación se acepta sola (G-35). */
 export const YA_HAY_CUENTA_MANDATO =
   "Ya hay una cuenta con este correo. Para asociarla, entrar con esa cuenta: al entrar, la invitación se acepta sola.";
+
+/** Dónde deja la página cada paso que informa la consulta (C8G-12): los mismos estados que los 409 de aceptar. */
+const ESTADO_DEL_PASO: Record<Paso, Estado> = {
+  crear_cuenta: "lista",
+  aceptar: "lista",
+  entrar: "invitacion_requiere_sesion",
+  otra_cuenta: "invitacion_de_otra_persona",
+  de_si_mismo: "asociacion_de_si_mismo",
+  consejo_superpuesto: "asociacion_incompatible_con_consejo",
+};
 
 const ESTADO_INVALIDA = 404;
 const ESTADO_CONFLICTO = 409;
@@ -81,12 +96,12 @@ export function InvitacionMandato() {
   const consultar = useCallback((elToken: string) => {
     setEstado("consultando");
     void api
-      .POST("/api/v1/auth/invitacion-mandato/consultar", { body: { token: elToken } })
+      .POST("/api/v1/auth/invitacion-mandato/consultar", { body: { token: elToken }, headers: encabezadoCsrf() })
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setInvitacion(data);
           setNombre(data.mandatario ?? "");
-          setEstado("lista");
+          setEstado(ESTADO_DEL_PASO[data.paso]);
         } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else fallar(response.status, codigoDe(error));
       })
@@ -110,7 +125,8 @@ export function InvitacionMandato() {
     if (!token) return;
     setEstado("aceptando");
     setFallaAlAceptar(null);
-    const elegido = nombre.trim();
+    // El nombre es solo de una cuenta nueva: a una que ya existe no se le pide ni se le manda (MAN-15).
+    const elegido = invitacion?.paso === "crear_cuenta" ? nombre.trim() : "";
     const volverAlFormulario = (estadoHttp: number, codigo: string | undefined) => {
       setFallaAlAceptar(mensajeDeFallaConEnlace(estadoHttp, codigo));
       setEstado("lista");
@@ -157,15 +173,19 @@ export function InvitacionMandato() {
           {/* MAN-15: lo que ya dicen el título y el botón no se repite; queda lo que no cambia. */}
           <p>El mandato, su CUIT y su vigencia no cambian.</p>
           <form className="formulario" onSubmit={aceptar}>
-            <label htmlFor={`${id}-nombre`}>Nombre (solo si la cuenta es nueva)</label>
-            <input
-              id={`${id}-nombre`}
-              type="text"
-              autoComplete="name"
-              maxLength={100}
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-            />
+            {invitacion.paso === "crear_cuenta" && (
+              <>
+                <label htmlFor={`${id}-nombre`}>Nombre</label>
+                <input
+                  id={`${id}-nombre`}
+                  type="text"
+                  autoComplete="name"
+                  maxLength={100}
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                />
+              </>
+            )}
             <button type="submit" disabled={estado === "aceptando"}>
               Aceptar y asociar mi cuenta
             </button>

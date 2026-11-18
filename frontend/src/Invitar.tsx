@@ -35,7 +35,10 @@ import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 // el definitivo llega con G3. Cada invitación es una fila que abre su ficha (comentario 21), con
 // «Retirar» adentro si el rol lo permite. No hay forma de modificar una invitación: se retira y se
 // manda otra. Invitar se carga en su ventana (INV-01 del informe de fricción, 17-11-2026), que se
-// ofrece solo si hay unidades a las que invitar (C8G-09).
+// ofrece solo si hay unidades a las que invitar (C8G-09). Con la unidad, el vínculo y el correo
+// escritos, la ventana pregunta si esa persona ya tiene la invitación del padrón importado (C8G-10,
+// app 0109): si la tiene, «Invitar» no se ofrece y una línea dice por qué. La pregunta responde lo
+// mismo que invitar respondería, sin decir nada más de esa invitación.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Unidad = components["schemas"]["Unidad"];
@@ -48,6 +51,9 @@ const ESTADO_SIN_SESION = 401;
 const ESTADO_SIN_PERMISO = 403;
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 const LARGO_MAXIMO_NOMBRE = 100;
+/** Cuánto se espera a que la persona deje de escribir el correo antes de preguntar por la invitación
+ * del padrón (C8G-10): una pregunta por correo escrito, no una por letra. */
+const ESPERA_CONSULTA_IMPORTADA_MS = 400;
 
 const TIPOS: { valor: TipoVinculo; texto: string }[] = [
   { valor: "propietario", texto: "Propietario/a" },
@@ -146,6 +152,8 @@ export function Invitar() {
   const [correo, setCorreo] = useState("");
   const [nombre, setNombre] = useState("");
   const [enviando, setEnviando] = useState(false);
+  /** C8G-10: la unidad, el vínculo y el correo por los que se preguntó, y si ya tienen la invitación del padrón. */
+  const [importada, setImportada] = useState<{ clave: string; pendiente: boolean } | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   /** Los campos que rechazó la API, con su motivo (G-23). */
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
@@ -276,6 +284,37 @@ export function Invitar() {
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, navegar]);
+
+  const correoEscrito = correo.trim();
+  const claveImportada = `${unidad}|${tipo}|${correoEscrito.toLowerCase()}`;
+  // C8G-10: con la ventana abierta y el correo escrito, se pregunta si ya salió la invitación del padrón.
+  useEffect(() => {
+    if (!invitando || consorcio === "" || unidad === "" || !correoEscrito.includes("@")) return;
+    let vigente = true;
+    const espera = setTimeout(() => {
+      void api
+        .POST("/api/v1/consorcios/{consorcio_id}/invitaciones/importada-pendiente", {
+          params: { path: { consorcio_id: consorcio } },
+          headers: encabezadoCsrf(),
+          body: { unidad_id: unidad, tipo, correo: correoEscrito },
+        })
+        .then(({ data, response }) => {
+          exigirSesion(response);
+          // Sin respuesta (un correo que la API no acepta, una falla), no se sabe: se ofrece «Invitar» y
+          // la invitación responde lo que corresponda, como antes de esta pregunta.
+          if (vigente && data !== undefined) setImportada({ clave: claveImportada, pendiente: data.importada_pendiente });
+        })
+        .catch((e: unknown) => {
+          if (vigente && e instanceof SinSesion) aEntrar();
+        });
+    }, ESPERA_CONSULTA_IMPORTADA_MS);
+    return () => {
+      vigente = false;
+      clearTimeout(espera);
+    };
+  }, [invitando, consorcio, unidad, tipo, correoEscrito, claveImportada, aEntrar]);
+  /** La persona del correo ya tiene la invitación del padrón para esa unidad y vínculo: invitar se negaría. */
+  const yaInvitadaPorElPadron = importada?.clave === claveImportada && importada.pendiente;
 
   /** Vuelve a pedir lo que no se pudo consultar, de un solo toque; un «Listo» a la vista queda. */
   function reconsultar() {
@@ -645,7 +684,13 @@ export function Invitar() {
   /** La ventana de invitar (INV-01): la unidad, el vínculo, el nombre y el correo. */
   function ventanaInvitar(lista: Unidad[]) {
     return (
-      <VentanaDeFormulario titulo="Invitar a una persona" textoEnviar="Invitar" alEnviar={invitar} alCerrar={() => setInvitando(false)}>
+      <VentanaDeFormulario
+        titulo="Invitar a una persona"
+        textoEnviar="Invitar"
+        alEnviar={invitar}
+        alCerrar={() => setInvitando(false)}
+        sinEnviar={yaInvitadaPorElPadron}
+      >
         {lista.length === 1 ? (
           <p>Unidad: {lista[0]?.designacion}</p>
         ) : (
@@ -705,6 +750,7 @@ export function Invitar() {
           onChange={(e) => cambiar(setCorreo, "correo")(e.target.value)}
         />
         <ErrorDeCampo idCampo={`${id}-correo`} mensaje={errores.correo} />
+        {yaInvitadaPorElPadron && <ComandoNoDisponible motivo={INVITACION_DEL_PADRON} />}
       </VentanaDeFormulario>
     );
   }

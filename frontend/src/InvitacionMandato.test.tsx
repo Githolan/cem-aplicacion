@@ -18,6 +18,7 @@ const RECIBIDA = {
   mandatario: "Estudio X",
   invitada_por: "Ana",
   vence_en: "2026-10-26T00:00:00Z",
+  paso: "crear_cuenta",
 };
 
 function aceptada(vigenteDesde: string) {
@@ -59,7 +60,8 @@ const ACEPTAR = "/api/v1/auth/invitacion-mandato/aceptar";
 const SALIR = "/api/v1/auth/salir";
 const INICIO = { level: 1, name: "Consorcio en mano" };
 const AVISO = "Listo: la cuenta quedó asociada a la administración de Edificio Alvear 100.";
-const CAMPO_NOMBRE = "Nombre (solo si la cuenta es nueva)";
+/** MAN-15: el campo sale solo cuando la cuenta se va a crear, así que no hace falta aclararlo. */
+const CAMPO_NOMBRE = "Nombre";
 
 type Respuesta = () => Response | Promise<Response>;
 
@@ -132,7 +134,7 @@ describe("página /invitacion-mandato", () => {
     const simulado = backend(() => Response.json(aceptada("2026-01-01")));
     vi.stubGlobal("fetch", simulado);
     abrir(`${RUTA}#token=${TOKEN}`);
-    const campo = await screen.findByLabelText("Nombre (solo si la cuenta es nueva)");
+    const campo = await screen.findByLabelText(CAMPO_NOMBRE);
     expect((campo as HTMLInputElement).value).toBe("Estudio X");
     fireEvent.change(campo, { target: { value: "  Beto Estudio " } });
     fireEvent.click(await aceptarBoton());
@@ -305,13 +307,49 @@ describe("ningún error de /invitacion-mandato termina sin un paso siguiente", (
   });
 });
 
+describe("C8G-12 y MAN-15: la consulta dice lo que pasaría al aceptar", () => {
+  it("con la sesión de la cuenta del correo ofrece asociar sin pedir el nombre, y la consulta lleva el CSRF", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+    const simulado = backend(() => Response.json({ ...aceptada("2026-01-01"), cuenta_nueva: false }), () => Response.json({ ...RECIBIDA, paso: "aceptar" }));
+    vi.stubGlobal("fetch", simulado);
+    abrir(`${RUTA}#token=${TOKEN}`);
+    const boton = await aceptarBoton();
+    expect(screen.queryByLabelText(CAMPO_NOMBRE)).toBeNull();
+    expect(consultasDe(simulado)[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
+    fireEvent.click(boton);
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+    expect(await aceptacionesDe(simulado)[0]?.json()).toEqual({ token: TOKEN, nombre: null });
+  });
+
+  it.each<[string, string, RegExp]>([
+    ["con otra cuenta abierta", "otra_cuenta", /no es la del correo invitado/],
+    ["si la cuenta tiene un mandato del Consejo superpuesto", "consejo_superpuesto", /el Consejo fiscaliza/],
+    ["si la cuenta emitió o aprobó la invitación", "de_si_mismo", /no puede aceptarla para sí/],
+  ])("%s lo dice de entrada, sin el campo ni el botón", async (_, paso, texto) => {
+    const simulado = backend(() => Response.json(aceptada("2026-01-01")), () => Response.json({ ...RECIBIDA, paso }));
+    vi.stubGlobal("fetch", simulado);
+    abrir(`${RUTA}#token=${TOKEN}`);
+    expect(await screen.findByText(texto)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar y asociar mi cuenta" })).toBeNull();
+    expect(screen.queryByLabelText(CAMPO_NOMBRE)).toBeNull();
+    expect(aceptacionesDe(simulado)).toEqual([]);
+  });
+
+  it("control: con una cuenta nueva pide el nombre y ofrece asociar", async () => {
+    vi.stubGlobal("fetch", backend(() => Response.json(aceptada("2026-01-01"))));
+    abrir(`${RUTA}#token=${TOKEN}`);
+    expect(await aceptarBoton()).toBeTruthy();
+    expect(screen.getByLabelText(CAMPO_NOMBRE)).toBeTruthy();
+  });
+});
+
 describe("G-35 en /invitacion-mandato", () => {
-  it("con una cuenta que ya existe, se entra acá mismo y la asociación sale sola, sin volver a abrir el correo", async () => {
+  it("con una cuenta que ya existe, lo dice de entrada, se entra acá mismo y la asociación sale sola, sin volver a abrir el correo", async () => {
     vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
     let conSesion = false;
     const pedido = vi.fn(async (p: Request) => {
       const camino = new URL(p.url).pathname;
-      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === CONSULTAR) return Response.json({ ...RECIBIDA, paso: "entrar" });
       if (camino === ACEPTAR)
         return conSesion ? Response.json({ ...aceptada("2026-01-01"), cuenta_nueva: false }) : error("invitacion_requiere_sesion", 409);
       if (camino === "/api/v1/auth/codigo") {
@@ -324,9 +362,10 @@ describe("G-35 en /invitacion-mandato", () => {
     });
     vi.stubGlobal("fetch", pedido);
     abrir(`${RUTA}#token=${TOKEN}`);
-    fireEvent.click(await aceptarBoton());
 
+    // C8G-12: sin el botón ni el nombre, aceptar así llevaría al rechazo.
     expect(await screen.findByText(YA_HAY_CUENTA_MANDATO)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar y asociar mi cuenta" })).toBeNull();
     expect(screen.queryByText(/abrir de nuevo el enlace del correo/)).toBeNull();
     const entrar = screen.getByRole("region", { name: "Entrar para asociar la cuenta" });
     fireEvent.click(within(entrar).getByRole("button", { name: "Ya tengo un código" }));
@@ -336,8 +375,8 @@ describe("G-35 en /invitacion-mandato", () => {
 
     expect(await screen.findByText(AVISO)).toBeTruthy();
     const aceptaciones = aceptacionesDe(pedido);
-    expect(aceptaciones).toHaveLength(2);
-    expect(((await aceptaciones[1]?.json()) as { token: string }).token).toBe(TOKEN);
+    expect(aceptaciones).toHaveLength(1);
+    expect(await aceptaciones[0]?.json()).toEqual({ token: TOKEN, nombre: null });
   });
 });
 

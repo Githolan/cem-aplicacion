@@ -47,7 +47,10 @@ async function simularApi(
     const camino = new URL(pedido.url()).pathname;
     pedidos.push({ camino, url: pedido.url(), csrf: (await pedido.headerValue("x-csrf-token")) ?? null, cuerpo: pedido.postDataJSON() });
     if (camino.endsWith("/consultar"))
-      return ruta.fulfill({ json: { consorcio: "Edificio Azul", mandatario: "Estudio X", invitada_por: "Ana", vence_en: "2026-10-26T12:00:00Z" } });
+      // C8G-12 y MAN-15 (app 0109): `paso` dice lo que pasaría al aceptar; acá, una cuenta nueva.
+      return ruta.fulfill({
+        json: { consorcio: "Edificio Azul", mandatario: "Estudio X", invitada_por: "Ana", vence_en: "2026-10-26T12:00:00Z", paso: "crear_cuenta" },
+      });
     return ruta.fulfill(typeof aceptar === "function" ? aceptar() : aceptar);
   });
   await pagina.context().addCookies([
