@@ -2156,3 +2156,10 @@ a.fila-registro:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Flujos 18-11, tanda 2 */
+/* Sin nada pendiente, una línea en el inicio (FL-INI-01). */
+.inicio-nada {
+  margin: var(--space-4) 0;
+  color: var(--ink-muted);
+}

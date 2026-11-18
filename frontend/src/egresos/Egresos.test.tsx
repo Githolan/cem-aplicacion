@@ -183,6 +183,11 @@ const INICIO: Respuestas = {
   "GET /api/v1/me/consorcios": CONSORCIOS,
   // Con todas las acciones, el inicio cuenta los vínculos sin confirmar (G-26).
   [`GET /api/v1/consorcios/${C1}/padron`]: () => Response.json({ elementos: [] }),
+  // Lo demás que lee el inicio como bandeja (decisión 9 del 18-11-2026), sin pendientes.
+  [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 }),
+  [`GET ${BASE}/solicitudes-formales`]: () => Response.json({ elementos: [] }),
+  [`GET ${BASE}/mandatos`]: () => Response.json({ elementos: [] }),
+  [`GET ${BASE}/contactos/gestion`]: () => Response.json({ elementos: [] }),
 };
 
 function abrir(ruta: string) {

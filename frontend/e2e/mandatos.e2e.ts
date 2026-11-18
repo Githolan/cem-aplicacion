@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularInicioSinPendientes, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /mandatos servida por el nginx de la imagen, con su CSP real. El backend de la corrida
 // no tiene base de datos: sin sesión responde el 401 de verdad y la página manda a /entrar. Con
@@ -110,6 +110,9 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
         return ruta.fulfill({
           json: { ...decision, referencia: "Acta 14", sha256: null },
         });
+      // Lo demás que lee el inicio, sin pendientes (decisión 9, tanda 2 de flujos).
+      const inicio = simularInicioSinPendientes(ruta, camino);
+      if (inicio !== null) return inicio;
       return ruta.abort();
     }
     const csrf = (await pedido.headerValue("x-csrf-token")) ?? null;

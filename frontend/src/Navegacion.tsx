@@ -117,6 +117,16 @@ const RUTAS_CON_NAVEGACION: readonly string[] = [
   RUTA_POR_ACLARAR,
 ];
 
+/** Adónde lleva la entrada para esta persona; null si no se le ofrece. La misma regla en el menú y
+ * en la lista «Gestión» del inicio (FL-AVI-02): `conSolicitudes` es el destinatario que tiene alguna
+ * solicitud dirigida a él (MEN-04). */
+export function rutaDelDestino(d: Destino, porEdificio: ReadonlyMap<string, readonly string[]> | null, conSolicitudes: boolean): string | null {
+  if (d.opciones !== undefined)
+    return porEdificio === null ? null : (d.opciones.find((o) => cumpleEnAlguno(porEdificio, o.requisito))?.ruta ?? null);
+  if (d.ruta === RUTA_SOLICITUDES && conSolicitudes) return d.ruta;
+  return d.requisito === undefined || (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo)) ? d.ruta : null;
+}
+
 type PropsItem = { destino: Destino; ruta: string; activa: boolean; secundario?: boolean; desdeInicio?: boolean };
 
 function Item({ destino, ruta, activa, secundario, desdeInicio }: PropsItem) {
@@ -147,16 +157,9 @@ export function Navegacion() {
   const { porEdificio, consultando, falla, reintentar, reintentando } = useConsultaDeAcciones();
   // MEN-04: «Solicitudes formales» también para el destinatario que tiene alguna dirigida a él.
   const conSolicitudes = useSolicitudesDirigidas(porEdificio);
-  /** Adónde lleva la entrada para esta persona; null si no se le ofrece. */
-  const rutaPara = (d: Destino): string | null => {
-    if (d.opciones !== undefined)
-      return porEdificio === null ? null : (d.opciones.find((o) => cumpleEnAlguno(porEdificio, o.requisito))?.ruta ?? null);
-    if (d.ruta === RUTA_SOLICITUDES && conSolicitudes) return d.ruta;
-    return d.requisito === undefined || (porEdificio !== null && ofreceEnAlguno(porEdificio, d.requisito, d.salvo)) ? d.ruta : null;
-  };
   const ofrecidas = (destinos: readonly Destino[]) =>
     destinos.flatMap((destino) => {
-      const ruta = rutaPara(destino);
+      const ruta = rutaDelDestino(destino, porEdificio, conSolicitudes);
       return ruta === null ? [] : [{ destino, ruta, activa: marcaLa(destino, pathname) }];
     });
   const administracion = ofrecidas(DE_ADMINISTRACION);

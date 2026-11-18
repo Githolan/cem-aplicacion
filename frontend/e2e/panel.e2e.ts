@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularInicioSinPendientes, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /panel servida por el nginx de la imagen, con su CSP real. Sin sesión responde el
 // backend de verdad (401); con sesión la API se simula desde el navegador. Quién ve el panel lo
@@ -79,6 +79,9 @@ async function simularApi(pagina: Page, subidas: string[] = []): Promise<string[
       if (camino === "/api/v1/pagos-por-aclarar" || camino === "/api/v1/me/invitaciones")
         return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });
     }
+    // Lo demás que lee el inicio, sin pendientes (decisión 9, tanda 2 de flujos).
+    const inicio = simularInicioSinPendientes(ruta, camino);
+    if (inicio !== null) return inicio;
     imprevistos.push(`${pedido.method()} ${camino}`);
     return ruta.abort();
   });
