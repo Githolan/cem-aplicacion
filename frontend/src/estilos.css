@@ -2156,3 +2156,38 @@ a.fila-registro:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Flujos 18-11, tanda 6 */
+
+/* Liquidación: cada gasto del borrador en una fila compacta, como el Padrón (FL-LIQ-06): proveedor
+   e importe arriba; concepto, grupo y fecha debajo; «Quitar» al costado. */
+.gastos-liquidacion {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.gasto-liquidacion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.gasto-liquidacion__datos {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gasto-liquidacion__resumen {
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
