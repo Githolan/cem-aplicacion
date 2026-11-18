@@ -33,7 +33,7 @@ import {
   SIN_REQUISITO, TITULO_SECCION,
 } from "./DocumentacionProveedor";
 import { SALTEO_EN_UNA_URGENCIA } from "../pagos/textos";
-import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
+import { MARCA_BLOQUEADO, RUTA_CONSULTA_PROVEEDORES, textoMarcaSalteo, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
 import {
   ACLARACION_RETIRO,
   AUTORIZAR,
@@ -42,6 +42,7 @@ import {
   FALTA_MOTIVO,
   MOTIVO,
   RETIRAR,
+  VE_POR_ROL,
   RUTA_AUTORIZACIONES_PROVEEDORES,
   textoAutorizado,
   textoRetirado,
@@ -163,13 +164,23 @@ const CON_SEGUNDO_FACTOR: Respuestas = {
   [`GET /api/v1/consorcios/${C1}/pedidos-salteo`]: () => Response.json({ elementos: [] }),
 };
 
+/** Los campos que el contrato 0.77.0 sumó a las listas de proveedores (tanda 8): la prueba que no los
+ * fija los recibe vacíos, como el servidor sin salteos. */
+const LISTA_DE_PROVEEDORES = /^GET \/api\/v1\/consorcios\/[^/]+\/(consulta-)?proveedores$/;
+async function completarLista(clave: string, respuesta: Response): Promise<Response> {
+  if (!LISTA_DE_PROVEEDORES.test(clave) || !respuesta.ok) return respuesta;
+  const datos = (await respuesta.clone().json()) as Record<string, unknown>;
+  const nuevos = { con_salteo: [], vence_salteo: [], salteo_vencido_sin_usar: [], autoriza_por_persona: true };
+  return Response.json({ ...nuevos, ...datos }, { status: respuesta.status });
+}
+
 /** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
     const respuesta = respuestas[clave] ?? CON_SEGUNDO_FACTOR[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
-    return respuesta();
+    return completarLista(clave, await respuesta());
   });
 }
 
@@ -1198,6 +1209,13 @@ describe("página /egresos/proveedores", () => {
     expect(enlace.getAttribute("href")).toBe("/proveedores/quien-los-ve");
   });
 
+  it("FL-VER-01: si el edificio no autoriza por persona, la gestión no ofrece «Quién ve los proveedores»", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()], autoriza_por_persona: false }) }));
+    abrir("/egresos/proveedores");
+    await screen.findByRole("button", { name: /^Limpieza Ficticia SRL/ });
+    expect(screen.queryByRole("link", { name: "Quién ve los proveedores" })).toBeNull();
+  });
+
   it("con el campo de cuenta vacío se conserva la cuenta y no hay aviso", async () => {
     const simulado = conLista({
       [`POST ${BASE}/proveedores/${P1}/versiones`]: () => Response.json({ id: P1, version: 2 }),
@@ -1650,7 +1668,8 @@ describe("página /proveedores (consulta)", () => {
     const { container } = abrir(RUTA_CONSULTA_PROVEEDORES);
     const fila = await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
     expect(fila.textContent).toContain(MARCA_VENCIDA);
-    expect(fila.textContent).toContain(MARCA_FALTANTE);
+    // En «bloquear», sin salteo: bloqueado (FL-VER-03).
+    expect(fila.textContent).toContain(MARCA_BLOQUEADO);
     expect(fila.textContent).not.toContain("Cuenta");
     // «Activo» es lo esperado: no se dice (CPR-02).
     expect(fila.textContent).not.toContain("Activo");
@@ -1719,6 +1738,33 @@ describe("página /proveedores (consulta)", () => {
     abrir(RUTA_CONSULTA_PROVEEDORES);
     const enlace = await screen.findByRole("link", { name: "Quién ve los proveedores" });
     expect(enlace.getAttribute("href")).toBe(RUTA_AUTORIZACIONES_PROVEEDORES);
+  });
+
+  it("FL-VER-01: si el edificio no autoriza por persona, la consulta no ofrece «Quién ve los proveedores»", async () => {
+    const apagada = () =>
+      Response.json({ elementos: [enConsulta], documentacion_vencida: [], documentacion_por_vencer: [], documentacion_faltante: [], modo_exigencia: "bloquear", autoriza_por_persona: false });
+    vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("proveedores.ver", "proveedores.autorizar"), [`GET ${CONSULTA}`]: apagada }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    await screen.findByRole("button", { name: /^Ascensores Ficticios SA / });
+    expect(screen.queryByRole("link", { name: "Quién ve los proveedores" })).toBeNull();
+  });
+
+  it("FL-VER-03: en «bloquear», la fila distingue el bloqueado del que tiene un salteo, con hasta cuándo; en «avisar», la marca de siempre", async () => {
+    const VENCE = "2026-11-19T15:00:00Z";
+    const otro = { ...enConsulta, id: C2, razon_social: "Gas Ficticio SRL" };
+    const lista = (modo: string) => () =>
+      Response.json({
+        elementos: [enConsulta, otro], documentacion_vencida: [], documentacion_por_vencer: [], documentacion_faltante: [P1, C2],
+        modo_exigencia: modo, con_salteo: [C2], vence_salteo: [{ proveedor_id: C2, vence_en: VENCE }],
+      });
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}`]: lista("bloquear") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    expect((await screen.findByRole("button", { name: /^Ascensores Ficticios SA / })).textContent).toContain(MARCA_BLOQUEADO);
+    expect(screen.getByRole("button", { name: /^Gas Ficticio SRL / }).textContent).toContain(textoMarcaSalteo(VENCE));
+    cleanup();
+    vi.stubGlobal("fetch", consulta({ [`GET ${CONSULTA}`]: lista("avisar") }));
+    abrir(RUTA_CONSULTA_PROVEEDORES);
+    expect((await screen.findByRole("button", { name: /^Gas Ficticio SRL / })).textContent).toContain(MARCA_FALTANTE);
   });
 
   // Salteo por urgencia (app 0106; propietario, 16-11-2026: «si con motivo»).
@@ -1902,6 +1948,7 @@ describe("página /proveedores/quien-los-ve", () => {
     motivo: null,
     registrado_en: null,
     registrado_por_nombre: null,
+    ve_por_rol: false,
   };
   const autorizado = {
     ...sinAutorizar,
@@ -1945,6 +1992,24 @@ describe("página /proveedores/quien-los-ve", () => {
     expect(within(ficha).getByText("SINTETICO: comisión de obras")).toBeTruthy();
     expect(within(ficha).getByRole("button", { name: RETIRAR }).className).toBe("secundario peligro");
     await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("FL-VER-02: quien ya los ve por su rol lo dice la fila, y la ficha no ofrece «Autorizar»", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => Response.json({ elementos: [{ ...sinAutorizar, ve_por_rol: true }] }) }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    const fila = await screen.findByRole("button", { name: /^Habitante Ficticio / });
+    expect(fila.textContent).toBe(`Habitante Ficticio 3° A · ${VE_POR_ROL}`);
+    fireEvent.click(fila);
+    const ficha = await screen.findByRole("dialog", { name: "Habitante Ficticio" });
+    expect(within(ficha).queryByRole("button", { name: AUTORIZAR })).toBeNull();
+  });
+
+  it("FL-VER-02: con una autorización registrada y el rol que ya los ve, retirarla se sigue ofreciendo", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => Response.json({ elementos: [{ ...autorizado, ve_por_rol: true }] }) }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: /^Habitante Ficticio / }));
+    const ficha = await screen.findByRole("dialog", { name: "Habitante Ficticio" });
+    expect(within(ficha).getByRole("button", { name: RETIRAR })).toBeTruthy();
   });
 
   it("autoriza con el motivo en su ventana (AUT-02): botón siempre activo, y al terminar queda la lista con el resultado", async () => {

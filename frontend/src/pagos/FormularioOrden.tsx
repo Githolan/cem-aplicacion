@@ -24,6 +24,7 @@ import {
   importe,
   mensajeDeActo,
   mensajeDeError,
+  momentoAlFinal,
   sinLaFalla,
   sinPisarLoHecho,
   sobreLoNuevo,
@@ -114,6 +115,10 @@ type Lectura =
       conSalteo: ReadonlySet<string>;
       /** Los bloqueados cuyo salteo vigente lo registró quien prepara: la base no lo toma (app 0109). */
       salteoPropio: ReadonlySet<string>;
+      /** Hasta cuándo sirve el salteo de cada uno de `conSalteo` (FL-SAL-01, app 0110). */
+      venceSalteo: ReadonlyMap<string, string>;
+      /** Los bloqueados cuyo último salteo venció sin usarse (FL-SAL-04, app 0110). */
+      vencidoSinUsar: ReadonlySet<string>;
     };
 
 /** Lo que el formulario toma de la lista de proveedores: la lista y sus bloqueos. */
@@ -124,8 +129,15 @@ function deLaLista(l: components["schemas"]["ListaProveedores"]) {
     modo: l.modo_exigencia,
     conSalteo: new Set(l.con_salteo),
     salteoPropio: new Set(l.salteo_de_quien_prepara),
+    venceSalteo: new Map(l.vence_salteo.map((v) => [v.proveedor_id, v.vence_en])),
+    vencidoSinUsar: new Set(l.salteo_vencido_sin_usar),
   };
 }
+
+/** FL-SAL-01 (tanda 9): el aviso del salteo que sirve dice hasta cuándo. */
+export const textoConSalteo = (vence: string | undefined) => (vence === undefined ? CON_SALTEO : `${CON_SALTEO} Sirve hasta el ${momentoAlFinal(vence)}`);
+/** FL-SAL-04 (tanda 9): el último salteo venció sin que se preparara la orden. */
+export const SALTEO_VENCIDO_SIN_USAR = "El último salteo por urgencia de este proveedor venció sin usarse.";
 
 /** Qué pasa con el proveedor bloqueado (informe de fricción, C8P-01 y C8P-02): sin un salteo que le
  * sirva a quien prepara, la base no deja crear la orden, ni como borrador. Lo dice la lista de
@@ -844,6 +856,7 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
         {elegido !== undefined && !inactivo && salteoDelElegido === "sin_salteo" && (
           <>
             <ComandoNoDisponible motivo={SIN_DOCUMENTACION} resolver={aSuFicha(elegido)} />
+            {lectura.vencidoSinUsar.has(elegido.id) && <p className="aviso-pendiente" role="note">{SALTEO_VENCIDO_SIN_USAR}</p>}
             {/* Pregunta 3 del propietario (18-11-2026, tanda 9): el salteo se le pide al Consejo desde acá. */}
             <PedidoDeSalteo consorcio={consorcio} proveedor={elegido} monedas={monedas}
               inicial={{ importe: datos.importe, moneda: datos.moneda }} aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
@@ -853,7 +866,11 @@ export function FormularioOrden({ consorcio, monedas, acto, aEntrar, aInicio, mo
           <ComandoNoDisponible motivo={SALTEO_PROPIO} resolver={aSuFicha(elegido)} />
         )}
         <div className="campos-de-la-orden" hidden={impedido}>
-          {salteoDelElegido === "con_salteo" && <p className="aviso-pendiente" role="note">{CON_SALTEO}</p>}
+          {salteoDelElegido === "con_salteo" && (
+            <p className="aviso-pendiente" role="note">
+              {textoConSalteo(lectura.venceSalteo.get(datos.proveedor))}
+            </p>
+          )}
           {/* FL-ORD-06: sin cuenta destino la orden no se puede pagar; se avisa y se deja guardar (decisión 2). */}
           {elegido !== undefined && elegido.cuenta_ultimos_digitos === null && (
             <p className="aviso-pendiente" role="note">

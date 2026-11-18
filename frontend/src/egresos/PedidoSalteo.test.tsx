@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
+import { SALTEO_VENCIDO_SIN_USAR, textoConSalteo } from "../pagos/FormularioOrden";
 import { ContextoVersion } from "../version";
 import {
   ENVIAR_PEDIDO,
@@ -207,5 +208,32 @@ describe("el pedido desde la ficha del proveedor", () => {
     expect(await within(ficha).findByText(normal(textoPedidoAlConsejo(pedido({ propio: false }))))).toBeTruthy();
     fireEvent.click(within(ficha).getByRole("button", { name: SALTEAR }));
     await waitFor(() => expect((screen.getByLabelText(MOTIVO_SALTEO) as HTMLTextAreaElement).value).toBe("Pérdida de gas en el palier"));
+  });
+});
+
+describe("el salteo en el formulario de la orden (FL-SAL-01, FL-SAL-04, tanda 9)", () => {
+  it("con un salteo que sirve, el aviso dice hasta cuándo", async () => {
+    const VENCE = "2026-11-19T15:00:00Z";
+    const lista = { ...LISTA, con_salteo: [P1], vence_salteo: [{ proveedor_id: P1, vence_en: VENCE }] };
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/proveedores`]: () => Response.json(lista) }));
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    expect(await screen.findByText(normal(textoConSalteo(VENCE)))).toBeTruthy();
+    expect(textoConSalteo(VENCE)).toMatch(/Sirve hasta el .+\.$/);
+  });
+
+  it("el último salteo que venció sin usarse se dice junto al bloqueo", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/proveedores`]: () => Response.json({ ...LISTA, salteo_vencido_sin_usar: [P1] }) }));
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    expect(await screen.findByText(SALTEO_VENCIDO_SIN_USAR)).toBeTruthy();
+  });
+
+  it("control: sin un salteo vencido, no se dice", async () => {
+    vi.stubGlobal("fetch", backend({}));
+    abrir("/pagos/nueva");
+    await elegirElBloqueado();
+    await screen.findByRole("button", { name: PEDIR_SALTEO });
+    expect(screen.queryByText(SALTEO_VENCIDO_SIN_USAR)).toBeNull();
   });
 });

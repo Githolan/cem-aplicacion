@@ -241,6 +241,16 @@ async function completarFicha(clave: string, respuesta: Response): Promise<Respo
   return Response.json(completa, { status: respuesta.status });
 }
 
+/** Los campos que el contrato 0.77.0 sumó a las listas de proveedores (tanda 8): la prueba que no los
+ * fija los recibe vacíos, como el servidor sin salteos. */
+const LISTA_DE_PROVEEDORES = /^GET \/api\/v1\/consorcios\/[^/]+\/(consulta-)?proveedores$/;
+async function completarLista(clave: string, respuesta: Response): Promise<Response> {
+  if (!LISTA_DE_PROVEEDORES.test(clave) || !respuesta.ok) return respuesta;
+  const datos = (await respuesta.clone().json()) as Record<string, unknown>;
+  const nuevos = { con_salteo: [], vence_salteo: [], salteo_vencido_sin_usar: [], autoriza_por_persona: true };
+  return Response.json({ ...nuevos, ...datos }, { status: respuesta.status });
+}
+
 /** Responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
 function backend(respuestas: Respuestas) {
   const base: Respuestas = {
@@ -257,7 +267,7 @@ function backend(respuestas: Respuestas) {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
     const respuesta = respuestas[clave] ?? base[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
-    return completarFicha(clave, await respuesta());
+    return completarLista(clave, await completarFicha(clave, await respuesta()));
   });
 }
 

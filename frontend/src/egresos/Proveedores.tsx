@@ -94,7 +94,15 @@ export const OTROS_EDIFICIOS = "Proveedores de los otros edificios";
 type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_servicio" }
-  | { tipo: "ok"; proveedores: Proveedor[]; vencida: ReadonlySet<string>; porVencer: ReadonlySet<string>; faltante: ReadonlySet<string> };
+  | {
+      tipo: "ok";
+      proveedores: Proveedor[];
+      vencida: ReadonlySet<string>;
+      porVencer: ReadonlySet<string>;
+      faltante: ReadonlySet<string>;
+      /** Si el edificio autoriza a personas a ver los proveedores (FL-VER-01, app 0110). */
+      autorizaPorPersona: boolean;
+    };
 
 type Datos = {
   cuit: string;
@@ -404,6 +412,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             vencida: new Set(data.documentacion_vencida),
             porVencer: new Set(data.documentacion_por_vencer),
             faltante: new Set(data.documentacion_faltante),
+            autorizaPorPersona: data.autoriza_por_persona,
           });
         else if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver los proveedores", reintentar: () => setVuelta((v) => v + 1) });
@@ -762,8 +771,9 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                     {VOLVER_A_LA_ORDEN}
                   </Link>
                 )}
-                {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú. */}
-                {puede("proveedores.autorizar") && (
+                {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú.
+                    FL-VER-01: si el edificio no autoriza por persona, no hay a quién autorizar. */}
+                {puede("proveedores.autorizar") && lectura.autorizaPorPersona && (
                   <Link to={RUTA_AUTORIZACIONES_PROVEEDORES} state={{ consorcio }} className="enlace-suelto">
                     {TITULO_AUTORIZACIONES_PROVEEDORES}
                   </Link>

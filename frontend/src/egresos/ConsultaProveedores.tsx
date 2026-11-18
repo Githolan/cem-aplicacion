@@ -13,6 +13,7 @@ import {
   ESTADO,
   estadoSiNoEsActivo,
   mensajeDeError,
+  momento,
   RUTA_AUTORIZACIONES_PROVEEDORES,
   RUTA_CONSULTA_PROVEEDORES,
   sinLaFalla,
@@ -42,6 +43,18 @@ import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 // de ese proveedor se abre sola, con el pedido a la vista y el botón del salteo.
 
 type ProveedorConsulta = components["schemas"]["ProveedorConsulta"];
+
+/** FL-VER-03: en «bloquear», el que falta está bloqueado o tiene un salteo que espera su orden. */
+export const MARCA_BLOQUEADO = "Bloqueado: le falta documentación legal";
+export const MARCA_SALTEO = "Salteo por urgencia";
+export const textoMarcaSalteo = (vence: string) => `${MARCA_SALTEO} hasta el ${momento(vence)}`;
+
+function marcaDeFalta(l: { bloquea: boolean; conSalteo: ReadonlySet<string>; venceSalteo: ReadonlyMap<string, string> }, id: string): string {
+  if (!l.bloquea) return MARCA_FALTANTE;
+  if (!l.conSalteo.has(id)) return MARCA_BLOQUEADO;
+  const vence = l.venceSalteo.get(id);
+  return vence === undefined ? MARCA_SALTEO : textoMarcaSalteo(vence);
+}
 type Ficha = components["schemas"]["FichaProveedorConsulta"];
 
 export { RUTA_CONSULTA_PROVEEDORES };
@@ -56,6 +69,12 @@ type Lectura =
       vencida: ReadonlySet<string>;
       porVencer: ReadonlySet<string>;
       faltante: ReadonlySet<string>;
+      /** FL-VER-03 (tanda 9): en «bloquear», si el que falta está bloqueado o tiene un salteo, y hasta cuándo. */
+      bloquea: boolean;
+      conSalteo: ReadonlySet<string>;
+      venceSalteo: ReadonlyMap<string, string>;
+      /** FL-VER-01: si el edificio autoriza a personas a ver los proveedores. */
+      autorizaPorPersona: boolean;
     };
 
 /** La ficha que se pidió abrir al llegar (desde el inicio), y de qué edificio. */
@@ -105,6 +124,10 @@ function DelEdificio({
             vencida: new Set(data.documentacion_vencida),
             porVencer: new Set(data.documentacion_por_vencer),
             faltante: new Set(data.documentacion_faltante),
+            bloquea: data.modo_exigencia === "bloquear",
+            conSalteo: new Set(data.con_salteo),
+            venceSalteo: new Map(data.vence_salteo.map((v) => [v.proveedor_id, v.vence_en])),
+            autorizaPorPersona: data.autoriza_por_persona,
           });
         else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
@@ -173,8 +196,9 @@ function DelEdificio({
 
       {pantalla.tipo === "lista" && (
         <>
-          {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú. */}
-          {puede("proveedores.autorizar") && (
+          {/* MEN-05: quién ve los proveedores se decide desde acá, no desde otra entrada del menú.
+              FL-VER-01: si el edificio no autoriza por persona, no hay a quién autorizar. */}
+          {puede("proveedores.autorizar") && lectura.tipo === "ok" && lectura.autorizaPorPersona && (
             <p>
               <Link to={RUTA_AUTORIZACIONES_PROVEEDORES} state={{ consorcio }} className="enlace-suelto">
                 {TITULO_AUTORIZACIONES_PROVEEDORES}
@@ -199,7 +223,7 @@ function DelEdificio({
                         p.rubro,
                         estadoSiNoEsActivo(p.estado),
                         lectura.vencida.has(p.id) ? MARCA_VENCIDA : lectura.porVencer.has(p.id) ? MARCA_POR_VENCER : null,
-                        lectura.faltante.has(p.id) ? MARCA_FALTANTE : null,
+                        lectura.faltante.has(p.id) ? marcaDeFalta(lectura, p.id) : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}
