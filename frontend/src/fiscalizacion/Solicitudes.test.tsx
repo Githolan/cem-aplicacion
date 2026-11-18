@@ -11,7 +11,9 @@ import type { components } from "../api/tipos";
 import { ContextoVersion } from "../version";
 import {
   DOS_FIRMAS,
+  FALTA_ADMINISTRADOR,
   FIRMAR,
+  IR_A_MANDATOS,
   PREPARAR,
   REGISTRAR_ENVIO,
   RESPONDER,
@@ -56,6 +58,7 @@ const BORRADOR: Solicitud = {
   respuesta: null,
   retiro: null,
   acciones: ["firmar", "retirar"],
+  falta_administrador_vigente: false,
 };
 const PENDIENTE: Solicitud = {
   ...BORRADOR,
@@ -308,6 +311,28 @@ describe("solicitudes formales", () => {
     expect(await screen.findByText("Quedó la firma. Falta la de otra persona.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect((await fila(3)).textContent).toMatch(/1 de 2 firmas$/);
+  });
+
+  it("C8P-08: sin administrador vigente no ofrece «Firmar»: dice qué falta y dónde se resuelve", async () => {
+    const espera: Solicitud = {
+      ...BORRADOR, firmas: [{ nombre: "Eva Ficticia", firmada_en: "2026-11-16T10:00:00Z", propia: false }],
+      acciones: ["retirar"], falta_administrador_vigente: true,
+    };  // prettier-ignore
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [espera] }) }));
+    abrir();
+    const ficha = await abrirFicha(3);
+    const linea = await ficha.findByText(new RegExp(`^${FALTA_ADMINISTRADOR.slice(0, 40)}`));
+    expect(within(linea).getByRole("link", { name: IR_A_MANDATOS }).getAttribute("href")).toBe("/mandatos");
+    expect(ficha.queryByRole("button", { name: FIRMAR })).toBeNull();
+    expect(ficha.getByRole("button", { name: RETIRAR })).toBeTruthy();
+  });
+
+  it("control C8P-08: con administrador vigente no hay línea y se ofrece «Firmar»", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    const ficha = await abrirFicha(3);
+    expect(await ficha.findByRole("button", { name: FIRMAR })).toBeTruthy();
+    expect(ficha.queryByText(new RegExp(`^${FALTA_ADMINISTRADOR.slice(0, 40)}`))).toBeNull();
   });
 
   it("C8P-26: registra el envío en su ventana: sin comprobante lo marca; con él lo sube y lo cita", async () => {

@@ -355,6 +355,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
         ].map((f, i) => ({
           ...f,
           confirmable_por_vos: !f.confirmado,
+          gestionable_por_vos: true,
           vinculo_id: `5555555${i}-5555-4555-8555-555555555555`,
           unidad_id: "44444444-4444-4444-8444-444444444444",
           designacion: "1° A",
@@ -463,8 +464,8 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: `/invitacion#token=${TOKEN_ENLACE}`,
     cargada: "Aceptar la invitación",
     api: {
-      // La sesión abierta es la del correo invitado: con la de otra cuenta la página ya no ofrece
-      // aceptar (C8G-11), y lo que se mide acá es el formulario.
+      // Lo que se mide acá es el formulario: la consulta dice que la cuenta se crea (`paso`, C8G-11),
+      // así que se ven el nombre y «Aceptar la invitación».
       "GET /api/v1/auth/sesion": {
         persona_id: "99999999-9999-4999-8999-999999999999",
         nombre: "Beto Pérez",
@@ -480,6 +481,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
         nombre: "Beto Pérez",
         invitada_por: "Ana",
         vence_en: "2026-10-27T12:00:00Z",
+        paso: "crear_cuenta",
       },
     },
   },
@@ -493,6 +495,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
         mandatario: "Estudio Sur",
         invitada_por: "Ana",
         vence_en: "2026-10-27T12:00:00Z",
+        paso: "crear_cuenta",
       },
     },
   },

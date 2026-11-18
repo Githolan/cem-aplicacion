@@ -18,9 +18,11 @@ import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 // mínimo de D6 (unidad, nombre, carácter, vigencia y si está confirmado; nunca correo ni teléfono).
 // Cada vínculo es una fila que abre su ficha (comentario 21), y la ficha ofrece solo lo que el rol
 // permite: «Confirmar» en los que la API marca (`confirmable_por_vos`: nadie confirma su propio
-// vínculo ni el que registró), «Finalizar» si ya empezó y hay `padron.gestionar`, y «Anular» si
-// todavía no empezó, no está confirmado y hay `padron.gestionar` (`anular` en padron.py: uno
-// confirmado lo anula el equipo). No hay lectura de un vínculo suelto ni forma de modificarlo: la
+// vínculo ni el que registró), «Finalizar» si ya empezó y hay `padron.gestionar` sobre su unidad, y
+// «Anular» si todavía no empezó, no está confirmado y hay `padron.gestionar` sobre su unidad
+// (`anular` en padron.py: uno confirmado lo anula el equipo). La facultad sobre la unidad la marca
+// la API en cada fila (`gestionable_por_vos`, informe de fricción C8G-13): una facultad acotada a
+// otras unidades no la alcanza, y sin ella no se ofrece (el rol no lo alcanza: sin línea, C7). No hay lectura de un vínculo suelto ni forma de modificarlo: la
 // ficha muestra la fila de la lista. Si no puede leer el padrón va al inicio. Es solo interfaz: la
 // API decide cada pedido y la base vuelve a controlar, y un 403 al actuar se dice acá.
 
@@ -495,8 +497,9 @@ export function Padron() {
 
   /** Las acciones que el rol permite sobre este vínculo (la API decide igual cada pedido). */
   function accionesDe(f: Fila): Accion[] {
-    // Si ya empezó lo dice la API con la fecha del consorcio, la misma con la que decide el fin.
-    const gestiona = puede("padron.gestionar");
+    // Si ya empezó lo dice la API con la fecha del consorcio, la misma con la que decide el fin; y si
+    // la facultad alcanza esta unidad, con la misma decisión que finalizar y anular (C8G-13).
+    const gestiona = f.gestionable_por_vos;
     return [
       ...(f.confirmable_por_vos ? (["confirmar"] as const) : []),
       ...(gestiona && f.iniciado ? (["finalizar"] as const) : []),

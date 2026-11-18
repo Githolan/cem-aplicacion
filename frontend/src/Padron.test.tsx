@@ -37,6 +37,7 @@ type Fila = components["schemas"]["FilaPadron"];
 function fila(vinculo_id: string, nombre: string, extra: Partial<Fila> = {}): Fila {
   return {
     confirmable_por_vos: extra.confirmado !== true,
+    gestionable_por_vos: true,
     vinculo_id,
     unidad_id: U1,
     designacion: "1° A",
@@ -665,7 +666,7 @@ describe("página /padron", () => {
     }
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(Object.keys(esquemas.FilaPadron?.properties ?? {}).sort()).toEqual(
-      ["confirmable_por_vos", "confirmado", "designacion", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
+      ["confirmable_por_vos", "confirmado", "designacion", "gestionable_por_vos", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
     );
     expect(esquemas.ConfirmacionVinculo?.properties?.referencia?.maxLength).toBe(300);
     expect(esquemas.FinVinculo?.properties?.motivo?.maxLength).toBe(300);
@@ -858,12 +859,19 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
 });
 
 describe("lo que no se puede hacer no aparece en /padron", () => {
-  // Sin la facultad, `confirmable_por_vos` llega en falso: la API lo calcula fila por fila con ella.
-  const sinConfirmables = { elementos: PADRON.elementos.map((f) => ({ ...f, confirmable_por_vos: false })) };
+  // Sin la facultad, `confirmable_por_vos` y `gestionable_por_vos` llegan en falso: la API los
+  // calcula fila por fila con ella.
   const conAcciones = (...acciones: string[]) =>
     conPadron({
       [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", ...acciones),
-      ...(acciones.includes("padron.confirmar_vinculo") ? {} : { [`GET ${RUTA_PADRON}`]: () => Response.json(sinConfirmables) }),
+      [`GET ${RUTA_PADRON}`]: () =>
+        Response.json({
+          elementos: PADRON.elementos.map((f) => ({
+            ...f,
+            confirmable_por_vos: f.confirmable_por_vos && acciones.includes("padron.confirmar_vinculo"),
+            gestionable_por_vos: acciones.includes("padron.gestionar"),
+          })),
+        }),
     });
   /** Abre la ficha de cada vínculo y junta sus botones de acción («Cerrar» va siempre). */
   async function accionesEnLasFichas(): Promise<Record<string, (string | null)[]>> {
@@ -919,6 +927,26 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
       "2° B: Carla Gómez": ["Anular"],
     });
     expect(screen.queryByText(/Confirmar acredita el carácter/)).toBeNull();
+  });
+
+  it("C8G-13: con `padron.gestionar` acotado a otra unidad, la fila que no alcanza no ofrece «Finalizar» ni «Anular»", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conPadron({
+        [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", "padron.gestionar"),
+        [`GET ${RUTA_PADRON}`]: () =>
+          Response.json({
+            elementos: PADRON.elementos.map((f) => ({ ...f, confirmable_por_vos: false, gestionable_por_vos: f.unidad_id === U1 })),
+          }),
+      }),
+    );
+    abrir();
+    await filaDe("1° A: Beto Pérez");
+    expect(await accionesEnLasFichas()).toEqual({
+      "1° A: Ana Ruiz": ["Finalizar"],
+      "1° A: Beto Pérez": ["Finalizar"],
+      "2° B: Carla Gómez": [],
+    });
   });
 
   it("control: sin `padron.confirmar_vinculo` queda el orden de la API, porque nada espera a quien mira", async () => {
