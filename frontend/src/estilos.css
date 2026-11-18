@@ -2158,6 +2158,13 @@ a.fila-registro:hover {
 }
 
 /* Flujos 18-11, tanda 2 */
+/* El círculo que vuelve al inicio, solo donde no hay barra lateral (FL-SOL-07). */
+@media (min-width: 1025px) {
+  .cabecera-interna__volver--angosto {
+    display: none;
+  }
+}
+
 /* Sin nada pendiente, una línea en el inicio (FL-INI-01). */
 .inicio-nada {
   margin: var(--space-4) 0;
