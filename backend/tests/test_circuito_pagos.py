@@ -517,12 +517,17 @@ def test_parecidas_por_grupos_da_lo_mismo_que_comparar_todos_los_pares():
 def test_la_rechazada_se_avisa_a_quien_la_preparo_hasta_entendido():
     """Decisión 3: aviso arriba de la bandeja, no en una lista de pendientes."""
     o = orden(E.RECHAZADA, motivo_rechazo="Falta la factura SINTETICA")
-    [aviso] = avisos_de_rechazo([o], True, {o.id})
+    [aviso] = avisos_de_rechazo([o], True, {o.id}, {o.proveedor_id})
     assert aviso.orden_id == o.id and aviso.motivo == "Falta la factura SINTETICA"
     assert aviso.rechazada_en == o.actualizada_en
-    assert avisos_de_rechazo([o], True, set()) == []  # ya la vio, o no la preparó
-    assert avisos_de_rechazo([o], False, {o.id}) == []  # quien no prepara no recibe avisos
-    assert avisos_de_rechazo([orden(E.BORRADOR)], True, {o.id}) == []  # control: solo rechazadas
+    assert aviso.proveedor_admite_orden is True
+    # FL-ORD-05: el aviso dice si al proveedor se le puede preparar otra.
+    [aviso] = avisos_de_rechazo([o], True, {o.id}, set())
+    assert aviso.proveedor_admite_orden is False
+    assert avisos_de_rechazo([o], True, set(), set()) == []  # ya la vio, o no la preparó
+    assert avisos_de_rechazo([o], False, {o.id}, set()) == []  # quien no prepara: sin avisos
+    # Control: solo rechazadas.
+    assert avisos_de_rechazo([orden(E.BORRADOR)], True, {o.id}, set()) == []
 
 
 def test_pagada_y_cotejada_completa_la_barra_y_conserva_lo_que_falta():
@@ -606,7 +611,7 @@ CAMPOS_DE_LA_BASE = [
     "puede_subir_comprobante", "puede_corregir", "puede_conciliar", "puede_confirmar",
     "falta_que_declares", "pago_sin_salida", "puede_resolver_diferencia", "pago_de_otro",
     "puede_tomar", "proveedor_cambiado", "cuenta_vista", "pagada_de_menos", "cotejada",
-    "cerrada_sin_pago", "declaracion_confirmable",
+    "cerrada_sin_pago", "declaracion_confirmable", "proveedor_sin_cuenta",
 ]  # fmt: skip
 
 
