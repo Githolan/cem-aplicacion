@@ -211,17 +211,35 @@ export const textoVerMarcados = (n: number) => `Ver los marcados (${n})`;
 export const FALTA_PROVEEDOR = "Falta elegir el proveedor.";
 export const FALTA_IMPORTE = "Falta escribir el importe.";
 export const FALTA_CONCEPTO = "Falta escribir el concepto.";
-/** C8P-01: el proveedor bloqueado por documentación legal, en el desplegable y debajo de él. */
-export const MARCA_SIN_DOCUMENTACION = "(le falta documentación legal)";
-export const SIN_DOCUMENTACION =
-  "A este proveedor le falta documentación que exige la ley: no se le puede preparar una orden. Se carga en su ficha; en una urgencia, un miembro del Consejo puede registrar ahí un salteo por urgencia.";
+/** FL-LEG-07: lo que hace la documentación legal que falta en un edificio que bloquea, dicho igual en
+ * la ficha del proveedor y en el formulario de la orden. */
+export const BLOQUEO_POR_DOCUMENTACION =
+  "Le falta documentación que exige la ley, o la tiene vencida: no se le pueden preparar órdenes nuevas hasta cargarla.";
+export const SALTEO_EN_UNA_URGENCIA = "En una urgencia, un miembro del Consejo puede saltear el bloqueo para una orden, en la ficha del proveedor.";
+/** FL-ORD-03: en el desplegable, el bloqueado con un salteo que le sirve a quien prepara. */
+export const MARCA_CON_SALTEO = "(con salteo por urgencia)";
+/** FL-ORD-03: el grupo del desplegable con los proveedores a los que no se les puede preparar una orden. */
+export const GRUPO_SIN_ORDEN = "No se les puede preparar una orden";
+/** C8P-01 y FL-ORD-01: el aviso que queda solo, con el desplegable, el enlace a la ficha y «Cancelar». */
+export const SIN_DOCUMENTACION = `${BLOQUEO_POR_DOCUMENTACION} ${SALTEO_EN_UNA_URGENCIA}`;
 /** C8P-02: el único salteo vigente lo registró quien prepara; la base no lo toma. */
 export const SALTEO_PROPIO =
   "Le falta documentación legal y el salteo por urgencia que espera lo registró esta cuenta: la orden la prepara otra persona, o el salteo lo registra otro miembro del Consejo.";
-export const CON_SALTEO = "Le falta documentación legal: se prepara con el salteo por urgencia que registró el Consejo.";
-export const IR_A_PROVEEDORES = "Ir a Proveedores";
-/** C8P-06: al modificar, el proveedor de la orden ya no recibe órdenes. */
-export const PROVEEDOR_INACTIVO = "Este proveedor está suspendido o de baja: hay que elegir otro, o reactivarlo en Proveedores.";
+/** FL-SAL-03: el salteo lo usa la primera versión que se guarda, también un borrador. */
+export const CON_SALTEO =
+  "Le falta documentación legal: se prepara con el salteo por urgencia que registró el Consejo. El salteo sirve para una sola orden: se usa al guardar, también como borrador.";
+/** FL-ORD-04: el enlace del aviso abre la ficha de ese proveedor, y la ficha vuelve a la orden. */
+export const textoAbrirFicha = (razonSocial: string) => `Abrir la ficha de ${razonSocial}`;
+/** C8P-06 y FL-ORD-01: el proveedor elegido ya no recibe órdenes. */
+export const PROVEEDOR_INACTIVO = "Este proveedor está suspendido o de baja: no recibe órdenes nuevas. Se elige otro, o se lo reactiva en su ficha.";
+/** FL-ORD-06: se avisa al elegirlo y se deja guardar (decisión 2 del propietario, 18-11-2026). */
+export const SIN_CUENTA_DESTINO =
+  "Este proveedor no tiene cuenta destino: sin ella la orden no se puede pagar. Cargarla antes evita volver a aprobarla.";
+/** FL-ORD-02: la lectura de la factura no elige sola a un proveedor al que no se le puede preparar una orden. */
+export const textoLeidoSinOrden = (razonSocial: string) => `La factura es de ${razonSocial}: no se le puede preparar una orden.`;
+/** FL-PRV-01: el CUIT de la factura es de un proveedor suspendido o de baja: no se ofrece el alta. */
+export const textoLeidoInactivo = (razonSocial: string) =>
+  `El proveedor de la factura (${razonSocial}) está suspendido o de baja: se reactiva en su ficha.`;
 /** C8P-05: al modificar, todavía no se cambió nada. */
 export const SIN_CAMBIOS = "Todavía no hay cambios para guardar.";
 /** C8P-04: el contrato elegido no cubre el importe escrito. */

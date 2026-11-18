@@ -25,8 +25,8 @@ import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_
 import { TEXTO_ACCION, TITULO_PLEGADAS } from "./textosDeAcciones";
 import {
   AVISO_DESHACE_DECLARACION, AVISO_SIN_SALIDA_CAUSA, AVISO_RECLAMO, AVISO_VER_LA_CUENTA_QUEDA, CON_SALTEO, DAR_POR_PAGADO, FALTA_CONCEPTO, FALTA_IMPORTE, FALTA_LA_CUENTA, FALTA_MOTIVO,
-  FALTA_PROVEEDOR, IR_A_PROVEEDORES, MARCA_SIN_DOCUMENTACION, PROVEEDOR_INACTIVO, RECLAMAR, SIN_CAMBIOS, SIN_DOCUMENTACION,
-  SALTEO_PROPIO, textoContratoExcedido, TITULO_PARECIDA,
+  FALTA_PROVEEDOR, GRUPO_SIN_ORDEN, MARCA_CON_SALTEO, PROVEEDOR_INACTIVO, RECLAMAR, SIN_CAMBIOS, SIN_CUENTA_DESTINO, SIN_DOCUMENTACION,
+  SALTEO_PROPIO, textoAbrirFicha, textoContratoExcedido, textoLeidoInactivo, textoLeidoSinOrden, TITULO_PARECIDA,
 } from "./textos";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
@@ -4126,6 +4126,56 @@ describe("la factura arriba de la orden (0088)", () => {
       sinBoton("Ver la factura");
     });
   });
+  // Flujos 18-11, tanda 1.
+  it("FL-ORD-02: la lectura no elige sola a un proveedor bloqueado: lo dice y lleva a su ficha", async () => {
+    conEsperaManual();
+    conFactura([lectura()], {
+      [`GET ${BASE}/proveedores`]: () =>
+        Response.json({ elementos: [proveedor(), proveedor({ id: P2, cuit: "30000000007", razon_social: "Ascensores Ficticios SA" })],
+          documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [], modo_exigencia: "bloquear",
+          con_salteo: [], salteo_de_quien_prepara: [] }),  // prettier-ignore
+    });
+    await subirFactura();
+    await vuelta();
+    const aviso = await screen.findByText(new RegExp(`^${textoLeidoSinOrden("Limpieza Ficticia SRL")}`));
+    expect(within(aviso).getByRole("link", { name: textoAbrirFicha("Limpieza Ficticia SRL") })).toBeTruthy();
+    expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe("");
+    // Lo demás de la factura sí se completa, y los campos siguen a la vista.
+    expect(valor("Concepto")).toBe("Limpieza de noviembre");
+    expect(screen.getByRole("textbox", { name: "Concepto" })).toBeTruthy();
+  });
+
+  it("FL-PRV-01: el CUIT de la factura de un proveedor suspendido no ofrece el alta: lleva a su ficha", async () => {
+    conEsperaManual();
+    conFactura([lectura({ proveedor_sugerido: null })], {
+      [`GET ${BASE}/proveedores`]: () =>
+        Response.json({ elementos: [proveedor({ estado: "suspendido" }), proveedor({ id: P2, cuit: "30000000007", razon_social: "Ascensores Ficticios SA" })] }),
+    });
+    await subirFactura();
+    await vuelta();
+    const aviso = await screen.findByText(new RegExp(`^${textoLeidoInactivo("Limpieza Ficticia SRL").replace(/[()]/g, "\\$&")}`));
+    expect(within(aviso).getByRole("link", { name: textoAbrirFicha("Limpieza Ficticia SRL") })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Dar de alta el proveedor" })).toBeNull();
+    expect(screen.queryByText(/no está cargado en este edificio/)).toBeNull();
+  });
+
+  it("FL-PRV-02: cancelar el alta que vino de la orden vuelve a la orden con lo escrito y la factura", async () => {
+    conEsperaManual();
+    const api = conFactura([lectura({ proveedor_sugerido: null })], {
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor({ id: P2, cuit: "30000000007", razon_social: "Ascensores Ficticios SA" })] }),
+    });
+    await subirFactura();
+    await vuelta();
+    fireEvent.click(await screen.findByLabelText(/Usa el fondo de reserva/));
+    fireEvent.click(screen.getByRole("link", { name: "Dar de alta el proveedor" }));
+    const alta = await screen.findByRole("dialog", { name: "Alta de un proveedor" });
+    fireEvent.click(within(alta).getByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
+    await waitFor(() => expect(valor("Concepto")).toBe("Limpieza de noviembre"));
+    expect((screen.getByLabelText(/Usa el fondo de reserva/) as HTMLInputElement).checked).toBe(true);
+    expect(await boton("Ver la factura")).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/proveedores`)).toHaveLength(0);
+  });
 });
 
 // Tanda 1 del informe de fricción (decisiones del propietario del 12-11-2026). Cada prueba falla con
@@ -5081,9 +5131,12 @@ describe("fricción 17-11, tanda 2: preparar una orden", () => {
     vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
     await elegirElBloqueado();
-    expect(screen.getByRole("option", { name: `Limpieza Ficticia SRL ${MARCA_SIN_DOCUMENTACION}` })).toBeTruthy();
+    // FL-ORD-03: va aparte, con el nombre solo.
+    const opcion = screen.getByRole("option", { name: "Limpieza Ficticia SRL" });
+    expect(opcion.closest("optgroup")?.label).toBe(GRUPO_SIN_ORDEN);
     const linea = await screen.findByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`));
-    expect(within(linea).getByRole("link", { name: IR_A_PROVEEDORES }).getAttribute("href")).toBe("/egresos/proveedores");
+    // FL-ORD-04: el enlace abre SU ficha.
+    expect(within(linea).getByRole("link", { name: textoAbrirFicha("Limpieza Ficticia SRL") }).getAttribute("href")).toBe("/egresos/proveedores");
     sinBoton("Guardar y enviar a aprobar");
     sinBoton("Guardar como borrador");
     expect(await boton("Cancelar")).toBeTruthy();
@@ -5099,6 +5152,10 @@ describe("fricción 17-11, tanda 2: preparar una orden", () => {
     expect(await screen.findByText(CON_SALTEO)).toBeTruthy();
     expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
     expect(await boton("Guardar como borrador")).toBeTruthy();
+    // FL-ORD-03: se le puede preparar: va en la lista de siempre, con su marca.
+    expect(screen.getByRole("option", { name: `Limpieza Ficticia SRL ${MARCA_CON_SALTEO}` }).closest("optgroup")).toBeNull();
+    // FL-SAL-03: el aviso dice que el borrador también usa el salteo.
+    expect(CON_SALTEO).toContain("también como borrador");
     expect(screen.queryByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`))).toBeNull();
   });
 
@@ -5124,7 +5181,7 @@ describe("fricción 17-11, tanda 2: preparar una orden", () => {
     abrir("/pagos/nueva");
     await elegirElBloqueado();
     expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
-    expect(screen.queryByRole("option", { name: new RegExp(MARCA_SIN_DOCUMENTACION.replace(/[()]/g, "\\$&")) })).toBeNull();
+    expect(screen.getByRole("option", { name: "Limpieza Ficticia SRL" }).closest("optgroup")).toBeNull();
     expect(pedidos(api, "GET", `${BASE}/proveedores/${P1}`)).toEqual([]);
   });
 
@@ -5305,8 +5362,10 @@ describe("fricción 17-11, tanda 5: la ficha de la orden", () => {
     fireEvent.click(await boton("Modificar la orden"));
     const ventana = await screen.findByRole("dialog", { name: "Modificar la orden" });
     expect(await within(ventana).findByText(new RegExp(`^${PROVEEDOR_INACTIVO}`))).toBeTruthy();
-    fireEvent.change(within(ventana).getByLabelText("Concepto"), { target: { value: "Otro" } });
+    // FL-ORD-01 (C9): los datos de la orden no se piden ni se muestran.
+    expect(within(ventana).queryByRole("textbox", { name: "Concepto" })).toBeNull();
     expect(within(ventana).queryByRole("button", { name: "Guardar la orden" })).toBeNull();
+    expect(within(ventana).getByRole("button", { name: "Cancelar" })).toBeTruthy();
   });
 
   it("FIC-11: el «Listo» de modificar se va al tocar otra acción de la ficha", async () => {
@@ -5394,5 +5453,156 @@ describe("fricción 17-11, tanda 5: la ficha de la orden", () => {
     expect(within(ventana).getByRole("button", { name: "Elegir un archivo" })).toBeTruthy();
     // REG-04: sin el pie que el «Listo» repite.
     expect(within(ventana).queryByText("Queda pagada cuando el Consejo lo concilie.")).toBeNull();
+  });
+});
+
+// Comentario 41 del propietario (flujos 18-11, tanda 1): la orden a un proveedor al que no se le puede
+// preparar, de punta a punta.
+describe("flujos 18-11, tanda 1: orden a un proveedor bloqueado", () => {
+  const P2 = "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2";
+  const OTRO = proveedor({ id: P2, cuit: "30000000007", razon_social: "Ascensores Ficticios SA" });
+  const ENLACE = textoAbrirFicha("Limpieza Ficticia SRL");
+  type Lista = Partial<components["schemas"]["ListaProveedores"]>;
+  /** La lista con P1 bloqueado por documentación legal y P2 al día; `extra` cambia lo que haga falta. */
+  const lista = (extra: () => Lista = () => ({})) => ({
+    [`GET ${BASE}/proveedores`]: () =>
+      Response.json({
+        elementos: [proveedor(), OTRO], documentacion_faltante: [P1], documentacion_vencida: [], documentacion_por_vencer: [],
+        modo_exigencia: "bloquear", con_salteo: [], salteo_de_quien_prepara: [], ...extra(),
+      }),
+    [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+  });
+  /** La ficha de gestión de P1, sin nada cargado. */
+  const fichaP1 = () =>
+    Response.json({
+      proveedor: proveedor(), versiones: [], documentacion: [], puede_cargar_documentacion: true, rubros_legales: [], faltantes: [],
+      requisitos: [], configuracion: { dias_por_vencer: 30, modo_exigencia: "bloquear", admite_no_vence: true }, salteos: [],
+    });
+  const elegir = async (id: string) => fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: id } });
+  const valor = (etiqueta: string) => (screen.getByLabelText(etiqueta) as HTMLInputElement).value;
+  async function escribirConP2() {
+    await elegir(P2);
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Reparación SINTETICA" } });
+    fireEvent.click(screen.getByLabelText(/Usa el fondo de reserva/));
+  }
+
+  it("FL-ORD-01 (C9): con el bloqueado quedan el desplegable, el aviso, su ficha y «Cancelar»; con otro vuelve lo escrito", async () => {
+    const api = backend(lista());
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/pagos/nueva");
+    await escribirConP2();
+    // Control: con el proveedor al día, los campos y los botones están.
+    expect(screen.getByRole("textbox", { name: "Concepto" })).toBeTruthy();
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    await elegir(P1);
+    expect(await screen.findByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`))).toBeTruthy();
+    expect(screen.getByRole("link", { name: ENLACE })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Proveedor" })).toBeTruthy();
+    for (const campo of ["Importe", "Concepto", "Número de la factura (opcional)"])
+      expect(screen.queryByRole("textbox", { name: campo })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Usa el fondo de reserva/ })).toBeNull();
+    expect(screen.getByLabelText("Archivo de la factura").closest("[hidden]")).not.toBeNull();
+    sinBoton("Guardar y enviar a aprobar");
+    sinBoton("Guardar como borrador");
+    expect(await boton("Cancelar")).toBeTruthy();
+    await sinFaltasDeAccesibilidad(container);
+    // Al elegir otro proveedor, vuelven los campos con lo que tenían.
+    await elegir(P2);
+    expect(valor("Concepto")).toBe("Reparación SINTETICA");
+    expect(valor("Importe")).toMatch(/^15\.?000/);
+    expect((screen.getByRole("checkbox", { name: /Usa el fondo de reserva/ }) as HTMLInputElement).checked).toBe(true);
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    expect(escrituras(api)).toEqual([]);
+  });
+
+  it("FL-ORD-03: los que no admiten una orden van aparte con el nombre solo; el del salteo, en la lista con su marca", async () => {
+    const TERCERO = proveedor({ id: NUEVO, cuit: "30000000015", razon_social: "Plomería Ficticia SA" });
+    vi.stubGlobal("fetch", backend({
+      ...lista(() => ({ elementos: [proveedor(), OTRO, TERCERO], documentacion_faltante: [P1, P2, NUEVO], con_salteo: [P2], salteo_de_quien_prepara: [NUEVO] })),
+    }));
+    abrir("/pagos/nueva");
+    const desplegable = await screen.findByLabelText("Proveedor");
+    const grupo = desplegable.querySelector("optgroup");
+    expect(grupo?.label).toBe(GRUPO_SIN_ORDEN);
+    expect([...(grupo?.querySelectorAll("option") ?? [])].map((o) => o.textContent)).toEqual(["Limpieza Ficticia SRL", "Plomería Ficticia SA"]);
+    const conSalteo = screen.getByRole("option", { name: `Ascensores Ficticios SA ${MARCA_CON_SALTEO}` });
+    expect(conSalteo.closest("optgroup")).toBeNull();
+  });
+
+  it("FL-ORD-04: el enlace abre la ficha de ese proveedor y «Volver a la orden» trae lo escrito, con los bloqueos leídos de nuevo", async () => {
+    let cargada = false;
+    const api = backend({
+      ...lista(() => (cargada ? { documentacion_faltante: [] } : {})),
+      [`GET ${BASE}/proveedores/${P1}`]: fichaP1,
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    await escribirConP2();
+    await elegir(P1);
+    fireEvent.click(await screen.findByRole("link", { name: ENLACE }));
+    // Llega a SU ficha, no a la lista (FL-LEG-03).
+    const ficha = await screen.findByRole("dialog", { name: "Limpieza Ficticia SRL" });
+    expect(lugar()).toBe("/egresos/proveedores");
+    cargada = true;
+    const lecturas = pedidos(api, "GET", `${BASE}/proveedores`).length;
+    fireEvent.click(within(ficha).getByRole("button", { name: "Volver a la orden" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1));
+    expect(pedidos(api, "GET", `${BASE}/proveedores`).length).toBeGreaterThan(lecturas);
+    expect(valor("Concepto")).toBe("Reparación SINTETICA");
+    expect((screen.getByRole("checkbox", { name: /Usa el fondo de reserva/ }) as HTMLInputElement).checked).toBe(true);
+    // Ya no está bloqueado: la orden se puede guardar.
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+  });
+
+  it("FL-SAL-06: un salteo registrado con el formulario abierto se ve al volver a la pestaña", async () => {
+    let conSalteo = false;
+    const api = backend(lista(() => (conSalteo ? { con_salteo: [P1] } : {})));
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    await elegir(P1);
+    expect(await screen.findByText(new RegExp(`^${SIN_DOCUMENTACION.slice(0, 40)}`))).toBeTruthy();
+    conSalteo = true;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fireEvent(document, new Event("visibilitychange"));
+    expect(await screen.findByText(CON_SALTEO)).toBeTruthy();
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1);
+  });
+
+  it("control FL-SAL-06: con la pestaña escondida no se vuelve a leer", async () => {
+    const api = backend(lista());
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    await elegir(P1);
+    const lecturas = pedidos(api, "GET", `${BASE}/proveedores`).length;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    fireEvent(document, new Event("visibilitychange"));
+    await act(() => Promise.resolve());
+    expect(pedidos(api, "GET", `${BASE}/proveedores`)).toHaveLength(lecturas);
+  });
+
+  it("FL-ORD-05: llegar con un proveedor suspendido lo elige y dice por qué, sin pedir los datos de la orden", async () => {
+    vi.stubGlobal("fetch", backend(lista(() => ({ elementos: [proveedor({ estado: "suspendido" }), OTRO], documentacion_faltante: [] }))));
+    abrir({ pathname: "/pagos/nueva", state: { consorcio: C1, proveedor: P1 } });
+    expect(await screen.findByText(PROVEEDOR_INACTIVO)).toBeTruthy();
+    expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1);
+    expect(screen.getByRole("link", { name: ENLACE })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Concepto" })).toBeNull();
+    sinBoton("Guardar y enviar a aprobar");
+  });
+
+  it("FL-ORD-06: el proveedor sin cuenta destino se avisa al elegirlo y se deja guardar", async () => {
+    vi.stubGlobal("fetch", backend(lista(() => ({ elementos: [proveedor({ cuenta_ultimos_digitos: null }), OTRO], documentacion_faltante: [] }))));
+    abrir("/pagos/nueva");
+    await elegir(P2);
+    // Control: con cuenta, no hay aviso.
+    expect(screen.queryByText(SIN_CUENTA_DESTINO)).toBeNull();
+    await elegir(P1);
+    const aviso = await screen.findByText(new RegExp(`^${SIN_CUENTA_DESTINO}`));
+    expect(within(aviso).getByRole("link", { name: ENLACE })).toBeTruthy();
+    expect(await boton("Guardar y enviar a aprobar")).toBeTruthy();
+    expect(await boton("Guardar como borrador")).toBeTruthy();
   });
 });

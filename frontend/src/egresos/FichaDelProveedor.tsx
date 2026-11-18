@@ -100,6 +100,10 @@ export function FichaDelProveedor({
         requisitos={ficha.requisitos}
         modo={ficha.configuracion.modo_exigencia}
         puedeCambiar={puedeCambiar}
+        puedeCargar={puedeCargar}
+        razonSocial={p.razon_social}
+        admiteNoVence={ficha.configuracion.admite_no_vence}
+        salteoVence={ficha.salteos.find((s) => s.estado === "vigente")?.vence_en ?? null}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />
@@ -119,6 +123,7 @@ export function FichaDelProveedor({
         documentacion={ficha.documentacion}
         puedeCargar={puedeCargar}
         requisitos={ficha.requisitos}
+        faltantes={ficha.faltantes}
         admiteNoVence={ficha.configuracion.admite_no_vence}
         aEntrar={aEntrar}
         alCambiar={alCambiar}

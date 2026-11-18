@@ -14,6 +14,12 @@ import { SubirArchivo } from "../SubirArchivo";
 import { ENCABEZADO_IDEMPOTENCIA, fechaLegible, LARGO_TITULO, mensajeDeActo, renovarClave } from "./comun";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "./useConsorcio";
 
+/** El requisito con que arranca la hoja (FL-LEG-06): el único de ese tipo que falta; si no, ninguno. */
+function requisitoInicial(faltantes: readonly Faltante[], tipo: Tipo): string {
+  const deEsteTipo = faltantes.filter((f) => f.tipo === tipo);
+  return deEsteTipo.length === 1 ? (deEsteTipo[0]?.codigo ?? "") : "";
+}
+
 // Seguros y habilitaciones en la ficha del proveedor (RF50; app 0103; diseño
 // `RF50_Seguros_y_Habilitaciones.md` del repositorio CEM). Un documento vencido marca al proveedor y
 // no lo excluye: se le puede seguir contratando y pagando. El estado lo calcula la base con el día
@@ -26,9 +32,16 @@ import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "./useConsorcio
 // consecuencia, una sola vez, «Lo que exige la ley» (SEG-08); quien solo lee no ve una sección vacía
 // con título (SEG-03); aceptado el archivo, la hoja se cierra sola y la ficha lo muestra (SEG-09);
 // y un archivo elegido antes de completar los datos no se pierde: se carga con «Cargar» (SEG-10).
+//
+// Flujos 18-11, tanda 1: con requisitos de ese tipo que faltan, el requisito no arranca en «Ninguno en
+// particular» (que no destraba): si falta uno solo, arranca en él; si faltan varios, hay que elegirlo,
+// y un documento vigente que no cubre ninguno lo dice (FL-LEG-06). Mientras un documento espera al
+// antivirus, la ficha se vuelve a leer sola (FL-LEG-09). Desde «Lo que falta», la hoja llega con el
+// tipo y el requisito fijos (`fijo`, FL-LEG-05).
 
 export type Documentacion = components["schemas"]["DocumentacionProveedor"];
 export type RequisitoLegal = components["schemas"]["RequisitoLegal"];
+type Faltante = components["schemas"]["RequisitoFaltante"];
 type Estado = components["schemas"]["EstadoDocumentacionProveedor"];
 type Tipo = components["schemas"]["TipoDocumentacionProveedor"];
 
@@ -40,6 +53,11 @@ export const SIN_REQUISITO = "Ninguno en particular";
 export const FALTA_DESCRIPCION = "Falta decir qué cubre.";
 export const FALTA_VENCIMIENTO = "Falta la fecha de vencimiento.";
 export const CARGAR = "Cargar";
+export const ELEGIR_REQUISITO = "Elegir un requisito";
+export const FALTA_REQUISITO = "Falta elegir qué requisito de la ley cubre.";
+export const NO_CUBRE_REQUISITO = "No cubre ningún requisito de la ley";
+/** «Ninguno en particular» elegido a propósito, cuando hay requisitos de ese tipo que faltan. */
+const NINGUNO = "ninguno";
 export const TEXTO_TIPO: Record<Tipo, string> = { seguro: "Seguro", habilitacion: "Habilitación" };
 /** Lo que cuenta para la marca y lo único que se reemplaza (`ESTADOS_QUE_VALEN` del contrato). */
 const VALEN: ReadonlySet<Estado> = new Set<Estado>(["vigente", "por_vencer", "vencida"]);
@@ -76,6 +94,8 @@ type Props = {
   puedeCargar: boolean;
   /** La matriz legal, para decir qué requisito cubre cada una y elegirlo al cargar. */
   requisitos: readonly RequisitoLegal[];
+  /** Lo que le falta al proveedor: decide con qué requisito arranca la hoja (FL-LEG-06). */
+  faltantes: readonly Faltante[];
   /** Si el edificio admite «No vence» (configuración, app 0104). */
   admiteNoVence: boolean;
   aEntrar: () => void;
@@ -83,7 +103,7 @@ type Props = {
   alCambiar: () => void;
 };
 
-export function DocumentacionProveedor({ consorcio, proveedor, documentacion, puedeCargar, requisitos, admiteNoVence, aEntrar, alCambiar }: Props) {
+export function DocumentacionProveedor({ consorcio, proveedor, documentacion, puedeCargar, requisitos, faltantes, admiteNoVence, aEntrar, alCambiar }: Props) {
   const id = useId();
   const [hoja, setHoja] = useState<{ reemplaza: Documentacion | null } | null>(null);
   // Las que valen y las que esperan, arriba; lo reemplazado y lo rechazado, como historia.
@@ -92,6 +112,9 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
   const conReemplazoEnCurso = new Set(
     documentacion.filter((d) => d.estado === "en_revision" && d.reemplaza_a !== null).map((d) => d.reemplaza_a),
   );
+  // FL-LEG-09: «la ficha lo muestra cuando termine» se cumple sin cerrarla. Con la hoja abierta, la que
+  // consulta es la hoja.
+  useConsultaDelAntivirus(hoja === null && documentacion.some((d) => d.estado === "en_revision"), alCambiar);
 
   // Quien solo lee y no hay nada: una línea, sin título (la pantalla se llama «Proveedores y sus
   // seguros» y hace falta decirlo). Quien carga ve el título con su botón, sin la frase (SEG-03).
@@ -108,6 +131,9 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
                 {TEXTO_TIPO[d.tipo]}: {d.descripcion}
               </strong>
               {d.requisito_codigo !== null && <span>Cubre: {descripcionDe(requisitos, d.requisito_codigo)}</span>}
+              {d.requisito_codigo === null && VALEN.has(d.estado) && faltantes.some((f) => f.tipo === d.tipo) && (
+                <span>{NO_CUBRE_REQUISITO}</span>
+              )}
               <span className="etiqueta-situacion" data-tono={TONO[d.estado]}>
                 {textoEstado(d)}
               </span>
@@ -144,6 +170,7 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
           proveedor={proveedor}
           reemplaza={hoja.reemplaza}
           requisitos={requisitos}
+          faltantes={faltantes}
           admiteNoVence={admiteNoVence}
           aEntrar={aEntrar}
           alCerrar={(cambio) => {
@@ -167,20 +194,27 @@ type PropsHoja = {
   consorcio: string;
   proveedor: { id: string; razon_social: string };
   reemplaza: Documentacion | null;
+  /** Desde un renglón de «Lo que falta» (FL-LEG-05): el tipo y el requisito no se eligen. */
+  fijo?: { tipo: Tipo; requisito: string; descripcion: string };
   requisitos: readonly RequisitoLegal[];
+  faltantes: readonly Faltante[];
   admiteNoVence: boolean;
   aEntrar: () => void;
   alCerrar: (cambio: boolean) => void;
 };
 
-export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos, admiteNoVence, aEntrar, alCerrar }: PropsHoja) {
+export function SubirDocumentacion({ consorcio, proveedor, reemplaza, fijo, requisitos, faltantes, admiteNoVence, aEntrar, alCerrar }: PropsHoja) {
   const id = useId();
-  const [tipo, setTipo] = useState<Tipo>(reemplaza?.tipo ?? "seguro");
-  const [descripcion, setDescripcion] = useState(reemplaza?.descripcion ?? "");
+  const [tipo, setTipo] = useState<Tipo>(fijo?.tipo ?? reemplaza?.tipo ?? "seguro");
+  const [descripcion, setDescripcion] = useState(fijo?.descripcion ?? reemplaza?.descripcion ?? "");
   const [vence, setVence] = useState("");
   const [noVence, setNoVence] = useState(false);
-  const [requisito, setRequisito] = useState(reemplaza?.requisito_codigo ?? "");
+  const [requisito, setRequisito] = useState(
+    fijo?.requisito ?? reemplaza?.requisito_codigo ?? requisitoInicial(faltantes, reemplaza?.tipo ?? "seguro"),
+  );
   const deEsteTipo = requisitos.filter((r) => r.tipo === tipo);
+  /** Con requisitos de este tipo que faltan, «Ninguno en particular» no es lo que se elige sin mirar (FL-LEG-06). */
+  const hayQueElegir = fijo === undefined && deEsteTipo.length > 0 && faltantes.some((f) => f.tipo === tipo);
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
   const [falla, setFalla] = useState<string | null>(null);
   /** El archivo elegido antes de completar los datos: queda para «Cargar» (SEG-10). */
@@ -220,6 +254,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
     return faltaCompletar({
       descripcion: [descripcion, FALTA_DESCRIPCION],
       ...(noVence ? {} : { vence: [vence, FALTA_VENCIMIENTO] as const }),
+      ...(hayQueElegir ? { requisito: [requisito, FALTA_REQUISITO] as const } : {}),
     });
   }
 
@@ -250,7 +285,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
             tipo,
             descripcion: descripcion.trim(),
             ...(noVence ? { no_vence: true } : { vence_el: vence }),
-            ...(requisito === "" ? {} : { requisito }),
+            ...(requisito === "" || requisito === NINGUNO ? {} : { requisito }),
             titulo: tituloDeArchivo(elegido, TEXTO_TIPO[tipo], LARGO_TITULO),
             ...(reemplaza === null ? {} : { reemplaza: reemplaza.id }),
           },
@@ -292,7 +327,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
   const enviando = fase.tipo === "subiendo";
   useAvisoAlSalir(enviando);
   const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
-  const titulo = reemplaza === null ? AGREGAR : `Reemplazar: ${reemplaza.descripcion}`;
+  const titulo = fijo !== undefined ? `${CARGAR}: ${fijo.descripcion}` : reemplaza === null ? AGREGAR : `Reemplazar: ${reemplaza.descripcion}`;
 
   return (
     <Hoja titulo={titulo} alEscapar={enviando ? undefined : cerrar}>
@@ -312,7 +347,11 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
       )}
       {ofreceElegir && (
         <div className="formulario">
-          {reemplaza === null ? (
+          {fijo !== undefined ? (
+            <p>
+              {TEXTO_TIPO[fijo.tipo]} que exige la ley: {fijo.descripcion}.
+            </p>
+          ) : reemplaza === null ? (
             <fieldset>
               <legend>Qué es</legend>
               {(["seguro", "habilitacion"] as const).map((t) => (
@@ -325,7 +364,8 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
                     disabled={enviando}
                     onChange={() => {
                       setTipo(t);
-                      setRequisito("");
+                      setRequisito(requisitoInicial(faltantes, t));
+                      setErrores((actuales) => sinElDe(actuales, "requisito"));
                     }}
                   />
                   {TEXTO_TIPO[t]}
@@ -352,17 +392,29 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos
             }}
           />
           <ErrorDeCampo idCampo={`${id}-descripcion`} mensaje={errores.descripcion} />
-          {deEsteTipo.length > 0 && (
+          {fijo === undefined && deEsteTipo.length > 0 && (
             <>
               <label htmlFor={`${id}-requisito`}>Qué requisito de la ley cubre</label>
-              <select id={`${id}-requisito`} value={requisito} disabled={enviando} onChange={(e) => setRequisito(e.target.value)}>
-                <option value="">{SIN_REQUISITO}</option>
+              <select id={`${id}-requisito`} value={requisito} disabled={enviando} {...marcaDe(`${id}-requisito`, errores.requisito)}
+                onChange={(e) => {
+                  setErrores((actuales) => sinElDe(actuales, "requisito"));
+                  setRequisito(e.target.value);
+                }}>
+                {hayQueElegir ? (
+                  <>
+                    <option value="">{ELEGIR_REQUISITO}</option>
+                    <option value={NINGUNO}>{SIN_REQUISITO}</option>
+                  </>
+                ) : (
+                  <option value="">{SIN_REQUISITO}</option>
+                )}
                 {deEsteTipo.map((r) => (
                   <option key={r.codigo} value={r.codigo}>
                     {r.descripcion}
                   </option>
                 ))}
               </select>
+              <ErrorDeCampo idCampo={`${id}-requisito`} mensaje={errores.requisito} />
             </>
           )}
           <label htmlFor={`${id}-vence`}>Vence el</label>

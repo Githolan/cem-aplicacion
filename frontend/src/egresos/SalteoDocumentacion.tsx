@@ -23,6 +23,8 @@ import { exigirSesion, SinSesion } from "./useConsorcio";
 // propietario (lección 21) e informe de fricción C8P-03: quien tiene un salteo propio que espera su
 // orden no ve otra vez el botón (la base no le deja registrar otro: `salteo_vigente`). La API dice
 // de cada salteo si es de esta cuenta (`propio`, app 0109), también al volver a abrir la pantalla.
+// Flujos 18-11, tanda 1: con cualquier salteo que espera su orden no se ofrece otro (decisión 5,
+// FL-SAL-05), y el último que venció sin usarse se dice a la vista (FL-SAL-04).
 
 type Salteo = components["schemas"]["SalteoDocumentacion"];
 type Modo = components["schemas"]["ModoExigencia"];
@@ -45,6 +47,9 @@ export function textoSalteo(s: Salteo): string {
   if (s.estado === "vencido") return `Venció sin usarse el ${momentoAlFinal(s.vence_en)} Registrado el ${quien}`;
   return `Espera su orden hasta el ${momentoAlFinal(s.vence_en)} Registrado el ${quien}`;
 }
+
+/** FL-SAL-04: el último salteo venció sin que se preparara la orden. */
+export const textoVencioSinUsarse = (s: Salteo) => `El salteo del ${momento(s.registrado_en)} venció sin usarse.`;
 
 /** La línea de la ficha de la orden: la versión se preparó con un salteo. */
 export function textoSalteoDeLaVersion(s: Salteo): string {
@@ -76,8 +81,13 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
   const anteriores = salteos.filter((s) => s.estado !== "vigente");
   /** El que se acaba de registrar, mientras la ficha vuelve a leerse y todavía no lo trae. */
   const [recien, setRecien] = useState<number | null>(null);
-  const suyoEnEspera = enEspera.some((s) => s.propio) || (recien !== null && !salteos.some((s) => s.numero === recien));
-  const ofreceSaltear = bloquea && puedeSaltear && !suyoEnEspera;
+  const recienSinLeer = recien !== null && !salteos.some((s) => s.numero === recien);
+  // Decisión 5 del propietario (18-11-2026, FL-SAL-05): mientras un salteo espera su orden, sea de quien
+  // sea, no se ofrece otro: un segundo habilitaría una segunda orden.
+  const ofreceSaltear = bloquea && puedeSaltear && enEspera.length === 0 && !recienSinLeer;
+  /** FL-SAL-04: el último salteo venció sin usarse y no hay otro: se dice a la vista, no solo en «Anteriores». */
+  const ultimo = salteos.reduce<Salteo | null>((a, s) => (a === null || s.numero > a.numero ? s : a), null);
+  const vencioElUltimo = bloquea && enEspera.length === 0 && ultimo?.estado === "vencido" ? ultimo : null;
   if (salteos.length === 0 && !ofreceSaltear && resultado === null) return null;
 
   function abrir() {
@@ -133,6 +143,11 @@ export function SalteoDocumentacion({ consorcio, proveedorId, salteos, modo, hay
   return (
     <section aria-labelledby={`${id}-titulo`}>
       <h3 id={`${id}-titulo`}>{TITULO_SALTEO}</h3>
+      {vencioElUltimo !== null && (
+        <p className="aviso-pendiente" role="note">
+          {textoVencioSinUsarse(vencioElUltimo)}
+        </p>
+      )}
       {enEspera.length > 0 && (
         <ul className="versiones" aria-label="Salteos">
           {[...enEspera].reverse().map((s) => (
