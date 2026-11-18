@@ -21,9 +21,9 @@ test.describe("entrar con el código del correo", () => {
     await sinFaltasDeAccesibilidad(page);
 
     await page.getByRole("region", { name: "Escribir el código del correo" }).getByLabel("Correo").fill(CORREO);
-    await page.getByLabel(/^Código de 6 números/).fill("042 917");
     const canje = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/v1/auth/codigo");
-    await page.getByRole("button", { name: "Entrar con el código" }).click();
+    // Sale solo al sexto número, sin tocar el botón (ACC-01).
+    await page.getByLabel(/^Código de 6 números/).fill("042 917");
 
     const pedido = await canje;
     expect(pedido.method()).toBe("POST");

@@ -190,6 +190,45 @@ describe("entrar con contraseña", () => {
     expect(await paso?.json()).toEqual({ codigo: "k7m2q-x9p4t" });
   });
 
+  // Decisión del propietario, 18-11-2026, deja de lado WCAG 3.2.2: el sexto número envía solo (ACC-01).
+  it("los seis números de la aplicación salen solos, una vez; cinco no salen", async () => {
+    const simulado = backend({
+      [ENTRAR]: [() => Response.json(FALTA_CODIGO)],
+      [PASO]: [() => Response.json(SESION)],
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    escribirContrasena();
+    const campo = await seccion().findByLabelText("Código de la aplicación o de recuperación");
+
+    // Control: con cinco números no sale nada.
+    fireEvent.change(campo, { target: { value: "04291" } });
+    await new Promise((listo) => setTimeout(listo, 0));
+    expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([ENTRAR]);
+
+    fireEvent.change(campo, { target: { value: "042 917" } });
+    await llegoAlInicio();
+    expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([ENTRAR, PASO]);
+  });
+
+  it("un código de recuperación no sale solo: espera el botón", async () => {
+    const simulado = backend({
+      [ENTRAR]: [() => Response.json(FALTA_CODIGO)],
+      [PASO]: [() => Response.json(SESION)],
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    escribirContrasena();
+    const campo = await seccion().findByLabelText("Código de la aplicación o de recuperación");
+
+    fireEvent.change(campo, { target: { value: "k7m2q-x9p4t" } });
+    await new Promise((listo) => setTimeout(listo, 0));
+    expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([ENTRAR]);
+    // Control: con el botón sí sale.
+    mandar("Entrar con el código");
+    await llegoAlInicio();
+  });
+
   it("un código mal formado no sale y se explica junto al campo", async () => {
     const simulado = backend({ [ENTRAR]: [() => Response.json(FALTA_CODIGO)] });
     vi.stubGlobal("fetch", simulado);

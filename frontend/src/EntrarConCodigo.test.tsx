@@ -124,17 +124,36 @@ describe("entrar con el código del correo", () => {
     expect(window.location.href).not.toContain(CODIGO);
   });
 
-  it("completar los seis números no envía nada: confirma actos de dinero y espera el botón (WCAG 3.2.2)", async () => {
+  // Decisión del propietario, 18-11-2026, deja de lado WCAG 3.2.2: el sexto número envía solo (ACC-01).
+  it("completar los seis números envía solo, una vez, sin tocar el botón", async () => {
     const pedido = backend({ codigo: () => Response.json(SESION) });
     vi.stubGlobal("fetch", pedido);
     abrirCodigo();
     fireEvent.change(seccionCodigo().getByLabelText("Correo"), { target: { value: CORREO } });
 
+    // Control: con cinco números no sale nada.
+    fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: "04291" } });
+    await new Promise((listo) => setTimeout(listo, 0));
+    expect(postsDe(pedido)).toEqual([]);
+
+    fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: "042 917" } });
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    const posts = postsDe(pedido);
+    expect(posts).toHaveLength(1);
+    expect(await posts[0]!.json()).toEqual({ correo: CORREO, codigo: CODIGO });
+  });
+
+  it("sin el correo escrito, los seis números no salen solos", async () => {
+    const pedido = backend({ codigo: () => Response.json(SESION) });
+    vi.stubGlobal("fetch", pedido);
+    abrirCodigo();
+
     fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: CODIGO } });
     await new Promise((listo) => setTimeout(listo, 0));
 
     expect(postsDe(pedido)).toEqual([]);
-    // Control: con el botón sí sale.
+    // Control: escrito el correo, el botón sí lo manda.
+    fireEvent.change(seccionCodigo().getByLabelText("Correo"), { target: { value: CORREO } });
     fireEvent.submit(screen.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
     await vi.waitFor(() => expect(postsDe(pedido)).toHaveLength(1));
   });

@@ -146,9 +146,9 @@ test.describe("contraseña contra el backend real sin base", () => {
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
     await seccion.getByRole("button", { name: "Entrar", exact: true }).click();
-    await seccion.getByLabel("Código de la aplicación o de recuperación").fill("042 917");
     const paso = page.waitForRequest((r) => new URL(r.url()).pathname === PASO);
-    await seccion.getByRole("button", { name: "Entrar con el código" }).click();
+    // Sale solo al sexto número, sin tocar el botón (ACC-01).
+    await seccion.getByLabel("Código de la aplicación o de recuperación").fill("042 917");
 
     const pedido = await paso;
     expect(pedido.method()).toBe("POST");
