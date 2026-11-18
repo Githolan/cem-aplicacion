@@ -57,22 +57,26 @@ export function GraficoBarras({ titulo, base, aviso, barras, columna, valor, con
           </li>
         ))}
       </ul>
-      <table aria-label={titulo} className="solo-lector">
-        <thead>
-          <tr>
-            <th scope="col">{columna}</th>
-            <th scope="col">{valor}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {barras.map((b) => (
-            <tr key={b.clave}>
-              <th scope="row">{b.etiqueta}</th>
-              <td>{b.texto}</td>
+      {/* La tabla va dentro de un bloque oculto: una tabla no achica su ancho a 1 px y, sola, ensancharía
+          la página en un teléfono (medido: 498 px en 360 px). */}
+      <div className="solo-lector">
+        <table aria-label={titulo}>
+          <thead>
+            <tr>
+              <th scope="col">{columna}</th>
+              <th scope="col">{valor}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {barras.map((b) => (
+              <tr key={b.clave}>
+                <th scope="row">{b.etiqueta}</th>
+                <td>{b.texto}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

@@ -155,7 +155,7 @@ describe("resumen de pagos del edificio", () => {
     const estados = await screen.findByRole("region", { name: "Órdenes de pago por estado" });
     expect(screen.queryByText("Ver los datos en una tabla")).toBeNull();
     // La tabla sigue para el lector de pantalla, que no lee las barras.
-    expect(within(estados).getByRole("table", { name: "Órdenes de pago por estado" }).classList.contains("solo-lector")).toBe(true);
+    expect(within(estados).getByRole("table", { name: "Órdenes de pago por estado" }).closest(".solo-lector")).not.toBeNull();
     expect(container.querySelector(".grafico__barras")?.getAttribute("aria-hidden")).toBe("true");
     const como = within(estados).getByText("Cómo se calcula").closest("details");
     expect(como?.open).toBe(false);
