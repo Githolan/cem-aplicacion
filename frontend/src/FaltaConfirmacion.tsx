@@ -51,8 +51,10 @@ export function useFaltaConfirmacion() {
   return { leDaUso, consulta, pendiente: leDaUso && consulta.data !== true };
 }
 
-export function FaltaConfirmacion() {
-  const { leDaUso, consulta } = useFaltaConfirmacion();
+/** `consulta` viene del inicio, que junta su falla con las demás bajo un solo «Reintentar» (AC-08). */
+export function FaltaConfirmacion({ consulta: deAfuera }: { consulta?: ReturnType<typeof useFaltaConfirmacion> } = {}) {
+  const propia = useFaltaConfirmacion();
+  const { leDaUso, consulta } = deAfuera ?? propia;
   const [activado, setActivado] = useState<Activado | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
@@ -74,6 +76,7 @@ export function FaltaConfirmacion() {
     );
 
   if (!leDaUso || consulta.data === true) return null;
+  if (consulta.isError && deAfuera !== undefined) return null;
   if (consulta.isError)
     return (
       <section aria-label="Confirmación con PIN, huella o código" className="tarjeta">

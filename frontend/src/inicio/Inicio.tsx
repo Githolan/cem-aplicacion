@@ -15,7 +15,7 @@ import { FaltaConfirmacion, useFaltaConfirmacion } from "../FaltaConfirmacion";
 import { InvitacionesPropias, useMisInvitaciones } from "../InvitacionesPropias";
 import { DE_ADMINISTRACION, rutaDelDestino, soloConsultaProveedores } from "../Navegacion";
 import { CONSULTA_AL_LADO, useAncho } from "../pagos/useAncho";
-import { useConsultaDeAcciones, useMisConsorcios } from "../permisos";
+import { mensajeDeLectura, useConsultaDeAcciones, useMisConsorcios } from "../permisos";
 import { useSesion } from "../sesion";
 import {
   type EnlaceDeInicio,
@@ -111,13 +111,14 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
   const servicio = useFallaDelServicio(sesion === "con_sesion");
   // Desde 1025 px la barra lateral ya lista las pantallas: el inicio no las repite.
   const conBarra = useAncho(CONSULTA_AL_LADO);
+  // Decisión 10: mientras falte activar la confirmación (o no se sepa), no hay «nada pendiente».
+  const confirmacion = useFaltaConfirmacion();
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
   if (sesion === "consultando") return <p role="status">Cargando…</p>;
 
   const pendientes = fuentes.flatMap((f) => f.filas);
   const conFalla = fuentes.filter((f) => f.falla !== null);
   const sabido = porEdificio !== null && fuentes.every((f) => !f.cargando) && invitaciones.data !== undefined;
-  const confirmacion = useFaltaConfirmacion();
   const nadaPendiente = !confirmacion.pendiente && sabido && porEdificio.size > 0 && pendientes.length === 0 && conFalla.length === 0 && invitaciones.data.length === 0;
 
   // En el teléfono y la tablet, las pantallas de Gestión (sin pestaña) que no estén ya en «Para
@@ -138,7 +139,15 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
 
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y los
   // pendientes. Vuelve a pedir solo lo que falló.
-  const reintentables = [...(servicio.falla === null ? [] : [servicio]), ...(falla === null ? [] : [{ reintentar, reintentando }]), ...conFalla];
+  const confirmacionFallo = confirmacion.leDaUso && confirmacion.consulta.isError;
+  const reintentables = [
+    ...(servicio.falla === null ? [] : [servicio]),
+    ...(falla === null ? [] : [{ reintentar, reintentando }]),
+    ...conFalla,
+    ...(confirmacionFallo
+      ? [{ reintentar: () => void confirmacion.consulta.refetch(), reintentando: confirmacion.consulta.isFetching }]
+      : []),
+  ];
   const reintentarTodo = () => reintentables.forEach((r) => r.reintentar());
   return (
     <>
@@ -168,13 +177,18 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
               Puede que falten pendientes. {conFalla[0].falla}
             </p>
           )}
+          {confirmacionFallo && (
+            <p className="aviso-error" role="alert">
+              No se pudo saber si la confirmación con PIN, huella o código está activada. {mensajeDeLectura(confirmacion.consulta.error)}
+            </p>
+          )}
           <button type="button" className="secundario" disabled={reintentables.some((r) => r.reintentando)} onClick={reintentarTodo}>
             Reintentar
           </button>
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
-      <FaltaConfirmacion />
+      <FaltaConfirmacion consulta={confirmacion} />
       {nadaPendiente && <p className="inicio-nada">{NADA_PENDIENTE}</p>}
       <div className="grupos-inicio">
         {pendientes.length > 0 && (

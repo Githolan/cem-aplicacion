@@ -21,6 +21,7 @@ const AZUL = { id: C1, nombre: "Edificio Azul", vinculos: [] };
 const VERDE = { id: C2, nombre: "Edificio Verde", vinculos: [] };
 const P1 = "99999999-9999-4999-8999-999999999991";
 const P2 = "99999999-9999-4999-8999-999999999992";
+const CONFIRMACION_ACTIVA = { activo: true, llaves: 0, codigos_recuperacion_restantes: 8, verificado_en: "2026-11-01T00:00:00Z" };
 const SESION = {
   persona_id: "0199e3a2-1234-7abc-8def-0123456789ab",
   nombre: "Ana",
@@ -106,6 +107,8 @@ function backend({
     const otra = otras[camino];
     if (otra !== undefined) return otra();
     if (camino === "/api/v1/auth/sesion") return Response.json(SESION);
+    // La confirmación ya activada: el aviso de la decisión 10 no aparece salvo que la prueba lo pida.
+    if (camino === "/api/v1/auth/totp") return Response.json(CONFIRMACION_ACTIVA);
     if (camino === "/health") return Response.json(SALUD);
     if (camino === "/api/v1/me/consorcios") return Response.json(consorcios);
     if (camino === "/api/v1/me/invitaciones") return Response.json({ elementos: invitaciones });
@@ -463,5 +466,32 @@ describe("Flujos 18-11, tanda 7: el inicio del habitante autorizado", () => {
     abrir();
     const gestion = within(await screen.findByRole("region", { name: "Gestión" }));
     expect(await gestion.findByRole("link", { name: "Proveedores" })).toBeTruthy();
+  });
+});
+
+describe("integración de las tandas 2 y 3: la confirmación en el inicio", () => {
+  const PREPARA = ["egresos.revisar_orden"];
+
+  it("decisión 10: sin la confirmación activada, el aviso está y no se dice «No hay nada pendiente.»", async () => {
+    const sinConfirmacion = () => Response.json({ ...CONFIRMACION_ACTIVA, activo: false });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: PREPARA }, otras: { "/api/v1/auth/totp": sinConfirmacion } }));
+    abrir();
+    expect(await screen.findByRole("region", { name: "Confirmación con PIN, huella o código" })).toBeTruthy();
+    expect(screen.queryByText(NADA_PENDIENTE)).toBeNull();
+  });
+
+  it("control: con la confirmación activada, sin el aviso y con «No hay nada pendiente.»", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: PREPARA } }));
+    abrir();
+    expect(await screen.findByText(NADA_PENDIENTE)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Confirmación con PIN, huella o código" })).toBeNull();
+  });
+
+  it("AC-08: si no se puede leer la confirmación y falla otro pendiente, hay un solo «Reintentar»", async () => {
+    const falla = () => new Response(null, { status: 500 });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: PREPARA }, otras: { "/api/v1/auth/totp": falla, [ruta(C1, "pagos/bandeja")]: falla } }));
+    abrir();
+    expect(await screen.findByText(/No se pudo saber si la confirmación/)).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Reintentar" })).toHaveLength(1);
   });
 });
