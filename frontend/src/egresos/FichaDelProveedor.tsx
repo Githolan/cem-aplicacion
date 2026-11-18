@@ -104,6 +104,7 @@ export function FichaDelProveedor({
         razonSocial={p.razon_social}
         admiteNoVence={ficha.configuracion.admite_no_vence}
         salteoVence={ficha.salteos.find((s) => s.estado === "vigente")?.vence_en ?? null}
+        puedeSaltear={puedeSaltear}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />

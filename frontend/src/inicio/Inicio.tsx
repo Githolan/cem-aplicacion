@@ -12,7 +12,7 @@ import { useSolicitudesDirigidas } from "../fiscalizacion/solicitudesDirigidas";
 import { Icono } from "../Iconos";
 import { EnlaceInstalar } from "../Instalar";
 import { InvitacionesPropias, useMisInvitaciones } from "../InvitacionesPropias";
-import { DE_ADMINISTRACION, rutaDelDestino } from "../Navegacion";
+import { DE_ADMINISTRACION, rutaDelDestino, soloConsultaProveedores } from "../Navegacion";
 import { CONSULTA_AL_LADO, useAncho } from "../pagos/useAncho";
 import { useConsultaDeAcciones, useMisConsorcios } from "../permisos";
 import { useSesion } from "../sesion";
@@ -120,7 +120,7 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
 
   // En el teléfono y la tablet, las pantallas de Gestión (sin pestaña) que no estén ya en «Para
   // hacer». Sin saber qué alcanza la persona el menú queda corto: los contactos guardados le sirven.
-  const gestion: EnlaceDeInicio[] =
+  const todaLaGestion: EnlaceDeInicio[] =
     porEdificio === null
       ? falla === null
         ? []
@@ -131,6 +131,8 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
             const ruta = rutaDelDestino(d, porEdificio, conSolicitudes);
             return ruta === null || pendientes.some((p) => p.ruta === ruta) ? [] : [{ clave: ruta, ruta, texto: d.texto, icono: d.icono }];
           });
+  // FL-VER-04: con solo la consulta de proveedores, «Proveedores» es una pestaña más del menú, no Gestión.
+  const gestion = soloConsultaProveedores(todaLaGestion.map((e) => e.ruta)) ? [] : todaLaGestion;
 
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y los
   // pendientes. Vuelve a pedir solo lo que falló.

@@ -8,17 +8,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import type { components } from "../api/tipos";
+import { hoyDelDispositivo } from "../archivos";
 import { ContextoVersion } from "../version";
 import {
   DOS_FIRMAS,
   DESDE_EL_PANEL,
+  EMITE_AL_FIRMAR,
   FALTA_ADMINISTRADOR,
   FIRMAR,
+  FIRMAR_Y_EMITIR,
   IR_A_MANDATOS,
   PREPARAR,
   REGISTRAR_ENVIO,
   RESPONDER,
+  REGISTRAR_RESPUESTA,
   RETIRAR,
+  SIN_ADMINISTRADOR_AL_PREPARAR,
   SIN_SOLICITUDES,
   TEXTO_ESTADO,
   textoSituacion,
@@ -512,5 +517,121 @@ describe("el círculo de volver (FL-SOL-07)", () => {
     const volver = screen.getByRole("link", { name: "Volver a Inicio" });
     expect(volver.getAttribute("href")).toBe("/");
     expect(volver.classList.contains("cabecera-interna__volver--angosto")).toBe(true);
+  });
+});
+
+describe("Flujos 18-11, tanda 7", () => {
+  const CON_UNA_FIRMA: Solicitud = {
+    ...BORRADOR,
+    firmas: [{ nombre: "Eva Ficticia", firmada_en: "2026-11-16T10:00:00Z", propia: false }],
+  };
+  const manana = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d;
+  };
+
+  it("FL-SOL-01: con una firma puesta, el botón dice «Firmar y emitir» y avisa que no se puede retirar", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_UNA_FIRMA] }) }));
+    abrir();
+    const ficha = await abrirFicha(3);
+    expect(ficha.getByRole("button", { name: FIRMAR_Y_EMITIR })).toBeTruthy();
+    expect(ficha.getByText(EMITE_AL_FIRMAR)).toBeTruthy();
+    expect(ficha.queryByRole("button", { name: FIRMAR })).toBeNull();
+  });
+
+  it("FL-SOL-01, control: la primera firma sigue diciendo «Firmar», sin el aviso", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    const ficha = await abrirFicha(3);
+    expect(ficha.getByRole("button", { name: FIRMAR })).toBeTruthy();
+    expect(ficha.queryByText(EMITE_AL_FIRMAR)).toBeNull();
+  });
+
+  it("FL-SOL-02: emitida con el envío pendiente, la ficha queda abierta con el resultado, el texto y «Registrar el envío»", async () => {
+    const emitida: Solicitud = { ...PENDIENTE, id: S1, numero: 3, firmas: [...CON_UNA_FIRMA.firmas, { nombre: "Yo Ficticia", firmada_en: "2026-11-17T10:00:00Z", propia: true }] };
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_UNA_FIRMA] }),
+      [`POST ${BASE}/${S1}/firma`]: () => Response.json(emitida),
+    }));  // prettier-ignore
+    abrir();
+    const ficha = await abrirFicha(3);
+    fireEvent.click(ficha.getByRole("button", { name: FIRMAR_Y_EMITIR }));
+    expect(await ficha.findByText(/^Quedó emitida\. El administrador no tiene cuenta/)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: /^N\.º 3 ·/ })).toBeTruthy();
+    expect(ficha.getByText("Texto emitido")).toBeTruthy();
+    expect(ficha.getByRole("button", { name: REGISTRAR_ENVIO })).toBeTruthy();
+  });
+
+  it("FL-SOL-02, control: emitida a quien tiene cuenta, la ficha se cierra y el resultado queda en la lista", async () => {
+    const enviada: Solicitud = { ...ENVIADA, id: S1, numero: 3, acciones: [] };
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_UNA_FIRMA] }),
+      [`POST ${BASE}/${S1}/firma`]: () => Response.json(enviada),
+    }));  // prettier-ignore
+    abrir();
+    const ficha = await abrirFicha(3);
+    fireEvent.click(ficha.getByRole("button", { name: FIRMAR_Y_EMITIR }));
+    expect(await screen.findByText(/^Quedó emitida y enviada/)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("FL-SOL-06: la fecha del envío va de la emisión a hoy; fuera de eso se marca sin mandar nada", async () => {
+    const api = backend({ [LISTA]: () => Response.json(LLENA) });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const pendiente = await abrirFicha(2);
+    fireEvent.click(pendiente.getByRole("button", { name: REGISTRAR_ENVIO }));
+    const ventana = within(await screen.findByRole("dialog", { name: REGISTRAR_ENVIO }));
+    const fecha = ventana.getByLabelText("Fecha del envío") as HTMLInputElement;
+    expect(fecha.min).toBe(hoyDelDispositivo(new Date(PENDIENTE.emitida_en!)));
+    expect(fecha.max).toBe(hoyDelDispositivo());
+    fireEvent.change(ventana.getByLabelText("Archivo del comprobante del envío", { selector: "input" }), {
+      target: { files: [new File(["%PDF"], "carta.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.change(fecha, { target: { value: "2026-11-01" } });
+    fireEvent.click(ventana.getByRole("button", { name: "Registrar el envío" }));
+    expect(await ventana.findByText(/^La fecha va desde la emisión \(.+\) hasta hoy\.$/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/${S2}/adjuntos`)).toHaveLength(0);
+  });
+
+  it("FL-SOL-06: la respuesta recibida va del envío a hoy; un día futuro se marca sin mandar nada", async () => {
+    const vencida: Solicitud = {
+      ...ENVIADA, estado: "vencida", destinatario_con_cuenta: false,
+      envio: { ...ENVIADA.envio!, medio: "carta_documento" }, acciones: ["registrar_respuesta"],
+    };  // prettier-ignore
+    const api = backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [vencida] }) });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const ficha = await abrirFicha(1);
+    fireEvent.click(ficha.getByRole("button", { name: REGISTRAR_RESPUESTA }));
+    const ventana = within(await screen.findByRole("dialog", { name: REGISTRAR_RESPUESTA }));
+    const fecha = ventana.getByLabelText("Fecha en que llegó") as HTMLInputElement;
+    expect(fecha.min).toBe("2026-11-01");
+    expect(fecha.max).toBe(hoyDelDispositivo());
+    fireEvent.change(ventana.getByLabelText("Lo que respondió la administración"), { target: { value: "Llegó por carta." } });
+    fireEvent.change(fecha, { target: { value: hoyDelDispositivo(manana()) } });
+    fireEvent.click(ventana.getByRole("button", { name: "Registrar la respuesta" }));
+    expect(await ventana.findByText(/^La fecha va desde el envío \(01\/11\/2026\) hasta hoy\.$/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/${S3}/respuesta-recibida`)).toHaveLength(0);
+  });
+
+  it("decisión 15: sin administrador vigente, la ventana de preparar lo dice y deja guardar el borrador", async () => {
+    const espera: Solicitud = { ...CON_UNA_FIRMA, acciones: ["retirar"], falta_administrador_vigente: true };
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [espera] }) }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: PREPARAR }));
+    const ventana = within(await screen.findByRole("dialog", { name: PREPARAR }));
+    const linea = ventana.getByText(new RegExp(`^${SIN_ADMINISTRADOR_AL_PREPARAR.slice(0, 40)}`));
+    expect(within(linea).getByRole("link", { name: IR_A_MANDATOS }).getAttribute("href")).toBe("/mandatos");
+    expect(ventana.getByRole("button", { name: "Guardar el borrador" })).toBeTruthy();
+  });
+
+  it("decisión 15, control: con administrador vigente, la ventana no lo menciona", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json(LLENA) }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: PREPARAR }));
+    const ventana = within(await screen.findByRole("dialog", { name: PREPARAR }));
+    expect(ventana.queryByText(new RegExp(`^${SIN_ADMINISTRADOR_AL_PREPARAR.slice(0, 40)}`))).toBeNull();
   });
 });
