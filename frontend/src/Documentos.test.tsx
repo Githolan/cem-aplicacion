@@ -1370,7 +1370,8 @@ describe("tanda 6 de fricción en /documentos", () => {
   const conAcciones = (acciones: string[], extra: Respuestas = {}) =>
     conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza(...acciones), ...extra });
 
-  it("G-02: un documento que respalda algo no ofrece «Retirar el documento»: lo dice en su lugar", async () => {
+  // DOC-12: decisión del propietario, 18-11-2026 (deja de lado G-02 en esto): ni botón ni párrafo.
+  it("DOC-12: un documento que respalda algo no ofrece «Retirar el documento» ni explica por qué", async () => {
     const lista = {
       documentos: [
         documento(D1, "Acta de asamblea ordinaria", { versiones: [version(V1)], respalda: true }),
@@ -1381,7 +1382,8 @@ describe("tanda 6 de fricción en /documentos", () => {
     abrir();
     const acta = await tarjeta("Acta de asamblea ordinaria");
     expect(within(acta).queryByRole("button", { name: RETIRAR_DOCUMENTO })).toBeNull();
-    expect(within(acta).getByText(RESPALDA_ALGO)).toBeTruthy();
+    expect(within(acta).queryByText(RESPALDA_ALGO)).toBeNull();
+    expect(within(acta).queryByText(/no se puede retirar/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
     // Control: el que no respalda nada sigue ofreciéndolo, sin el aviso.
     const contrato = await tarjeta("Contrato de limpieza");

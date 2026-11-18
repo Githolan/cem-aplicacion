@@ -217,7 +217,7 @@ type Datos = { categoria: Categoria; titulo: string; fecha: string };
 /** Un documento nuevo empieza con la fecha de hoy: casi siempre se carga el día que llega (G-06). */
 const vacio = (): Datos => ({ categoria: "actas_y_decisiones", titulo: "", fecha: hoyDelDispositivo() });
 
-/** Lo que dice si algo guardado cita el documento (G-02): en lugar del botón que no puede andar. */
+/** El rechazo de la API si algo guardado cita el documento (`documento_referenciado`). */
 export const RESPALDA_ALGO =
   "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede retirar.";
 
@@ -1081,24 +1081,22 @@ export function Documentos() {
           </p>
         )}
         {/* Retirar: quien carga la categoría y además tiene la facultad de ver (`0089`). */}
-        {/* G-02: si algo guardado lo cita, se dice en lugar del botón, sin pedir el motivo para nada. */}
-        {puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") &&
-          (d.respalda === true ? (
-            <p>{RESPALDA_ALGO}</p>
-          ) : (
-            <p>
-              <button type="button" className="secundario peligro" disabled={enviando}
-                onClick={() => {
-                  if (subiendo) cancelar();
-                  setFallaDescarga(null);
-                  claveRetiro.current = null;
-                  setErroresRetiro(SIN_ERRORES);
-                  setRetiro({ documento: d.id, motivo: "" });
-                }}>
-                {RETIRAR_DOCUMENTO}
-              </button>
-            </p>
-          ))}
+        {/* DOC-12: si algo guardado lo cita, ni el botón ni un párrafo que lo explique (decisión del
+            propietario, 18-11-2026; deja de lado G-02 en esto). */}
+        {puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") && d.respalda !== true && (
+          <p>
+            <button type="button" className="secundario peligro" disabled={enviando}
+              onClick={() => {
+                if (subiendo) cancelar();
+                setFallaDescarga(null);
+                claveRetiro.current = null;
+                setErroresRetiro(SIN_ERRORES);
+                setRetiro({ documento: d.id, motivo: "" });
+              }}>
+              {RETIRAR_DOCUMENTO}
+            </button>
+          </p>
+        )}
       </FichaDeRegistro>
     );
   }
