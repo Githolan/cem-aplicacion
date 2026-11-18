@@ -8,7 +8,6 @@ import { RUTA_INVITACION, tokenDelFragmento } from "./enlace";
 import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceAlInicio, SalirDeEstaCuenta } from "./SalidaDeInvitacion";
 import { useIrAlInicio } from "./sesion";
-import { comprobarSesion } from "./sesionEncima";
 
 // Página /invitacion: la que abre el enlace de la invitación del correo (RF03). Como en /entrar,
 // el token llega en el fragmento (#token=…), que el navegador nunca manda al servidor; la página
@@ -20,12 +19,15 @@ import { comprobarSesion } from "./sesionEncima";
 // entra acá mismo y, al entrar, la aceptación se repite sola con el mismo enlace (G-35): no hace
 // falta tocar «Aceptar» otra vez. Diseño provisorio: el definitivo llega con G3.
 //
-// C8G-11 (informe de fricción, 17-11-2026): si hay una sesión abierta de otra cuenta, ya se sabe
-// que «Aceptar» no va a servir. La página lo dice de entrada, con «Salir de esta cuenta», sin el
-// formulario. Si la cuenta del correo ya existe sin sesión, o si la invitación la creó esta cuenta,
-// la página todavía no lo puede saber: hace falta que la consulta del enlace lo informe (backend).
+// C8G-11 (informe de fricción, 17-11-2026; app 0109): la consulta del enlace, con la sesión de este
+// navegador (y su CSRF), dice lo que pasaría al aceptar (`paso`). La página ofrece «Aceptar» solo si
+// va a servir, y pide el nombre solo si la cuenta se va a crear. Con otra cuenta abierta lo dice de
+// entrada, con «Salir de esta cuenta»; si la cuenta del correo ya existe, abre «Entrar para aceptar»;
+// si la invitación la creó esta cuenta, lo dice. La aceptación vuelve a decidir: sus 409 siguen
+// teniendo su pantalla, por si algo cambió entre la consulta y el clic.
 
 type Recibida = components["schemas"]["InvitacionRecibida"];
+type Paso = components["schemas"]["PasoInvitacion"];
 
 type Estado =
   | "sin_enlace"
@@ -58,22 +60,18 @@ const CONFLICTOS: Record<string, Estado> = {
   invitacion_propia: "propia",
 };
 
+/** Dónde deja la página cada paso que informa la consulta (C8G-11). */
+const ESTADO_DEL_PASO: Record<Paso, Estado> = {
+  crear_cuenta: "lista",
+  aceptar: "lista",
+  entrar: "requiere_sesion",
+  otra_cuenta: "otra_persona",
+  propia: "propia",
+};
+
 function leerToken(): string | null {
   return tokenDelFragmento(window.location.hash);
 }
-
-/** El correo de la sesión abierta; sin sesión, o si no se pudo saber, nulo: decide el servidor al aceptar. */
-async function correoDeLaSesion(): Promise<string | null> {
-  try {
-    const { data } = await api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion });
-    return data?.correo ?? null;
-  } catch {
-    // Sin respuesta no se sabe nada de la sesión: se ofrece aceptar y el servidor decide, como antes.
-    return null;
-  }
-}
-
-const mismoCorreo = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function Invitacion() {
   const id = useId();
@@ -91,14 +89,14 @@ export function Invitacion() {
 
   const consultar = useCallback((elToken: string) => {
     setEstado("consultando");
-    void Promise.all([api.POST("/api/v1/auth/invitacion/consultar", { body: { token: elToken } }), correoDeLaSesion()])
-      .then(([{ data, error, response }, correoSesion]) => {
+    void api
+      .POST("/api/v1/auth/invitacion/consultar", { body: { token: elToken }, headers: encabezadoCsrf() })
+      .then(({ data, error, response }) => {
         if (data !== undefined) {
           setInvitacion(data);
           setNombre(data.nombre);
           setCorreoParaEntrar(data.correo);
-          // C8G-11: con la sesión de otra cuenta, aceptar llevaría al rechazo: se dice ya.
-          setEstado(correoSesion !== null && !mismoCorreo(correoSesion, data.correo) ? "otra_persona" : "lista");
+          setEstado(ESTADO_DEL_PASO[data.paso]);
         } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else fallar(response.status, codigoDe(error));
       })
@@ -122,7 +120,8 @@ export function Invitacion() {
     if (!token) return;
     setEstado("aceptando");
     setFallaAlAceptar(null);
-    const elegido = nombre.trim();
+    // El nombre es solo de una cuenta nueva: a una que ya existe no se le manda (C8G-11).
+    const elegido = invitacion?.paso === "crear_cuenta" ? nombre.trim() : "";
     const volverAlFormulario = (estadoHttp: number, codigo: string | undefined) => {
       setFallaAlAceptar(mensajeDeFallaConEnlace(estadoHttp, codigo));
       setEstado("lista");
@@ -166,15 +165,19 @@ export function Invitacion() {
             <dd>{invitacion.invitada_por ?? "El equipo de Consorcio en Mano"}</dd>
           </dl>
           <form className="formulario" onSubmit={aceptar}>
-            <label htmlFor={`${id}-nombre`}>Nombre</label>
-            <input
-              id={`${id}-nombre`}
-              type="text"
-              autoComplete="name"
-              maxLength={100}
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-            />
+            {invitacion.paso === "crear_cuenta" && (
+              <>
+                <label htmlFor={`${id}-nombre`}>Nombre</label>
+                <input
+                  id={`${id}-nombre`}
+                  type="text"
+                  autoComplete="name"
+                  maxLength={100}
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                />
+              </>
+            )}
             <button type="submit" disabled={estado === "aceptando"}>
               Aceptar la invitación
             </button>

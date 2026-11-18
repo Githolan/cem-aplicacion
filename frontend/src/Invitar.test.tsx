@@ -39,6 +39,7 @@ function invitacion(id: string, nombre: string, estado: string, correo: string |
     vence_en: "2026-10-25T12:00:00Z",
     aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
     revocada_en: null,
+    importada: false,
   };
 }
 
@@ -74,12 +75,14 @@ function backend(respuestas: Respuestas) {
 
 const RUTA_LISTA = `/api/v1/consorcios/${C1}/invitaciones`;
 const RUTA_UNIDADES = `/api/v1/consorcios/${C1}/unidades`;
+const RUTA_IMPORTADA = `/api/v1/consorcios/${C1}/invitaciones/importada-pendiente`;
 
 function conConsorcio(extra: Respuestas = {}) {
   return backend({
     "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
     [`GET /api/v1/consorcios/${C1}/unidades`]: () => Response.json(UNIDADES),
     [`GET ${RUTA_LISTA}`]: () => Response.json(LISTA),
+    [`POST ${RUTA_IMPORTADA}`]: () => Response.json({ importada_pendiente: false }),
     ...extra,
   });
 }
@@ -388,6 +391,31 @@ describe("página /invitaciones", () => {
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(2));
     const claves = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
     expect(claves[1]).not.toBe(claves[0]);
+  });
+
+  it("C8G-10: si la persona ya tiene la invitación del padrón para esa unidad y vínculo, no ofrece «Invitar» y lo dice", async () => {
+    const simulado = conConsorcio({ [`POST ${RUTA_IMPORTADA}`]: () => Response.json({ importada_pendiente: true }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar("Lola Ficticia", "lola@ejemplo.com");
+    const ventana = screen.getByRole("dialog", { name: "Invitar a una persona" });
+    expect(await within(ventana).findByText(INVITACION_DEL_PADRON)).toBeTruthy();
+    expect(within(ventana).queryByRole("button", { name: "Invitar" })).toBeNull();
+    expect(within(ventana).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+    // Pregunta por lo escrito, con el correo en el cuerpo (nunca en la dirección), y no invita.
+    const [pregunta] = pedidos(simulado, "POST", RUTA_IMPORTADA).slice(-1);
+    expect(await pregunta?.json()).toEqual({ unidad_id: U1, tipo: "inquilino", correo: "lola@ejemplo.com" });
+    expect(pedidos(simulado, "POST", RUTA_LISTA)).toEqual([]);
+  });
+
+  it("control C8G-10: sin la invitación del padrón, «Invitar» sigue a la vista y no hay línea", async () => {
+    const simulado = conConsorcio();
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar("Lola Ficticia", "lola@ejemplo.com");
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_IMPORTADA).length).toBeGreaterThan(0));
+    expect(invitarBoton()).toBeTruthy();
+    expect(screen.queryByText(INVITACION_DEL_PADRON)).toBeNull();
   });
 
   it("E34: un 503 de la aplicación dice que el servicio no está disponible, no que revise la conexión", async () => {

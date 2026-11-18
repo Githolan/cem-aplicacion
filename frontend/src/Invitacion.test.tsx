@@ -22,6 +22,7 @@ const RECIBIDA = {
   nombre: "Beto",
   invitada_por: "Ana",
   vence_en: "2026-10-22T00:00:00Z",
+  paso: "crear_cuenta",
 };
 const ACEPTADA = {
   consorcio_id: "0199e3a2-1234-7abc-8def-0123456789ab",
@@ -109,11 +110,12 @@ describe("página /invitacion", () => {
     expect(screen.getByText("3° B")).toBeTruthy();
     expect(screen.getByText("inquilino/a")).toBeTruthy();
     expect(window.location.href).not.toContain(TOKEN);
-    // C8G-11: además de la invitación se lee la sesión, para no ofrecer aceptar a otra cuenta.
-    const [consulta, ...otros] = pedidosDe(pedido).filter((p) => new URL(p.url).pathname !== "/api/v1/auth/sesion");
+    // C8G-11: la consulta ya dice qué pasaría al aceptar; no hace falta leer la sesión aparte.
+    const [consulta, ...otros] = pedidosDe(pedido);
     expect(otros).toEqual([]);
-    expect(pedidosDe(pedido).filter((p) => new URL(p.url).pathname === "/api/v1/auth/sesion")).toHaveLength(1);
     if (consulta === undefined) throw new Error("no hubo consulta");
+    // Sin sesión no hay CSRF que mandar.
+    expect(consulta.headers.get("X-CSRF-Token")).toBeNull();
     const url = new URL(consulta.url);
     expect([consulta.method, url.pathname, url.search]).toEqual([
       "POST",
@@ -141,25 +143,30 @@ describe("página /invitacion", () => {
     expect(await aceptacion.json()).toEqual({ token: TOKEN, nombre: "Alberto" });
   });
 
-  it("con sesión abierta manda el CSRF", async () => {
+  it("con sesión abierta manda el CSRF; con la cuenta del correo no pide el nombre (C8G-11)", async () => {
     // jsdom no guarda cookies __Host- (piden Secure y https): se simula la lectura.
     vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
-    const pedido = backend(() => Response.json({ ...ACEPTADA, cuenta_nueva: false }));
+    const pedido = backend(() => Response.json({ ...ACEPTADA, cuenta_nueva: false }), () => Response.json({ ...RECIBIDA, paso: "aceptar" }));
     vi.stubGlobal("fetch", pedido);
     abrir(`/invitacion#token=${TOKEN}`);
 
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
 
     await screen.findByText(/ya es parte/);
-    expect(aceptacionesDe(pedido)[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
+    // La consulta lee la sesión: también lleva el CSRF.
+    expect(consultasDe(pedido)[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
+    const [aceptacion] = aceptacionesDe(pedido);
+    expect(aceptacion?.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(await aceptacion?.json()).toEqual({ token: TOKEN, nombre: null });
   });
 
-  it("G-35: si el correo ya tiene cuenta, se entra acá mismo y la invitación se acepta sola, sin otro clic", async () => {
+  it("G-35 y C8G-11: si el correo ya tiene cuenta, lo dice de entrada, se entra acá mismo y la invitación se acepta sola", async () => {
     vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
     let conSesion = false;
     const pedido = vi.fn(async (p: Request) => {
       const camino = new URL(p.url).pathname;
-      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === CONSULTAR) return Response.json({ ...RECIBIDA, paso: "entrar" });
       if (camino === ACEPTAR) return conSesion ? Response.json({ ...ACEPTADA, cuenta_nueva: false }) : error("invitacion_requiere_sesion", 409);
       if (camino === "/api/v1/auth/codigo") {
         conSesion = true;
@@ -172,9 +179,10 @@ describe("página /invitacion", () => {
     vi.stubGlobal("fetch", pedido);
     abrir(`/invitacion#token=${TOKEN}`);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
-
+    // Sin «Nombre» ni «Aceptar»: aceptar así llevaría al rechazo.
     expect(await screen.findByText(YA_HAY_CUENTA)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
     const entrar = screen.getByRole("region", { name: "Entrar para aceptar" });
     fireEvent.click(within(entrar).getByRole("button", { name: "Ya tengo un código" }));
     // El correo ya viene puesto: es el de la invitación.
@@ -183,11 +191,11 @@ describe("página /invitacion", () => {
     fireEvent.click(within(entrar).getByRole("button", { name: "Entrar con el código" }));
 
     expect(await screen.findByText(AVISO)).toBeTruthy();
-    // Dos aceptaciones con el mismo enlace: la que pidió entrar y la que salió sola al entrar.
+    // Una sola aceptación, la que salió sola al entrar, sin nombre (la cuenta ya existe).
     const aceptaciones = aceptacionesDe(pedido);
-    expect(aceptaciones).toHaveLength(2);
-    expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: RECIBIDA.nombre });
-    expect(aceptaciones[1]?.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(aceptaciones).toHaveLength(1);
+    expect(await aceptaciones[0]?.json()).toEqual({ token: TOKEN, nombre: null });
+    expect(aceptaciones[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
   it("si la sesión es de otra persona, lo dice", async () => {
@@ -204,13 +212,11 @@ describe("página /invitacion", () => {
     let adentro = true;
     const pedido = vi.fn(async (p: Request) => {
       const camino = new URL(p.url).pathname;
-      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === CONSULTAR) return Response.json({ ...RECIBIDA, paso: adentro ? "otra_cuenta" : "crear_cuenta" });
       if (camino === SALIR) {
         adentro = false;
         return new Response(null, { status: 204 });
       }
-      if (camino === "/api/v1/auth/sesion")
-        return adentro ? Response.json({ correo: "otra@ejemplo.com", nombre: "Otra" }) : error("no_autenticado", 401);
       if (camino === "/health") return error("servicio_no_disponible", 503);
       throw new Error(`pedido no previsto: ${p.method} ${camino}`);
     });
@@ -226,19 +232,24 @@ describe("página /invitacion", () => {
     expect(screen.queryByText(/no es la del correo invitado/)).toBeNull();
   });
 
-  it("control C8G-11: con la sesión del correo invitado (aunque cambie la mayúscula) ofrece aceptar", async () => {
-    const pedido = vi.fn(async (p: Request) => {
-      const camino = new URL(p.url).pathname;
-      if (camino === CONSULTAR) return Response.json(RECIBIDA);
-      if (camino === "/api/v1/auth/sesion") return Response.json({ correo: " Beto@Ejemplo.com", nombre: "Beto" });
-      if (camino === "/health") return error("servicio_no_disponible", 503);
-      throw new Error(`pedido no previsto: ${p.method} ${camino}`);
-    });
-    vi.stubGlobal("fetch", pedido);
+  it("control C8G-11: con la sesión del correo invitado ofrece aceptar, sin pedir el nombre", async () => {
+    vi.stubGlobal("fetch", backend(() => Response.json(ACEPTADA), () => Response.json({ ...RECIBIDA, paso: "aceptar" })));
     abrir(`/invitacion#token=${TOKEN}`);
 
     expect(await screen.findByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
     expect(screen.queryByText(/no es la del correo invitado/)).toBeNull();
+  });
+
+  it("C8G-11: si la creó esta cuenta, lo dice de entrada, sin «Aceptar» (F9)", async () => {
+    const pedido = backend(() => Response.json(ACEPTADA), () => Response.json({ ...RECIBIDA, paso: "propia" }));
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByText(/Esta invitación la creó esta cuenta/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Ir al inicio" })).toBeTruthy();
+    expect(aceptacionesDe(pedido)).toEqual([]);
   });
 
   it("si la creó quien la acepta, lo dice (F9)", async () => {

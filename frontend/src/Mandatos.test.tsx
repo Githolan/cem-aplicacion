@@ -19,6 +19,7 @@ import {
   LISTO_DECISION,
   mensajeDeError,
   RECIEN_DADO_DE_ALTA,
+  SIN_CONDICION_PARA_MANTENER,
 } from "./Mandatos";
 import { ContextoVersion } from "./version";
 
@@ -90,6 +91,7 @@ function detalleDecision(id: string, registradaPorVos: boolean) {
 const DETALLE_AE = {
   ...MANDATOS.elementos[1],
   es_propio: false,
+  condicion_cumplida_hoy: null,
   matricula: "RPA 1234",
   decision_id: D_EQUIPO,
   facultades: ["documentos.cargar"],
@@ -2171,7 +2173,19 @@ describe("tanda 6 de fricción en /mandatos", () => {
       cuit: null,
       con_cuenta: true,
       estado: "pendiente_revision",
+      condicion_cumplida_hoy: true,
     };
+
+    it("C8G-04: si la persona hoy no cumple la condición, no ofrece mantenerlo y dice dónde se resuelve", async () => {
+      vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_MC}`]: () => Response.json({ ...PENDIENTE, condicion_cumplida_hoy: false }) }));
+      abrir();
+      await cargado();
+      fireEvent.click(screen.getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") }));
+      const ficha = await esperarFicha("Ana Díaz, Consejo de propietarios");
+      const linea = await within(ficha).findByText(new RegExp(`^${SIN_CONDICION_PARA_MANTENER.slice(0, 40)}`));
+      expect(within(linea).getByRole("link", { name: "Ir al Padrón" }).getAttribute("href")).toBe("/padron");
+      expect(within(ficha).queryByRole("button", { name: "Mantener el mandato…" })).toBeNull();
+    });
 
     it("«Mantener el mandato…» abre su ventana con el porqué; con una asamblea y una fecha, lo mantiene", async () => {
       const simulado = conConsejo({
@@ -2184,6 +2198,8 @@ describe("tanda 6 de fricción en /mandatos", () => {
       await cargado();
       fireEvent.click(screen.getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") }));
       const ficha = await esperarFicha("Ana Díaz, Consejo de propietarios");
+      // Control C8G-04: con la condición cumplida no hay línea.
+      expect(within(ficha).queryByText(new RegExp(`^${SIN_CONDICION_PARA_MANTENER.slice(0, 40)}`))).toBeNull();
       // MAN-06: no está desplegado en la ficha.
       expect(within(ficha).queryByLabelText("Asamblea que lo mantiene")).toBeNull();
       fireEvent.click(within(ficha).getByRole("button", { name: "Mantener el mandato…" }));

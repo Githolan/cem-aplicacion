@@ -88,6 +88,7 @@ from cem_contracts.egresos import (
     EstadoLecturaCarga,
     EstadoOrdenPago,
     EstadoProveedor,
+    EstadoSalteo,
     FacturaAdjunta,
     FacturaSubida,
     FichaPago,
@@ -104,6 +105,7 @@ from cem_contracts.egresos import (
     ListaPagosPorAclarar,
     ListaProveedores,
     ListaProveedoresConsulta,
+    ModoExigencia,
     NuevoSalteoDocumentacion,
     ObservacionVigente,
     OrdenConPagoManual,
@@ -736,8 +738,32 @@ def listar_proveedores(
 ) -> ListaProveedores:
     with _lectura(permiso, _una_foto(motor)) as c:
         proveedores = _proveedores(c, permiso, None)
-        marcas = _marcas(c, permiso, [p.id for p in proveedores])
-    return ListaProveedores(elementos=proveedores, **marcas)
+        ids = [p.id for p in proveedores]
+        marcas = _marcas(c, permiso, ids)
+        salteos = _salteos_para_preparar(c, permiso, ids, marcas)
+    return ListaProveedores(elementos=proveedores, **marcas, **salteos)
+
+
+def _salteos_para_preparar(
+    c: Connection, lector: Permiso, ids: list[UUID], marcas: dict
+) -> dict[str, list[UUID]]:
+    """Informe de fricción C8P-02 (17-11-2026): de los bloqueados, a cuáles quien lee les puede
+    preparar una orden con un salteo vigente y a cuáles solo con uno suyo, que la barrera no toma
+    (`salteo_de_quien_prepara`). La regla es la columna `de_quien_prepara` que da la base (`0109`):
+    acá solo se agrupa."""
+    if marcas["modo_exigencia"] != ModoExigencia.BLOQUEAR:
+        return {"con_salteo": [], "salteo_de_quien_prepara": []}
+    bloqueados = set(marcas["documentacion_faltante"])
+    vigentes = [
+        f for f in _filas_salteos(c, lector, proveedor=None, orden=None)
+        if f["estado"] == EstadoSalteo.VIGENTE and f["proveedor_id"] in bloqueados
+    ]  # fmt: skip
+    sirven = {f["proveedor_id"] for f in vigentes if not f["de_quien_prepara"]}
+    propios = {f["proveedor_id"] for f in vigentes} - sirven
+    return {
+        "con_salteo": [p for p in ids if p in sirven],
+        "salteo_de_quien_prepara": [p for p in ids if p in propios],
+    }
 
 
 def _marcas(c: Connection, lector: Permiso, ids: list[UUID]) -> dict:
@@ -797,13 +823,21 @@ def _salteos(
     c: Connection, lector: Permiso, *, proveedor: UUID | None = None, orden: UUID | None = None
 ) -> list[SalteoDocumentacion]:
     """Los salteos con motivo del bloqueo por documentación legal (`0106`), de un proveedor o de
-    una orden, con el estado que calcula la base."""
-    filas = _ejecutar(
+    una orden, con el estado que calcula la base y si son de la cuenta de quien lee (`0109`)."""
+    return [
+        SalteoDocumentacion(**{k: v for k, v in f.items() if k != "de_quien_prepara"})
+        for f in _filas_salteos(c, lector, proveedor=proveedor, orden=orden)
+    ]
+
+
+def _filas_salteos(
+    c: Connection, lector: Permiso, *, proveedor: UUID | None, orden: UUID | None
+) -> list:
+    return _ejecutar(
         c, lector,
         "select * from nucleo.salteos_documentacion_lectura(:p, :o, :f, :actor, 'api', :sesion)",
         {"p": proveedor, "o": orden, "f": LEE_COMO[lector.accion]},
-    ).mappings()  # fmt: skip
-    return [SalteoDocumentacion(**f) for f in filas]
+    ).mappings().all()  # fmt: skip
 
 
 def _documentacion(
@@ -1194,7 +1228,8 @@ def saltear_documentacion(
             {"p": proveedor_id, "motivo": cuerpo.motivo},
             {"proveedor_inexistente": ERRORES["no_encontrado"]},
         ).mappings().one()  # fmt: skip
-        return 201, SalteoDocumentacion(**fila)
+        # Lo registró quien pide: la base exige que `actor` sea la persona de la sesión.
+        return 201, SalteoDocumentacion(**fila, propio=True)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 

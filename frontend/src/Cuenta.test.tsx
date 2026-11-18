@@ -51,6 +51,8 @@ const SESIONES = [
   sesion(OTRA, "Chrome en Android", false),
   sesion(TERCERA, "Safari en iPhone", false),
 ];
+/** `ultimo_uso_en` de las sesiones de prueba, como lo escribe la pantalla. */
+const ULTIMO_USO = "16 de octubre de 2026, 09:00";
 const TOTP_INACTIVO = { activo: false, activado_en: null, codigos_recuperacion_restantes: 0, verificado_en: null };
 const TOTP_ACTIVO = {
   activo: true,
@@ -139,7 +141,7 @@ function abrir(ruta = "/cuenta") {
 
 /** El botón «Cerrar» de la fila de un dispositivo: lo distingue su descripción. */
 function botonCerrar(dispositivo: string) {
-  return screen.findByRole("button", { name: "Cerrar", description: dispositivo });
+  return screen.findByRole("button", { name: "Cerrar", description: `${dispositivo} · último uso ${ULTIMO_USO}` });
 }
 
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
@@ -228,12 +230,36 @@ describe("página /cuenta", () => {
     expect(otra.textContent).toContain("último uso");
     expect(within(lista).queryByText("Abierta")).toBeNull();
     expect(within(lista).queryByText("Vence")).toBeNull();
-    // Cada botón dice de qué sesión es a quien usa un lector de pantalla.
-    expect(within(otra).getByRole("button", { name: "Cerrar", description: "Chrome en Android" })).toBeTruthy();
+    // Cada botón dice de qué sesión es a quien usa un lector de pantalla, con su último uso.
+    expect(
+      within(otra).getByRole("button", { name: "Cerrar", description: `Chrome en Android · último uso ${ULTIMO_USO}` }),
+    ).toBeTruthy();
     expect(screen.getByText("No está activado.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Activar la confirmación" }).getAttribute("href")).toBe(
       "/cuenta/segundo-factor",
     );
+  });
+
+  it("dos sesiones del mismo dispositivo se distinguen por el último uso en la descripción de «Cerrar»", async () => {
+    const mismas = [
+      sesion(ACTUAL, "Firefox en Windows", true),
+      { ...sesion(OTRA, "Chrome en Android", false), ultimo_uso_en: "2026-10-16T12:00:00Z" },
+      { ...sesion(TERCERA, "Chrome en Android", false), ultimo_uso_en: "2026-11-02T18:30:00Z" },
+    ];
+    vi.stubGlobal("fetch", conSesion({ "GET /api/v1/auth/sesiones": () => Response.json({ elementos: mismas }) }));
+    abrir();
+    const lista = (await screen.findByRole("heading", { name: "Sesiones abiertas" })).parentElement!;
+    await within(lista).findAllByRole("button", { name: "Cerrar" });
+    const descripciones = within(lista)
+      .getAllByRole("button", { name: "Cerrar" })
+      .map((b) => b.getAttribute("aria-describedby"))
+      .map((idDe) => document.getElementById(idDe ?? "")?.textContent);
+    expect(descripciones).toEqual([
+      "Chrome en Android · último uso 16 de octubre de 2026, 09:00",
+      "Chrome en Android · último uso 2 de noviembre de 2026, 15:30",
+    ]);
+    // Control: sin el último uso, las dos serían iguales.
+    expect(new Set(descripciones.map((d) => d?.split(" · ")[0])).size).toBe(1);
   });
 
   it("con el segundo factor activo lo dice", async () => {

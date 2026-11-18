@@ -1,3 +1,4 @@
+import { borrarDeLaPestana, guardarEnLaPestana, leerDeLaPestana } from "./almacenDeLaPestana";
 import { RUTA_ENTRAR, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 
 // Adónde iba la persona cuando un 401 la mandó a /entrar (decisión 7-11-2026, punto 13). Pasa con una
@@ -6,7 +7,8 @@ import { RUTA_ENTRAR, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } 
 //
 // Va en sessionStorage: es de esta pestaña y se usa una sola vez. Lo guardado se vuelve a mirar al
 // leerlo, porque se navega hacia ahí: solo una ruta de este origen, nunca una dirección de otro.
-// El fragmento no se guarda: en los enlaces de la aplicación es donde viaja un token.
+// El fragmento no se guarda: en los enlaces de la aplicación es donde viaja un token. Si el navegador
+// no deja guardar, no se recuerda y entrar lleva al inicio.
 
 const CLAVE = "cem.entrar.adonde_iba";
 /** Las que no se retoman: no son trabajo, son la entrada a la aplicación. */
@@ -24,16 +26,16 @@ export function rutaPropia(ruta: string, origen: string): string | null {
 export function guardarAdondeIba() {
   const { pathname, search, origin } = window.location;
   const ruta = rutaPropia(`${pathname}${search}`, origin);
-  if (ruta !== null) window.sessionStorage.setItem(CLAVE, ruta);
+  if (ruta !== null) guardarEnLaPestana(CLAVE, ruta);
 }
 
 export function olvidarAdondeIba() {
-  window.sessionStorage.removeItem(CLAVE);
+  borrarDeLaPestana(CLAVE);
 }
 
 /** Lo guardado, una sola vez. */
 export function tomarAdondeIba(): string | null {
-  const guardada = window.sessionStorage.getItem(CLAVE);
+  const guardada = leerDeLaPestana(CLAVE);
   olvidarAdondeIba();
   return guardada === null ? null : rutaPropia(guardada, window.location.origin);
 }

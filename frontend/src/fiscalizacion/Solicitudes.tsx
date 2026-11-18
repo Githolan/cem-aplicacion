@@ -27,6 +27,8 @@ import { RUTA_INICIO } from "../enlace";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { type DatoDeFicha, FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { ComandoNoDisponible } from "../ComandoNoDisponible";
+import { RUTA_MANDATOS } from "../Mandatos";
 import { REQUISITOS } from "../permisos";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { SubirArchivo } from "../SubirArchivo";
@@ -56,6 +58,9 @@ export const RUTA_SOLICITUDES = "/solicitudes";
 export const TITULO_SOLICITUDES = "Solicitudes formales";
 export const PREPARAR = "Preparar una solicitud";
 export const FIRMAR = "Firmar";
+/** C8P-08: la firma emitiría y el consorcio no tiene administrador vigente (A14). */
+export const FALTA_ADMINISTRADOR = "Falta un administrador vigente para emitirla: queda en borrador, con una firma, hasta que lo tenga. Se registra en Mandatos.";
+export const IR_A_MANDATOS = "Ir a Mandatos";
 export const RETIRAR = "Retirar el borrador";
 export const REGISTRAR_ENVIO = "Registrar el envío";
 export const RESPONDER = "Responder";
@@ -505,6 +510,9 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
         <p role="alert" className="aviso-error">
           {falla}
         </p>
+      )}
+      {s.falta_administrador_vigente && (
+        <ComandoNoDisponible motivo={FALTA_ADMINISTRADOR} resolver={{ texto: IR_A_MANDATOS, a: RUTA_MANDATOS }} />
       )}
       {s.acciones.length > 0 && (
         <p className="ficha-registro__acciones acciones">

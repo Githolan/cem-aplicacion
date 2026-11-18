@@ -1608,6 +1608,32 @@
         "title": "ConsorcioResumen",
         "type": "object"
       },
+      "ConsultaInvitacionImportada": {
+        "description": "`POST …/invitaciones/importada-pendiente`: antes de invitar, si la persona de ese correo ya\ntiene una invitación del padrón importado para esa unidad y carácter. El correo va en el\ncuerpo, nunca en la URL.",
+        "properties": {
+          "correo": {
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "tipo",
+          "correo"
+        ],
+        "title": "ConsultaInvitacionImportada",
+        "type": "object"
+      },
       "ConsultaPagos": {
         "description": "`GET …/pagos/consulta`: de lo último que cambió a lo más viejo.",
         "properties": {
@@ -5159,6 +5185,11 @@
             "title": "Designacion",
             "type": "string"
           },
+          "gestionable_por_vos": {
+            "description": "Si quien lee tiene `padron.gestionar` sobre la unidad de este vínculo (finalizar o anular). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Gestionable Por Vos",
+            "type": "boolean"
+          },
           "iniciado": {
             "description": "Si el vínculo ya empezó en la fecha del consorcio (`vigente_desde` <= hoy en su zona horaria), con la misma regla con la que el backend decide si se puede finalizar. No concede ningún permiso.",
             "title": "Iniciado",
@@ -5211,7 +5242,8 @@
           "vigente_hasta",
           "confirmado",
           "iniciado",
-          "confirmable_por_vos"
+          "confirmable_por_vos",
+          "gestionable_por_vos"
         ],
         "title": "FilaPadron",
         "type": "object"
@@ -5717,6 +5749,11 @@
             "title": "Id",
             "type": "string"
           },
+          "importada": {
+            "description": "Si salió con el padrón importado (nombra su vínculo): una invitación manual no la reemplaza (`invitacion_importada_pendiente`).",
+            "title": "Importada",
+            "type": "boolean"
+          },
           "nombre": {
             "title": "Nombre",
             "type": "string"
@@ -5764,7 +5801,8 @@
           "nombre",
           "estado",
           "creada_en",
-          "vence_en"
+          "vence_en",
+          "importada"
         ],
         "title": "Invitacion",
         "type": "object"
@@ -5794,6 +5832,20 @@
           "cuenta_nueva"
         ],
         "title": "InvitacionAceptada",
+        "type": "object"
+      },
+      "InvitacionImportadaConsultada": {
+        "description": "Responde lo mismo que invitar respondería (409 `invitacion_importada_pendiente`), sin\ndecir nada más de esa invitación.",
+        "properties": {
+          "importada_pendiente": {
+            "title": "Importada Pendiente",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "importada_pendiente"
+        ],
+        "title": "InvitacionImportadaConsultada",
         "type": "object"
       },
       "InvitacionMandato": {
@@ -6059,6 +6111,10 @@
             "description": "Nombre del mandatario que figura en el mandato.",
             "title": "Mandatario"
           },
+          "paso": {
+            "$ref": "#/components/schemas/PasoInvitacionMandato",
+            "description": "Lo que pasaría al aceptar con la sesión de este pedido. Solo para mostrar: la aceptación vuelve a decidir."
+          },
           "vence_en": {
             "format": "date-time",
             "title": "Vence En",
@@ -6069,7 +6125,8 @@
           "consorcio",
           "mandatario",
           "invitada_por",
-          "vence_en"
+          "vence_en",
+          "paso"
         ],
         "title": "InvitacionMandatoRecibida",
         "type": "object"
@@ -6221,6 +6278,10 @@
             "title": "Nombre",
             "type": "string"
           },
+          "paso": {
+            "$ref": "#/components/schemas/PasoInvitacion",
+            "description": "Lo que pasaría al aceptar con la sesión de este pedido. Solo para mostrar: la aceptación vuelve a decidir."
+          },
           "tipo": {
             "$ref": "#/components/schemas/TipoVinculo"
           },
@@ -6244,7 +6305,8 @@
           "correo",
           "nombre",
           "invitada_por",
-          "vence_en"
+          "vence_en",
+          "paso"
         ],
         "title": "InvitacionRecibida",
         "type": "object"
@@ -7232,6 +7294,15 @@
       },
       "ListaProveedores": {
         "properties": {
+          "con_salteo": {
+            "description": "Los bloqueados (modo `bloquear` y documentación faltante) con un salteo por urgencia vigente que sirve para una orden que prepare quien lee: lo registró otra persona, con otra identidad humana (`0106`, `0109`). Solo para mostrar: la base vuelve a decidir al preparar.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Con Salteo",
+            "type": "array"
+          },
           "documentacion_faltante": {
             "description": "Los proveedores a los que les falta documentación que exige la ley para sus rubros legales, o la tienen vencida (`0104`).",
             "items": {
@@ -7268,6 +7339,15 @@
           },
           "modo_exigencia": {
             "$ref": "#/components/schemas/ModoExigencia"
+          },
+          "salteo_de_quien_prepara": {
+            "description": "Los bloqueados cuyos salteos vigentes los registró quien lee (o su misma identidad humana): la base no los toma para una orden que prepare esa persona (`salteo_de_quien_prepara`).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Salteo De Quien Prepara",
+            "type": "array"
           }
         },
         "required": [
@@ -7275,7 +7355,9 @@
           "documentacion_vencida",
           "documentacion_por_vencer",
           "documentacion_faltante",
-          "modo_exigencia"
+          "modo_exigencia",
+          "con_salteo",
+          "salteo_de_quien_prepara"
         ],
         "title": "ListaProveedores",
         "type": "object"
@@ -7607,6 +7689,18 @@
             "title": "Con Cuenta",
             "type": "boolean"
           },
+          "condicion_cumplida_hoy": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "En un mandato pendiente de revisión: si la persona cumple hoy una condición para integrar el Consejo, medida del padrón como al mantenerlo (`0109`). Sin ella, la revisión que lo mantiene se niega (`sin_condicion_habilitante`). Nulo en otro estado.",
+            "title": "Condicion Cumplida Hoy"
+          },
           "cuit": {
             "anyOf": [
               {
@@ -7733,7 +7827,8 @@
           "instrumento_referencia",
           "motivo_fin",
           "finalizado_en",
-          "es_propio"
+          "es_propio",
+          "condicion_cumplida_hoy"
         ],
         "title": "MandatoDetalle",
         "type": "object"
@@ -9448,6 +9543,31 @@
         "title": "ParecidaAntesDeGuardar",
         "type": "object"
       },
+      "PasoInvitacion": {
+        "description": "Lo que pasaría al aceptar con la sesión del pedido (`0109`, el mismo orden que\n`aceptar_invitacion`). No revela nada que la aceptación no diga ya a quien tiene el enlace.",
+        "enum": [
+          "crear_cuenta",
+          "aceptar",
+          "entrar",
+          "otra_cuenta",
+          "propia"
+        ],
+        "title": "PasoInvitacion",
+        "type": "string"
+      },
+      "PasoInvitacionMandato": {
+        "description": "Lo que pasaría al aceptar con la sesión del pedido (`0109`, el mismo orden que\n`aceptar_invitacion_mandato`). Lo que depende de la cuenta solo se dice a esa cuenta.",
+        "enum": [
+          "crear_cuenta",
+          "aceptar",
+          "entrar",
+          "otra_cuenta",
+          "de_si_mismo",
+          "consejo_superpuesto"
+        ],
+        "title": "PasoInvitacionMandato",
+        "type": "string"
+      },
       "PasoPago": {
         "description": "El próximo paso de una orden para quien mira (§2). Sale solo si la base va a aceptar la\nacción; los `espera_*` son de quien la ve y no le toca.",
         "enum": [
@@ -11100,6 +11220,11 @@
             ],
             "title": "Orden Id"
           },
+          "propio": {
+            "description": "Si lo registró la cuenta de quien lee (`0109`): mientras espera su orden, esa cuenta no registra otro del mismo proveedor (`salteo_vigente`). Sin decir quién es la persona.",
+            "title": "Propio",
+            "type": "boolean"
+          },
           "proveedor_id": {
             "format": "uuid",
             "title": "Proveedor Id",
@@ -11153,7 +11278,8 @@
           "estado",
           "orden_id",
           "version",
-          "usado_en"
+          "usado_en",
+          "propio"
         ],
         "title": "SalteoDocumentacion",
         "type": "object"
@@ -11547,6 +11673,11 @@
           "estado": {
             "$ref": "#/components/schemas/EstadoSolicitudFormal"
           },
+          "falta_administrador_vigente": {
+            "description": "Si quien lee firmaría este borrador pero la firma emite y el consorcio no tiene un administrador vigente (A14): `firmar` no se ofrece hasta que lo tenga.",
+            "title": "Falta Administrador Vigente",
+            "type": "boolean"
+          },
           "firmas": {
             "items": {
               "$ref": "#/components/schemas/FirmaSolicitud"
@@ -11656,7 +11787,8 @@
           "envio",
           "respuesta",
           "retiro",
-          "acciones"
+          "acciones",
+          "falta_administrador_vigente"
         ],
         "title": "SolicitudFormal",
         "type": "object"
@@ -13243,7 +13375,7 @@
     },
     "/api/v1/auth/invitacion-mandato/consultar": {
       "post": {
-        "description": "No la consume: abrirla no la acepta. Sin CUIT.",
+        "description": "No la consume: abrirla no la acepta. Sin CUIT. Con la sesión del pedido (si trae una, con\nsu `X-CSRF-Token`), dice lo que pasaría al aceptar (`paso`, informe de fricción C8G-12 y\nMAN-15): la pantalla no ofrece «Aceptar» si la aceptación lo va a negar, ni pide el nombre a\nuna cuenta que ya existe. Donde aceptar respondería que la invitación no sirve, responde lo\nmismo ya al abrirla.",
         "operationId": "consultar_api_v1_auth_invitacion_mandato_consultar_post",
         "requestBody": {
           "content": {
@@ -13350,7 +13482,7 @@
     },
     "/api/v1/auth/invitacion/consultar": {
       "post": {
-        "description": "No la consume: abrirla no la acepta.",
+        "description": "No la consume: abrirla no la acepta. Con la sesión del pedido (si trae una, con su\n`X-CSRF-Token`), dice lo que pasaría al aceptar (`paso`, informe de fricción C8G-11): la\npantalla no ofrece «Aceptar» si la aceptación lo va a negar.",
         "operationId": "consultar_api_v1_auth_invitacion_consultar_post",
         "requestBody": {
           "content": {
@@ -16347,6 +16479,63 @@
         "summary": "Retirar una invitación de mandato no aceptada",
         "tags": [
           "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/invitaciones/importada-pendiente": {
+      "post": {
+        "description": "Informe de fricción C8G-10 (17-11-2026): la pantalla no ofrece «Invitar» si va a recibir\nel 409 `invitacion_importada_pendiente`. Responde lo mismo que invitar respondería a quien\npuede invitar en esa unidad, con la misma consulta, sin decir nada más de esa invitación ni\nescribir nada. El correo va en el cuerpo.",
+        "operationId": "importada_pendiente_api_v1_consorcios__consorcio_id__invitaciones_importada_pendiente_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsultaInvitacionImportada"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionImportadaConsultada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "La persona no es propietaria vigente de esa unidad ni tiene `invitaciones.crear` sobre ella."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Antes de invitar: si esa persona ya tiene una invitación del padrón importado para la unidad y el carácter",
+        "tags": [
+          "identidad"
         ]
       }
     },

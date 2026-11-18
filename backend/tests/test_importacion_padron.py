@@ -1411,6 +1411,30 @@ def invitar_manual(persona, cons, unidad, correo, tipo="ocupante"):
         )
 
 
+def importada_pendiente(persona, cons, unidad, correo, tipo="ocupante") -> bool:
+    with cliente(persona) as c:
+        r = c.post(
+            f"/api/v1/consorcios/{cons}/invitaciones/importada-pendiente",
+            json={"unidad_id": str(unidad), "tipo": tipo, "correo": correo},
+        )
+    assert r.status_code == 200, r.text
+    assert r.headers["cache-control"] == "no-store"
+    return r.json()["importada_pendiente"]
+
+
+def test_la_consulta_de_importada_pide_la_facultad_sobre_la_unidad(escena, motor_migrate):
+    """C8G-10: quien no puede invitar en esa unidad no pregunta por ella."""
+    e = escena
+    restringir(motor_migrate, e["m_admin"], "invitaciones.crear", e["u2"])
+    cuerpo = {"tipo": "ocupante", "correo": correo_nuevo()}
+    with cliente(e["admin"]) as c:
+        ruta = f"/api/v1/consorcios/{e['cons']}/invitaciones/importada-pendiente"
+        r = c.post(ruta, json=cuerpo | {"unidad_id": str(e["u1"])})
+        assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+        # Control: en su unidad responde.
+        assert c.post(ruta, json=cuerpo | {"unidad_id": str(e["u2"])}).status_code == 200
+
+
 @pytest.mark.parametrize("vencida", [False, True], ids=["vigente", "vencida"])
 def test_una_invitacion_manual_no_reemplaza_la_importada(escena, motor_migrate, vencida):
     e = escena
@@ -1429,6 +1453,13 @@ def test_una_invitacion_manual_no_reemplaza_la_importada(escena, motor_migrate, 
                 {"i": importada["id"]},
             )
     outbox = conteos(motor_migrate)["plataforma.outbox"]
+    # C8G-10 (informe de fricción, 17-11-2026): antes de invitar, la consulta dice lo mismo que
+    # va a responder invitar, sin escribir nada; y la lista marca la importada.
+    assert importada_pendiente(e["admin"], e["cons"], e["u2"], correo.upper()) is True
+    assert importada_pendiente(e["admin"], e["cons"], e["u2"], correo, "inquilino") is False
+    with cliente(e["admin"]) as c:
+        lista = c.get(f"/api/v1/consorcios/{e['cons']}/invitaciones").json()["elementos"]
+    assert [x["importada"] for x in lista if x["id"] == str(importada["id"])] == [True]
     r = invitar_manual(e["admin"], e["cons"], e["u2"], correo)
     assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_importada_pendiente")
     [sigue] = invitaciones_de(motor_migrate, correo)  # no se creó otra
@@ -1439,9 +1470,9 @@ def test_una_invitacion_manual_no_reemplaza_la_importada(escena, motor_migrate, 
     )
     assert conteos(motor_migrate)["plataforma.outbox"] == outbox
     # Control: otro carácter no es incompatible y se invita como siempre.
-    assert (
-        invitar_manual(e["admin"], e["cons"], e["u2"], correo, tipo="inquilino").status_code == 201
-    )
+    r = invitar_manual(e["admin"], e["cons"], e["u2"], correo, tipo="inquilino")
+    assert r.status_code == 201
+    assert r.json()["importada"] is False
 
 
 def test_el_script_del_equipo_tampoco_reemplaza_la_importada(escena, motor_migrate, monkeypatch):

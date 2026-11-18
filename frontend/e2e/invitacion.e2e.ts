@@ -23,6 +23,8 @@ const RECIBIDA = {
   nombre: "Beto Pérez",
   invitada_por: "Ana",
   vence_en: "2026-10-27T12:00:00Z",
+  // C8G-11 (app 0109): lo que pasaría al aceptar; sin sesión y sin cuenta, se crea con el nombre.
+  paso: "crear_cuenta",
 };
 const ACEPTADA = {
   consorcio_id: "11111111-1111-4111-8111-111111111111",
@@ -87,7 +89,7 @@ test.describe("invitación", () => {
     await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: ALTO_TELEFONO_PX });
     const pedidos = await simularApi(page, baseURL!);
     // La cuenta nueva queda con la sesión abierta al aceptar; antes no hay sesión (con la de otra
-    // cuenta, la página ya no ofrece aceptar: C8G-11).
+    // cuenta, la consulta lo dice y la página no ofrece aceptar: C8G-11).
     await simularSesion(page, () => (pedidos.some((p) => p.camino.endsWith("/aceptar")) ? "con_sesion" : "sin_sesion"));
     await page.goto(`/invitacion#token=${TOKEN}`);
 
@@ -111,7 +113,7 @@ test.describe("invitación", () => {
     for (const p of pedidos) expect(p.url).not.toContain(TOKEN);
     expect(pedidos[0]).toMatchObject({ cuerpo: { token: TOKEN } });
     expect(pedidos[1]).toMatchObject({ csrf: CSRF, cuerpo: { token: TOKEN, nombre: "Alberto" } });
-    // La consola informa el 401 de la sesión antes de aceptar (C8G-11 la lee); errores de la página, ninguno.
+    // La consola puede informar el 401 de la sesión antes de aceptar; errores de la página, ninguno.
     expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
@@ -136,8 +138,8 @@ test.describe("invitación", () => {
 
     await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toBeVisible();
     await expect(page.getByText("Buscando la invitación…")).toHaveCount(0);
-    // La consola informa el 401 de la sesión, que la página lee junto con la invitación (C8G-11);
-    // violaciones de la CSP o errores de la página, ninguno.
+    // La consola puede informar el 401 de la sesión; violaciones de la CSP o errores de la página,
+    // ninguno.
     expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
@@ -156,7 +158,7 @@ test.describe("invitación", () => {
     expect(pedidos.map((p) => p.camino)).toEqual(["/api/v1/auth/invitacion/consultar"]);
     expect(await anchoDePagina(page)).toBeLessThanOrEqual(ANCHO_TELEFONO_PX);
     await sinFaltasDeAccesibilidad(page);
-    // La consola informa el pedido cortado y el 401 de la sesión (C8G-11 la lee); violaciones de la
+    // La consola informa el pedido cortado (y puede informar el 401 de la sesión); violaciones de la
     // CSP o errores de la página, ninguno.
     expect(errores.filter((e) => !e.includes("ERR_INTERNET_DISCONNECTED") && !e.includes("401"))).toEqual([]);
   });

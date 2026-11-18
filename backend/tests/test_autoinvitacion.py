@@ -26,6 +26,7 @@ from tests.test_identidad_cierre_y_purga import entrar_como
 from tests.test_identidad_humana import huella_al_azar, verificar_identidad, vincular_identidad
 from tests.test_invitaciones import (
     ACEPTAR,
+    CONSULTAR,
     correo_nuevo,
     edificio,
     invitar,
@@ -54,6 +55,8 @@ def test_quien_invita_a_su_propio_correo_no_la_acepta(app, motor_migrate):  # no
     assert r.status_code == 201, r.text  # crearla se puede: lo que no se puede es aceptarla
     propia = r.json()
     token = token_invitacion(motor_migrate, e.propietaria)
+    # C8G-11: la consulta ya lo dice, a esa sesión.
+    assert ana.post(CONSULTAR, json={"token": token}, headers=csrf(ana)).json()["paso"] == "propia"
     r = ana.post(ACEPTAR, json={"token": token}, headers=csrf(ana))
     assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_propia")
     assert r.headers["cache-control"] == "no-store"
@@ -92,6 +95,9 @@ def test_otra_cuenta_de_la_misma_identidad_tampoco_la_acepta(app, motor_app, mot
     verificar_identidad(motor_app, e.consorcio, ana_id, huella)
     vincular_identidad(motor_app, e.consorcio, otra_id, huella)
     otra = entrar_como(app, motor_migrate, segundo)
+    assert otra.post(CONSULTAR, json={"token": token}, headers=csrf(otra)).json()["paso"] == (
+        "propia"
+    )
     r = otra.post(ACEPTAR, json={"token": token}, headers=csrf(otra))
     assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_propia")
 

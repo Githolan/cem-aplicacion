@@ -96,6 +96,11 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
       lista.unshift(nueva);
       return ruta.fulfill({ status: 201, json: nueva });
     }
+    // C8G-10 (app 0109): antes de invitar, la ventana pregunta si ya salió la invitación del padrón.
+    if (camino === `/api/v1/consorcios/${C1}/invitaciones/importada-pendiente`) {
+      if (csrf !== CSRF) return ruta.fulfill(error(403, "csrf_invalido"));
+      return ruta.fulfill({ json: { importada_pendiente: false } });
+    }
     if (camino === `/api/v1/consorcios/${C1}/invitaciones/${PENDIENTE}/revocar`) {
       retiros.push(csrf);
       if (csrf !== CSRF) return ruta.fulfill(error(403, "csrf_invalido"));

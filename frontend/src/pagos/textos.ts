@@ -215,8 +215,9 @@ export const FALTA_CONCEPTO = "Falta escribir el concepto.";
 export const MARCA_SIN_DOCUMENTACION = "(le falta documentación legal)";
 export const SIN_DOCUMENTACION =
   "A este proveedor le falta documentación que exige la ley: no se le puede preparar una orden. Se carga en su ficha; en una urgencia, un miembro del Consejo puede registrar ahí un salteo por urgencia.";
-export const SIN_DOCUMENTACION_SIN_SABER =
-  "Le falta documentación legal: solo se puede preparar si el Consejo registró un salteo por urgencia.";
+/** C8P-02: el único salteo vigente lo registró quien prepara; la base no lo toma. */
+export const SALTEO_PROPIO =
+  "Le falta documentación legal y el salteo por urgencia que espera lo registró esta cuenta: la orden la prepara otra persona, o el salteo lo registra otro miembro del Consejo.";
 export const CON_SALTEO = "Le falta documentación legal: se prepara con el salteo por urgencia que registró el Consejo.";
 export const IR_A_PROVEEDORES = "Ir a Proveedores";
 /** C8P-06: al modificar, el proveedor de la orden ya no recibe órdenes. */

@@ -43,10 +43,11 @@ pytestmark = pytest.mark.db
 REFERENCIA = "Escritura 1234, registro notarial 56"
 ESPERA_MAXIMA_S = 10
 """Tope de las esperas entre pedidos concurrentes: si se traba, la prueba falla sin colgar la CI."""
-# Los datos de D6, `iniciado` (corte 4, contrato 0.18.0) y `confirmable_por_vos` (0.46.0), que no
-# son datos de la persona.
+# Los datos de D6, `iniciado` (corte 4, contrato 0.18.0), `confirmable_por_vos` (0.46.0) y
+# `gestionable_por_vos` (0.76.0), que no son datos de la persona.
 COLUMNAS_D6 = {"vinculo_id", "unidad_id", "designacion", "nombre", "tipo", "vigente_desde",
-               "vigente_hasta", "confirmado", "iniciado", "confirmable_por_vos"}  # fmt: skip
+               "vigente_hasta", "confirmado", "iniciado", "confirmable_por_vos",
+               "gestionable_por_vos"}  # fmt: skip
 COLUMNAS_CONFIRMADO = {"vinculo_id", "unidad_id", "tipo", "confirmado", "confirmado_en"}
 
 

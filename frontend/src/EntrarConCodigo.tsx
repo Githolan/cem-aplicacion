@@ -14,8 +14,9 @@ import { useIrTrasEntrar } from "./sesion";
 //
 // Informe de fricción: «Enviar otro código» aparece junto al rechazo y detrás de «No llegó el correo», y deja la pantalla en el mismo
 // paso (ACC-02); con el correo que se acaba de pedir, va como texto con «Cambiar», sin el campo
-// (ACC-03); sin párrafos que repitan la etiqueta (ACC-04). Completar los seis números NO envía
-// solo (ACC-01 no se aplica): entrar es un cambio de contexto y espera el botón (WCAG 3.2.2).
+// (ACC-03); sin párrafos que repitan la etiqueta (ACC-04). Al completar los seis números (con el
+// correo escrito) se envía solo, como en egresos/PedirCodigo.tsx (ACC-01): decisión del
+// propietario, 18-11-2026, deja de lado WCAG 3.2.2. El botón queda por si el envío falla.
 
 export const DIGITOS_CODIGO = 6;
 /** Cuánto esperar el correo antes de buscar otra causa. */
@@ -90,12 +91,21 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar, alCa
 
   function enviar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
+    // El sexto número ya lo mandó (ACC-01): Enter o el botón no repiten el pedido en viaje.
+    if (estado === "enviando") return;
     const limpio = normalizarCodigo(codigo);
     if (!codigoValido(limpio)) {
       setFormatoMal(true);
       return;
     }
     entrarCon(limpio);
+  }
+
+  /** Al sexto número, con el correo escrito, entra sin esperar el botón (ACC-01). */
+  function escribirCodigo(valor: string) {
+    setCodigo(valor);
+    const limpio = normalizarCodigo(valor);
+    if (estado !== "enviando" && correo.trim() !== "" && codigoValido(limpio)) entrarCon(limpio);
   }
 
   /** Repite el pedido con el mismo correo y deja la pantalla en este paso (ACC-02). */
@@ -158,7 +168,7 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar, alCa
           aria-invalid={formatoMal}
           aria-describedby={formatoMal ? `${id}-formato` : undefined}
           value={codigo}
-          onChange={(e) => setCodigo(e.target.value)}
+          onChange={(e) => escribirCodigo(e.target.value)}
         />
         {formatoMal && (
           <p id={`${id}-formato`} className="aviso-error">

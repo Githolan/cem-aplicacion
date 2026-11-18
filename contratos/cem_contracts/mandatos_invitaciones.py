@@ -26,6 +26,25 @@ FORMATO_REFERENCIA = r"^[^\x00-\x1f\x7f]*\S[^\x00-\x1f\x7f]*$"
 """Al menos un carácter visible y ningún control."""
 
 
+class PasoInvitacionMandato(StrEnum):
+    """Lo que pasaría al aceptar con la sesión del pedido (`0109`, el mismo orden que
+    `aceptar_invitacion_mandato`). Lo que depende de la cuenta solo se dice a esa cuenta."""
+
+    CREAR_CUENTA = "crear_cuenta"
+    """El correo no tiene cuenta y no hay sesión: aceptar crea la cuenta, con el nombre."""
+    ACEPTAR = "aceptar"
+    """La sesión es la de la cuenta del correo y nada lo impide: aceptar no pide nombre."""
+    ENTRAR = "entrar"
+    """El correo ya tiene cuenta y no hay sesión: hay que entrar con ella."""
+    OTRA_CUENTA = "otra_cuenta"
+    """La sesión abierta es de otra cuenta."""
+    DE_SI_MISMO = "de_si_mismo"
+    """La cuenta emitió o aprobó la invitación (`asociacion_de_si_mismo`)."""
+    CONSEJO_SUPERPUESTO = "consejo_superpuesto"
+    """La cuenta tiene un mandato del Consejo superpuesto con el de administración
+    (`asociacion_incompatible_con_consejo`)."""
+
+
 class EstadoInvitacionMandato(StrEnum):
     POR_APROBAR = "por_aprobar"
     """La emitió una persona y falta que la apruebe otra; todavía no salió ningún correo."""
@@ -147,6 +166,10 @@ class InvitacionMandatoRecibida(BaseModel):
         description="Nombre de quien emitió; nulo si la emitió el equipo de la plataforma."
     )
     vence_en: datetime
+    paso: PasoInvitacionMandato = Field(
+        description="Lo que pasaría al aceptar con la sesión de este pedido. Solo para mostrar:"
+        " la aceptación vuelve a decidir."
+    )
 
 
 class AceptacionInvitacionMandato(BaseModel):

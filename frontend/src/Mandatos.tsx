@@ -66,6 +66,9 @@ type Categoria = components["schemas"]["CategoriaDocumento"];
 const CATEGORIA_ACTAS: Categoria = "actas_y_decisiones";
 
 export const RUTA_MANDATOS = "/mandatos";
+/** C8G-04: la persona del mandato no cumple hoy ninguna condición para integrar el Consejo. */
+export const SIN_CONDICION_PARA_MANTENER =
+  "Para mantenerlo, la persona tiene que volver a tener un vínculo confirmado en el edificio: se confirma en el Padrón.";
 
 const ESTADO = {
   sinSesion: 401,
@@ -2085,9 +2088,11 @@ export function Mandatos() {
     const enCurso = invitacionEnCurso();
     const conInvitacion = admiteInvitacion(m) && invitaciones?.tipo === "ok";
     const resuelveRevision = m.estado === "pendiente_revision" && puede("mandatos.resolver_revision");
+    /** C8G-04: sin la condición hoy, mantenerlo se niega (`sin_condicion_habilitante`); lo dice la API. */
+    const sinCondicion = resuelveRevision && m.condicion_cumplida_hoy === false;
     const daBaja = ESTADOS_CON_BAJA.includes(m.estado) && puede("mandatos.baja");
     const botones: ReactNode[] = [];
-    if (resuelveRevision && !m.es_propio && asambleas.length > 0)
+    if (resuelveRevision && !m.es_propio && !sinCondicion && asambleas.length > 0)
       botones.push(
         <button key="revision" type="button" onClick={() => abrirAccionFicha("revision")}>
           Mantener el mandato…
@@ -2136,7 +2141,10 @@ export function Mandatos() {
       >
         {resultado}
         {botones.length > 0 && <p className="ficha-registro__acciones">{botones}</p>}
-        {resuelveRevision && !m.es_propio && asambleas.length === 0 && (
+        {sinCondicion && !m.es_propio && (
+          <ComandoNoDisponible motivo={SIN_CONDICION_PARA_MANTENER} resolver={{ texto: "Ir al Padrón", a: RUTA_PADRON }} />
+        )}
+        {resuelveRevision && !m.es_propio && !sinCondicion && asambleas.length === 0 && (
           <ComandoNoDisponible motivo="Para mantenerlo hace falta una asamblea registrada por otra persona, y no hay ninguna que esta cuenta pueda usar." />
         )}
         {propiosQueNoVan.length > 0 && (

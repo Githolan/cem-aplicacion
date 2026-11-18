@@ -33,14 +33,17 @@ from cem_contracts.errores import CodigoError, Error
 from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import (
     AceptacionInvitacion,
+    ConsultaInvitacionImportada,
     Invitacion,
     InvitacionAceptada,
+    InvitacionImportadaConsultada,
     InvitacionNueva,
     InvitacionPropia,
     InvitacionPropiaAceptada,
     InvitacionRecibida,
     ListaInvitaciones,
     ListaInvitacionesPropias,
+    PasoInvitacion,
     TokenInvitacion,
 )
 from cem_contracts.politicas import TipoRecurso
@@ -73,7 +76,8 @@ ESTADO_SQL = """case when i.aceptada_en is not null then 'aceptada'
   when i.revocada_en is not null then 'revocada'
   when i.vence_en <= now() then 'vencida' else 'pendiente' end"""
 COLUMNAS = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo, i.correo,
-  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
+  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en,
+  i.vinculo_id is not null as importada"""
 NO_ENCONTRADA = "No se encontró lo pedido."
 # El correo en el listado (P6 del propietario, 19-10-2026): solo el de una invitación
 # **pendiente** y solo para quien la creó. Para cualquier otro autorizado, y para toda aceptada,
@@ -83,7 +87,17 @@ NO_ENCONTRADA = "No se encontró lo pedido."
 COLUMNAS_LISTA = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo,
   case when i.aceptada_en is null and i.revocada_en is null and i.vence_en > now()
     and i.invitada_por = :yo then i.correo end as correo,
-  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
+  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en,
+  i.vinculo_id is not null as importada"""
+
+
+DE_LA_CLAVE = (
+    "select id, vinculo_id from nucleo.invitacion"
+    " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
+    " and aceptada_en is null and revocada_en is null order by id"
+)
+"""Las invitaciones sin aceptar ni retirar de un correo, unidad y carácter (vencidas incluidas):
+las que `crear` retira o, si alguna es de la importación, por las que se niega."""
 
 
 @dataclass(frozen=True)
@@ -124,11 +138,7 @@ def crear(
     # previa se trababa con esta ruta: cada una esperaba la invitación nueva o la auditoría de
     # la otra (Codex en app #105).
     clave = {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo}
-    de_la_clave = (
-        "select id, vinculo_id from nucleo.invitacion"
-        " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
-        " and aceptada_en is null and revocada_en is null order by id"
-    )
+    de_la_clave = DE_LA_CLAVE
     bloqueadas = {f.id for f in conn.execute(text(de_la_clave + " for update"), clave)}
     conn.execute(
         text("select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"),
@@ -324,6 +334,39 @@ async def invitar(
     return await responder_una_vez_con_cupo(motor, ctx, idempotencia, cupo, efecto)
 
 
+@router.post(
+    "/consorcios/{consorcio_id}/invitaciones/importada-pendiente",
+    response_model=InvitacionImportadaConsultada,
+    summary="Antes de invitar: si esa persona ya tiene una invitación del padrón importado para"
+    " la unidad y el carácter",
+    responses={
+        403: {
+            "description": "La persona no es propietaria vigente de esa unidad ni tiene"
+            " `invitaciones.crear` sobre ella."
+        },
+    },
+)
+def importada_pendiente(
+    consulta: ConsultaInvitacionImportada,
+    permiso: Annotated[Permiso, Depends(requiere("invitaciones.crear"))],
+    motor: MotorDep,
+    response: Response,
+) -> InvitacionImportadaConsultada:
+    """Informe de fricción C8G-10 (17-11-2026): la pantalla no ofrece «Invitar» si va a recibir
+    el 409 `invitacion_importada_pendiente`. Responde lo mismo que invitar respondería a quien
+    puede invitar en esa unidad, con la misma consulta, sin decir nada más de esa invitación ni
+    escribir nada. El correo va en el cuerpo."""
+    response.headers.update(SIN_CACHE)
+    ctx = permiso.ctx
+    permiso.verificar(sobre_unidad(consulta.unidad_id))
+    clave = {"u": consulta.unidad_id, "t": consulta.tipo.value, "c": consulta.correo.lower()}
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        pendientes = conn.execute(text(DE_LA_CLAVE), clave).all()
+    return InvitacionImportadaConsultada(
+        importada_pendiente=any(f.vinculo_id is not None for f in pendientes)
+    )
+
+
 @router.get(
     "/consorcios/{consorcio_id}/invitaciones",
     response_model=ListaInvitaciones,
@@ -457,16 +500,23 @@ def _invitacion_invalida() -> ErrorApi:
     summary="Ver una invitación antes de aceptarla",
     responses={404: {"description": "La invitación no sirve (todas las causas responden igual)."}},
 )
-def consultar(pedido: TokenInvitacion, motor: MotorDep, response: Response) -> InvitacionRecibida:
-    """No la consume: abrirla no la acepta."""
+def consultar(
+    pedido: TokenInvitacion, request: Request, motor: MotorDep, response: Response
+) -> InvitacionRecibida:
+    """No la consume: abrirla no la acepta. Con la sesión del pedido (si trae una, con su
+    `X-CSRF-Token`), dice lo que pasaría al aceptar (`paso`, informe de fricción C8G-11): la
+    pantalla no ofrece «Aceptar» si la aceptación lo va a negar."""
     response.headers.update(SIN_CACHE)
+    persona_sesion = persona_de_la_sesion(request, motor)
+    token = sesiones.hash_token(pedido.token)
     with transaccion(motor, persona_id=None) as conn:
         r = conn.execute(
             text(
-                "select resultado, consorcio, unidad, tipo, correo, nombre, invitada_por, vence"
+                "select resultado, consorcio, unidad, tipo, correo, nombre, invitada_por, vence,"
+                " nucleo.paso_invitacion(:t, :p) as paso"
                 " from nucleo.consultar_invitacion(:t)"
             ),
-            {"t": sesiones.hash_token(pedido.token)},
+            {"t": token, "p": persona_sesion},
         ).one()
     if r.resultado != "ok":
         log.info("invitación consultada sin servir: %s", r.resultado)
@@ -479,6 +529,7 @@ def consultar(pedido: TokenInvitacion, motor: MotorDep, response: Response) -> I
         nombre=r.nombre,
         invitada_por=r.invitada_por,
         vence_en=r.vence,
+        paso=PasoInvitacion(r.paso),
     )
 
 

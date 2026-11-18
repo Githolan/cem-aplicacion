@@ -59,9 +59,6 @@ type Props = {
   puedeCargar: boolean;
   /** Lo que la configuración deja saltear (solo para mostrar: decide la API). */
   puedeSaltear: boolean;
-  /** Los salteos que registró esta persona en esta pantalla (comentario 40). */
-  salteosPropios: ReadonlySet<number>;
-  alRegistrarSalteo: (numero: number) => void;
   /** Los botones de las acciones de quien gestiona. */
   acciones?: ReactNode;
   /** La historia de versiones (solo gestión). */
@@ -82,8 +79,6 @@ export function FichaDelProveedor({
   puedeCambiar,
   puedeCargar,
   puedeSaltear,
-  salteosPropios,
-  alRegistrarSalteo,
   acciones,
   historia,
   ventana,
@@ -115,8 +110,6 @@ export function FichaDelProveedor({
         modo={ficha.configuracion.modo_exigencia}
         hayFaltantes={ficha.faltantes.length > 0}
         puedeSaltear={puedeSaltear}
-        propios={salteosPropios}
-        alRegistrar={alRegistrarSalteo}
         aEntrar={aEntrar}
         alCambiar={alCambiar}
       />

@@ -40,6 +40,7 @@ from cem_contracts.mandatos_invitaciones import (
     InvitacionMandatoNueva,
     InvitacionMandatoRecibida,
     ListaInvitacionesMandato,
+    PasoInvitacionMandato,
     TokenInvitacionMandato,
 )
 from fastapi import APIRouter, Depends, Request, Response
@@ -351,28 +352,40 @@ def _invitacion_invalida() -> ErrorApi:
     )
 
 
+NO_SIRVE = "no_sirve"
+"""El paso de `0109` donde aceptar respondería que la invitación no sirve (404)."""
+
+
 @router.post(
     "/auth/invitacion-mandato/consultar",
     response_model=InvitacionMandatoRecibida,
     summary="Ver una invitación de mandato antes de aceptarla",
     responses={404: {"description": "La invitación no sirve (todas las causas responden igual)."}},
 )
-def consultar(pedido: TokenInvitacionMandato, motor: MotorDep) -> InvitacionMandatoRecibida:
-    """No la consume: abrirla no la acepta. Sin CUIT."""
+def consultar(
+    pedido: TokenInvitacionMandato, request: Request, motor: MotorDep
+) -> InvitacionMandatoRecibida:
+    """No la consume: abrirla no la acepta. Sin CUIT. Con la sesión del pedido (si trae una, con
+    su `X-CSRF-Token`), dice lo que pasaría al aceptar (`paso`, informe de fricción C8G-12 y
+    MAN-15): la pantalla no ofrece «Aceptar» si la aceptación lo va a negar, ni pide el nombre a
+    una cuenta que ya existe. Donde aceptar respondería que la invitación no sirve, responde lo
+    mismo ya al abrirla."""
+    persona_sesion = persona_de_la_sesion(request, motor)
     with transaccion(motor, persona_id=None) as conn:
         r = conn.execute(
             text(
-                "select resultado, consorcio, mandatario, invitada_por, vence"
+                "select resultado, consorcio, mandatario, invitada_por, vence,"
+                " nucleo.paso_invitacion_mandato(:t, :p) as paso"
                 " from nucleo.consultar_invitacion_mandato(:t)"
             ),
-            {"t": sesiones.hash_token(pedido.token)},
+            {"t": sesiones.hash_token(pedido.token), "p": persona_sesion},
         ).one()
-    if r.resultado != "ok":
-        log.info("invitación de mandato consultada sin servir: %s", r.resultado)
+    if r.resultado != "ok" or r.paso == NO_SIRVE:
+        log.info("invitación de mandato consultada sin servir: %s", r.paso or r.resultado)
         raise _invitacion_invalida()
     return InvitacionMandatoRecibida(
         consorcio=r.consorcio, mandatario=r.mandatario, invitada_por=r.invitada_por,
-        vence_en=r.vence,
+        vence_en=r.vence, paso=PasoInvitacionMandato(r.paso),
     )  # fmt: skip
 
 

@@ -251,14 +251,13 @@ def _firmantes(fila) -> tuple[UUID, ...]:
 
 def _acciones(fila, firmar_decision, puede: dict[str, bool]) -> list[AccionSolicitud]:
     """Lo que se le ofrece a la persona: lo que el evaluador concedería con la solicitud a la
-    vista. La segunda firma sin administrador vigente se ofrece igual: al intentarla, la API dice
-    por qué no (409), en vez de esconder el botón sin explicación."""
+    vista. La segunda firma sin administrador vigente no se ofrece (informe de fricción C8P-08,
+    17-11-2026): la solicitud lo dice con `falta_administrador_vigente`, para que la pantalla
+    explique qué falta en vez de llevar al 409."""
     estado = EstadoSolicitudFormal(fila["estado"])
     acciones = []
     if estado is EstadoSolicitudFormal.BORRADOR:
-        if firmar_decision.permitido or (
-            firmar_decision.motivo_interno == Motivo.SIN_ADMINISTRADOR_VIGENTE
-        ):
+        if firmar_decision.permitido:
             acciones.append(AccionSolicitud.FIRMAR)
         if puede[RETIRAR]:
             acciones.append(AccionSolicitud.RETIRAR)
@@ -270,6 +269,15 @@ def _acciones(fila, firmar_decision, puede: dict[str, bool]) -> list[AccionSolic
         elif fila["destinatario_con_cuenta"] is False and puede[REGISTRAR_RESPUESTA]:
             acciones.append(AccionSolicitud.REGISTRAR_RESPUESTA)
     return acciones
+
+
+def _falta_administrador(fila, firmar_decision) -> bool:
+    """Si quien lee firmaría este borrador y solo lo impide que la firma emite sin un
+    administrador vigente (A14): el mismo motivo con que la ruta de firmar responde 409."""
+    return (
+        EstadoSolicitudFormal(fila["estado"]) is EstadoSolicitudFormal.BORRADOR
+        and firmar_decision.motivo_interno == Motivo.SIN_ADMINISTRADOR_VIGENTE
+    )
 
 
 def _solicitudes(
@@ -300,6 +308,7 @@ def _solicitudes(
             respuesta=RespuestaSolicitud(**f["respuesta"]) if f["respuesta"] else None,
             retiro=RetiroRegistrado(**f["retiro"]) if f["retiro"] else None,
             acciones=_acciones(f, decision, puede),
+            falta_administrador_vigente=_falta_administrador(f, decision),
         )
         for f, decision in zip(filas, firmar, strict=True)
     ]  # fmt: skip

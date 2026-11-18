@@ -34,6 +34,7 @@ COLUMNAS_MANDATO = {
 COLUMNAS_DETALLE = COLUMNAS_MANDATO | {
     "matricula", "decision_id", "facultades", "causa_baja", "baja_decision_id",
     "instrumento_referencia", "motivo_fin", "finalizado_en", "es_propio",
+    "condicion_cumplida_hoy",
 }  # fmt: skip
 COLUMNAS_DECISION = {"id", "tipo", "fecha", "descripcion", "registrada_por_vos", "del_equipo"}
 

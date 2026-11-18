@@ -125,8 +125,8 @@ test.describe("entrar encima", () => {
     // El correo es el de la sesión y va como texto, sin campo (ACC-05).
     await expect(hoja.getByText("ana@ejemplo.com", { exact: true })).toBeVisible();
     await expect(hoja.getByLabel("Correo", { exact: true })).toHaveCount(0);
+    // Sale solo al sexto número, sin tocar el botón (ACC-01).
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
-    await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
     await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(hoja).toHaveCount(0);
@@ -149,8 +149,8 @@ test.describe("entrar encima", () => {
 
     const hoja = page.getByRole("dialog", { name: "La sesión venció" });
     await yaTengoUnCodigo(hoja);
+    // Sale solo al sexto número, sin tocar el botón (ACC-01).
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
-    await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
     await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(page.getByText(/más de 12 horas/)).toHaveCount(0);
@@ -218,9 +218,9 @@ test.describe("hojas superpuestas", () => {
     const fallo = page.getByRole("dialog", { name: "No se pudo confirmar" });
     // Un clic de verdad: falla si la hoja quedó inerte o tapada por la de confirmar.
     await yaTengoUnCodigo(entrar);
-    await entrar.getByLabel(/Código de/).fill("042917");
     await sinFaltasDeAccesibilidad(page);
-    await entrar.getByRole("button", { name: "Entrar con el código" }).click();
+    // Sale solo al sexto número, sin tocar el botón (ACC-01).
+    await entrar.getByLabel(/Código de/).fill("042917");
 
     await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(entrar).toHaveCount(0);
@@ -273,8 +273,8 @@ test.describe("entrar encima en mi cuenta", () => {
     expect(new URL(page.url()).pathname).toBe("/cuenta");
 
     await yaTengoUnCodigo(hoja);
+    // Sale solo al sexto número, sin tocar el botón (ACC-01).
     await hoja.getByLabel(/Código de/).fill("042917");
-    await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
     await expect(hoja).toHaveCount(0);
     await expect(datos.getByText("ana@ejemplo.com")).toBeVisible();

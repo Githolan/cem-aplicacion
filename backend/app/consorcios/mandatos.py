@@ -42,6 +42,7 @@ from cem_contracts.mandatos import (
     DecisionNueva,
     DecisionRegistrada,
     DecisionResumen,
+    EstadoMandato,
     ListaCandidatos,
     ListaDecisiones,
     ListaMandatos,
@@ -532,7 +533,11 @@ def detalle_mandato(
         f"select {COLUMNAS_RESUMEN}, matricula, decision_id, facultades, causa_baja,"
         " baja_decision_id, instrumento_referencia, motivo_fin, finalizado_en,"
         " exists (select 1 from nucleo.mandato x where x.consorcio_id = :c and x.id = :m"
-        " and x.persona_id = :p) as es_propio"
+        " and x.persona_id = :p) as es_propio,"
+        # C8G-04 (informe de fricción, 17-11-2026): la medida con que la revisión que lo mantiene
+        # se niega (`sin_condicion_habilitante`, 0023), solo donde esa revisión se puede pedir.
+        f" case when estado = '{EstadoMandato.PENDIENTE_REVISION.value}'"
+        " then nucleo.condicion_consejo_hoy(:m) end as condicion_cumplida_hoy"
         " from nucleo.mandato_detalle(:m)",
         {"m": mandato_id, "c": ctx.consorcio_id, "p": ctx.persona_id},
     )
