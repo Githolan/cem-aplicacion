@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from "react-router";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { RUTA_INICIO } from "../enlace";
-import { codigoDe, esDeConexion } from "../fallas";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "../fallas";
 import { type Requisito, useEdificioElegido } from "../permisos";
 import { useAEntrar } from "../sesionEncima";
 import { ESTADO } from "./comun";
@@ -14,7 +14,7 @@ type Consorcio = components["schemas"]["ConsorcioResumen"];
 
 export type PantallaConsorcio =
   | { tipo: "cargando" }
-  | { tipo: "sin_servicio"; deConexion: boolean }
+  | { tipo: "sin_servicio"; motivo: string }
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: readonly Consorcio[] };
 
@@ -162,13 +162,13 @@ export function useConsorcio(requisito: Requisito) {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data === undefined)
-          setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
+          setPantalla({ tipo: "sin_servicio", motivo: mensajeDeFalla(response.status, codigoDe(error)) });
         else if (data.length === 0) setPantalla({ tipo: "sin_consorcios" });
         else setPantalla({ tipo: "lista", consorcios: data });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else setPantalla({ tipo: "sin_servicio", deConexion: true });
+        else setPantalla({ tipo: "sin_servicio", motivo: SIN_CONEXION });
       });
   }, [aEntrar]);
 

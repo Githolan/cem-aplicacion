@@ -946,6 +946,17 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByRole("button", { name: /^Limpieza Ficticia SRL / })).toBeNull();
   });
 
+  it.each([
+    [404, "consorcio_no_encontrado", "No se pudo completar el pedido. Hay que recargar la página y reintentar.", "El servicio no está disponible"],
+    [503, "servicio_no_disponible", "El servicio no está disponible en este momento. Reintentar en unos minutos.", "Hay que recargar"],
+  ])("E55: si la consulta de edificios vuelve %i, el aviso lo dice como es", async (estado, codigo, texto, ausente) => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => error(codigo, estado) }));
+    abrir("/egresos/proveedores");
+    expect(await screen.findByText(texto)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(ausente))).toBeNull();
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+  });
+
   it("una respuesta tardía del edificio anterior no aparece en el nuevo", async () => {
     let soltar: (r: Response) => void = () => undefined;
     const tardia = new Promise<Response>((r) => (soltar = r));

@@ -1242,6 +1242,13 @@ describe("página /mandatos", () => {
     expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
+  it("E55: la primera carga con un 404 pide recargar, no dice que el servicio cayó", async () => {
+    vi.stubGlobal("fetch", conConsejo({ "GET /api/v1/me/consorcios": () => error("consorcio_no_encontrado", 404) }));
+    abrir();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. No se pudo completar el pedido. Hay que recargar la página/)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
   describe("al terminar un envío", () => {
     const valor = (region: HTMLElement, etiqueta: string) => (within(region).getByLabelText(etiqueta) as HTMLInputElement).value;
 
