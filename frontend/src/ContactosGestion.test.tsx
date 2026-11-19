@@ -9,9 +9,9 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { MESES_DE_VALIDEZ_DE_LA_COMPROBACION, mensajeDeError, ofreceComprobar, PATRON_TELEFONO } from "./ContactosGestion";
+import { LARGO_TELEFONO, MESES_DE_VALIDEZ_DE_LA_COMPROBACION, mensajeDeError, ofreceComprobar, PATRON_TELEFONO } from "./ContactosGestion";
 import { PREFIJO_COPIA } from "./copiaContactos";
-import { SIN_CONEXION } from "./fallas";
+import { RECARGAR, SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
 // La gestión de los contactos, dentro de /contactos (G-52 y G-53): quien alcanza
@@ -882,6 +882,22 @@ describe("gestión de los contactos en /contactos", () => {
     expect(enviarAgregar()).toBeTruthy();
   });
 
+  it("agregar con un 404 (el edificio ya no se ve) pide recargar, no habla de un contacto y deja lo escrito", async () => {
+    const simulado = conLista({ [`POST ${BASE}`]: () => error("no_encontrado", 404) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
+    escribir("Nombre", "Seguros del Plata");
+    fireEvent.click(enviarAgregar());
+    const ventana = screen.getByRole("dialog", { name: "Agregar un contacto" });
+    expect(await within(ventana).findByText(RECARGAR)).toBeTruthy();
+    expect(screen.queryByText("Ese contacto ya no está en este edificio.")).toBeNull();
+    expect((within(ventana).getByLabelText("Nombre") as HTMLInputElement).value).toBe("Seguros del Plata");
+    await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    // Control: el 404 de un acto sobre un contacto sigue diciendo que el contacto ya no está.
+    expect(mensajeDeError(404, "no_encontrado", "retirar")).toBe("Ese contacto ya no está en este edificio.");
+  });
+
   it("control: otro 409 al corregir cierra el formulario, porque un PUT viejo desharía el cambio de otro", async () => {
     const simulado = conLista({ [`PUT ${BASE}/${K1}`]: () => error("conflicto", 409) });
     vi.stubGlobal("fetch", simulado);
@@ -1032,6 +1048,8 @@ describe("gestión de los contactos en /contactos", () => {
     for (const valor of ["0800-555-1234", "+54 11 4000 0000", "(011) 4321-9876", "11x", "1"])
       expect(pagina.test(valor)).toBe(delContrato.test(valor));
     expect(() => new RegExp(`^(?:${(telefono?.pattern ?? "").slice(1, -1)})$`, "v")).toThrow();
+    // El tope del campo es el largo máximo del formato: un primer carácter y el máximo de la repetición.
+    expect(LARGO_TELEFONO).toBe(1 + Number(/\{\d+,(\d+)\}\$$/.exec(telefono?.pattern ?? "")?.[1]));
     expect(mensajeDeError(500, undefined, "agregar")).toMatch(/No pudimos completar|servicio/);
   });
 });

@@ -81,6 +81,8 @@ const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 /** Los mismos topes que el contrato (`LARGO_MAXIMO_NOMBRE`, `LARGO_MAXIMO_TEXTO`, `FORMATO_TELEFONO`). */
 const LARGO_NOMBRE = 120;
 const LARGO_TEXTO = 300;
+/** El largo máximo que admite `FORMATO_TELEFONO`: un primer carácter y hasta 29 más. */
+export const LARGO_TELEFONO = 30;
 // Con la marca `v` que el navegador aplica a `pattern`, los paréntesis y el guion van escapados.
 export const PATRON_TELEFONO = "[+0-9][0-9 \\(\\)\\-]{2,29}";
 /** Un texto con algo más que espacios. */
@@ -156,6 +158,8 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
   if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
   if (estado === ESTADO.sinPermiso)
     return "Esta cuenta no tiene permiso para gestionar los contactos de este edificio: hace falta la facultad de la administración o del Consejo.";
+  // Agregar no apunta a un contacto: su 404 es el edificio, que esta cuenta ya no ve.
+  if (estado === ESTADO.noEncontrado && accion === "agregar") return mensajeDeFalla(estado, codigo);
   if (estado === ESTADO.noEncontrado) return "Ese contacto ya no está en este edificio.";
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
     return "El pedido se está procesando. Reintentar en unos segundos.";
@@ -755,7 +759,7 @@ export function GestionContactos({ consorcio, nombre, listaGeneral, alCambiar, a
           id={`${titulo}-telefono`}
           type="tel"
           autoComplete="off"
-          maxLength={30}
+          maxLength={LARGO_TELEFONO}
           pattern={PATRON_TELEFONO}
           required={profesional}
           disabled={enviando}
