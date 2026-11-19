@@ -49,6 +49,10 @@ const NOMBRE_ESTADO: Record<Caso["estado"], string> = {
   rechazado: "rechazado",
 };
 const FALTA_CODIGO = "Falta el código que llegó por correo.";
+/** FL-CTA-06 (tanda 10): el código lo manda solo soporte, uno por pedido (`0039`); vencido, soporte abre
+ * otro pedido con otro código. El medio es el que ya dice ese correo: responderlo. */
+export const CODIGO_NUEVO_POR_SOPORTE =
+  "Para seguir, responder al correo que trajo el código: soporte abre un pedido nuevo, con otro código.";
 const FALTA_CONTRASENA = "Falta la contraseña.";
 const FALTA_CONTRASENA_ACTUAL = "Falta la contraseña actual.";
 
@@ -297,7 +301,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
           {caso.codigo_vence_en === null
             ? "El código de este pedido ya no sirve."
             : `El código de este pedido venció el ${fecha(caso.codigo_vence_en)}.`}{" "}
-          Para seguir hace falta un código nuevo, que se pide a soporte.
+          {CODIGO_NUEVO_POR_SOPORTE}
         </p>
       );
     }

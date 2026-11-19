@@ -9,7 +9,7 @@ import { App } from "./App";
 import { trazoQr } from "./CodigoQr";
 import { PREFIJO_COPIA } from "./copiaContactos";
 import { ENTRAR_DE_NUEVO, RECARGAR } from "./fallas";
-import { ACTIVADO_CON_LLAVE, codigoAplicacion, codigoVerificacion, secretoEnBloques } from "./SegundoFactor";
+import { ACTIVADO_CON_LLAVE, CODIGOS_GENERADOS, codigoAplicacion, codigoVerificacion, GENERAR_CODIGOS, secretoEnBloques, textoRestantes } from "./SegundoFactor";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -269,7 +269,7 @@ describe("página /cuenta/segundo-factor", () => {
     expect(screen.queryByLabelText("Código de la aplicación o de recuperación")).toBeNull();
     expect(screen.queryByText("Verificado en esta sesión")).toBeNull();
     // Control: lo demás de la tarjeta sigue ahí.
-    expect(screen.getByText("Códigos de recuperación sin usar")).toBeTruthy();
+    expect(screen.getByText(textoRestantes(10))).toBeTruthy();
     // Desactivar es una acción negativa: va en rojo (comentario 26).
     expect(screen.getByRole("button", { name: "Desactivar la confirmación con código" }).className).toBe("peligro");
   });
@@ -990,16 +990,19 @@ describe("informe de fricción, tanda 7", () => {
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
-  it("AC-18: con pocos códigos sin usar dice cómo tener otros; con muchos, no", async () => {
+  it("AC-18 y FL-CTA-05: con pocos códigos se resalta cuántos quedan; con muchos, sin resaltar; siempre «Generar códigos nuevos»", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json({ ...ACTIVO, codigos_recuperacion_restantes: 2 }) }));
     abrir();
-    expect(await screen.findByText(/Quedan 2 códigos de recuperación\. Para tener otros/)).toBeTruthy();
+    expect((await screen.findByText(textoRestantes(2))).className).toBe("aviso-info");
+    expect(screen.getByRole("button", { name: GENERAR_CODIGOS })).toBeTruthy();
+    // Desactivar y volver a activar ya no es el camino: no se dice.
+    expect(screen.queryByText(/desactivar la aplicación y volver a activarla/)).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO) }));
     abrir();
-    await screen.findByRole("heading", { name: "Está activado" });
-    expect(screen.queryByText(/Para tener otros/)).toBeNull();
+    expect((await screen.findByText(textoRestantes(10))).className).toBe("");
+    expect(screen.getByRole("button", { name: GENERAR_CODIGOS })).toBeTruthy();
   });
 });
 
@@ -1154,11 +1157,61 @@ describe("tanda 9: segundo factor", () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json({ ...ACTIVO, codigos_recuperacion_restantes: 2 }) }));
     abrir();
     expect(await screen.findByText(/Quedan 2 códigos de recuperación/)).toBeTruthy();
-    expect(screen.queryByText("Códigos de recuperación sin usar")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Desactivar" })).toBeNull();
     expect(screen.queryByText(/Borra la aplicación cargada/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Desactivar la confirmación con código" }));
     const hoja = await screen.findByRole("dialog", { name: "¿Desactivar la aplicación de códigos?" });
     expect(within(hoja).getByText(/Se borran la aplicación cargada y los códigos de recuperación, y se avisa por correo/)).toBeTruthy();
+  });
+});
+
+describe("tanda 10 de flujos: códigos de recuperación nuevos (FL-CTA-05)", () => {
+  it("con la aplicación: pide confirmar si hace falta, repite el pedido y muestra los diez una sola vez", async () => {
+    let confirmado = false;
+    const pedido = backend({
+      "GET /api/v1/auth/totp": () => Response.json({ ...ACTIVO, codigos_recuperacion_restantes: 2 }),
+      "POST /api/v1/auth/totp/verificar": () => {
+        confirmado = true;
+        return Response.json(VERIFICADO);
+      },
+      "POST /api/v1/auth/totp/codigos-recuperacion": () =>
+        confirmado ? Response.json({ codigos: CODIGOS }) : error("segundo_factor_requerido", 403),
+    });
+    vi.stubGlobal("fetch", pedido);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: GENERAR_CODIGOS }));
+    // El código de la aplicación se verifica solo al sexto número.
+    await screen.findByLabelText("Código");
+    escribirCodigo("Código", "042917");
+    const hoja = await screen.findByRole("dialog", { name: "Guardar los códigos de recuperación" });
+    expect(within(hoja).getByText(CODIGOS_GENERADOS)).toBeTruthy();
+    expect(within(within(hoja).getByRole("list", { name: "Códigos de recuperación" })).getAllByRole("listitem")).toHaveLength(10);
+    const nuevos = pedidosDe(pedido).filter((p) => p.url.endsWith("/codigos-recuperacion"));
+    expect(nuevos).toHaveLength(2);
+    expect(nuevos.every((p) => p.headers.get("X-CSRF-Token") === "abc123")).toBe(true);
+  });
+
+  it("con solo la llave también se ve cuántos quedan y se generan otros", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json({ ...SOLO_LLAVE, codigos_recuperacion_restantes: 4 }),
+        "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
+        "POST /api/v1/auth/totp/codigos-recuperacion": () => Response.json({ codigos: CODIGOS }),
+      }),
+    );
+    abrir();
+    const tarjeta = (await screen.findByRole("heading", { name: "Códigos de recuperación" })).closest("section") as HTMLElement;
+    expect(within(tarjeta).getByText(textoRestantes(4))).toBeTruthy();
+    fireEvent.click(within(tarjeta).getByRole("button", { name: GENERAR_CODIGOS }));
+    expect(await screen.findByRole("dialog", { name: "Guardar los códigos de recuperación" })).toBeTruthy();
+  });
+
+  it("control: sin ningún medio, ni la cantidad ni el botón", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json({ ...INACTIVO, llaves: 0 }) }));
+    abrir();
+    await screen.findByRole("heading", { name: "Todavía no está activado" });
+    expect(screen.queryByRole("button", { name: GENERAR_CODIGOS })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Códigos de recuperación" })).toBeNull();
   });
 });

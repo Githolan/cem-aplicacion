@@ -37,6 +37,9 @@ export { codigoAplicacion, secretoEnBloques } from "./AltaAplicacion";
 // el código se verifica solo al sexto número (CTA-09); qué es la aplicación se explica ahí adentro
 // (CTA-11). Con la llave a la vista, que ya está activado lo dice su tarjeta (CTA-10). Con pocos
 // códigos queda solo el aviso, y la baja se explica en su hoja, no en la página (CTA-12).
+//
+// Flujos, tanda 10 (FL-CTA-05, app 0111): «Generar códigos nuevos» da diez sin desactivar nada (pide
+// confirmar la identidad como la baja), y cuántos quedan se ve también con solo la llave.
 
 type EstadoFactor = components["schemas"]["EstadoSegundoFactor"];
 type Alta = components["schemas"]["AltaTotp"];
@@ -75,6 +78,15 @@ const ACTIVADO = {
   llave: "Listo: la llave quedó activada.",
 };
 
+/** FL-CTA-05 (tanda 10): códigos nuevos sin desactivar el medio. */
+export const GENERAR_CODIGOS = "Generar códigos nuevos";
+export const CODIGOS_GENERADOS = "Listo: hay diez códigos de recuperación nuevos. Los anteriores ya no sirven.";
+
+/** Cuántos códigos de recuperación quedan, en una frase. */
+export function textoRestantes(n: number): string {
+  return n === 1 ? "Queda 1 código de recuperación." : `Quedan ${n} códigos de recuperación.`;
+}
+
 const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
   dateStyle: "long",
   timeStyle: "short",
@@ -87,7 +99,7 @@ type Pantalla =
   | { tipo: "sin_servicio"; deConexion: boolean }
   | { tipo: "inactivo" }
   | { tipo: "alta"; alta: Alta }
-  | { tipo: "codigos"; codigos: string[]; medio: keyof typeof ACTIVADO }
+  | { tipo: "codigos"; codigos: string[]; medio: keyof typeof ACTIVADO; aviso: string }
   | { tipo: "activo"; estado: EstadoFactor }
   | { tipo: "terminado"; aviso: string };
 
@@ -115,6 +127,8 @@ export function SegundoFactor() {
   const [volver] = useState(() => volverDe(lugar.state));
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [conLlave, setConLlave] = useState(false);
+  /** Los códigos de recuperación sin usar: con la aplicación o con solo la llave (FL-CTA-05). */
+  const [restantes, setRestantes] = useState(0);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -134,7 +148,7 @@ export function SegundoFactor() {
   const terminar = useCallback((texto: string) => pasarA({ tipo: "terminado", aviso: texto }), [pasarA]);
 
   const mostrarCodigosDeLlave = useCallback((codigos: string[]) => {
-    setPantalla({ tipo: "codigos", codigos, medio: "llave" });
+    setPantalla({ tipo: "codigos", codigos, medio: "llave", aviso: ACTIVADO.llave });
   }, []);
 
   const consultar = useCallback(() => {
@@ -144,6 +158,7 @@ export function SegundoFactor() {
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setConLlave(data.llaves > 0);
+          setRestantes(data.codigos_recuperacion_restantes);
           pasarA(data.activo ? { tipo: "activo", estado: data } : { tipo: "inactivo" });
         } else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
         else pasarA({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
@@ -217,6 +232,37 @@ export function SegundoFactor() {
       .finally(() => setEnviando(false));
   }
 
+  /** FL-CTA-05: diez códigos nuevos; los anteriores dejan de servir. Pide confirmar la identidad si
+   * no se confirmó hace poco, como desactivar, y repite el pedido. */
+  function generarCodigos() {
+    const medio = pantalla.tipo === "activo" ? "aplicacion" : "llave";
+    setEnviando(true);
+    setAviso(null);
+    void api
+      .POST("/api/v1/auth/totp/codigos-recuperacion", { headers: encabezadoCsrf() })
+      .then(({ data, error, response }) => {
+        if (data !== undefined) setPantalla({ tipo: "codigos", codigos: data.codigos, medio, aviso: CODIGOS_GENERADOS });
+        else if (codigoDe(error) === CODIGO_REQUERIDO)
+          setPendiente({ acto: "generar códigos de recuperación nuevos", reintentar: generarCodigos });
+        else if (response.status === ESTADO_SIN_SESION) sinSesion();
+        else avisarFalla(response.status, error);
+      })
+      .catch(() => setAviso(fallo(SIN_CONEXION)))
+      .finally(() => setEnviando(false));
+  }
+
+  /** Cuántos códigos quedan y cómo tener otros (FL-CTA-05): con la aplicación o con solo la llave. */
+  function codigosRestantes() {
+    return (
+      <>
+        <p className={restantes <= POCOS_CODIGOS ? "aviso-info" : undefined}>{textoRestantes(restantes)}</p>
+        <button type="button" className="secundario" onClick={generarCodigos} disabled={enviando}>
+          {GENERAR_CODIGOS}
+        </button>
+      </>
+    );
+  }
+
   function reintentarConsulta() {
     setPantalla({ tipo: "cargando" });
     consultar();
@@ -225,7 +271,6 @@ export function SegundoFactor() {
   const conMensaje = aviso !== null || ["cargando", "sin_servicio"].includes(pantalla.tipo);
   // La llave ya se ofrece arriba como la acción principal: la aplicación queda como otra opción.
   const llaveArriba = llaveDisponible();
-  const pocos = pantalla.tipo === "activo" && pantalla.estado.codigos_recuperacion_restantes <= POCOS_CODIGOS;
 
   // Los códigos no se sueltan hasta «Códigos guardados: seguir»: van en una hoja que deja inerte el resto de la
   // aplicación (la marca de la cabecera, el aviso de versión nueva) y no se cierra con Escape.
@@ -234,11 +279,11 @@ export function SegundoFactor() {
       <>
         <h1>Confirmación con PIN, huella o código</h1>
         <Hoja titulo="Guardar los códigos de recuperación">
-          <p className="aviso-ok">{ACTIVADO[pantalla.medio]}</p>
+          <p className="aviso-ok">{pantalla.aviso}</p>
           <CodigosRecuperacion
             codigos={pantalla.codigos}
             medio={pantalla.medio}
-            alGuardar={() => setPantalla({ tipo: "terminado", aviso: ACTIVADO[pantalla.medio] })}
+            alGuardar={() => setPantalla({ tipo: "terminado", aviso: pantalla.aviso })}
           />
         </Hoja>
       </>
@@ -301,11 +346,19 @@ export function SegundoFactor() {
         </section>
       )}
 
+      {/* FL-CTA-05 (tanda 10): con solo la llave, también se ve cuántos códigos quedan y se generan otros. */}
+      {pantalla.tipo === "inactivo" && conLlave && pendiente === null && (
+        <section aria-labelledby={`${id}-codigos`} className="tarjeta">
+          <h2 id={`${id}-codigos`}>Códigos de recuperación</h2>
+          {codigosRestantes()}
+        </section>
+      )}
+
       {pantalla.tipo === "alta" && (
         <VentanaAltaAplicacion
           alta={pantalla.alta}
           alOcupar={setAltaEnCurso}
-          alActivar={(codigos) => setPantalla({ tipo: "codigos", codigos, medio: "aplicacion" })}
+          alActivar={(codigos) => setPantalla({ tipo: "codigos", codigos, medio: "aplicacion", aviso: ACTIVADO.aplicacion })}
           alCerrar={cancelarAlta}
           alVencer={() => {
             pasarA({ tipo: "inactivo" });
@@ -325,23 +378,9 @@ export function SegundoFactor() {
                 <dd>{FORMATO_FECHA.format(new Date(pantalla.estado.activado_en))}</dd>
               </>
             )}
-            {/* Con pocos, el aviso de abajo ya dice cuántos quedan (CTA-12). */}
-            {pocos ? null : (
-              <>
-                <dt>Códigos de recuperación sin usar</dt>
-                <dd>{pantalla.estado.codigos_recuperacion_restantes}</dd>
-              </>
-            )}
           </dl>
-          {pocos && (
-            <p className="aviso-info">
-              {pantalla.estado.codigos_recuperacion_restantes === 1
-                ? "Queda 1 código de recuperación."
-                : `Quedan ${pantalla.estado.codigos_recuperacion_restantes} códigos de recuperación.`}{" "}
-              Para tener otros, desactivar la aplicación y volver a activarla: al activarla llegan
-              diez nuevos.
-            </p>
-          )}
+          {/* FL-CTA-05 (tanda 10): cuántos quedan y «Generar códigos nuevos», sin desactivar nada. */}
+          {codigosRestantes()}
           {/* Qué borra la baja lo dice su hoja de confirmación (CTA-12). */}
           <button type="button" className="peligro" onClick={() => setConfirmarBaja(true)} disabled={enviando}>
             Desactivar la confirmación con código
