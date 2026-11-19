@@ -332,6 +332,10 @@ try {
         $quedan = @(docker ps -aq --filter "label=com.docker.compose.project=$abandonado")
         if ($quedan) { throw "la corrida cortada $abandonado dejó $($quedan.Count) contenedores" }
     }
+    # Las corridas cortadas que ya no tenían contenedores no aparecen arriba; sus redes quedaban
+    # y agotaban los rangos de Docker (ver Remove-CemRedesCiAbandonadas).
+    $redesBorradas = @(Remove-CemRedesCiAbandonadas)
+    Escribir "  redes de corridas cortadas borradas: $($redesBorradas.Count)" $(if ($redesBorradas.Count) { 'Yellow' } else { 'Gray' })
     # Sus copias LF en la carpeta temporal también quedaron (el `finally` no corrió): se borran
     # las de procesos muertos, bajo el mutex de limpieza (dos corridas que arrancan a la vez no se
     # pisan: la segunda ya no ve lo que borró la primera). Las del formato viejo, sin PID, no se tocan.

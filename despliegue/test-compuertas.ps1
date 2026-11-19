@@ -16,7 +16,8 @@
 # 8. cd.ps1 acepta -SinCopiaPrevia y con él las demás compuertas siguen valiendo.
 # 10. Cobertura de PA: la constancia guarda cubiertas y faltantes; un informe roto falla.
 # 11. Proyecto de compose por corrida: formato, dos corridas distintas, y solo las corridas
-#     de procesos muertos se toman por abandonadas (nunca una viva ni otro formato).
+#     de procesos muertos se toman por abandonadas (nunca una viva ni otro formato); de las
+#     redes que quedan, solo se quitan las vacías de corridas muertas.
 # 12. Pruebas heredadas: una fusión hereda las de la punta de su PR (mismo árbol); no hereda
 #     sin constancia, de una en rojo, de una que a su vez heredó, ni con otro árbol.
 # 13. Copias LF de ci.ps1 en %TEMP%: llevan el PID; solo las de procesos muertos se toman por
@@ -349,6 +350,22 @@ $conPartes = @(Get-CemProyectosCiAbandonados -Proyectos @('cem-ci-abc1234-300-bb
 Comprobar 'la parte de una corrida muerta también se toma por abandonada (y una viva no)' (($conPartes -join ',') -eq 'cem-ci-abc1234-300-bbbbbb-p2') ($conPartes -join ',')
 Comprobar 'control: con todos vivos no hay abandonadas' (@(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo { $true }).Count -eq 0) 'hay'
 Comprobar "control: el proceso de esta prueba ($PID) se ve vivo" (@(Get-CemProyectosCiAbandonados -Proyectos @("cem-ci-abc1234-$PID-eeeeee")).Count -eq 0) 'se tomó por abandonada'
+# Redes que quedan de corridas cortadas: solo las de procesos muertos y sin contenedores.
+$redes = @(
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-300-bbbbbb_default';    Proyecto = 'cem-ci-abc1234-300-bbbbbb';    Contenedores = 0 },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-300-bbbbbb-p2_default'; Proyecto = 'cem-ci-abc1234-300-bbbbbb-p2'; Contenedores = 0 },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-400-ffffff_default';    Proyecto = 'cem-ci-abc1234-400-ffffff';    Contenedores = 1 },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-100-aaaaaa_default';    Proyecto = 'cem-ci-abc1234-100-aaaaaa';    Contenedores = 0 },
+    [pscustomobject]@{ Nombre = 'cem-h3d_default';                      Proyecto = 'cem-h3d';                      Contenedores = 0 },
+    [pscustomobject]@{ Nombre = 'oci-mirror-net';                       Proyecto = 'oci-mirror';                   Contenedores = 0 })
+$quitadas = [System.Collections.Generic.List[string]]::new()
+$devueltas = @(Remove-CemRedesCiAbandonadas -Listar { $redes } -Quitar { param($n) $quitadas.Add($n) } -ProcesoVivo $esVivo)
+$esperadas = 'cem-ci-abc1234-300-bbbbbb_default,cem-ci-abc1234-300-bbbbbb-p2_default'
+Comprobar 'quita solo las redes vacías de corridas muertas (no una con contenedores, viva u otro proyecto)' (($quitadas -join ',') -eq $esperadas) ($quitadas -join ',')
+Comprobar 'devuelve lo que quitó' (($devueltas -join ',') -eq $esperadas) ($devueltas -join ',')
+$quitadas.Clear()
+Comprobar 'control: con todos vivos no quita ninguna' (@(Remove-CemRedesCiAbandonadas -Listar { $redes } -Quitar { param($n) $quitadas.Add($n) } -ProcesoVivo { $true }).Count -eq 0 -and $quitadas.Count -eq 0) ($quitadas -join ',')
+Comprobar 'control: sin redes no hace nada' (@(Remove-CemRedesCiAbandonadas -Listar { @() } -Quitar { throw 'no debía quitar' } -ProcesoVivo $esVivo).Count -eq 0) 'quitó'
 
 Write-Host "`n=== 13. Copias LF de corridas cortadas de ci.ps1 ===" -ForegroundColor Cyan
 $tmpSis = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

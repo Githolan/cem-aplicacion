@@ -10,7 +10,8 @@
 # de tipo dockerimage y cd.ps1 solo le cambia la etiqueta (docker_registry_image_tag).
 #
 # Compuertas (se niega y sale con código 1 si alguna no se cumple; nada cambia):
-#   - la SHA está en origin/main y es su punta (se despliega solo la punta de main)
+#   - la SHA está en origin/main; para desplegar, además es su punta (se despliega solo la punta
+#     de main; -SoloVerificar acepta una anterior, para comparar lo que está corriendo)
 #   - ci.ps1 terminó en verde sobre esa SHA y su constancia tiene el digest de
 #     cada imagen que usa el entorno (también en -SoloVerificar: es contra lo que
 #     se compara el contenedor)

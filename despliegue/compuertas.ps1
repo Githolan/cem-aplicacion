@@ -69,6 +69,44 @@ function Get-CemProyectosCiAbandonados {
     }
 }
 
+# Las redes de compose que quedan de corridas cortadas. La limpieza de ci.ps1 encuentra las
+# corridas por sus contenedores: un proyecto que se quedó sin contenedores y con su red no
+# aparece, y esas redes se acumulaban hasta agotar los rangos de direcciones de Docker («all
+# predefined address pools have been fully subnetted»: CI en rojo sin correr ninguna prueba,
+# 19-11-2026, con 15 redes vacías de cem-ci-*). Cada red: nombre, proyecto y contenedores.
+$CemListarRedesCompose = {
+    $filas = @(docker network ls --filter 'label=com.docker.compose.project' --format '{{.Name}}|{{.Label "com.docker.compose.project"}}')
+    if ($LASTEXITCODE) { throw "docker network ls salió con $LASTEXITCODE" }
+    foreach ($fila in $filas) {
+        $nombre, $proyecto = $fila.Split('|', 2)
+        $conectados = docker network inspect $nombre --format '{{len .Containers}}'
+        if ($LASTEXITCODE) { throw "docker network inspect $nombre salió con $LASTEXITCODE" }
+        [pscustomobject]@{ Nombre = $nombre; Proyecto = $proyecto; Contenedores = [int]$conectados }
+    }
+}
+$CemQuitarRed = {
+    param($nombre)
+    docker network rm $nombre | Out-Null
+    if ($LASTEXITCODE) { throw "docker network rm $nombre salió con $LASTEXITCODE" }
+}
+
+# Quita y devuelve las redes de corridas de procesos muertos que no tienen ningún contenedor
+# conectado. Nunca la de una corrida viva, la de otro proyecto ni una con contenedores: esa la
+# baja antes la limpieza por contenedores, y si quedó alguno es un error que se ve.
+function Remove-CemRedesCiAbandonadas {
+    param([scriptblock]$Listar = $CemListarRedesCompose, [scriptblock]$Quitar = $CemQuitarRed,
+          [scriptblock]$ProcesoVivo = $CemProcesoVivo)
+    $redes = @(& $Listar)
+    if (-not $redes) { return }
+    $abandonados = @(Get-CemProyectosCiAbandonados -Proyectos @($redes.Proyecto) -ProcesoVivo $ProcesoVivo)
+    foreach ($r in $redes) {
+        if ($abandonados -contains $r.Proyecto -and $r.Contenedores -eq 0) {
+            & $Quitar $r.Nombre
+            $r.Nombre
+        }
+    }
+}
+
 # Copia LF del commit que hace ci.ps1, directamente dentro de la carpeta temporal del sistema.
 # Lleva el PID de la corrida, como el proyecto de compose, para reconocer después la copia de una
 # corrida cortada (TaskStop, cierre de la terminal), cuyo `finally` no llegó a borrarla. Las del
