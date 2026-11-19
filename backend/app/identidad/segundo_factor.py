@@ -283,6 +283,19 @@ def emitir_codigos(conn: Connection, claves: Claves, persona_id: UUID) -> list[s
     return codigos
 
 
+def codigos_si_no_tiene(conn: Connection, claves: Claves, persona_id: UUID) -> list[str] | None:
+    """Los códigos de recuperación del alta de una llave: diez nuevos si la persona no tiene
+    ninguno sin usar; si tiene, ninguno (no se le cambian).
+
+    Toma el cerrojo de `emitir_codigos` antes de contar. Sin él, dos altas a la vez contaban cero
+    las dos (el juego de la primera todavía sin confirmar) y la segunda reemplazaba los códigos
+    que se le acababan de mostrar a la primera. Con él, la segunda espera, cuenta los diez de la
+    primera y no entrega otros. El cerrojo consultivo admite tomarse dos veces en la misma
+    transacción, así que `emitir_codigos` lo vuelve a pedir sin trabarse."""
+    conn.execute(text(CERROJO_CODIGOS), {"p": str(persona_id)})
+    return None if restantes(conn) else emitir_codigos(conn, claves, persona_id)
+
+
 def _verificado_en(conn: Connection, sesion_id: UUID) -> datetime | None:
     return conn.execute(
         text("select segundo_factor_en from nucleo.sesion where id = :s"), {"s": sesion_id}
