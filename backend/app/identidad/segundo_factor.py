@@ -75,6 +75,8 @@ LIMITES_INTENTOS: tuple[RateLimitItem, ...] = (parse("5/minute"), parse("20/day"
 """Intentos de código (alta, verificación o baja) por persona. Con ±1 paso hay 3 códigos
 válidos en 10⁶: 20 por día dan 0,006 % de acertar al azar en un día."""
 LIMITE_NOMBRE = "auth-totp"
+CERROJO_CODIGOS = "select pg_advisory_xact_lock(hashtextextended('recuperacion:' || :p, 0))"
+"""El cerrojo por persona con que se reemplazan los códigos de recuperación (`emitir_codigos`)."""
 SIN_CACHE = {"Cache-Control": "no-store"}
 
 ASUNTO_ALTA = "Se activó la confirmación con código"
@@ -264,7 +266,14 @@ def olvidar_verificaciones(conn: Connection) -> None:
 
 
 def emitir_codigos(conn: Connection, claves: Claves, persona_id: UUID) -> list[str]:
-    """Reemplaza los códigos de recuperación de la persona del ámbito y devuelve los nuevos."""
+    """Reemplaza los códigos de recuperación de la persona del ámbito y devuelve los nuevos.
+
+    Toma antes un cerrojo consultivo propio de la persona (`CERROJO_CODIGOS`), hasta el fin de la
+    transacción: dos reemplazos a la vez (dos pedidos de códigos nuevos, o uno con un alta) se
+    hacen uno detrás del otro, y queda un solo juego de diez (Codex en el PR #262). Es el último
+    cerrojo que toma quien llega acá: el alta ya tiene el factor (`_paso_totp`) y nadie que tenga
+    este cerrojo pide después otro, así que no se cruza con el orden único de 0041."""
+    conn.execute(text(CERROJO_CODIGOS), {"p": str(persona_id)})
     codigos = [nuevo_codigo_recuperacion() for _ in range(CANTIDAD_RECUPERACION)]
     conn.execute(text("delete from nucleo.codigo_recuperacion"))
     conn.execute(
