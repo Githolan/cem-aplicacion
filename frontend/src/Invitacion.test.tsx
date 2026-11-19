@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { PREFIJO_COPIA } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { textoYaAceptada, YA_HAY_CUENTA } from "./Invitacion";
+import { textoYaAceptada, VINCULO_NO_CORRESPONDE, YA_HAY_CUENTA } from "./Invitacion";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -269,6 +269,32 @@ describe("página /invitacion", () => {
     expect(screen.queryByText(/Hay que pedir una nueva/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
     expect(aceptacionesDe(pedido)).toEqual([]);
+  });
+
+  it("tanda 11 (0112): si el vínculo del padrón ya no corresponde, lo dice de entrada, sin «Aceptar» (C9)", async () => {
+    const pedido = backend(
+      () => Response.json(ACEPTADA),
+      () => Response.json({ ...RECIBIDA, paso: "vinculo_no_corresponde" }),
+    );
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByText(VINCULO_NO_CORRESPONDE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
+    expect(screen.getByRole("link", { name: "Ir al inicio" })).toBeTruthy();
+    expect(aceptacionesDe(pedido)).toEqual([]);
+  });
+
+  it("tanda 11: si el vínculo dejó de corresponder después de abrirla, «Aceptar» termina en el mismo aviso", async () => {
+    vi.stubGlobal("fetch", backend(() => error("invitacion_vinculo_no_corresponde", 409)));
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(await screen.findByText(VINCULO_NO_CORRESPONDE)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Ir al inicio" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
   });
 
   it("si la creó quien la acepta, lo dice (F9)", async () => {
@@ -609,12 +635,10 @@ describe("ningún error de /invitacion termina sin un paso siguiente", () => {
   });
 
   it("un 409 sin pantalla propia muestra lo que dice el servidor, no un error de conexión", async () => {
-    const mensaje = "El vínculo de esta invitación ya no está en el padrón.";
+    const mensaje = "Esta invitación ya no está pendiente.";
     vi.stubGlobal(
       "fetch",
-      backend(() =>
-        Response.json({ codigo: "invitacion_vinculo_no_corresponde", mensaje, id_correlacion: "c" }, { status: 409 }),
-      ),
+      backend(() => Response.json({ codigo: "invitacion_no_pendiente", mensaje, id_correlacion: "c" }, { status: 409 })),
     );
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));

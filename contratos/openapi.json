@@ -65,7 +65,8 @@
           "retirar",
           "registrar_envio",
           "responder",
-          "registrar_respuesta"
+          "registrar_respuesta",
+          "reemplazar_comprobante"
         ],
         "title": "AccionSolicitud",
         "type": "string"
@@ -1471,6 +1472,23 @@
           "factura_subida"
         ],
         "title": "ComprobanteFaltante",
+        "type": "object"
+      },
+      "ComprobanteNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/solicitudes-formales/{s}/envio/comprobante`: otro comprobante para el envío ya\nregistrado, porque el antivirus rechazó el vigente (`0112`). Medio, fecha y vencimiento no\ncambian.",
+        "properties": {
+          "adjunto_id": {
+            "description": "El comprobante nuevo, subido para el envío.",
+            "format": "uuid",
+            "title": "Adjunto Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adjunto_id"
+        ],
+        "title": "ComprobanteNuevo",
         "type": "object"
       },
       "ComprobantePagoNuevo": {
@@ -9993,7 +10011,8 @@
           "entrar",
           "otra_cuenta",
           "propia",
-          "ya_aceptada"
+          "ya_aceptada",
+          "vinculo_no_corresponde"
         ],
         "title": "PasoInvitacion",
         "type": "string"
@@ -23973,6 +23992,83 @@
           }
         },
         "summary": "Registrar el envío por un medio externo (destinatario sin cuenta): desde esa fecha corre el plazo",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/envio/comprobante": {
+      "post": {
+        "operationId": "reemplazar_comprobante_api_v1_consorcios__consorcio_id__solicitudes_formales__solicitud_id__envio_comprobante_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solicitud_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Solicitud Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComprobanteNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolicitudFormal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad o sin el modo; o la misma persona ya firmó."
+          },
+          "404": {
+            "description": "La solicitud no existe en este consorcio, o no es para esta cuenta."
+          },
+          "409": {
+            "description": "La solicitud no admite eso en su estado, o falta el administrador."
+          },
+          "422": {
+            "description": "Comprobante inválido."
+          }
+        },
+        "summary": "Otro comprobante para el envío ya registrado, si el antivirus rechazó el vigente: la fecha y el vencimiento no cambian (pregunta 17, FL-SOL-04)",
         "tags": [
           "consorcios"
         ]

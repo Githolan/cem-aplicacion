@@ -51,6 +51,8 @@ TABLAS = [
     "nucleo.solicitud_formal", "nucleo.solicitud_formal_firma", "nucleo.solicitud_formal_emision",
     "nucleo.solicitud_formal_adjunto", "nucleo.solicitud_formal_envio",
     "nucleo.solicitud_formal_respuesta", "nucleo.solicitud_formal_retiro",
+    # 0112 (pregunta 17): los reemplazos del comprobante del envío, con las mismas protecciones.
+    "nucleo.solicitud_formal_envio_comprobante",
 ]  # fmt: skip
 ABIERTAS = "select nucleo.panel_solicitudes_abiertas()"
 

@@ -259,7 +259,7 @@ async def alta(
                 "m": pedido.nombre.strip(),
             },
         ).scalar_one()
-        codigos = None if sf.restantes(conn) else sf.emitir_codigos(conn, claves, persona)
+        codigos = sf.codigos_si_no_tiene(conn, claves, persona)
         marcada = conn.execute(
             text("select nucleo.confirmar_llave(:s, :l)"), {"s": sf.sesion_de(identidad), "l": id_}
         ).scalar_one()

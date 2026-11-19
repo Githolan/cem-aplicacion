@@ -187,6 +187,9 @@ class AccionSolicitud(StrEnum):
     REGISTRAR_ENVIO = "registrar_envio"
     RESPONDER = "responder"
     REGISTRAR_RESPUESTA = "registrar_respuesta"
+    REEMPLAZAR_COMPROBANTE = "reemplazar_comprobante"
+    """El antivirus rechazó el comprobante del envío ya registrado: se sube otro, sin tocar la
+    fecha (pregunta 17 del propietario, FL-SOL-04; `0112`)."""
 
 
 class SolicitudFormalNueva(BaseModel):
@@ -225,6 +228,16 @@ class EnvioNuevo(BaseModel):
     )
     fecha_envio: date = Field(description="Entre el día de la emisión y hoy.")
     adjunto_id: UUID = Field(description="El comprobante, subido para el envío.")
+
+
+class ComprobanteNuevo(BaseModel):
+    """`POST …/solicitudes-formales/{s}/envio/comprobante`: otro comprobante para el envío ya
+    registrado, porque el antivirus rechazó el vigente (`0112`). Medio, fecha y vencimiento no
+    cambian."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    adjunto_id: UUID = Field(description="El comprobante nuevo, subido para el envío.")
 
 
 class RespuestaNueva(BaseModel):

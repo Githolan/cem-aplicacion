@@ -29,6 +29,7 @@ from cem_contracts.fiscalizacion import (
     AccionSolicitud,
     AdjuntoSubido,
     ComprobanteFaltante,
+    ComprobanteNuevo,
     EnvioNuevo,
     EnvioSolicitud,
     EstadoSolicitudFormal,
@@ -277,6 +278,11 @@ def _acciones(fila, firmar_decision, puede: dict[str, bool]) -> list[AccionSolic
             acciones.append(AccionSolicitud.RESPONDER)
         elif por_otro_medio and puede[REGISTRAR_RESPUESTA]:
             acciones.append(AccionSolicitud.REGISTRAR_RESPUESTA)
+    # Pregunta 17 (FL-SOL-04, `0112`): el antivirus rechazó el comprobante del envío ya
+    # registrado; quien registra envíos sube otro, en cualquier estado posterior al envío.
+    envio = fila["envio"]
+    if envio is not None and envio.get("estado_archivo") == "rechazado" and puede[REGISTRAR_ENVIO]:
+        acciones.append(AccionSolicitud.REEMPLAZAR_COMPROBANTE)
     return acciones
 
 
@@ -556,6 +562,35 @@ def registrar_envio(
             " :adjunto, :actor, 'api', :sesion)",
             {"s": vista.id, "medio": cuerpo.medio.value, "detalle": cuerpo.detalle,
              "fecha": cuerpo.fecha_envio, "adjunto": cuerpo.adjunto_id},
+        )  # fmt: skip
+        return 200, _una(conn, permisos, vista.id)
+
+    return responder_una_vez(motor, permisos.registrar_envio.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/envio/comprobante",
+    response_model=SolicitudFormal,
+    summary="Otro comprobante para el envío ya registrado, si el antivirus rechazó el vigente:"
+    " la fecha y el vencimiento no cambian (pregunta 17, FL-SOL-04)",
+    responses=RESPUESTAS | {422: {"description": "Comprobante inválido."}},
+)
+def reemplazar_comprobante(
+    solicitud_id: UUID,
+    cuerpo: ComprobanteNuevo,
+    permisos: PermisosDep,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    vista = _vista(permisos, motor, solicitud_id)
+    permisos.registrar_envio.verificar()
+
+    def efecto(conn: Connection) -> tuple[int, SolicitudFormal]:
+        _ejecutar(
+            conn, permisos.registrar_envio,
+            "select nucleo.reemplazar_comprobante_envio_solicitud_formal(:s, :adjunto, :actor,"
+            " 'api', :sesion)",
+            {"s": vista.id, "adjunto": cuerpo.adjunto_id},
         )  # fmt: skip
         return 200, _una(conn, permisos, vista.id)
 

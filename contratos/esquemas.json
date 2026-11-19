@@ -2307,7 +2307,8 @@
           "entrar",
           "otra_cuenta",
           "propia",
-          "ya_aceptada"
+          "ya_aceptada",
+          "vinculo_no_corresponde"
         ],
         "title": "PasoInvitacion",
         "type": "string"
