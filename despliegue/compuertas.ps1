@@ -73,38 +73,70 @@ function Get-CemProyectosCiAbandonados {
 # corridas por sus contenedores: un proyecto que se quedó sin contenedores y con su red no
 # aparece, y esas redes se acumulaban hasta agotar los rangos de direcciones de Docker («all
 # predefined address pools have been fully subnetted»: CI en rojo sin correr ninguna prueba,
-# 19-11-2026, con 15 redes vacías de cem-ci-*). Cada red: nombre, proyecto y contenedores.
+# 19-11-2026, con 15 redes vacías de cem-ci-*). Cada red: nombre y proyecto.
 $CemListarRedesCompose = {
     $filas = @(docker network ls --filter 'label=com.docker.compose.project' --format '{{.Name}}|{{.Label "com.docker.compose.project"}}')
     if ($LASTEXITCODE) { throw "docker network ls salió con $LASTEXITCODE" }
     foreach ($fila in $filas) {
         $nombre, $proyecto = $fila.Split('|', 2)
-        $conectados = docker network inspect $nombre --format '{{len .Containers}}'
-        if ($LASTEXITCODE) { throw "docker network inspect $nombre salió con $LASTEXITCODE" }
-        [pscustomobject]@{ Nombre = $nombre; Proyecto = $proyecto; Contenedores = [int]$conectados }
+        [pscustomobject]@{ Nombre = $nombre; Proyecto = $proyecto }
     }
 }
+# $true si la red existe. Distingue «no existe» de un error de Docker: `network ls` con el nombre
+# exacto (un filtro de nombre es por prefijo: se compara la línea entera).
+$CemExisteRed = {
+    param($nombre)
+    $nombres = @(docker network ls --filter "name=$nombre" --format '{{.Name}}')
+    if ($LASTEXITCODE) { throw "docker network ls salió con $LASTEXITCODE" }
+    $nombres -contains $nombre
+}
+# Contenedores conectados, o $null si la red ya no existe (la bajó otra limpieza).
+$CemConectadosARed = {
+    param($nombre)
+    $n = docker network inspect $nombre --format '{{len .Containers}}' 2>$null
+    if ($LASTEXITCODE -eq 0) { return [int]$n }
+    if (& $CemExisteRed $nombre) { throw "docker network inspect $nombre salió con $LASTEXITCODE" }
+    $null
+}
+# $true si la quitó esta llamada; $false si ya no estaba. Si sigue estando, es un error.
 $CemQuitarRed = {
     param($nombre)
-    docker network rm $nombre | Out-Null
-    if ($LASTEXITCODE) { throw "docker network rm $nombre salió con $LASTEXITCODE" }
+    docker network rm $nombre 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $true }
+    if (& $CemExisteRed $nombre) { throw "docker network rm $nombre salió con $LASTEXITCODE y la red sigue" }
+    $false
 }
+# Dos corridas que arrancan a la vez verían las mismas redes abandonadas: la limpieza entera
+# (listar, contar y quitar) va bajo este mutex, como la de las copias (Codex en app #265).
+$CemMutexLimpiezaRedesCi = 'Global\cem-ci-limpieza-redes'
 
 # Quita y devuelve las redes de corridas de procesos muertos que no tienen ningún contenedor
-# conectado. Nunca la de una corrida viva, la de otro proyecto ni una con contenedores: esa la
-# baja antes la limpieza por contenedores, y si quedó alguno es un error que se ve.
+# conectado. Nunca la de una corrida viva (ni se la inspecciona: su limpieza puede estar
+# corriendo), la de otro proyecto ni una con contenedores: esa la baja antes la limpieza por
+# contenedores, y si quedó alguno es un error que se ve. Una red que desaparece entre la lista y
+# el borrado (la bajó la limpieza de otra corrida) ya no está, que es lo que se buscaba.
 function Remove-CemRedesCiAbandonadas {
-    param([scriptblock]$Listar = $CemListarRedesCompose, [scriptblock]$Quitar = $CemQuitarRed,
-          [scriptblock]$ProcesoVivo = $CemProcesoVivo)
-    $redes = @(& $Listar)
-    if (-not $redes) { return }
-    $abandonados = @(Get-CemProyectosCiAbandonados -Proyectos @($redes.Proyecto) -ProcesoVivo $ProcesoVivo)
-    foreach ($r in $redes) {
-        if ($abandonados -contains $r.Proyecto -and $r.Contenedores -eq 0) {
-            & $Quitar $r.Nombre
-            $r.Nombre
+    param([scriptblock]$Listar = $CemListarRedesCompose, [scriptblock]$Conectados = $CemConectadosARed,
+          [scriptblock]$Quitar = $CemQuitarRed, [scriptblock]$ProcesoVivo = $CemProcesoVivo)
+    $mutex = [Threading.Mutex]::new($false, $CemMutexLimpiezaRedesCi)
+    try {
+        try { $tomado = $mutex.WaitOne($CemEsperaLimpiezaCopiasCi) }
+        # Lo tenía un proceso que murió sin soltarlo: el mutex pasa a este proceso.
+        catch [Threading.AbandonedMutexException] { $tomado = $true }
+        if (-not $tomado) { throw "la limpieza de redes de otra corrida no soltó $CemMutexLimpiezaRedesCi en $CemEsperaLimpiezaCopiasCi" }
+        try {
+            $redes = @(& $Listar)
+            if (-not $redes) { return }
+            $abandonados = @(Get-CemProyectosCiAbandonados -Proyectos @($redes.Proyecto) -ProcesoVivo $ProcesoVivo)
+            foreach ($r in $redes) {
+                if ($abandonados -notcontains $r.Proyecto) { continue }
+                if ((& $Conectados $r.Nombre) -ne 0) { continue }
+                if (& $Quitar $r.Nombre) { $r.Nombre }
+            }
         }
+        finally { $mutex.ReleaseMutex() }
     }
+    finally { $mutex.Dispose() }
 }
 
 # Copia LF del commit que hace ci.ps1, directamente dentro de la carpeta temporal del sistema.

@@ -352,20 +352,31 @@ Comprobar 'control: con todos vivos no hay abandonadas' (@(Get-CemProyectosCiAba
 Comprobar "control: el proceso de esta prueba ($PID) se ve vivo" (@(Get-CemProyectosCiAbandonados -Proyectos @("cem-ci-abc1234-$PID-eeeeee")).Count -eq 0) 'se tomó por abandonada'
 # Redes que quedan de corridas cortadas: solo las de procesos muertos y sin contenedores.
 $redes = @(
-    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-300-bbbbbb_default';    Proyecto = 'cem-ci-abc1234-300-bbbbbb';    Contenedores = 0 },
-    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-300-bbbbbb-p2_default'; Proyecto = 'cem-ci-abc1234-300-bbbbbb-p2'; Contenedores = 0 },
-    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-400-ffffff_default';    Proyecto = 'cem-ci-abc1234-400-ffffff';    Contenedores = 1 },
-    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-100-aaaaaa_default';    Proyecto = 'cem-ci-abc1234-100-aaaaaa';    Contenedores = 0 },
-    [pscustomobject]@{ Nombre = 'cem-h3d_default';                      Proyecto = 'cem-h3d';                      Contenedores = 0 },
-    [pscustomobject]@{ Nombre = 'oci-mirror-net';                       Proyecto = 'oci-mirror';                   Contenedores = 0 })
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-300-bbbbbb_default';    Proyecto = 'cem-ci-abc1234-300-bbbbbb' },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-300-bbbbbb-p2_default'; Proyecto = 'cem-ci-abc1234-300-bbbbbb-p2' },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-400-ffffff_default';    Proyecto = 'cem-ci-abc1234-400-ffffff' },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-500-999999_default';    Proyecto = 'cem-ci-abc1234-500-999999' },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-600-777777_default';    Proyecto = 'cem-ci-abc1234-600-777777' },
+    [pscustomobject]@{ Nombre = 'cem-ci-abc1234-100-aaaaaa_default';    Proyecto = 'cem-ci-abc1234-100-aaaaaa' },
+    [pscustomobject]@{ Nombre = 'cem-h3d_default';                      Proyecto = 'cem-h3d' },
+    [pscustomobject]@{ Nombre = 'oci-mirror-net';                       Proyecto = 'oci-mirror' })
+# 400 tiene un contenedor; 500 desapareció antes de contarla; 600 la bajó otra limpieza entre la
+# cuenta y el borrado. Las de corridas vivas y de otros proyectos no se cuentan.
+$conteos = @{ 'cem-ci-abc1234-400-ffffff_default' = 1; 'cem-ci-abc1234-500-999999_default' = $null }
+$contadas = [System.Collections.Generic.List[string]]::new()
+$contar = { param($n) $contadas.Add($n); if ($conteos.ContainsKey($n)) { $conteos[$n] } else { 0 } }
 $quitadas = [System.Collections.Generic.List[string]]::new()
-$devueltas = @(Remove-CemRedesCiAbandonadas -Listar { $redes } -Quitar { param($n) $quitadas.Add($n) } -ProcesoVivo $esVivo)
+$quitar = { param($n) $quitadas.Add($n); $n -ne 'cem-ci-abc1234-600-777777_default' }
+$devueltas = @(Remove-CemRedesCiAbandonadas -Listar { $redes } -Conectados $contar -Quitar $quitar -ProcesoVivo $esVivo)
 $esperadas = 'cem-ci-abc1234-300-bbbbbb_default,cem-ci-abc1234-300-bbbbbb-p2_default'
-Comprobar 'quita solo las redes vacías de corridas muertas (no una con contenedores, viva u otro proyecto)' (($quitadas -join ',') -eq $esperadas) ($quitadas -join ',')
-Comprobar 'devuelve lo que quitó' (($devueltas -join ',') -eq $esperadas) ($devueltas -join ',')
+Comprobar 'devuelve solo las redes vacías de corridas muertas que quitó' (($devueltas -join ',') -eq $esperadas) ($devueltas -join ',')
+Comprobar 'no intenta quitar la que tiene un contenedor ni la que ya no estaba' (($quitadas -join ',') -eq "$esperadas,cem-ci-abc1234-600-777777_default") ($quitadas -join ',')
+Comprobar 'no inspecciona la red de una corrida viva ni la de otro proyecto' (-not ($contadas | Where-Object { $_ -match '100-aaaaaa|cem-h3d|oci-mirror' })) ($contadas -join ',')
 $quitadas.Clear()
-Comprobar 'control: con todos vivos no quita ninguna' (@(Remove-CemRedesCiAbandonadas -Listar { $redes } -Quitar { param($n) $quitadas.Add($n) } -ProcesoVivo { $true }).Count -eq 0 -and $quitadas.Count -eq 0) ($quitadas -join ',')
-Comprobar 'control: sin redes no hace nada' (@(Remove-CemRedesCiAbandonadas -Listar { @() } -Quitar { throw 'no debía quitar' } -ProcesoVivo $esVivo).Count -eq 0) 'quitó'
+Comprobar 'control: con todos vivos no quita ninguna' (@(Remove-CemRedesCiAbandonadas -Listar { $redes } -Conectados $contar -Quitar $quitar -ProcesoVivo { $true }).Count -eq 0 -and $quitadas.Count -eq 0) ($quitadas -join ',')
+Comprobar 'control: sin redes no hace nada' (@(Remove-CemRedesCiAbandonadas -Listar { @() } -Conectados { throw 'no debía contar' } -Quitar { throw 'no debía quitar' } -ProcesoVivo $esVivo).Count -eq 0) 'quitó'
+$e = $null; try { Remove-CemRedesCiAbandonadas -Listar { $redes } -Conectados { 0 } -Quitar { throw 'la red sigue' } -ProcesoVivo $esVivo | Out-Null } catch { $e = $_ }
+Comprobar 'control: si una red no se pudo quitar y sigue, falla' ($null -ne $e) 'no falló'
 
 Write-Host "`n=== 13. Copias LF de corridas cortadas de ci.ps1 ===" -ForegroundColor Cyan
 $tmpSis = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
