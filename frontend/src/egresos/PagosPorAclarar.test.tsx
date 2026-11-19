@@ -11,7 +11,7 @@ import { FALTA_CODIGO_MONEDA } from "../pagos/CampoMonedaSalida";
 import { CAMBIAR_ARCHIVO } from "../SubirArchivo";
 import { ContextoVersion } from "../version";
 import { VOLVIO_LA_RED } from "./comun";
-import { NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, resumenDe, SI_SE_TRANSFIRIO, SIN_PAGOS } from "./PagosPorAclarar";
+import { CORREGIR_LO_LEIDO, NO_SE_TRANSFIRIO, OTRA_COSA, REGISTRAR_TRANSFERENCIA, resumenDe, SI_SE_LEYO_MAL, SI_SE_TRANSFIRIO, SIN_PAGOS, textoLeido, textosDistintos } from "./PagosPorAclarar";
 
 // Pagos para aclarar (app 0067). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -139,6 +139,7 @@ const POR_ACLARAR = {
   huella: H1,
   comprobante_id: null,
   comprobante_estado: null,
+  lectura_comprobante: null,
 };
 
 /** Abre la ficha del pago tocando su fila. */
@@ -594,5 +595,89 @@ describe("informe de fricción, tanda 7 (AC-11)", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Pagos para aclarar" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Volver a Inicio" }).getAttribute("href")).toBe("/");
+  });
+});
+
+describe("tanda 10 de flujos: «Sí se transfirió» con lo leído del comprobante (FL-ACL-01)", () => {
+  const PAGO_RUTA = `${BASE}/pagos-por-aclarar/${O1}/pago`;
+  /** El párrafo con ese texto exacto: los importes llevan espacios duros que el buscador de texto cambia. */
+  const parrafo = (texto: string) => (_t: string, el: Element | null) => el?.tagName === "P" && el.textContent === texto;
+  const LEIDA = {
+    version_documento_id: ARCHIVO, estado: "leida", importe_centavos: 1_500_000, moneda: "ARS", cuenta_ultimos_digitos: "1234",
+    cuenta_coincide: true, titular_destino: "Limpieza Ficticia SRL", numero_operacion: "0001-234567", fecha: "2026-10-31",
+    distinto_de_la_orden: [], titular_distinto: false, distinto_de_lo_registrado: [], coincide_con_lo_registrado: false,
+  };  // prettier-ignore
+  const conLectura = (lectura: object | null) => ({ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible", lectura_comprobante: lectura });
+  const servidor = (lectura: () => object | null) =>
+    backend({
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [conLectura(lectura())] }),
+      [`POST ${PAGO_RUTA}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
+    });
+
+  it("con lo leído que coincide, no pide el importe ni la cuenta: se confirma con un toque", async () => {
+    const api = servidor(() => LEIDA);
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    expect(await within(ventana).findByText(parrafo(textoLeido(LEIDA as never, POR_ACLARAR)))).toBeTruthy();
+    expect((within(ventana).getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
+    expect((within(ventana).getByLabelText("Fecha de la transferencia") as HTMLInputElement).value).toBe("2026-10-31");
+    expect(within(ventana).queryByLabelText(/^Importe transferido/)).toBeNull();
+    expect(within(ventana).queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
+    // La cuenta completa no está en ningún lado: solo sus últimos dígitos.
+    expect(ventana.textContent).not.toContain(CUENTA);
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar el pago" }));
+    await waitFor(() => expect(pedidos(api, "POST", PAGO_RUTA)).toHaveLength(1));
+    const cuerpo = await pedidos(api, "POST", PAGO_RUTA)[0]?.json();
+    expect(cuerpo).toMatchObject({ numero_operacion: "0001-234567", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, lectura_mal: false, documento_id: DOC });
+    expect(cuerpo).not.toHaveProperty("cuenta_destino");
+  });
+
+  it("«Corregir lo que se leyó» pide también el importe y la cuenta", async () => {
+    vi.stubGlobal("fetch", servidor(() => LEIDA));
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    fireEvent.click(await within(ventana).findByRole("button", { name: CORREGIR_LO_LEIDO }));
+    expect((within(ventana).getByLabelText(/^Importe transferido/) as HTMLInputElement).value).toBe("15.000,00");
+    expect(within(ventana).getByLabelText(/^CBU\/CVU de destino/)).toBeTruthy();
+  });
+
+  it("lo leído que no coincide se dice; registrar igual va como «Se leyó mal», con la cuenta escrita", async () => {
+    const distinta = { ...LEIDA, importe_centavos: 1_400_000, distinto_de_la_orden: ["importe"] };
+    const api = servidor(() => distinta);
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    const [texto] = textosDistintos(distinta as never, POR_ACLARAR);
+    expect(await within(ventana).findByText(parrafo(texto!))).toBeTruthy();
+    expect(within(ventana).getByText(SI_SE_LEYO_MAL)).toBeTruthy();
+    expect((within(ventana).getByLabelText(/^Importe transferido/) as HTMLInputElement).value).toBe("14.000,00");
+    fireEvent.change(within(ventana).getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
+    fireEvent.change(within(ventana).getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar el pago" }));
+    await waitFor(() => expect(pedidos(api, "POST", PAGO_RUTA)).toHaveLength(1));
+    expect(await pedidos(api, "POST", PAGO_RUTA)[0]?.json()).toMatchObject({ importe_centavos: 1_500_000, lectura_mal: true, cuenta_destino: CUENTA });
+  });
+
+  it("control: sin lectura, los cuatro datos a mano y sin «Se leyó mal»", async () => {
+    const api = servidor(() => null);
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    expect((within(ventana).getByLabelText("Número de operación") as HTMLInputElement).value).toBe("");
+    expect(within(ventana).getByLabelText(/^Importe transferido/)).toBeTruthy();
+    expect(within(ventana).getByLabelText(/^CBU\/CVU de destino/)).toBeTruthy();
+    expect(within(ventana).queryByRole("button", { name: CORREGIR_LO_LEIDO })).toBeNull();
+  });
+
+  it("mientras se lee, lo dice; cuando llega la lectura, llena los datos", async () => {
+    let lectura: object = { ...LEIDA, estado: "leyendo", importe_centavos: null, numero_operacion: null, fecha: null, cuenta_ultimos_digitos: null, cuenta_coincide: null };
+    vi.stubGlobal("fetch", servidor(() => lectura));
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    expect(within(ventana).getByText("Leyendo el comprobante: los datos se completan solos.")).toBeTruthy();
+    lectura = LEIDA;
+    await waitFor(() => expect((within(ventana).getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567"), { timeout: 6000 });
+    expect(within(ventana).queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
   });
 });

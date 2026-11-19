@@ -667,6 +667,37 @@ describe("Flujos 18-11, tanda 7", () => {
     expect(lista.getByRole("link", { name: "Descargar el comprobante" })).toBeTruthy();
   });
 
+  it("FL-SOL-04 (tanda 10): bajar el adjunto pregunta antes y, si falla, lo dice en la ficha, que sigue abierta", async () => {
+    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const conAdjunto: Solicitud = {
+      ...ENVIADA, acciones: [],
+      envio: { ...ENVIADA.envio!, documento_id: DOC_RESPUESTA, version_documento_id: VERSION_RESPUESTA, estado_archivo: "disponible", descargable: true },
+    };  // prettier-ignore
+    const DESCARGA = `GET /api/v1/consorcios/${C1}/documentos/${DOC_RESPUESTA}/versiones/${VERSION_RESPUESTA}/descargar`;
+    let vencido = true;
+    const simulado = backend({
+      [LISTA]: () => Response.json({ ...LLENA, elementos: [conAdjunto] }),
+      [DESCARGA]: () => {
+        if (vencido) return error("archivo_vencido", 410);
+        const redireccion = Response.error();
+        Object.defineProperty(redireccion, "type", { value: "opaqueredirect" });
+        return redireccion;
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const ficha = await abrirFicha(1);
+    fireEvent.click(ficha.getByRole("link", { name: "Descargar el comprobante" }));
+    expect(await ficha.findByRole("alert")).toHaveProperty("textContent", "No se pudo bajar el archivo. Ese archivo ya no está disponible.");
+    expect(clic).not.toHaveBeenCalled();
+    expect(pedidos(simulado, "GET", DESCARGA.slice(4))).toHaveLength(1);
+    // Control: con el archivo, navega a la descarga y el aviso se va.
+    vencido = false;
+    fireEvent.click(ficha.getByRole("link", { name: "Descargar el comprobante" }));
+    await waitFor(() => expect(clic).toHaveBeenCalledOnce());
+    expect(ficha.queryByRole("alert")).toBeNull();
+  });
+
   it("P15 (tanda 9): con destinatario con cuenta, la vencida ofrece registrar la respuesta que llegó por otro medio", async () => {
     const vencida: Solicitud = { ...ENVIADA, estado: "vencida", destinatario_con_cuenta: true, acciones: ["registrar_respuesta"] };
     vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [vencida] }) }));

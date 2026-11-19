@@ -37,6 +37,7 @@ import { useConsultaDelAntivirus } from "./egresos/useConsorcio";
 import { SubirArchivo } from "./SubirArchivo";
 import { VisorDocumento } from "./VisorDocumento";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
+import { FilaDeLectura } from "./pagos/FilaEnlace";
 import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
@@ -148,7 +149,7 @@ export function tamano(bytes: number): string {
   return `${FORMATO_NUMERO.format(bytes / BYTES_POR_MB)} MB`;
 }
 
-function estadoEnPalabras(v: Version): string {
+function estadoEnPalabras(v: Pick<Version, "estado" | "motivo_rechazo">): string {
   if (v.estado === "disponible") return "Disponible";
   if (v.estado === "en_cuarentena") return "En revisión";
   return `Rechazado: ${v.motivo_rechazo ? TEXTO_MOTIVO[v.motivo_rechazo] : "sin el motivo"}`;
@@ -300,6 +301,28 @@ function descarga(consorcio: string, documento: string, version: string): string
   return `/api/v1/consorcios/${consorcio}/documentos/${documento}/versiones/${version}/descargar`;
 }
 
+export type ResultadoDescarga = { tipo: "ok" } | { tipo: "sin_sesion" } | { tipo: "falla"; texto: string };
+
+/** Baja un archivo de Documentos preguntando antes (DOC-05): si el servidor responde con el 302, el
+ * navegador sigue a la dirección firmada; si no, devuelve qué decir, para decirlo donde se tocó. La
+ * usan Documentos y la ficha de una solicitud formal (FL-SOL-04, tanda 10). */
+export async function pedirDescarga(consorcio: string, documento: string, version: string): Promise<ResultadoDescarga> {
+  try {
+    const { error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
+      params: { path: { consorcio_id: consorcio, documento_id: documento, version_id: version } },
+      redirect: "manual",
+    });
+    if (response.status === ESTADO.sinSesion) return { tipo: "sin_sesion" };
+    if (response.type !== "opaqueredirect") return { tipo: "falla", texto: mensajeDeDescarga(response.status, codigoDe(error)) };
+    const enlace = window.document.createElement("a");
+    enlace.href = descarga(consorcio, documento, version);
+    enlace.click();
+    return { tipo: "ok" };
+  } catch {
+    return { tipo: "falla", texto: SIN_CONEXION };
+  }
+}
+
 /** Si algún archivo de la lista sigue en el análisis: es lo único que justifica volver a pedirla sola. */
 function hayEnCuarentena(documentos: Documento[]): boolean {
   return documentos.some((d) => d.versiones.some((v) => v.estado === "en_cuarentena"));
@@ -336,6 +359,71 @@ function resumenDe(d: Documento): string {
     : ultima.estado === "en_cuarentena" ? "En revisión"
     : "Rechazado";
   return `${dia(d.fecha)} · ${estado}`;
+}
+
+/** FL-DOC-04 (tanda 10, app 0111): quien carga sin ver la lista, al volver, sabe en qué quedó lo suyo. */
+export const LO_QUE_CARGO = "Lo que cargó esta cuenta";
+export const SIN_CARGAS_PROPIAS = "Esta cuenta no cargó archivos en los últimos días.";
+
+type CargaPropia = components["schemas"]["CargaPropia"];
+type LecturaCargas = { tipo: "cargando" } | { tipo: "falla"; texto: string } | { tipo: "ok"; elementos: CargaPropia[] };
+
+/** «Lo que cargó esta cuenta»: título, estado del antivirus y fecha de cada archivo propio reciente.
+ * Mientras alguno está en revisión, se vuelve a mirar solo. `vuelta` cambia con cada carga nueva. */
+function CargasPropias({ consorcio, vuelta, aEntrar }: { consorcio: string; vuelta: number; aEntrar: () => void }) {
+  const id = useId();
+  const [lectura, setLectura] = useState<LecturaCargas>({ tipo: "cargando" });
+  const [otra, setOtra] = useState(0);
+
+  useEffect(() => {
+    let vigente = true;
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/documentos/mis-cargas", { params: { path: { consorcio_id: consorcio } } })
+      .then(({ data, error, response }) => {
+        if (!vigente) return;
+        if (response.status === ESTADO.sinSesion) aEntrar();
+        else if (data !== undefined) setLectura({ tipo: "ok", elementos: data.elementos });
+        else setLectura({ tipo: "falla", texto: mensajeDeFalla(response.status, codigoDe(error)) });
+      })
+      .catch(() => {
+        if (vigente) setLectura({ tipo: "falla", texto: SIN_CONEXION });
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [consorcio, vuelta, otra, aEntrar]);
+
+  const enRevision = lectura.tipo === "ok" && lectura.elementos.some((c) => c.estado === "en_cuarentena");
+  useEffect(() => {
+    if (!enRevision) return;
+    const espera = setTimeout(() => setOtra((v) => v + 1), REFRESCO_CUARENTENA_MS);
+    return () => clearTimeout(espera);
+  }, [enRevision, lectura]);
+
+  return (
+    <section aria-labelledby={`${id}-titulo`} className="tarjeta">
+      <h2 id={`${id}-titulo`}>{LO_QUE_CARGO}</h2>
+      {lectura.tipo === "cargando" && <p>Consultando…</p>}
+      {lectura.tipo === "falla" && (
+        <>
+          <p className="aviso-error">No se pudo mostrar lo que cargó esta cuenta. {lectura.texto}</p>
+          <button type="button" className="secundario" onClick={() => setOtra((v) => v + 1)}>
+            Consultar de nuevo
+          </button>
+        </>
+      )}
+      {lectura.tipo === "ok" && lectura.elementos.length === 0 && <p>{SIN_CARGAS_PROPIAS}</p>}
+      {lectura.tipo === "ok" && lectura.elementos.length > 0 && (
+        <ul className="filas-registro" aria-label={LO_QUE_CARGO}>
+          {lectura.elementos.map((c) => (
+            <li key={c.version_id}>
+              <FilaDeLectura titulo={c.titulo} resumen={`${estadoEnPalabras(c)} · subido el ${momento(c.subida_en)}`} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 export function Documentos() {
@@ -421,23 +509,10 @@ export function Documentos() {
       if (consorcioVigente.current !== pedidoEn) return;
       setFallaDescarga({ documento, texto });
     };
-    void api
-      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
-        params: { path: { consorcio_id: consorcio, documento_id: documento, version_id: version } },
-        redirect: "manual",
-      })
-      .then(({ error, response }) => {
-        exigirSesion(response);
-        if (response.type === "opaqueredirect") {
-          const enlace = window.document.createElement("a");
-          enlace.href = descarga(consorcio, documento, version);
-          enlace.click();
-        } else fallo(mensajeDeDescarga(response.status, codigoDe(error)));
-      })
-      .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
-        else fallo(SIN_CONEXION);
-      });
+    void pedirDescarga(consorcio, documento, version).then((r) => {
+      if (r.tipo === "sin_sesion") aEntrar();
+      else if (r.tipo === "falla") fallo(r.texto);
+    });
   }
 
   const aEntrar = useAEntrar(borrarCopias);
@@ -492,6 +567,9 @@ export function Documentos() {
     }
   }, [esperando, aEntrar]);
   const antivirusTarda = useConsultaDelAntivirus(esperando.length > 0, mirarMiArchivo);
+  // FL-DOC-04: «Lo que cargó esta cuenta» se vuelve a leer con cada archivo que entra o sale de la espera.
+  const [vueltaCargas, setVueltaCargas] = useState(0);
+  useEffect(() => setVueltaCargas((v) => v + 1), [esperando.length]);
 
   const consultarEdificios = useCallback(() => {
     void api
@@ -892,6 +970,9 @@ export function Documentos() {
               </button>
             </p>
           )}
+
+          {/* FL-DOC-04 (tanda 10): sin la lista general, lo que cargó esta cuenta y en qué quedó. */}
+          {soloCarga && consorcio !== "" && <CargasPropias consorcio={consorcio} vuelta={vueltaCargas} aEntrar={aEntrar} />}
 
           {!soloCarga && (
             <section aria-label="Documentos" className="tarjeta">
