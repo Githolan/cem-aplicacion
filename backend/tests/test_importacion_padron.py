@@ -32,7 +32,7 @@ from cem_contracts.importacion import CodigoProblema, Problema
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
-from app.consorcios.importacion import leer_planilla
+from app.consorcios.importacion import _encabezado, leer_planilla
 from app.db import transaccion
 from scripts import anular_vinculo as script_anular
 from scripts import invitar as script_invitar
@@ -1840,17 +1840,42 @@ def restringir_general(motor_migrate, mandato, facultad: str) -> None:
 # Dos P2 de Codex sobre 69f1f77 (decisión del propietario del 23-10-2026) --------------------------
 
 
+class _ColumnasQueCuentan(list[str]):
+    """Una lista que cuenta cuántas veces se la recorre: al iterarla, con `in` y con `count`.
+    Cada recorrido cuenta como uno entero aunque termine antes (cota superior)."""
+
+    def __init__(self, columnas: list[str]) -> None:
+        super().__init__(columnas)
+        self.recorridos = 0
+
+    def __iter__(self):
+        self.recorridos += 1
+        return super().__iter__()
+
+    def __contains__(self, valor: object) -> bool:
+        self.recorridos += 1
+        return super().__contains__(valor)
+
+    def count(self, valor: str) -> int:
+        self.recorridos += 1
+        return super().count(valor)
+
+
 def test_un_encabezado_enorme_de_columnas_repetidas_se_valida_en_una_sola_pasada():
     """Con `columnas.count` por columna, 50 000 columnas tardaban segundos (y el tope de un
-    millón de caracteres admite cientos de miles). La validación y la respuesta no cambian."""
-    encabezado = "unidad," + ",".join(["x"] * 50_000)
-    inicio = time.perf_counter()
-    p = leer_planilla(encabezado + "\n")
-    assert time.perf_counter() - inicio < 1
-    assert (
-        Problema(codigo=CodigoProblema.ENCABEZADO_INVALIDO, mensaje="Columnas repetidas: x.")
-        in p.problemas
+    millón de caracteres admite cientos de miles). Se cuentan los recorridos de la lista, no el
+    tiempo: con el reloj, la prueba fallaba con la CI cargada (1,06 s contra un tope de 1 s, el
+    18-11-2026). Un recorrido por columna serían más de 50 000; una cantidad fija de pasadas, unas
+    pocas. La validación y la respuesta no cambian."""
+    columnas = _ColumnasQueCuentan(["unidad", *["x"] * 50_000])
+    _, problemas = _encabezado(columnas)
+    assert columnas.recorridos <= 50
+    repetidas = Problema(
+        codigo=CodigoProblema.ENCABEZADO_INVALIDO, mensaje="Columnas repetidas: x."
     )
+    assert repetidas in problemas
+    # Por la entrada pública, el mismo problema.
+    assert repetidas in leer_planilla("unidad," + ",".join(["x"] * 50_000) + "\n").problemas
 
 
 def test_un_surrogate_suelto_es_una_planilla_invalida_y_no_un_500(escena, motor_migrate):
