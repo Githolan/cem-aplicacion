@@ -94,12 +94,17 @@ def pings_de(app) -> list[str]:
     return anotados
 
 
-def test_el_healthcheck_de_las_pruebas_tambien_le_manda_ping_al_servidor(redis_limpio):
-    """Por qué la prueba de abajo no cuenta en el servidor: con la app quieta, el contador igual
-    sube (fallaba de a ratos con 2 en vez de 1 cuando las cinco llamadas pasaban del segundo)."""
+def test_el_contador_del_servidor_suma_los_ping_de_otros_clientes(base_de_prueba, redis_limpio):
+    """Por qué la prueba de abajo no cuenta en el servidor: cualquier otro cliente le suma (en
+    `backend/pruebas/compose.yml`, el healthcheck, uno por segundo; fallaba de a ratos con 2 en
+    vez de 1 cuando las cinco llamadas pasaban del segundo). El otro cliente acá es explícito."""
+    app, _ = app_con_contador()
+    de_la_app = pings_de(app)
     antes = pings()
-    time.sleep(2.5)
-    assert pings() - antes >= 1
+    redis_limpio.ping()  # otro cliente del mismo servidor, como el healthcheck
+    assert TestClient(app).get(RUTA).status_code == 200
+    assert de_la_app == ["PING"]
+    assert pings() - antes >= 2
 
 
 def test_llamadas_seguidas_hacen_una_sola_comprobacion(base_de_prueba, redis_limpio):
