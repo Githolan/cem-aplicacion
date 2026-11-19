@@ -21,8 +21,9 @@ CONSERVACION = timedelta(days=30)
 def purgar_cola(conn: Connection, trabajo: cola.Trabajo) -> dict[str, int]:
     """Limpieza diaria: trabajos hechos, eventos despachados y ventanas con más de 30 días, las
     respuestas de `Idempotency-Key` vencidas (documento 13, §7.4) y las sesiones y enlaces de
-    acceso que dejaron de servir hace más de 90 días (§15.6); los códigos por correo se borran
-    con su enlace (`on delete cascade`, migración 0006)."""
+    acceso que dejaron de servir hace más de 90 días (§15.6). Desde la migración 0041,
+    `nucleo.purgar_identidad` borra antes los códigos por correo de esos enlaces, después los
+    enlaces y al final las sesiones (el mismo orden de cerrojos que `canjear_codigo`)."""
     borrados = conn.execute(
         text("select plataforma.purgar_cola(:a)"), {"a": CONSERVACION}
     ).scalar_one()
