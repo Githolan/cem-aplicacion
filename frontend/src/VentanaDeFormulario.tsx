@@ -120,8 +120,11 @@ export function VentanaDeFormulario({ titulo, textoEnviar, alEnviar, alCerrar, c
           </p>
         )}
         <div className="acciones">
+          {/* Un acto que no se deshace no abre con el foco en su botón: dos Enter seguidos (el de la
+              acción de la ficha y uno más) lo harían sin leer la pregunta. La hoja enfoca entonces
+              un campo marcado o, sin ninguno, la ventana misma, que lee su título. */}
           {!sinEnviar && (
-            <button ref={principal} type="submit" className={peligro ? "peligro" : undefined} disabled={enviando} data-foco>
+            <button ref={principal} type="submit" className={peligro ? "peligro" : undefined} disabled={enviando} data-foco={peligro ? undefined : true}>
               {textoEnviar}
             </button>
           )}

@@ -702,7 +702,8 @@ describe("gestión de los contactos en /contactos", () => {
     const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     expect(screen.getByText("¿Retirar el contacto Plomería Rápida? No se puede deshacer.")).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, retirar" }));
+    // El foco queda en la pregunta, no en «Sí, retirar»: dos Enter seguidos no retiran (P3 de #125).
+    expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Retirar el contacto" }));
     // Control: el paso intermedio ya no existe, y abrir la pregunta no mandó nada.
     expect(screen.queryByRole("button", { name: "Retirar el contacto" })).toBeNull();
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/retirar`)).toHaveLength(0);

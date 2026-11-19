@@ -839,7 +839,8 @@ export function Documentos() {
       cerrar();
       cerrarFichaDe(false);
       // Sin acceso a la lista, quien solo carga pregunta por su archivo hasta que el antivirus
-      // termina (G-09). Con la lista caída no hay refresco automático: queda «Actualizar».
+      // termina (G-09). Con la lista caída no hay refresco automático: queda «Consultar de nuevo»
+      // (DOC-06, DOC-14).
       if (soloCarga)
         setEsperando((lista) => [...lista, { consorcio, documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA }]);
       // Ese documento ya tiene otro archivo: su rechazo anterior está atendido.
