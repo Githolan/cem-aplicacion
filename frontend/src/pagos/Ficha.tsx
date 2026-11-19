@@ -60,6 +60,7 @@ import {
   AVISO_RECLAMO,
   AVISO_SIN_CUENTA,
   TEXTO_SIN_ACTO,
+  textoProveedorInactivo,
   AVISO_SIN_SALIDA_CAUSA,
   AVISO_TOMAR,
   AVISO_VER_LA_CUENTA_QUEDA,
@@ -992,7 +993,9 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
           <Barra barra={ficha.barra} />
           {/* Lo que pasa con esta orden y desde cuándo espera (P-16). Pagada y cotejada, la etiqueta
               ya lo dice todo (FIC-05). */}
-          {ficha.estado_visible !== "pagada_y_cotejada" && (
+          {/* FL-ORD-08 (tanda 10): con el proveedor inactivo, «Se puede volver a pagar» no vale; lo
+              reemplaza la línea de abajo. */}
+          {ficha.estado_visible !== "pagada_y_cotejada" && ficha.motivo_sin_acto !== "proveedor_inactivo" && (
             <p>
               {ficha.que_decir}
               {ficha.esperando_desde !== null && ` Desde el ${fechaCorta(ficha.esperando_desde)}.`}
@@ -1002,7 +1005,9 @@ export function Ficha({ consorcio, monedas, orden, aEntrar, aInicio, terminar: t
               cuenta», lo que pasa ya lo dice: no se repite. */}
           {ficha.motivo_sin_acto != null && !(ficha.motivo_sin_acto === "proveedor_sin_cuenta" && paso === "falta_cuenta") && (
             <p className="aviso-info" role="note">
-              {TEXTO_SIN_ACTO[ficha.motivo_sin_acto]}
+              {ficha.motivo_sin_acto === "proveedor_inactivo"
+                ? textoProveedorInactivo(ofrece("modificar"), ofrece("cerrar_sin_pagar"))
+                : TEXTO_SIN_ACTO[ficha.motivo_sin_acto]}
             </p>
           )}
           {repetida !== null && (

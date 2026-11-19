@@ -777,6 +777,56 @@
         "title": "CargaCuitProveedor",
         "type": "object"
       },
+      "CargaPropia": {
+        "description": "Un archivo que subió quien pregunta, con cómo terminó el análisis.",
+        "properties": {
+          "categoria": {
+            "$ref": "#/components/schemas/CategoriaDocumento"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVersion"
+          },
+          "motivo_rechazo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotivoRechazo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subida_en": {
+            "format": "date-time",
+            "title": "Subida En",
+            "type": "string"
+          },
+          "titulo": {
+            "title": "Titulo",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "version_id",
+          "titulo",
+          "categoria",
+          "estado",
+          "subida_en"
+        ],
+        "title": "CargaPropia",
+        "type": "object"
+      },
       "CasoPrivacidad": {
         "description": "Un caso del titular, sin el código, la corroboración ni la referencia del pedido.",
         "properties": {
@@ -6965,6 +7015,23 @@
         "title": "ListaCandidatos",
         "type": "object"
       },
+      "ListaCargasPropias": {
+        "description": "`GET …/documentos/mis-cargas`: los archivos que subió quien pregunta en los últimos\n`CARGAS_PROPIAS_DIAS` días, a lo sumo `CARGAS_PROPIAS_MAXIMO`, de documentos vigentes\n(FL-DOC-04, `0111`). Es para quien carga sin ver la lista (el administrador externo): al\nvolver a Documentos sabe si el antivirus aceptó o rechazó lo que subió. Pide alguna acción de\ncarga, como `…/versiones/{v}/estado`.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/CargaPropia"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaCargasPropias",
+        "type": "object"
+      },
       "ListaCasosPrivacidad": {
         "description": "`GET /api/v1/privacidad/casos`: los más nuevos primero.",
         "properties": {
@@ -9705,6 +9772,17 @@
           "importe_centavos": {
             "title": "Importe Centavos",
             "type": "integer"
+          },
+          "lectura_comprobante": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LecturaComprobante"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que la IA leyó de ese último archivo, si pasó el antivirus y la lectura corrió (FL-ACL-01, `0111`): el registro llega con eso y solo se confirma, como en la ficha de la orden. Como allí, la cuenta leída no viaja: solo sus últimos dígitos y si coincide con la de la orden. `distinto_de_lo_registrado` va siempre vacía: todavía no hay registro con ese archivo."
           },
           "moneda": {
             "title": "Moneda",
@@ -14572,6 +14650,48 @@
         ]
       }
     },
+    "/api/v1/auth/totp/codigos-recuperacion": {
+      "post": {
+        "description": "FL-CTA-05 (18-11-2026): diez códigos nuevos sin desactivar el medio. Pide haber verificado\nen los últimos 10 minutos, como la baja: quien solo tiene la sesión no se queda con los\ncódigos. Los anteriores, usados o no, se borran; los nuevos se muestran una sola vez. Avisa\npor correo.",
+        "operationId": "nuevos_codigos_api_v1_auth_totp_codigos_recuperacion_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodigosRecuperacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta una verificación reciente (10 minutos)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay una aplicación ni una llave activa."
+          }
+        },
+        "summary": "Generar códigos de recuperación nuevos: los anteriores dejan de servir",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
     "/api/v1/auth/totp/confirmar": {
       "post": {
         "description": "Con el código correcto activa el segundo factor, deja la sesión verificada y devuelve diez\ncódigos de recuperación que no se vuelven a mostrar. Avisa por correo.",
@@ -16258,6 +16378,53 @@
           }
         },
         "summary": "Crear un documento (sin archivos todavía)",
+        "tags": [
+          "documentos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/mis-cargas": {
+      "get": {
+        "description": "FL-DOC-04 (18-11-2026): para quien carga sin ver la lista, «Lo que cargó esta cuenta». Sin\nesto, al salir de Documentos perdía el resultado del antivirus. Solo lo propio (`0111`).",
+        "operationId": "mis_cargas_api_v1_consorcios__consorcio_id__documentos_mis_cargas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaCargasPropias"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin ninguna acción de carga de documentos en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo que subió quien pregunta en los últimos días, con cómo terminó el análisis",
         "tags": [
           "documentos"
         ]

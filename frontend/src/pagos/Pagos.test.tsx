@@ -22,7 +22,7 @@ import { cambiosDeVersion, cambiosEntreVersiones, NO_ESTA_EN_NINGUNO } from "./F
 import { contratosAplicables, textoMonedaAjena } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
 import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_LISTO } from "./SubirFactura";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, MARCA_REPETIDA, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, TEXTO_SIN_ACTO, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, MARCA_REPETIDA, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, TEXTO_SIN_ACTO, textoParecidaAntes, textoProveedorInactivo, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
 import { TEXTO_ACCION, TITULO_PLEGADAS } from "./textosDeAcciones";
 import {
   AVISO_DESHACE_DECLARACION, AVISO_SIN_SALIDA_CAUSA, AVISO_RECLAMO, AVISO_VER_LA_CUENTA_QUEDA, CON_SALTEO, DAR_POR_PAGADO, FALTA_CONCEPTO, FALTA_IMPORTE, FALTA_LA_CUENTA, FALTA_MOTIVO,
@@ -5821,5 +5821,37 @@ describe("tanda 9: por qué no se ofrece el acto (FL-APR-02, FL-ORD-06)", () => 
     abrir(`/pagos/${O1}`);
     expect(await screen.findByText(deLaTabla("para_pagar", "falta_cuenta").que_decir)).toBeTruthy();
     expect(screen.queryByText(TEXTO_SIN_ACTO.proveedor_sin_cuenta)).toBeNull();
+  });
+});
+
+describe("tanda 10: el proveedor inactivo en una orden que no se pagó (FL-ORD-08)", () => {
+  const NO_SE_PAGO = {
+    orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos",
+    puede_modificar: true, puede_cerrar_sin_pagar: true,
+  } as const;
+
+  it("sin «Enviar a aprobar de nuevo»: la línea dice dónde se resuelve, con lo que se ofrece", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha({ ...NO_SE_PAGO, motivo_sin_acto: "proveedor_inactivo" })) }));
+    abrir(`/pagos/${O1}`);
+    expect(await screen.findByText(textoProveedorInactivo(true, true))).toBeTruthy();
+    expect(screen.queryByRole("button", { name: VERBO.volver_a_pagar })).toBeNull();
+    expect(screen.getByRole("button", { name: "Modificar la orden" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cerrar sin pagar" })).toBeTruthy();
+    // «Se puede volver a pagar» ya no vale: no se dice.
+    expect(screen.queryByText(deLaTabla("no_se_pago", "volver_a_pagar").que_decir)).toBeNull();
+  });
+
+  it("control: con el proveedor activo, «Enviar a aprobar de nuevo» y ninguna línea", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/${O1}`]: () => Response.json(ficha(NO_SE_PAGO)) }));
+    abrir(`/pagos/${O1}`);
+    expect(await screen.findByRole("button", { name: VERBO.volver_a_pagar })).toBeTruthy();
+    expect(screen.queryByText(textoProveedorInactivo(true, true))).toBeNull();
+  });
+
+  it("la línea nombra solo lo que el servidor ofrece", () => {
+    expect(textoProveedorInactivo(false, true)).toContain("«Cerrar sin pagar»");
+    expect(textoProveedorInactivo(false, true)).not.toContain("Modificar");
+    expect(textoProveedorInactivo(true, false)).not.toContain("Cerrar");
+    expect(textoProveedorInactivo(false, false)).toBe(TEXTO_SIN_ACTO.proveedor_inactivo);
   });
 });

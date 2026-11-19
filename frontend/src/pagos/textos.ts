@@ -22,6 +22,16 @@ export const TEXTO_SIN_ACTO: Record<MotivoSinActo, string> = {
   proveedor_inactivo: "El proveedor está suspendido o de baja: no se puede enviar a aprobar de nuevo. Se lo reactiva en su ficha.",
 };
 
+/** FL-ORD-08 (tanda 10): con el proveedor suspendido o de baja, «Enviar a aprobar de nuevo» no se
+ * ofrece; la línea dice dónde se resuelve, con lo que el servidor sí ofrece. */
+export function textoProveedorInactivo(modificar: boolean, cerrar: boolean): string {
+  const base = "El proveedor está suspendido o de baja: no se puede enviar a aprobar de nuevo.";
+  if (modificar && cerrar) return `${base} Se elige otro proveedor en «Modificar la orden» o, si ya no hace falta, «Cerrar sin pagar».`;
+  if (modificar) return `${base} Se elige otro proveedor en «Modificar la orden».`;
+  if (cerrar) return `${base} Si ya no hace falta, «Cerrar sin pagar».`;
+  return TEXTO_SIN_ACTO.proveedor_inactivo;
+}
+
 export const VERBO: Record<Paso, string> = {
   pagar: "Ver la cuenta para pagar",
   tomar_pago: "Hacerse cargo de este pago",

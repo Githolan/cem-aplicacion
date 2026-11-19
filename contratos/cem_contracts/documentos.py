@@ -189,3 +189,35 @@ class EstadoDeMiVersion(BaseModel):
 
     estado: EstadoVersion
     motivo_rechazo: MotivoRechazo | None = None
+
+
+CARGAS_PROPIAS_DIAS = 30
+"""FL-DOC-04 (18-11-2026): cuántos días atrás llega «Lo que cargó esta cuenta»."""
+CARGAS_PROPIAS_MAXIMO = 10
+"""FL-DOC-04: cuántas cargas propias recientes se listan, de la más nueva a la más vieja."""
+
+
+class CargaPropia(BaseModel):
+    """Un archivo que subió quien pregunta, con cómo terminó el análisis."""
+
+    model_config = ConfigDict(frozen=True)
+
+    documento_id: UUID
+    version_id: UUID
+    titulo: str
+    categoria: CategoriaDocumento
+    estado: EstadoVersion
+    motivo_rechazo: MotivoRechazo | None = None
+    subida_en: datetime
+
+
+class ListaCargasPropias(BaseModel):
+    """`GET …/documentos/mis-cargas`: los archivos que subió quien pregunta en los últimos
+    `CARGAS_PROPIAS_DIAS` días, a lo sumo `CARGAS_PROPIAS_MAXIMO`, de documentos vigentes
+    (FL-DOC-04, `0111`). Es para quien carga sin ver la lista (el administrador externo): al
+    volver a Documentos sabe si el antivirus aceptó o rechazó lo que subió. Pide alguna acción de
+    carga, como `…/versiones/{v}/estado`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[CargaPropia]

@@ -6,7 +6,7 @@ import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { hoyDelDispositivo, TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "../archivos";
 import { encabezadoCsrf } from "../csrf";
-import { mensajeDeError as mensajeDeCarga } from "../Documentos";
+import { mensajeDeError as mensajeDeCarga, pedirDescarga } from "../Documentos";
 import {
   type Aviso,
   cambioLoVisto,
@@ -148,18 +148,29 @@ const descarga = (consorcio: string, documento: string, version: string) =>
 export const ARCHIVO_EN_REVISION = "El antivirus todavía lo está revisando: se puede descargar cuando termine.";
 export const ARCHIVO_RECHAZADO = "El antivirus rechazó el archivo: no se puede descargar.";
 
+/** Baja el archivo preguntando antes (FL-SOL-04): la falla queda en la ficha. */
+type AlBajar = (documento: string, version: string) => void;
+
 type Adjunto = Pick<NonNullable<Solicitud["envio"]>, "documento_id" | "version_documento_id" | "estado_archivo" | "descargable">;
 
 /** El enlace al archivo solo si quien mira lo puede bajar (`descargable`); si no, por qué no, salvo
  * que sea solo por no leer Documentos: entonces no se dice nada. */
-function enlaceDelAdjunto(consorcio: string, adjunto: Adjunto, texto: string) {
+function enlaceDelAdjunto(consorcio: string, adjunto: Adjunto, texto: string, alBajar: AlBajar) {
   const { documento_id: documento, version_documento_id: version } = adjunto;
   if (!documento || !version) return null;
+  // FL-SOL-04 (tanda 10): se pregunta antes, como en Documentos; si falla, se dice en la ficha.
   if (adjunto.descargable)
     return (
       <>
         {" "}
-        <a className="enlace-suelto" href={descarga(consorcio, documento, version)}>
+        <a
+          className="enlace-suelto"
+          href={descarga(consorcio, documento, version)}
+          onClick={(evento) => {
+            evento.preventDefault();
+            alBajar(documento, version);
+          }}
+        >
           {texto}
         </a>
       </>
@@ -507,7 +518,17 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
   /** Por qué no se firmó: en la ficha, donde se tocó «Firmar». */
   const [falla, setFalla] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
+  /** Por qué no se pudo bajar el adjunto: en la ficha, que no se cierra (FL-SOL-04). */
+  const [fallaDescarga, setFallaDescarga] = useState<string | null>(null);
   const hacer = useActo(aEntrar);
+
+  function bajar(documento: string, version: string) {
+    setFallaDescarga(null);
+    void pedirDescarga(consorcio, documento, version).then((r) => {
+      if (r.tipo === "sin_sesion") aEntrar();
+      else if (r.tipo === "falla") setFallaDescarga(`No se pudo bajar el archivo. ${r.texto}`);
+    });
+  }
   const ruta = { consorcio_id: consorcio, solicitud_id: s.id };
 
   /** Lo que la ventana hace con el final de su acto. */
@@ -554,7 +575,7 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
   return (
     <FichaDeRegistro
       titulo={tituloDe(s)}
-      datos={datosDe(s, consorcio, copiado, setCopiado)}
+      datos={datosDe(s, consorcio, copiado, setCopiado, bajar)}
       alCerrar={alCerrar}
       ocupada={firmando}
       ventana={
@@ -568,6 +589,11 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
       }
     >
       {resultado}
+      {fallaDescarga !== null && (
+        <p role="alert" className="aviso-error">
+          {fallaDescarga}
+        </p>
+      )}
       {falla !== null && (
         <p role="alert" className="aviso-error">
           {falla}
@@ -612,7 +638,7 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
 
 /** Los datos de la ficha, sin lo técnico que no sirve para actuar (SOL-08) y con los adjuntos a mano
  * (SOL-09). El plazo dice solo los días: la situación ya dice desde cuándo corre (SOL-07). */
-function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: (v: boolean) => void): DatoDeFicha[] {
+function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: (v: boolean) => void, alBajar: AlBajar): DatoDeFicha[] {
   const datos: DatoDeFicha[] = [
     { etiqueta: "Situación", valor: textoSituacion(s) },
     { etiqueta: "Documentación pedida", valor: <span className="texto-con-renglones">{s.documentacion}</span> },
@@ -666,7 +692,7 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
         <>
           {TEXTO_MEDIO[s.envio.medio]}
           {s.envio.detalle ? ` (${s.envio.detalle})` : ""}, el {fechaLegible(s.envio.fecha_envio)}. Vence el {fechaLegible(s.envio.vence_el)}.
-          {enlaceDelAdjunto(consorcio, s.envio, "Descargar el comprobante")}
+          {enlaceDelAdjunto(consorcio, s.envio, "Descargar el comprobante", alBajar)}
         </>
       ),
     });
@@ -682,7 +708,7 @@ function datosDe(s: Solicitud, consorcio: string, copiado: boolean, setCopiado: 
             {fechaLegible(s.respuesta.respondida_el)}
             {s.respuesta.fuera_de_plazo ? ", fuera de plazo" : ""}.
           </span>
-          {enlaceDelAdjunto(consorcio, s.respuesta, "Descargar el adjunto")}
+          {enlaceDelAdjunto(consorcio, s.respuesta, "Descargar el adjunto", alBajar)}
         </>
       ),
     });

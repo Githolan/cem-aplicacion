@@ -75,10 +75,13 @@ LIMITES_INTENTOS: tuple[RateLimitItem, ...] = (parse("5/minute"), parse("20/day"
 """Intentos de código (alta, verificación o baja) por persona. Con ±1 paso hay 3 códigos
 válidos en 10⁶: 20 por día dan 0,006 % de acertar al azar en un día."""
 LIMITE_NOMBRE = "auth-totp"
+CERROJO_CODIGOS = "select pg_advisory_xact_lock(hashtextextended('recuperacion:' || :p, 0))"
+"""El cerrojo por persona con que se reemplazan los códigos de recuperación (`emitir_codigos`)."""
 SIN_CACHE = {"Cache-Control": "no-store"}
 
 ASUNTO_ALTA = "Se activó la confirmación con código"
 ASUNTO_BAJA = "Se desactivó la confirmación con código"
+ASUNTO_CODIGOS = "Se generaron códigos de recuperación nuevos"
 TEXTO_AVISO = """Hola:
 
 {que} la cuenta de Consorcio en Mano de este correo.
@@ -263,7 +266,14 @@ def olvidar_verificaciones(conn: Connection) -> None:
 
 
 def emitir_codigos(conn: Connection, claves: Claves, persona_id: UUID) -> list[str]:
-    """Reemplaza los códigos de recuperación de la persona del ámbito y devuelve los nuevos."""
+    """Reemplaza los códigos de recuperación de la persona del ámbito y devuelve los nuevos.
+
+    Toma antes un cerrojo consultivo propio de la persona (`CERROJO_CODIGOS`), hasta el fin de la
+    transacción: dos reemplazos a la vez (dos pedidos de códigos nuevos, o uno con un alta) se
+    hacen uno detrás del otro, y queda un solo juego de diez (Codex en el PR #262). Es el último
+    cerrojo que toma quien llega acá: el alta ya tiene el factor (`_paso_totp`) y nadie que tenga
+    este cerrojo pide después otro, así que no se cruza con el orden único de 0041."""
+    conn.execute(text(CERROJO_CODIGOS), {"p": str(persona_id)})
     codigos = [nuevo_codigo_recuperacion() for _ in range(CANTIDAD_RECUPERACION)]
     conn.execute(text("delete from nucleo.codigo_recuperacion"))
     conn.execute(
@@ -516,6 +526,44 @@ async def verificar(
         vale_hasta=verificado_en + VIGENCIA_VERIFICACION,
         codigos_recuperacion_restantes=quedan,
     )
+
+
+@router.post(
+    "/codigos-recuperacion",
+    response_model=CodigosRecuperacion,
+    summary="Generar códigos de recuperación nuevos: los anteriores dejan de servir",
+    responses={
+        403: {"model": Error, "description": "Falta una verificación reciente (10 minutos)."},
+        409: {"model": Error, "description": "No hay una aplicación ni una llave activa."},
+    },
+)
+def nuevos_codigos(
+    identidad: SegundoFactorRecienteDep, claves: ClavesDep, motor: MotorDep, response: Response
+) -> CodigosRecuperacion:
+    """FL-CTA-05 (18-11-2026): diez códigos nuevos sin desactivar el medio. Pide haber verificado
+    en los últimos 10 minutos, como la baja: quien solo tiene la sesión no se queda con los
+    códigos. Los anteriores, usados o no, se borran; los nuevos se muestran una sola vez. Avisa
+    por correo."""
+    response.headers.update(SIN_CACHE)
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        if not tiene_medio(conn):
+            raise ErrorApi(
+                409,
+                CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
+                "No hay una aplicación de autenticación ni una llave de acceso activa.",
+            )
+        codigos = emitir_codigos(conn, claves, identidad.persona_id)
+        avisar(
+            conn,
+            identidad.persona_id,
+            ASUNTO_CODIGOS,
+            "Se generaron códigos de recuperación nuevos para",
+        )
+    log.info(
+        "códigos de recuperación renovados",
+        extra={"campos": {"persona_id": str(identidad.persona_id)}},
+    )
+    return CodigosRecuperacion(codigos=codigos)
 
 
 @router.post(

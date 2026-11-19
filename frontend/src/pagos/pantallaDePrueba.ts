@@ -72,7 +72,8 @@ function puedeDe(f: Omit<Ficha, "acciones">): Record<AccionPago, boolean> {
     cerrar_reclamo: f.puede_recuperar,
     corregir_diferencia: f.puede_corregir_diferencia,
     preparar_faltante: f.puede_preparar_faltante,
-    volver_a_pagar: f.puede_modificar && fallida,
+    // FL-ORD-08: como el servidor, no con el proveedor suspendido o de baja.
+    volver_a_pagar: f.puede_modificar && fallida && f.motivo_sin_acto !== "proveedor_inactivo",
     preparar_otra: f.paso === "rechazada",
     cerrar_sin_pagar: f.puede_cerrar_sin_pagar,
     cotejar: false,

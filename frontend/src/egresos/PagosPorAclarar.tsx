@@ -13,7 +13,8 @@ import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe,
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
-import { CampoMonedaSalida, FALTA_CODIGO_MONEDA, monedaValida } from "../pagos/CampoMonedaSalida";
+import { CampoMonedaSalida, FALTA_CODIGO_MONEDA, monedaValida, nombreDeMoneda } from "../pagos/CampoMonedaSalida";
+import { AVISO_LECTURA_FALLO } from "../pagos/textos";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { SubirArchivo } from "../SubirArchivo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
@@ -21,7 +22,9 @@ import { CampoImporte } from "./CampoImporte";
 import {
   aCentavos,
   aDecimal,
+  aTexto,
   type Aviso,
+  cuentaEnmascarada,
   ENCABEZADO_IDEMPOTENCIA,
   importe,
   mensajeDeActo,
@@ -57,8 +60,14 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useConsultaDelAntivirus, use
 // acepta el comprobante muestra solo la carga y su estado (ACL-02, C8P-10). El antivirus se sigue
 // mirando solo, sin «Actualizar» (ACL-04); la subida no lleva aviso propio (ACL-05). Aclarado el
 // último, queda el «Listo» con la vuelta al inicio (ACL-06).
+//
+// Flujos, tanda 10 (FL-ACL-01, app 0111): con el comprobante aceptado, el registro llega con lo que la
+// IA leyó de él, como en la ficha de la orden. Si el importe y la cuenta coinciden con la orden, no se
+// piden: queda confirmar. La cuenta leída no llega nunca, solo sus últimos dígitos y si coincide. Lo
+// que no coincide se dice; registrar igual es decir que se leyó mal, y el Consejo lo ve.
 
 type PorAclarar = components["schemas"]["PagoPorAclarar"];
+type LecturaComprobante = components["schemas"]["LecturaComprobante"];
 
 export const RUTA_POR_ACLARAR = "/pagos/por-aclarar";
 
@@ -85,6 +94,32 @@ function textoDelComprobante(p: PorAclarar): string {
   return "Primero hay que subir el comprobante de la transferencia.";
 }
 
+/** Lo leído del comprobante, si se leyó (FL-ACL-01). */
+const leidaDe = (p: PorAclarar): LecturaComprobante | null => (p.lectura_comprobante?.estado === "leida" ? p.lectura_comprobante : null);
+
+/** Lo leído y aceptado: importe y cuenta coinciden con la orden. */
+const coincideLeida = (l: LecturaComprobante | null) =>
+  l !== null && l.distinto_de_la_orden.length === 0 && l.importe_centavos !== null && l.cuenta_coincide === true;
+
+/** FL-ACL-01: lo que dice el comprobante leído, para confirmar, cuando coincide con la orden. */
+export function textoLeido(l: LecturaComprobante, p: Pick<PorAclarar, "importe_centavos" | "moneda">): string {
+  return `El comprobante dice ${importe(l.importe_centavos ?? p.importe_centavos, l.moneda ?? p.moneda)} a la cuenta ${cuentaEnmascarada(l.cuenta_ultimos_digitos)}, la de la orden. Revisar el número y la fecha, y registrar.`;
+}
+
+/** FL-ACL-01: lo leído que no es lo de la orden, campo por campo. */
+export function textosDistintos(l: LecturaComprobante, p: Pick<PorAclarar, "importe_centavos" | "moneda">): string[] {
+  const textos: string[] = [];
+  if (l.distinto_de_la_orden.includes("importe") && l.importe_centavos !== null)
+    textos.push(`El comprobante dice ${importe(l.importe_centavos, l.moneda ?? p.moneda)} y la orden es por ${importe(p.importe_centavos, p.moneda)}.`);
+  if (l.distinto_de_la_orden.includes("moneda"))
+    textos.push(`El comprobante dice ${nombreDeMoneda(l.moneda ?? "")} y la orden es en ${nombreDeMoneda(p.moneda)}.`);
+  if (l.distinto_de_la_orden.includes("cuenta"))
+    textos.push(`El comprobante dice la cuenta ${cuentaEnmascarada(l.cuenta_ultimos_digitos)}, que no es la de la orden.`);
+  return textos;
+}
+export const SI_SE_LEYO_MAL = "Si se leyó mal, corregir el dato y registrar: el Consejo ve que se dijo que se leyó mal.";
+export const CORREGIR_LO_LEIDO = "Corregir lo que se leyó";
+
 const tituloDe = (p: PorAclarar) => `${p.consorcio}: ${importe(p.importe_centavos, p.moneda)}`;
 /** FL-ACL-03 (tanda 9, app 0110): la fila dice a qué proveedor era, sin la cuenta. */
 export const resumenDe = (p: Pick<PorAclarar, "razon_social" | "concepto">) => `${p.razon_social} · ${p.concepto}`;
@@ -105,6 +140,12 @@ export function PagosPorAclarar() {
   const [registro, setRegistro] = useState<Registro>(REGISTRO_VACIO);
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [otraCosa, setOtraCosa] = useState(false);
+  /** La versión del comprobante cuya lectura llenó el registro (FL-ACL-01). */
+  const [llenadaCon, setLlenadaCon] = useState<string | null>(null);
+  /** Pidió corregir lo leído que coincidía: se piden también el importe y la cuenta. */
+  const [aMano, setAMano] = useState(false);
+  /** Los datos que escribió la persona: lo leído que llega después no los pisa (Codex en el PR #262). */
+  const [tocados, setTocados] = useState<ReadonlySet<keyof Registro>>(new Set());
   const [archivo, setArchivo] = useState<File | null>(null);
   /** El nombre del último archivo que entró desde esta ventana; la API no informa el del comprobante. */
   const [subido, setSubido] = useState<string | null>(null);
@@ -164,6 +205,21 @@ export function PagosPorAclarar() {
   // lectura que falla en el medio se repite en la vuelta siguiente.
   useConsultaDelAntivirus(abierto?.comprobante_estado === "en_cuarentena" && accion === "si", () => setVuelta((v) => v + 1));
   useAlVolverLaRed(fallaLista !== null, () => setVuelta((v) => v + 1));
+  // FL-ACL-01: mientras la IA lee el comprobante, se vuelve a mirar; lo leído llena el registro una vez.
+  const leyendo = abierto?.comprobante_estado === "disponible" && abierto.lectura_comprobante?.estado === "leyendo" && accion === "si";
+  useConsultaDelAntivirus(leyendo, () => setVuelta((v) => v + 1));
+  const leidaAbierta = abierto === undefined ? null : leidaDe(abierto);
+  if (accion === "si" && leidaAbierta !== null && llenadaCon !== leidaAbierta.version_documento_id) {
+    setLlenadaCon(leidaAbierta.version_documento_id);
+    setAMano(false);
+    // Solo lo que la persona no escribió: lo suyo, también el importe de «otro importe», queda.
+    setRegistro((r) => ({
+      ...r,
+      numero: tocados.has("numero") ? r.numero : (leidaAbierta.numero_operacion ?? r.numero),
+      fecha: tocados.has("fecha") ? r.fecha : (leidaAbierta.fecha ?? r.fecha),
+      importe: tocados.has("importe") || leidaAbierta.importe_centavos === null ? r.importe : aTexto(leidaAbierta.importe_centavos),
+    }));
+  }
 
   /** Terminó un acto: se cierran la ventana y la ficha, y el resultado queda junto a la lista. */
   function terminar(texto: string) {
@@ -227,32 +283,45 @@ export function PagosPorAclarar() {
   }
 
   /** Lo que falta en el registro, campo por campo (decisión 4: el botón siempre activo). */
-  function faltaDelRegistro(): ErroresDeCampo {
+  function faltaDelRegistro(p: PorAclarar): ErroresDeCampo {
+    const { pideImporte, pideCuenta } = loQuePide(p);
     const faltan: Record<string, string> = {
       ...faltaCompletar({
         numero: [registro.numero, "Falta escribir el número de operación."],
         fecha: [registro.fecha, "Falta elegir la fecha de la transferencia."],
-        cuenta: [registro.cuenta, "Falta escribir el CBU o CVU de destino."],
+        ...(pideCuenta ? { cuenta: [registro.cuenta, "Falta escribir el CBU o CVU de destino."] as const } : {}),
         ...(otraCosa ? { explicacion: [registro.explicacion, "Falta escribir qué pasó."] as const } : {}),
       }),
     };
-    if (aCentavos(registro.importe) === null)
+    if (pideImporte && aCentavos(registro.importe) === null)
       faltan.importe = registro.importe.trim() === "" ? "Falta escribir el importe." : "Escribir el importe con números, como 15000 o 15.000,50.";
     if (otraCosa && !monedaValida(registro.moneda)) faltan.moneda = FALTA_CODIGO_MONEDA;
     return faltan;
   }
 
+  /** FL-ACL-01: con lo leído que coincide, el importe y la cuenta no se piden (salvo «Corregir lo que
+   * se leyó»); lo que no coincide y se registra igual es «Se leyó mal». */
+  function loQuePide(p: PorAclarar) {
+    const leida = leidaDe(p);
+    // Si la persona ya escribió el importe o la cuenta, se siguen pidiendo: lo suyo no se descarta.
+    const cuentaLeida = coincideLeida(leida) && !aMano && !otraCosa && !tocados.has("importe") && !tocados.has("cuenta");
+    const dijoMal = leida !== null && leida.distinto_de_la_orden.length > 0 && !otraCosa;
+    return { leida, cuentaLeida, dijoMal, pideImporte: !cuentaLeida, pideCuenta: !cuentaLeida };
+  }
+
   async function registrar(p: PorAclarar): Promise<FinDeEnvio> {
-    const faltan = faltaDelRegistro();
+    const faltan = faltaDelRegistro(p);
     if (hayErrores(faltan)) {
       setErrores(faltan);
       return "seguir";
     }
     const documento = p.comprobante_id;
-    const centavos = aCentavos(registro.importe);
+    const { cuentaLeida, dijoMal } = loQuePide(p);
+    // Con lo leído que coincide, el importe es el de la orden: el que se leyó, igual a ella.
+    const centavos = cuentaLeida ? p.importe_centavos : aCentavos(registro.importe);
     if (documento == null || centavos === null || !montado.current) return "seguir";
     const ruta = { consorcio_id: p.consorcio_id, orden_id: p.orden_id };
-    const huella = JSON.stringify([otraCosa ? "otra-cosa" : "registrar", p.orden_id, p.version, p.huella, documento, registro]);
+    const huella = JSON.stringify([otraCosa ? "otra-cosa" : "registrar", p.orden_id, p.version, p.huella, documento, registro, cuentaLeida, dijoMal]);
     const cuenta = registro.cuenta.replace(/\D/g, "");
     const r = otraCosa
       ? await conClave("registrar lo que pasó", huella, (k) =>
@@ -279,12 +348,12 @@ export function PagosPorAclarar() {
             body: {
               version: p.version,
               huella: p.huella,
-              lectura_mal: false,
+              lectura_mal: dijoMal,
               numero_operacion: registro.numero.trim(),
               fecha_operacion: registro.fecha,
               importe_centavos: centavos,
               moneda: p.moneda,
-              cuenta_destino: cuenta,
+              ...(cuentaLeida ? {} : { cuenta_destino: cuenta }),
               documento_id: documento,
             },
           }),
@@ -380,6 +449,9 @@ export function PagosPorAclarar() {
     else {
       setRegistro({ ...REGISTRO_VACIO, moneda: p.moneda });
       setOtraCosa(false);
+      setLlenadaCon(null);
+      setAMano(false);
+      setTocados(new Set());
       setArchivo(null);
       setSubido(null);
       setFallaSubida(null);
@@ -397,6 +469,7 @@ export function PagosPorAclarar() {
 
   function cambiar(campo: keyof Registro, valor: string) {
     setRegistro((r) => ({ ...r, [campo]: valor }));
+    setTocados((t) => (t.has(campo) ? t : new Set([...t, campo])));
     setErrores((e) => sinElDe(e, campo));
   }
 
@@ -486,23 +559,26 @@ export function PagosPorAclarar() {
       <VentanaDeFormulario titulo={otraCosa ? OTRA_COSA : REGISTRAR_TRANSFERENCIA} textoEnviar={otraCosa ? "Registrar lo que pasó" : "Registrar el pago"}
         alEnviar={() => registrar(p)} alCerrar={cerrarAccion} ancha>
         {comprobante(p, false)}
+        {lecturaDelComprobante(p)}
         {campo("numero", "Número de operación", (m) => (
           <input id={`${id}-numero`} data-foco maxLength={60} value={registro.numero} {...m} onChange={(e) => cambiar("numero", e.target.value)} />
         ))}
         {campo("fecha", "Fecha de la transferencia", (m) => (
           <input id={`${id}-fecha`} type="date" value={registro.fecha} {...m} onChange={(e) => cambiar("fecha", e.target.value)} />
         ))}
-        {campo("importe", otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)", () => (
-          <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={false} alCambiar={(texto) => cambiar("importe", texto)} />
-        ))}
+        {loQuePide(p).pideImporte &&
+          campo("importe", otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)", () => (
+            <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={false} alCambiar={(texto) => cambiar("importe", texto)} />
+          ))}
         {otraCosa &&
           // Por su nombre, con la de la orden elegida (FL-ACL-02); el código, solo si fue otra.
           campo("moneda", "Moneda que salió del banco", (m) => (
             <CampoMonedaSalida id={`${id}-moneda`} valor={registro.moneda} marca={m} alCambiar={(codigo) => cambiar("moneda", codigo)} />
           ))}
-        {campo("cuenta", "CBU/CVU de destino (como figura en el comprobante)", (m) => (
-          <input id={`${id}-cuenta`} inputMode="numeric" maxLength={30} value={registro.cuenta} {...m} onChange={(e) => cambiar("cuenta", e.target.value)} />
-        ))}
+        {loQuePide(p).pideCuenta &&
+          campo("cuenta", "CBU/CVU de destino (como figura en el comprobante)", (m) => (
+            <input id={`${id}-cuenta`} inputMode="numeric" maxLength={30} value={registro.cuenta} {...m} onChange={(e) => cambiar("cuenta", e.target.value)} />
+          ))}
         {otraCosa &&
           campo("explicacion", "Qué pasó", () => (
             <>
@@ -514,6 +590,11 @@ export function PagosPorAclarar() {
             </>
           ))}
         <div className="acciones">
+          {loQuePide(p).cuentaLeida && (
+            <button type="button" className="secundario" onClick={() => setAMano(true)}>
+              {CORREGIR_LO_LEIDO}
+            </button>
+          )}
           <button type="button" className="secundario"
             onClick={() => {
               setErrores(SIN_ERRORES);
@@ -523,6 +604,27 @@ export function PagosPorAclarar() {
           </button>
         </div>
       </VentanaDeFormulario>
+    );
+  }
+
+  /** FL-ACL-01: lo que dice la lectura del comprobante, arriba de los datos. */
+  function lecturaDelComprobante(p: PorAclarar) {
+    if (otraCosa) return null;
+    const estado = p.lectura_comprobante?.estado;
+    if (estado === "leyendo") return <p role="status">Leyendo el comprobante: los datos se completan solos.</p>;
+    if (estado === "no_leida") return <p role="note">{AVISO_LECTURA_FALLO}</p>;
+    const { leida, cuentaLeida } = loQuePide(p);
+    if (leida === null) return null;
+    if (cuentaLeida) return <p role="note">{textoLeido(leida, p)}</p>;
+    const distintos = textosDistintos(leida, p);
+    if (distintos.length === 0) return <p>Revisar lo que se leyó del comprobante y completar lo que falta.</p>;
+    return (
+      <div className="aviso-error" role="alert">
+        {distintos.map((t) => (
+          <p key={t}>{t}</p>
+        ))}
+        <p>{SI_SE_LEYO_MAL}</p>
+      </div>
     );
   }
 

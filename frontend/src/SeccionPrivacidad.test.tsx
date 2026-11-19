@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
-import { SeccionPrivacidad } from "./SeccionPrivacidad";
+import { CODIGO_NUEVO_POR_SOPORTE, SeccionPrivacidad } from "./SeccionPrivacidad";
 
 const CASO = "01a18105-0000-7000-8000-000000000001";
 const CASOS = "/api/v1/privacidad/casos";
@@ -269,7 +269,8 @@ describe("sección de pedidos sobre los datos", () => {
     vi.stubGlobal("fetch", backend({ [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto", "acceso", vence)] }) }));
     const { container } = mostrar();
 
-    expect(await screen.findByText(`${texto} Para seguir hace falta un código nuevo, que se pide a soporte.`)).toBeTruthy();
+    // FL-CTA-06 (tanda 10): dice el medio concreto, el que ya da el correo del código.
+    expect(await screen.findByText(`${texto} ${CODIGO_NUEVO_POR_SOPORTE}`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Confirmar el pedido" })).toBeNull();
     expect((await axe.run(container)).violations).toEqual([]);
   });

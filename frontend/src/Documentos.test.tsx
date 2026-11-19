@@ -12,7 +12,7 @@ import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { aceptar, hoyDelDispositivo, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
 import { CAMBIAR_ARCHIVO } from "./SubirArchivo";
-import { ARCHIVO_EN_REVISION, archivosDeLaFicha, mensajeDeError, REFRESCO_CUARENTENA_MS, RESPALDA_ALGO, RETIRAR_DOCUMENTO, tamano } from "./Documentos";
+import { ARCHIVO_EN_REVISION, archivosDeLaFicha, LO_QUE_CARGO, mensajeDeError, REFRESCO_CUARENTENA_MS, RESPALDA_ALGO, RETIRAR_DOCUMENTO, SIN_CARGAS_PROPIAS, tamano } from "./Documentos";
 import { LIMITE_DE_PEDIDOS, SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
@@ -95,6 +95,8 @@ function conLista(extra: Respuestas = {}) {
   return backend({
     "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
     [`GET ${BASE}`]: () => Response.json(LISTA),
+    // FL-DOC-04 (tanda 10): quien solo carga lee lo suyo; sin nada cargado, la lista vacía.
+    [`GET ${BASE}/mis-cargas`]: () => Response.json({ elementos: [] }),
     ...extra,
   });
 }
@@ -1761,5 +1763,62 @@ describe("Flujos 18-11, tanda 7", () => {
     fireEvent.click(within(ventanaDe("Cargar un documento")).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Cargar un documento" })).toBeNull());
     expect(screen.queryByText(/sin archivo\.$/)).toBeNull();
+  });
+});
+
+describe("tanda 10 de flujos: lo que cargó esta cuenta (FL-DOC-04)", () => {
+  const MIS_CARGAS = `${BASE}/mis-cargas`;
+  const carga = (version: string, titulo: string, estado: string, motivo: string | null = null) => ({
+    documento_id: D3, version_id: version, titulo, categoria: "presupuestos", estado, motivo_rechazo: motivo,
+    subida_en: "2026-11-18T12:00:00Z",
+  });  // prettier-ignore
+  const soloCarga = (respuesta: () => Response) =>
+    conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"), [`GET ${MIS_CARGAS}`]: respuesta });
+
+  it("quien solo carga ve, al llegar, cada archivo suyo con su estado; el rechazado, con el motivo", async () => {
+    vi.stubGlobal("fetch", soloCarga(() => Response.json({ elementos: [carga(V4, "Presupuesto de pintura", "rechazado", "pdf_cifrado"), carga(V3, "Plano del edificio", "disponible")] })));
+    abrir();
+    const lista = within(await screen.findByRole("list", { name: LO_QUE_CARGO }));
+    expect(lista.getByText("Presupuesto de pintura")).toBeTruthy();
+    expect(lista.getByText(/^Rechazado: el PDF tiene contraseña · subido el /)).toBeTruthy();
+    expect(lista.getByText(/^Disponible · subido el /)).toBeTruthy();
+    // Son filas para leer: no abren nada.
+    expect(lista.queryByRole("button")).toBeNull();
+  });
+
+  it("lo que sigue en revisión se vuelve a mirar solo hasta que termina", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    let estado = "en_cuarentena";
+    const simulado = soloCarga(() => Response.json({ elementos: [carga(V4, "Presupuesto de pintura", estado)] }));
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/^En revisión · subido el /)).toBeTruthy();
+    estado = "disponible";
+    await act(() => vi.advanceTimersByTimeAsync(REFRESCO_CUARENTENA_MS));
+    expect(await screen.findByText(/^Disponible · subido el /)).toBeTruthy();
+    const lecturas = pedidos(simulado, "GET", MIS_CARGAS).length;
+    // Terminado, no vuelve a preguntar (control de que la espera se cortó).
+    await act(() => vi.advanceTimersByTimeAsync(REFRESCO_CUARENTENA_MS * 2));
+    expect(pedidos(simulado, "GET", MIS_CARGAS)).toHaveLength(lecturas);
+    vi.useRealTimers();
+  });
+
+  it("sin cargas lo dice; si la lectura falla, lo dice y deja consultar de nuevo", async () => {
+    let falla = true;
+    vi.stubGlobal("fetch", soloCarga(() => (falla ? error("error_interno", 500) : Response.json({ elementos: [] }))));
+    abrir();
+    expect(await screen.findByText(/^No se pudo mostrar lo que cargó esta cuenta\./)).toBeTruthy();
+    falla = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await screen.findByText(SIN_CARGAS_PROPIAS)).toBeTruthy();
+  });
+
+  it("control: quien ve la lista general no recibe esta sección ni la pide", async () => {
+    const simulado = conLista();
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Acta de asamblea ordinaria");
+    expect(screen.queryByRole("heading", { name: LO_QUE_CARGO })).toBeNull();
+    expect(pedidos(simulado, "GET", MIS_CARGAS)).toHaveLength(0);
   });
 });
