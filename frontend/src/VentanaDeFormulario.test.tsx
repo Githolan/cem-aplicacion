@@ -241,3 +241,35 @@ describe("VentanaDeFormulario sin el botón principal (tanda 3, C8G-02 y C8G-05)
     expect(deAtras).not.toHaveBeenCalled();
   });
 });
+
+describe("VentanaDeFormulario de un acto que no se deshace (P3 de la revisión de app #125)", () => {
+  function retirar(conCampo = false) {
+    return render(
+      <VentanaDeFormulario titulo="Retirar el contacto" textoEnviar="Sí, retirar" peligro alEnviar={() => "cerrar"} alCerrar={() => undefined}>
+        {conCampo && <input aria-label="Motivo" data-foco />}
+        <p>¿Retirar el contacto Juan? No se puede deshacer.</p>
+      </VentanaDeFormulario>,
+    );
+  }
+
+  it("al abrirse, el foco queda en la ventana y no en «Sí, retirar»: dos Enter seguidos no retiran", () => {
+    retirar();
+    const hoja = screen.getByRole("dialog", { name: "Retirar el contacto" });
+    expect(document.activeElement).toBe(hoja);
+    expect(within(hoja).getByRole("button", { name: "Sí, retirar" })).not.toBe(document.activeElement);
+  });
+
+  it("control: un acto que se puede corregir sigue abriendo con el foco en su botón", () => {
+    render(
+      <VentanaDeFormulario titulo="Corregir el contacto" textoEnviar="Guardar" alEnviar={() => "cerrar"} alCerrar={() => undefined}>
+        <p>Juan</p>
+      </VentanaDeFormulario>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Guardar" }));
+  });
+
+  it("con un campo marcado, el foco va al campo aunque el acto no se deshaga", () => {
+    retirar(true);
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Motivo" }));
+  });
+});

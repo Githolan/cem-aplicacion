@@ -11,7 +11,7 @@ import { borrarCopias } from "./copiaContactos";
 import { RUTA_CUENTA } from "./Cuenta";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
-import { CODIGO_ENTRAR_DE_NUEVO, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { CODIGO_ENTRAR_DE_NUEVO, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { Hoja } from "./Hoja";
 import { llaveDisponible } from "./llaveAcceso";
 import { SeccionLlave } from "./SeccionLlave";
@@ -97,7 +97,8 @@ const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
 type Pantalla =
   | { tipo: "cargando" }
   | { tipo: "sin_sesion" }
-  | { tipo: "sin_servicio"; deConexion: boolean }
+  /** `motivo`: lo que dice `mensajeDeFalla` (E55: un 4xx no es «el servicio no está»). */
+  | { tipo: "sin_servicio"; motivo: string }
   | { tipo: "inactivo" }
   | { tipo: "alta"; alta: Alta }
   | { tipo: "codigos"; codigos: string[]; medio: keyof typeof ACTIVADO; aviso: string }
@@ -166,9 +167,9 @@ export function SegundoFactor() {
           setRestantes(data.codigos_recuperacion_restantes);
           pasarA(data.activo ? { tipo: "activo", estado: data } : { tipo: "inactivo" });
         } else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
-        else pasarA({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
+        else pasarA({ tipo: "sin_servicio", motivo: mensajeDeFalla(response.status, codigoDe(error)) });
       })
-      .catch(() => pasarA({ tipo: "sin_servicio", deConexion: true }));
+      .catch(() => pasarA({ tipo: "sin_servicio", motivo: SIN_CONEXION }));
   }, [pasarA]);
 
   useEffect(() => {
@@ -423,9 +424,9 @@ export function SegundoFactor() {
         {pantalla.tipo === "sin_servicio" && (
           <>
             <p className="aviso-error">
-              {pantalla.deConexion
+              {pantalla.motivo === SIN_CONEXION
                 ? "No se pudo consultar la confirmación con PIN, huella o código. Hay que revisar la conexión y reintentar."
-                : `No se pudo consultar la confirmación con PIN, huella o código. ${SERVICIO_NO_DISPONIBLE}`}
+                : `No se pudo consultar la confirmación con PIN, huella o código. ${pantalla.motivo}`}
             </p>
             <button className="secundario" type="button" onClick={reintentarConsulta}>
               Reintentar

@@ -479,6 +479,17 @@ describe("página /cuenta/segundo-factor", () => {
   });
 
   it.each([
+    ["un 429", 429, "limite_de_pedidos", /No se pudo consultar la confirmación con PIN, huella o código. Se llegó al límite de pedidos/],
+    ["un 404", 404, "no_encontrado", /No se pudo consultar la confirmación con PIN, huella o código. No se pudo completar el pedido. Hay que recargar/],
+  ])("%s al consultar dice lo que corresponde, no que el servicio no está (E55)", async (_, estado, codigo, texto) => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => error(codigo, estado) }));
+    abrir();
+
+    expect(await screen.findByText(texto)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
+  it.each([
     ["el alta", INACTIVO, "img"],
     ["el estado activo", ACTIVO, "heading"],
   ])("en %s no tiene faltas de accesibilidad detectables por axe", async (_, estado, espera) => {
