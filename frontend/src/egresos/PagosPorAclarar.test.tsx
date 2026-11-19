@@ -681,3 +681,45 @@ describe("tanda 10 de flujos: «Sí se transfirió» con lo leído del comproban
     expect(within(ventana).queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
   });
 });
+
+describe("Codex en el PR #262: lo leído que llega tarde no pisa lo escrito (FL-ACL-01)", () => {
+  const LEYENDO = {
+    version_documento_id: ARCHIVO, estado: "leyendo", importe_centavos: null, moneda: null, cuenta_ultimos_digitos: null,
+    cuenta_coincide: null, titular_destino: null, numero_operacion: null, fecha: null,
+    distinto_de_la_orden: [], titular_distinto: false, distinto_de_lo_registrado: [], coincide_con_lo_registrado: false,
+  };  // prettier-ignore
+  const LEIDA = { ...LEYENDO, estado: "leida", importe_centavos: 1_500_000, moneda: "ARS", cuenta_ultimos_digitos: "1234", cuenta_coincide: true, numero_operacion: "0001-234567", fecha: "2026-10-31" };
+  const numero = (v: HTMLElement) => (within(v).getByLabelText("Número de operación") as HTMLInputElement).value;
+
+  async function conLecturaTardia(escribir: (ventana: HTMLElement) => void) {
+    let lectura: object = LEYENDO;
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/pagos-por-aclarar": () =>
+        Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible", lectura_comprobante: lectura }] }),
+    }));  // prettier-ignore
+    abrir("/pagos/por-aclarar");
+    const ventana = await transferencia();
+    await within(ventana).findByText("Leyendo el comprobante: los datos se completan solos.");
+    escribir(ventana);
+    lectura = LEIDA;
+    // Control de que la lectura llegó: completa lo que no se escribió.
+    await waitFor(() => expect(numero(ventana)).toBe("0001-234567"), { timeout: 6000 });
+    return ventana;
+  }
+
+  it("el importe escrito en «otro importe» durante la lectura se mantiene", async () => {
+    const ventana = await conLecturaTardia((v) => {
+      fireEvent.click(within(v).getByRole("button", { name: OTRA_COSA }));
+      fireEvent.change(within(v).getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
+    });
+    expect((within(ventana).getByLabelText("Importe que salió del banco") as HTMLInputElement).value).toBe("14.000,00");
+  });
+
+  it("en el registro, el importe escrito se mantiene y se sigue pidiendo con la cuenta", async () => {
+    const ventana = await conLecturaTardia((v) => {
+      fireEvent.change(within(v).getByLabelText(/^Importe transferido/), { target: { value: "14000" } });
+    });
+    expect((within(ventana).getByLabelText(/^Importe transferido/) as HTMLInputElement).value).toBe("14.000,00");
+    expect(within(ventana).getByLabelText(/^CBU\/CVU de destino/)).toBeTruthy();
+  });
+});

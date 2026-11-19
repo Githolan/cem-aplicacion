@@ -144,6 +144,8 @@ export function PagosPorAclarar() {
   const [llenadaCon, setLlenadaCon] = useState<string | null>(null);
   /** Pidió corregir lo leído que coincidía: se piden también el importe y la cuenta. */
   const [aMano, setAMano] = useState(false);
+  /** Los datos que escribió la persona: lo leído que llega después no los pisa (Codex en el PR #262). */
+  const [tocados, setTocados] = useState<ReadonlySet<keyof Registro>>(new Set());
   const [archivo, setArchivo] = useState<File | null>(null);
   /** El nombre del último archivo que entró desde esta ventana; la API no informa el del comprobante. */
   const [subido, setSubido] = useState<string | null>(null);
@@ -210,11 +212,12 @@ export function PagosPorAclarar() {
   if (accion === "si" && leidaAbierta !== null && llenadaCon !== leidaAbierta.version_documento_id) {
     setLlenadaCon(leidaAbierta.version_documento_id);
     setAMano(false);
+    // Solo lo que la persona no escribió: lo suyo, también el importe de «otro importe», queda.
     setRegistro((r) => ({
       ...r,
-      numero: leidaAbierta.numero_operacion ?? r.numero,
-      fecha: leidaAbierta.fecha ?? r.fecha,
-      importe: leidaAbierta.importe_centavos === null ? r.importe : aTexto(leidaAbierta.importe_centavos),
+      numero: tocados.has("numero") ? r.numero : (leidaAbierta.numero_operacion ?? r.numero),
+      fecha: tocados.has("fecha") ? r.fecha : (leidaAbierta.fecha ?? r.fecha),
+      importe: tocados.has("importe") || leidaAbierta.importe_centavos === null ? r.importe : aTexto(leidaAbierta.importe_centavos),
     }));
   }
 
@@ -300,7 +303,8 @@ export function PagosPorAclarar() {
    * se leyó»); lo que no coincide y se registra igual es «Se leyó mal». */
   function loQuePide(p: PorAclarar) {
     const leida = leidaDe(p);
-    const cuentaLeida = coincideLeida(leida) && !aMano && !otraCosa;
+    // Si la persona ya escribió el importe o la cuenta, se siguen pidiendo: lo suyo no se descarta.
+    const cuentaLeida = coincideLeida(leida) && !aMano && !otraCosa && !tocados.has("importe") && !tocados.has("cuenta");
     const dijoMal = leida !== null && leida.distinto_de_la_orden.length > 0 && !otraCosa;
     return { leida, cuentaLeida, dijoMal, pideImporte: !cuentaLeida, pideCuenta: !cuentaLeida };
   }
@@ -447,6 +451,7 @@ export function PagosPorAclarar() {
       setOtraCosa(false);
       setLlenadaCon(null);
       setAMano(false);
+      setTocados(new Set());
       setArchivo(null);
       setSubido(null);
       setFallaSubida(null);
@@ -464,6 +469,7 @@ export function PagosPorAclarar() {
 
   function cambiar(campo: keyof Registro, valor: string) {
     setRegistro((r) => ({ ...r, [campo]: valor }));
+    setTocados((t) => (t.has(campo) ? t : new Set([...t, campo])));
     setErrores((e) => sinElDe(e, campo));
   }
 
