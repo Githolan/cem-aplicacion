@@ -43,6 +43,7 @@ type Estado =
   | "otra_persona"
   | "propia"
   | "ya_aceptada"
+  | "vinculo_no_corresponde"
   | "conflicto"
   | "sin_servicio";
 
@@ -53,6 +54,9 @@ export const TIPOS: Record<Recibida["tipo"], string> = {
 };
 
 /** Con el correo de una cuenta que ya existe: se entra acá y la invitación se acepta sola (G-35). */
+/** Tanda 11: el vínculo del padrón que nombra la invitación ya no le corresponde (`0112`). */
+export const VINCULO_NO_CORRESPONDE =
+  "Esta invitación ya no se puede aceptar: la unidad que nombra ya no está así en el padrón. Conviene consultar a quien administra el consorcio.";
 /** FL-INVA-02: la abre de nuevo la misma cuenta que ya la aceptó. */
 export const textoYaAceptada = (consorcio: string) =>
   `Esta invitación ya está aceptada: la cuenta ya es parte de ${consorcio}.`;
@@ -67,6 +71,8 @@ const CONFLICTOS: Record<string, Estado> = {
   invitacion_requiere_sesion: "requiere_sesion",
   invitacion_de_otra_persona: "otra_persona",
   invitacion_propia: "propia",
+  // Si el vínculo dejó de corresponder entre la consulta y «Aceptar»: el mismo aviso que la consulta.
+  invitacion_vinculo_no_corresponde: "vinculo_no_corresponde",
 };
 
 /** Dónde deja la página cada paso que informa la consulta (C8G-11). */
@@ -79,6 +85,9 @@ const ESTADO_DEL_PASO: Record<Paso, Estado> = {
   // FL-INVA-02 (`0110`, tanda 9): la cuenta que ya la aceptó la vuelve a abrir. Se le dice y se la
   // lleva al inicio; no se la manda a pedir otra.
   ya_aceptada: "ya_aceptada",
+  // Tanda 11 (`0112`): la invitación del padrón cuyo vínculo ya no corresponde se sabe imposible
+  // desde que se abre (C9): solo el aviso y la salida, sin «Aceptar».
+  vinculo_no_corresponde: "vinculo_no_corresponde",
 };
 
 function leerToken(): string | null {
@@ -233,6 +242,12 @@ export function Invitacion() {
         {estado === "ya_aceptada" && invitacion && (
           <>
             <p>{textoYaAceptada(invitacion.consorcio)}</p>
+            <EnlaceAlInicio />
+          </>
+        )}
+        {estado === "vinculo_no_corresponde" && (
+          <>
+            <p className="aviso-error">{VINCULO_NO_CORRESPONDE}</p>
             <EnlaceAlInicio />
           </>
         )}

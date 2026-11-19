@@ -71,6 +71,8 @@ export const FIRMAR_Y_EMITIR = "Firmar y emitir";
 export const EMITE_AL_FIRMAR = "Con esta firma se emite y se le envía a la administración. Ya no se puede retirar.";
 export const RETIRAR = "Retirar el borrador";
 export const REGISTRAR_ENVIO = "Registrar el envío";
+/** Pregunta 17 (FL-SOL-04, `0112`): el antivirus rechazó el comprobante del envío ya registrado. */
+export const SUBIR_OTRO_COMPROBANTE = "Subir otro comprobante";
 export const RESPONDER = "Responder";
 export const REGISTRAR_RESPUESTA = "Registrar la respuesta recibida";
 export const SIN_SOLICITUDES = "Todavía no hay solicitudes formales en este edificio.";
@@ -509,7 +511,7 @@ type PropsFicha = {
   alCambiarLoVisto: (texto: string) => void;
 };
 
-type Abierto = null | "retirar" | "envio" | "responder" | "registrar_respuesta";
+type Abierto = null | "retirar" | "envio" | "comprobante" | "responder" | "registrar_respuesta";
 
 /** La ficha de una solicitud: sus datos y, abajo, solo las acciones que trae `s.acciones` (SOL-03). */
 function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar, alCambiarLoVisto }: PropsFicha) {
@@ -583,6 +585,8 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
           <VentanaRetiro {...props} />
         ) : abierto === "envio" ? (
           <VentanaEnvio {...props} aEntrar={aEntrar} />
+        ) : abierto === "comprobante" ? (
+          <VentanaComprobante {...props} aEntrar={aEntrar} />
         ) : abierto === "responder" || abierto === "registrar_respuesta" ? (
           <VentanaRespuesta {...props} aEntrar={aEntrar} recibida={abierto === "registrar_respuesta"} />
         ) : null
@@ -613,6 +617,11 @@ function FichaSolicitud({ consorcio, s, aEntrar, resultado, alCerrar, alTerminar
           {s.acciones.includes("registrar_envio") && (
             <button type="button" onClick={() => setAbierto("envio")}>
               {REGISTRAR_ENVIO}
+            </button>
+          )}
+          {s.acciones.includes("reemplazar_comprobante") && (
+            <button type="button" onClick={() => setAbierto("comprobante")}>
+              {SUBIR_OTRO_COMPROBANTE}
             </button>
           )}
           {s.acciones.includes("responder") && (
@@ -884,6 +893,42 @@ function VentanaEnvio({ consorcio, s, hacer, alCerrar, finDe, aEntrar }: PropsVe
         alElegir={(a) => {
           adjunto.setArchivo(a);
           setErrores((e) => sinElDe(e, "archivo"));
+        }} />
+    </VentanaDeFormulario>
+  );
+}
+
+/** Otro comprobante para el envío ya registrado: el medio, la fecha y el vencimiento no cambian. */
+function VentanaComprobante({ consorcio, s, hacer, alCerrar, finDe, aEntrar }: PropsVentana & { aEntrar: () => void }) {
+  const id = useId();
+  const [falta, setFalta] = useState<string | undefined>(undefined);
+  const adjunto = useAdjunto(consorcio, s, "envio", aEntrar);
+
+  async function reemplazar(): Promise<FinDeEnvio> {
+    if (adjunto.archivo === null) {
+      setFalta("Falta el comprobante nuevo.");
+      return "seguir";
+    }
+    const subido = await adjunto.subir(adjunto.archivo);
+    if (subido === null) return "seguir";
+    if ("falla" in subido) return { rechazo: subido.falla };
+    const r = await hacer((clave) =>
+      api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/envio/comprobante", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio, solicitud_id: s.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+        body: { adjunto_id: subido.adjunto_id },
+      }),
+    );
+    return finDe(r, `Quedó el comprobante nuevo del envío de la solicitud N.º ${s.numero}. El antivirus lo revisa antes de que se pueda descargar.`);
+  }
+
+  return (
+    <VentanaDeFormulario titulo={SUBIR_OTRO_COMPROBANTE} textoEnviar={SUBIR_OTRO_COMPROBANTE} alEnviar={reemplazar} alCerrar={alCerrar} ancha>
+      <p>{ARCHIVO_RECHAZADO} La fecha del envío y el vencimiento no cambian.</p>
+      <CampoArchivo id={`${id}-archivo`} de="del comprobante del envío" archivo={adjunto.archivo} falta={falta}
+        alElegir={(a) => {
+          adjunto.setArchivo(a);
+          setFalta(undefined);
         }} />
     </VentanaDeFormulario>
   );

@@ -22,6 +22,7 @@ import {
   IR_A_MANDATOS,
   PREPARAR,
   REGISTRAR_ENVIO,
+  SUBIR_OTRO_COMPROBANTE,
   RESPONDER,
   REGISTRAR_RESPUESTA,
   RETIRAR,
@@ -713,5 +714,61 @@ describe("Flujos 18-11, tanda 7", () => {
     fireEvent.click(await screen.findByRole("button", { name: PREPARAR }));
     const ventana = within(await screen.findByRole("dialog", { name: PREPARAR }));
     expect(ventana.queryByText(new RegExp(`^${SIN_ADMINISTRADOR_AL_PREPARAR.slice(0, 40)}`))).toBeNull();
+  });
+});
+
+describe("Tanda 11: otro comprobante del envío (pregunta 17, FL-SOL-04)", () => {
+  const RECHAZADO = { documento_id: DOC_RESPUESTA, version_documento_id: VERSION_RESPUESTA, estado_archivo: "rechazado" as const, descargable: false };
+  const CON_RECHAZO: Solicitud = {
+    ...ENVIADA,
+    destinatario_con_cuenta: false,
+    envio: { ...ENVIADA.envio!, medio: "carta_documento", ...RECHAZADO },
+    acciones: ["reemplazar_comprobante"],
+  };
+  const SUBIDA = {
+    adjunto_id: "66666666-6666-4666-8666-666666666666",
+    documento_id: "77777777-7777-4777-8777-777777777777",
+    archivo: { id: "88888888-8888-4888-8888-888888888888", estado: "en_cuarentena", tipo: "application/pdf", tamano: 4, sha256: "b".repeat(64) },
+  };
+
+  it("con el comprobante rechazado ofrece subir otro, que se cita sin tocar la fecha", async () => {
+    let cuerpo: unknown = null;
+    const api = backend({
+      [LISTA]: () => Response.json({ ...LLENA, elementos: [CON_RECHAZO] }),
+      [`POST ${BASE}/${S3}/adjuntos`]: (p) => {
+        expect(new URL(p.url).searchParams.get("para")).toBe("envio");
+        return Response.json(SUBIDA, { status: 201 });
+      },
+      [`POST ${BASE}/${S3}/envio/comprobante`]: async (p) => {
+        cuerpo = await p.json();
+        return Response.json({ ...CON_RECHAZO, acciones: [], envio: { ...CON_RECHAZO.envio!, estado_archivo: "en_cuarentena" } });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const ficha = await abrirFicha(1);
+    expect(ficha.getByText(ARCHIVO_RECHAZADO, { exact: false })).toBeTruthy();
+    fireEvent.click(ficha.getByRole("button", { name: SUBIR_OTRO_COMPROBANTE }));
+    const ventana = within(await screen.findByRole("dialog", { name: SUBIR_OTRO_COMPROBANTE }));
+    expect(ventana.getByText(/La fecha del envío y el vencimiento no cambian/)).toBeTruthy();
+    const boton = ventana.getByRole("button", { name: SUBIR_OTRO_COMPROBANTE });
+    fireEvent.click(boton);
+    expect(await ventana.findByText("Falta el comprobante nuevo.")).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/${S3}/adjuntos`)).toHaveLength(0);
+    fireEvent.change(ventana.getByLabelText("Archivo del comprobante del envío", { selector: "input" }), {
+      target: { files: [new File(["%PDF"], "carta.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.click(boton);
+    expect(await screen.findByText(/Quedó el comprobante nuevo del envío de la solicitud N\.º 1\./)).toBeTruthy();
+    expect(cuerpo).toEqual({ adjunto_id: SUBIDA.adjunto_id });
+    expect(screen.queryByRole("dialog", { name: SUBIR_OTRO_COMPROBANTE })).toBeNull();
+  });
+
+  it("control: sin la acción, no se ofrece aunque el comprobante esté rechazado", async () => {
+    vi.stubGlobal("fetch", backend({ [LISTA]: () => Response.json({ ...LLENA, elementos: [{ ...CON_RECHAZO, acciones: [] }] }) }));
+    abrir();
+    const ficha = await abrirFicha(1);
+    expect(ficha.getByText(ARCHIVO_RECHAZADO, { exact: false })).toBeTruthy();
+    expect(ficha.queryByRole("button", { name: SUBIR_OTRO_COMPROBANTE })).toBeNull();
   });
 });
