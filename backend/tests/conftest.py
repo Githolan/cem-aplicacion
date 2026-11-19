@@ -165,6 +165,11 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 # Las solicitudes formales (0108) citan mandatos, personas, identidades y
                 # documentos, y niegan su downgrade: van primero, de la última tabla a la primera.
                 " if to_regclass('nucleo.solicitud_formal') is not null then"
+                "   if to_regclass('nucleo.solicitud_formal_envio_comprobante') is not null then"
+                "     alter table nucleo.solicitud_formal_envio_comprobante disable trigger user;"
+                "     delete from nucleo.solicitud_formal_envio_comprobante;"
+                "     alter table nucleo.solicitud_formal_envio_comprobante enable trigger user;"
+                "   end if;"
                 "   alter table nucleo.solicitud_formal_retiro disable trigger user;"
                 "   alter table nucleo.solicitud_formal_respuesta disable trigger user;"
                 "   alter table nucleo.solicitud_formal_envio disable trigger user;"

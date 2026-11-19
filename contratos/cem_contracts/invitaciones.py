@@ -48,6 +48,11 @@ class PasoInvitacion(StrEnum):
     YA_ACEPTADA = "ya_aceptada"
     """La sesión es la de la cuenta del correo y esa invitación ya está aceptada: no hay nada
     que hacer (FL-INVA-02, `0110`). A cualquier otra persona, la consulta responde 404."""
+    VINCULO_NO_CORRESPONDE = "vinculo_no_corresponde"
+    """La invitación nombra un vínculo del padrón que ya no le corresponde (anulado, terminado, o
+    de otra persona, unidad o carácter): aceptar la niega, como el 409
+    `invitacion_vinculo_no_corresponde` (`0112`, en los mismos dos lugares que `aceptar_invitacion`
+    de `0025`)."""
 
 
 class InvitacionNueva(BaseModel):
