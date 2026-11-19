@@ -79,6 +79,7 @@ SIN_CACHE = {"Cache-Control": "no-store"}
 
 ASUNTO_ALTA = "Se activó la confirmación con código"
 ASUNTO_BAJA = "Se desactivó la confirmación con código"
+ASUNTO_CODIGOS = "Se generaron códigos de recuperación nuevos"
 TEXTO_AVISO = """Hola:
 
 {que} la cuenta de Consorcio en Mano de este correo.
@@ -516,6 +517,44 @@ async def verificar(
         vale_hasta=verificado_en + VIGENCIA_VERIFICACION,
         codigos_recuperacion_restantes=quedan,
     )
+
+
+@router.post(
+    "/codigos-recuperacion",
+    response_model=CodigosRecuperacion,
+    summary="Generar códigos de recuperación nuevos: los anteriores dejan de servir",
+    responses={
+        403: {"model": Error, "description": "Falta una verificación reciente (10 minutos)."},
+        409: {"model": Error, "description": "No hay una aplicación ni una llave activa."},
+    },
+)
+def nuevos_codigos(
+    identidad: SegundoFactorRecienteDep, claves: ClavesDep, motor: MotorDep, response: Response
+) -> CodigosRecuperacion:
+    """FL-CTA-05 (18-11-2026): diez códigos nuevos sin desactivar el medio. Pide haber verificado
+    en los últimos 10 minutos, como la baja: quien solo tiene la sesión no se queda con los
+    códigos. Los anteriores, usados o no, se borran; los nuevos se muestran una sola vez. Avisa
+    por correo."""
+    response.headers.update(SIN_CACHE)
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        if not tiene_medio(conn):
+            raise ErrorApi(
+                409,
+                CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
+                "No hay una aplicación de autenticación ni una llave de acceso activa.",
+            )
+        codigos = emitir_codigos(conn, claves, identidad.persona_id)
+        avisar(
+            conn,
+            identidad.persona_id,
+            ASUNTO_CODIGOS,
+            "Se generaron códigos de recuperación nuevos para",
+        )
+    log.info(
+        "códigos de recuperación renovados",
+        extra={"campos": {"persona_id": str(identidad.persona_id)}},
+    )
+    return CodigosRecuperacion(codigos=codigos)
 
 
 @router.post(

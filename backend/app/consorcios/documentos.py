@@ -48,6 +48,7 @@ import hashlib
 import re
 from collections.abc import Callable, Iterator
 from contextlib import closing
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
@@ -57,13 +58,17 @@ from botocore.exceptions import ClientError
 from cem_contracts.documentos import (
     ACCION_DE_LECTURA,
     ACCIONES_DE_CARGA,
+    CARGAS_PROPIAS_DIAS,
+    CARGAS_PROPIAS_MAXIMO,
     TOPE_BYTES,
+    CargaPropia,
     CategoriaDocumento,
     DocumentoEnLista,
     DocumentoId,
     DocumentoNuevo,
     EstadoDeMiVersion,
     EstadoVersion,
+    ListaCargasPropias,
     ListaDocumentos,
     RetiroDocumento,
     TipoArchivo,
@@ -710,6 +715,35 @@ def contenido_de_version(
         media_type=TipoArchivo(f["tipo"]).value,
         headers=CABECERAS_CONTENIDO | {"Content-Length": str(leido["ContentLength"])},
     )
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos/mis-cargas",
+    response_model=ListaCargasPropias,
+    summary="Lo que subió quien pregunta en los últimos días, con cómo terminó el análisis",
+    responses={403: {"description": "Sin ninguna acción de carga de documentos en el consorcio."}},
+)
+def mis_cargas(
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
+    motor: MotorDep,
+) -> ListaCargasPropias:
+    """FL-DOC-04 (18-11-2026): para quien carga sin ver la lista, «Lo que cargó esta cuenta». Sin
+    esto, al salir de Documentos perdía el resultado del antivirus. Solo lo propio (`0111`)."""
+    ctx = cargar.ctx
+    _verificar_carga(cargar, operativos, None)
+    desde = datetime.now(UTC) - timedelta(days=CARGAS_PROPIAS_DIAS)
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        try:
+            filas = conn.execute(
+                text("select * from nucleo.mis_cargas_recientes(:desde, :maximo)"),
+                {"desde": desde, "maximo": CARGAS_PROPIAS_MAXIMO},
+            ).mappings().all()  # fmt: skip
+        except DBAPIError as e:
+            if isinstance(e.orig, InsufficientPrivilege):
+                raise Discrepancia("la base niega la carga y el evaluador la concede") from e
+            raise
+    return ListaCargasPropias(elementos=[CargaPropia(**f) for f in filas])
 
 
 @router.get(

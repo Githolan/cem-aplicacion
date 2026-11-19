@@ -3659,15 +3659,50 @@ ERRORES_SIN_AMBITO = {
     " bancaria y ya no ejecuta pagos",
 )
 def pagos_por_aclarar(identidad: IdentidadDep, motor: MotorDep) -> ListaPagosPorAclarar:
+    parametros = {"actor": identidad.persona_id, "sesion": identidad.sesion_id}
     with transaccion(motor, persona_id=identidad.persona_id) as c:
         filas = c.execute(
             text("select a.*, r.razon_social"
                  " from nucleo.pagos_por_aclarar(:actor, 'api', :sesion) a"
                  " join nucleo.razon_social_por_aclarar(:actor, 'api', :sesion) r"
                  " on r.orden_id = a.orden_id"),
-            {"actor": identidad.persona_id, "sesion": identidad.sesion_id},
-        ).mappings()  # fmt: skip
-        return ListaPagosPorAclarar(elementos=[PagoPorAclarar(**f) for f in filas])
+            parametros,
+        ).mappings().all()  # fmt: skip
+        # FL-ACL-01 (`0111`): lo leído del último comprobante propio, ya aceptado por el antivirus.
+        lecturas = {
+            f.orden_id: f
+            for f in c.execute(
+                text("select * from nucleo.lectura_por_aclarar(:actor, 'api', :sesion)"),
+                parametros,
+            )
+        }
+    return ListaPagosPorAclarar(
+        elementos=[
+            PagoPorAclarar(
+                **f, lectura_comprobante=_lectura_por_aclarar(f, lecturas.get(f["orden_id"]))
+            )
+            for f in filas
+        ]
+    )
+
+
+def _lectura_por_aclarar(pago, leido) -> LecturaComprobante | None:
+    """Como `_lectura_del_comprobante`, sin registro todavía: lo que no coincide se compara con la
+    ejecución que se aclara. Sin lectura (apagada o el archivo todavía no pasó), nada."""
+    if leido is None or leido.estado == "sin_lectura":
+        return None
+    return LecturaComprobante(
+        version_documento_id=leido.version_documento_id, estado=EstadoLectura(leido.estado),
+        importe_centavos=None if leido.importe is None else int(leido.importe * 100),
+        moneda=leido.moneda, cuenta_ultimos_digitos=leido.cuenta_ultimos_digitos,
+        cuenta_coincide=leido.cuenta_coincide, titular_destino=leido.titular_destino,
+        numero_operacion=leido.numero_operacion, fecha=leido.fecha,
+        distinto_de_la_orden=lectura_comprobantes.distinto_de_la_orden(
+            leido, pago["importe_centavos"], pago["moneda"]
+        ),
+        titular_distinto=lectura_comprobantes.titular_distinto(leido, pago["razon_social"]),
+        distinto_de_lo_registrado=[], coincide_con_lo_registrado=False,
+    )  # fmt: skip
 
 
 def _sin_ambito(motor, identidad, consorcio_id: UUID) -> Contexto:
@@ -3843,13 +3878,14 @@ def registrar_pago_sin_facultad(
     def efecto(conn: Connection) -> tuple[int, PagoManualRegistrado]:
         pago = ejecutar_sin_ambito(
             conn, ctx,
+            # FL-ACL-01: «Se leyó mal» también llega desde acá, como desde la ficha (`0087`).
             "select nucleo.registrar_pago_manual(:o, :version, :huella, :numero, :fecha, :importe,"
-            " :moneda, :cuenta, :doc, :actor, 'api', :sesion)",
+            " :moneda, :cuenta, :doc, :actor, 'api', :sesion, :mal)",
             {"o": orden_id, "version": registro.version,
              "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
              "fecha": registro.fecha_operacion, "importe": registro.importe_centavos,
              "moneda": registro.moneda, "cuenta": registro.cuenta_destino,
-             "doc": registro.documento_id},
+             "doc": registro.documento_id, "mal": registro.lectura_mal},
         ).scalar_one()  # fmt: skip
         return 201, PagoManualRegistrado(id=pago, orden_id=orden_id)
 

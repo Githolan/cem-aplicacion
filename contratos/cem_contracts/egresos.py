@@ -1614,6 +1614,14 @@ class PagoPorAclarar(BaseModel):
     comprobante_estado: str | None = Field(
         description="El estado de su último archivo: `en_cuarentena`, `disponible` o `rechazado`."
     )
+    lectura_comprobante: "LecturaComprobante | None" = Field(
+        default=None,
+        description="Lo que la IA leyó de ese último archivo, si pasó el antivirus y la lectura"
+        " corrió (FL-ACL-01, `0111`): el registro llega con eso y solo se confirma, como en la"
+        " ficha de la orden. Como allí, la cuenta leída no viaja: solo sus últimos dígitos y si"
+        " coincide con la de la orden. `distinto_de_lo_registrado` va siempre vacía: todavía no hay"
+        " registro con ese archivo.",
+    )
 
 
 class ListaPagosPorAclarar(BaseModel):
@@ -2026,6 +2034,10 @@ class LecturaComprobante(BaseModel):
         description="Si importe, cuenta y fecha se leyeron, se compararon con lo registrado con"
         " este archivo y nada difiere. Con una lectura parcial o vacía es falso."
     )
+
+
+PagoPorAclarar.model_rebuild()
+ListaPagosPorAclarar.model_rebuild()
 
 
 class ObservacionVigente(BaseModel):
