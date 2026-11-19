@@ -10,7 +10,7 @@ import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "./ErrorDeCampo";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
-import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { codigoDe, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useConsorcioDeLlegada, useEdificioElegido, usePuede } from "./permisos";
 import { type FinDeEnvio, VentanaDeFormulario } from "./VentanaDeFormulario";
 
@@ -166,7 +166,7 @@ function cambioElPadron(estado: number, codigo: string | undefined): boolean {
 
 type Pantalla =
   | { tipo: "cargando" }
-  | { tipo: "sin_servicio"; deConexion: boolean }
+  | { tipo: "sin_servicio"; motivo: string }
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
@@ -238,13 +238,13 @@ export function Padron() {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data === undefined)
-          setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
+          setPantalla({ tipo: "sin_servicio", motivo: mensajeDeFalla(response.status, codigoDe(error)) });
         else if (data.length === 0) setPantalla({ tipo: "sin_consorcios" });
         else setPantalla({ tipo: "lista", consorcios: data });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else setPantalla({ tipo: "sin_servicio", deConexion: true });
+        else setPantalla({ tipo: "sin_servicio", motivo: SIN_CONEXION });
       });
   }, [aEntrar]);
 
@@ -428,9 +428,9 @@ export function Padron() {
         {pantalla.tipo === "sin_servicio" && (
           <>
             <p className="aviso-error">
-              {pantalla.deConexion
+              {pantalla.motivo === SIN_CONEXION
                 ? "No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato."
-                : `No se pudieron consultar los edificios. ${SERVICIO_NO_DISPONIBLE}`}
+                : `No se pudieron consultar los edificios. ${pantalla.motivo}`}
             </p>
             <button className="secundario"
               type="button"

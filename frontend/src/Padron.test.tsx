@@ -182,6 +182,19 @@ describe("página /padron", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeTruthy();
   });
 
+  it("E55: la primera carga con un 404 pide recargar, no dice que el servicio cayó", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => error("consorcio_no_encontrado", 404) }));
+    abrir();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. No se pudo completar el pedido. Hay que recargar la página/)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
+  it("E55: la primera carga con un 503 dice que el servicio no está disponible (control)", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
+    abrir();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. El servicio no está disponible/)).toBeTruthy();
+  });
+
   it("cada fila abre la ficha con unidad, nombre, carácter, vigencia y confirmación, sin correo ni teléfono", async () => {
     // Aunque una respuesta trajera correo o teléfono (el contrato no los tiene), la pantalla solo
     // pinta los datos de D6.

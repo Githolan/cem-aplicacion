@@ -51,11 +51,6 @@ export function esPasajera(estado: number): boolean {
   return estado === SIN_RESPUESTA || estado === ESTADO_LIMITE || estado >= ESTADO_ERROR_DEL_SERVIDOR;
 }
 
-/** Si la falla fue de la red (sin respuesta) y no del servicio. */
-export function esDeConexion(estado: number, codigo: string | undefined): boolean {
-  return mensajeDeFalla(estado, codigo) === SIN_CONEXION;
-}
-
 /** El `codigo` del cuerpo uniforme de error, si la respuesta lo trae. */
 export function codigoDe(error: unknown): string | undefined {
   return (error as { codigo?: string } | undefined)?.codigo;

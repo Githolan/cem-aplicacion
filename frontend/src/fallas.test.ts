@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ENTRAR_DE_NUEVO, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { ENTRAR_DE_NUEVO, LIMITE_DE_PEDIDOS, mensajeDeFalla, RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 
 describe("mensajeDeFalla (E34)", () => {
   it("un 5xx de la aplicación, con su código, es del servicio", () => {
@@ -34,12 +34,5 @@ describe("mensajeDeFalla (E34)", () => {
   it("una acción que pide una entrada reciente dice que hay que volver a entrar", () => {
     expect(mensajeDeFalla(403, "reautenticacion_requerida")).toBe(ENTRAR_DE_NUEVO);
     expect(mensajeDeFalla(403, "sin_permiso")).toBe(RECARGAR); // control
-  });
-
-  it("esDeConexion solo cuando no hubo respuesta", () => {
-    expect(esDeConexion(0, undefined)).toBe(true);
-    expect(esDeConexion(502, undefined)).toBe(false);
-    expect(esDeConexion(503, "servicio_no_disponible")).toBe(false);
-    expect(esDeConexion(503, undefined)).toBe(false);
   });
 });

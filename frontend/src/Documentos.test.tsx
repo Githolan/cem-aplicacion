@@ -817,6 +817,19 @@ describe("página /documentos", () => {
     expect(screen.queryByText(/No se pudieron consultar los edificios/)).toBeNull();
   });
 
+  it("E55: la primera carga con un 404 pide recargar, no dice que el servicio cayó", async () => {
+    vi.stubGlobal("fetch", conLista({ "GET /api/v1/me/consorcios": () => error("consorcio_no_encontrado", 404) }));
+    abrir();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. No se pudo completar el pedido. Hay que recargar la página/)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
+  it("E55: la primera carga con un 503 dice que el servicio no está disponible (control)", async () => {
+    vi.stubGlobal("fetch", conLista({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
+    abrir();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. El servicio no está disponible/)).toBeTruthy();
+  });
+
   describe("mientras un archivo está en revisión", () => {
     const ACTA = "Acta de asamblea ordinaria";
     const EN_REVISION = { documentos: [documento(D1, ACTA, { versiones: [version(V2, { estado: "en_cuarentena" })] })] };

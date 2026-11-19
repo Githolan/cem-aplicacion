@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useRef } from "react";
 
-import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
 import { type Aviso, conLaRedDeVuelta, TEXTO_SESION_VENCIDA } from "./comun";
 import { type PantallaConsorcio, useAlVolverLaRed } from "./useConsorcio";
 
@@ -67,7 +66,7 @@ export function ConsorcioSinServicio({ pantalla, reintentar }: PropsConsorcio) {
   return (
     <>
       <p className="aviso-error" role="alert">
-        {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
+        {pantalla.motivo}
       </p>
       <Reintentar alReintentar={reintentar} />
     </>
