@@ -9,7 +9,7 @@ import { App } from "./App";
 import { trazoQr } from "./CodigoQr";
 import { PREFIJO_COPIA } from "./copiaContactos";
 import { ENTRAR_DE_NUEVO, RECARGAR } from "./fallas";
-import { ACTIVADO_CON_LLAVE, CODIGOS_GENERADOS, codigoAplicacion, codigoVerificacion, GENERAR_CODIGOS, secretoEnBloques, textoRestantes } from "./SegundoFactor";
+import { ACTIVADO_CON_LLAVE, CODIGOS_GENERADOS, codigoAplicacion, codigoVerificacion, GENERAR_CODIGOS, GENERANDO, secretoEnBloques, textoRestantes } from "./SegundoFactor";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -1055,6 +1055,32 @@ describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de
     expect(screen.queryByRole("link", { name: "Volver a Cuenta", hidden: true })).toBeNull();
 
     alta.soltar();
+    await sinSalidaHastaGuardar(container);
+  });
+
+  it("Codex en el PR #262: con códigos nuevos en camino, ni volver ni el resto de la aplicación; después, los códigos en una hoja", async () => {
+    const nuevos = enEspera(() => Response.json({ codigos: CODIGOS }));
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
+        "POST /api/v1/auth/totp/codigos-recuperacion": nuevos.responder,
+        ...LECTURAS_DE_CUENTA,
+      }),
+    );
+    const { container } = abrir();
+    // Control: antes de pedirlos, la página se deja.
+    expect(await screen.findByRole("link", { name: "Volver a Cuenta" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: GENERAR_CODIGOS }));
+    expect(await screen.findByRole("dialog", { name: GENERANDO })).toBeTruthy();
+    expect(container.inert).toBe(true);
+    expect(screen.queryByRole("link", { name: "Volver a Cuenta", hidden: true })).toBeNull();
+    const salida = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(salida);
+    expect(salida.defaultPrevented).toBe(true);
+
+    nuevos.soltar();
     await sinSalidaHastaGuardar(container);
   });
 

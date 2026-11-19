@@ -80,6 +80,7 @@ const ACTIVADO = {
 
 /** FL-CTA-05 (tanda 10): códigos nuevos sin desactivar el medio. */
 export const GENERAR_CODIGOS = "Generar códigos nuevos";
+export const GENERANDO = "Generando los códigos";
 export const CODIGOS_GENERADOS = "Listo: hay diez códigos de recuperación nuevos. Los anteriores ya no sirven.";
 
 /** Cuántos códigos de recuperación quedan, en una frase. */
@@ -137,7 +138,11 @@ export function SegundoFactor() {
   // una sola vez. Hasta que se muestran y la persona dice que los guardó, no se puede salir de la
   // página (revisión de #237).
   const [altaEnCurso, setAltaEnCurso] = useState(false);
-  useAvisoAlSalir(altaEnCurso);
+  /** Un pedido de códigos nuevos en camino (FL-CTA-05): al llegar invalida los guardados, así que
+   * hasta que los nuevos se muestran tampoco se puede salir de la página (Codex en el PR #262). */
+  const [generando, setGenerando] = useState(false);
+  const enCamino = altaEnCurso || generando;
+  useAvisoAlSalir(enCamino);
   const consultado = useRef(false);
 
   /** Cambia de pantalla, salvo que estén a la vista códigos que no se pueden volver a mostrar. */
@@ -237,6 +242,7 @@ export function SegundoFactor() {
   function generarCodigos() {
     const medio = pantalla.tipo === "activo" ? "aplicacion" : "llave";
     setEnviando(true);
+    setGenerando(true);
     setAviso(null);
     void api
       .POST("/api/v1/auth/totp/codigos-recuperacion", { headers: encabezadoCsrf() })
@@ -248,7 +254,10 @@ export function SegundoFactor() {
         else avisarFalla(response.status, error);
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
-      .finally(() => setEnviando(false));
+      .finally(() => {
+        setEnviando(false);
+        setGenerando(false);
+      });
   }
 
   /** Cuántos códigos quedan y cómo tener otros (FL-CTA-05): con la aplicación o con solo la llave. */
@@ -291,7 +300,7 @@ export function SegundoFactor() {
 
   return (
     <>
-      {altaEnCurso ? (
+      {enCamino ? (
         <h1>Confirmación con PIN, huella o código</h1>
       ) : (
         <CabeceraInterna
@@ -300,8 +309,8 @@ export function SegundoFactor() {
           destino={volver === null ? "Cuenta" : "la pantalla anterior"}
         />
       )}
-      {altaEnCurso && (
-        <Hoja titulo="Activando">
+      {enCamino && (
+        <Hoja titulo={generando ? GENERANDO : "Activando"}>
           <p role="status">Esperando la respuesta. Los códigos de recuperación aparecen acá.</p>
         </Hoja>
       )}
