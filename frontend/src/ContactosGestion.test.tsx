@@ -450,6 +450,10 @@ describe("gestión de los contactos en /contactos", () => {
     expect(guardada).toContain("Marta Ruiz");
     for (const deGestion of ["Nota firmada del 20-10", "El teléfono no atiende", "consentimiento_referencia", "observacion", P1])
       expect(guardada).not.toContain(deGestion);
+    // Tampoco en el almacenamiento de la pestaña: lo que haya ahí no es de la lista de gestión.
+    const deLaPestana = JSON.stringify(Object.fromEntries(Object.entries(sessionStorage)));
+    for (const deGestion of ["Nota firmada del 20-10", "El teléfono no atiende", "consentimiento_referencia", "observacion", "Marta Ruiz"])
+      expect(deLaPestana).not.toContain(deGestion);
     expect(pedidos(simulado, "GET", GESTION)).toHaveLength(1);
     expect(pedidos(simulado, "GET", BASE)).toHaveLength(1);
   });
@@ -953,7 +957,7 @@ describe("gestión de los contactos en /contactos", () => {
     expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
   });
 
-  it("un 5xx conserva la clave para el reintento; un 4xx definitivo la renueva; cambiar los datos también", async () => {
+  it("un 5xx, una falla de red y un pedido en curso conservan la clave; un 4xx definitivo la renueva; cambiar los datos también", async () => {
     let respuesta = () => error("servicio_no_disponible", 503);
     const simulado = conLista({ [`POST ${BASE}/${K1}/senalar`]: () => respuesta() });
     vi.stubGlobal("fetch", simulado);
@@ -971,14 +975,29 @@ describe("gestión de los contactos en /contactos", () => {
     await screen.findByText(/^Hay que corregir el motivo/);
     enviar();
     await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(4));
+    // Sin respuesta (falla de red) y con el pedido anterior todavía en curso, la clave sigue.
+    respuesta = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    enviar();
+    await screen.findByText(SIN_CONEXION);
+    respuesta = () => error("idempotencia_en_curso", 409);
+    enviar();
+    await screen.findByText("El pedido se está procesando. Reintentar en unos segundos.");
+    respuesta = () => error("servicio_no_disponible", 503);
+    enviar();
+    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(7));
+    // Recién ahora, con la clave conservada por el 503, cambiar el motivo la renueva.
     escribir("Motivo", "No atiende nunca");
     enviar();
-    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(5));
+    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(8));
     const claves = pedidos(simulado, "POST", `${BASE}/${K1}/senalar`).map((p) => p.headers.get("Idempotency-Key"));
     expect(claves[0]).toBe(claves[1]);
     expect(claves[1]).toBe(claves[2]);
     expect(claves[3]).not.toBe(claves[2]);
     expect(claves[4]).not.toBe(claves[3]);
+    expect(new Set(claves.slice(4, 7)).size).toBe(1);
+    expect(claves[7]).not.toBe(claves[6]);
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, con la lista, la ficha y cada formulario abierto", async () => {
