@@ -35,6 +35,7 @@ export const TITULO_LIQUIDACION_ADMINISTRADOR = "Liquidación del administrador"
 export const CATEGORIA = "liquidaciones_del_administrador";
 export const SUBIR = "Subir la liquidación";
 export const SIN_IMPORTACIONES = "Todavía no se subió ninguna liquidación del administrador.";
+export const IMPORTAR_DE_NUEVO = "Importar el archivo subido";
 export const EN_ANTIVIRUS = "El archivo está en la revisión del antivirus; cuando pase, se lee solo.";
 export const LEYENDO = "Se está leyendo la liquidación.";
 export const CONFIRMAR_DATO = "Confirmar";
@@ -108,7 +109,9 @@ export function aImporte(texto: string): string | null {
   const partes = /^(\d{1,3}(?:\.\d{3})+)(?:,(\d{1,2}))?$/.exec(sinSigno) ?? /^(\d+)(?:[.,](\d{1,2}))?$/.exec(sinSigno);
   if (partes === null) return null;
   const [, enteros = "", decimales = ""] = partes;
-  return `${negativo ? "-" : ""}${String(Number(enteros.replace(/\./g, "")))}.${decimales.padEnd(2, "0")}`;
+  // Sin pasar por `Number`: un entero de más de 15 cifras perdería precisión.
+  const sinCeros = enteros.replace(/\./g, "").replace(/^0+(?=\d)/, "");
+  return `${negativo ? "-" : ""}${sinCeros}.${decimales.padEnd(2, "0")}`;
 }
 
 const texto = (v: unknown) => (typeof v === "string" ? (IMPORTE_LEIDO.test(v) ? enPesos(v) : v) : v === null || v === undefined ? "—" : String(v));
@@ -198,6 +201,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const fichas = useFichas<string>();
   const clave = useRef<string | null>(null);
   const claveImportar = useRef<string | null>(null);
+  // El archivo que el antivirus aprobó y todavía no se pudo importar: se reintenta con la misma clave.
+  const [porImportar, setPorImportar] = useState<Subida | null>(null);
 
   const path = { consorcio_id: consorcio };
 
@@ -290,6 +295,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           setAviso({ texto: `El antivirus rechazó el archivo${data.motivo_rechazo ? `: ${data.motivo_rechazo}` : ""}.`, ok: false });
           return;
         }
+        setPorImportar(s);
         await importar(s);
       })
       .catch((e: unknown) => {
@@ -300,22 +306,42 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   }, [subida, aEntrar]);
   const antivirusTarda = useConsultaDelAntivirus(subida !== null, mirarSubida);
 
+  /** Pide importar el archivo aprobado. Si el pedido no llega o el servidor falla de paso, el archivo
+   * queda para reintentar con la misma clave; un rechazo definitivo se dice y lo descarta. */
   async function importar(s: Subida) {
     claveImportar.current ??= crypto.randomUUID();
-    const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas", {
-      headers: encabezadoCsrf(),
-      params: { path: { consorcio_id: s.consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveImportar.current } },
-      body: { documento_id: s.documento, version_documento_id: s.version },
-    });
-    exigirSesion(response);
-    claveImportar.current = null;
-    if (data === undefined) {
-      setAviso({ texto: mensajeDeActo(response.status, error), ok: false });
-      return;
+    setEnviando(true);
+    try {
+      const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: s.consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveImportar.current } },
+        body: { documento_id: s.documento, version_documento_id: s.version },
+      });
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) claveImportar.current = null;
+        if (!esPasajera(response.status) && codigo !== "idempotencia_en_curso") {
+          claveImportar.current = null;
+          setPorImportar(null);
+        }
+        setAviso({ texto: mensajeDeActo(response.status, error), ok: false });
+        return;
+      }
+      claveImportar.current = null;
+      setPorImportar(null);
+      setAviso({ texto: LEYENDO, ok: true });
+      setVuelta((v) => v + 1);
+      abrir(data.id);
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        aEntrar();
+        return;
+      }
+      setAviso({ texto: SIN_CONEXION, ok: false });
+    } finally {
+      setEnviando(false);
     }
-    setAviso({ texto: LEYENDO, ok: true });
-    setVuelta((v) => v + 1);
-    abrir(data.id);
   }
 
   function abrir(importacion: string) {
@@ -509,6 +535,13 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
       {subida !== null && antivirusTarda && <p role="status">El antivirus está tardando más de lo habitual; se sigue esperando.</p>}
+      {porImportar !== null && !enviando && (
+        <p>
+          <button type="button" className="secundario" onClick={() => void importar(porImportar)}>
+            {IMPORTAR_DE_NUEVO}
+          </button>
+        </p>
+      )}
 
       {pantalla.tipo === "lista" && elegida === null && (
         <>

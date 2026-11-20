@@ -17,6 +17,7 @@ import {
   CORREGIR_DATO,
   DESCARTAR_LIQUIDACION,
   EN_ANTIVIRUS,
+  IMPORTAR_DE_NUEVO,
   enPesos,
   FALTA_MOTIVO,
   hojasDe,
@@ -127,6 +128,9 @@ describe("importes", () => {
     expect(aImporte("-10")).toBe("-10.00");
     expect(aImporte("12,345")).toBeNull();
     expect(aImporte("doce")).toBeNull();
+    // Más de 15 cifras: sin pasar por `Number`, que redondearía a 9007199254740992.
+    expect(aImporte("9.007.199.254.740.993,00")).toBe("9007199254740993.00");
+    expect(aImporte("007,5")).toBe("7.50");
   });
 
   it("se corrigen los textos y los importes del dato, no los números de orden", () => {
@@ -334,6 +338,38 @@ describe("pantalla /importar-liquidacion", () => {
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones-importadas`)).toHaveLength(1), { timeout: 6000 });
     expect(await pedidos(api, "POST", `${BASE}/liquidaciones-importadas`)[0]?.json()).toEqual({ documento_id: D1, version_documento_id: V1 });
     expect((await screen.findAllByText("Se está leyendo la liquidación.")).length).toBeGreaterThan(0);
+  }, 15000);
+
+  it("si el pedido de importar no llega, el archivo subido queda para reintentar con la misma clave", async () => {
+    let intentos = 0;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([]),
+      [`POST ${BASE}/documentos`]: () => Response.json({ id: D1 }, { status: 201 }),
+      [`POST ${BASE}/documentos/${D1}/versiones`]: () => Response.json({ id: V1 }, { status: 201 }),
+      [`GET ${BASE}/documentos/${D1}/versiones/${V1}/estado`]: () => Response.json({ estado: "disponible", motivo_rechazo: null }),
+      [`POST ${BASE}/liquidaciones-importadas`]: () => {
+        intentos += 1;
+        return intentos === 1 ? Promise.reject(new TypeError("Failed to fetch")) : Response.json({ id: I1 }, { status: 201 });
+      },
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, estado: "leyendo", formato: null, periodo: null, leida_en: null, campos: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    expect(await screen.findByText("Todavía no se subió ninguna liquidación del administrador.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: SUBIR }));
+    const ventana = await screen.findByRole("dialog", { name: SUBIR });
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "liquidacion.pdf", { type: "application/pdf" });
+    fireEvent.change(within(ventana).getByLabelText("Archivo de la liquidación"), { target: { files: [pdf] } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
+    expect(await screen.findByText(EN_ANTIVIRUS)).toBeTruthy();
+    expect(await screen.findByText(SIN_CONEXION, {}, { timeout: 6000 })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: IMPORTAR_DE_NUEVO }));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones-importadas`)).toHaveLength(2));
+    const [primero, segundo] = pedidos(api, "POST", `${BASE}/liquidaciones-importadas`);
+    expect(segundo?.headers.get("Idempotency-Key")).toBe(primero?.headers.get("Idempotency-Key"));
+    expect((await screen.findAllByText("Se está leyendo la liquidación.")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: IMPORTAR_DE_NUEVO })).toBeNull();
   }, 15000);
 
   it("sin `liquidacion.importar` en ningún edificio, la dirección lleva al inicio", async () => {
