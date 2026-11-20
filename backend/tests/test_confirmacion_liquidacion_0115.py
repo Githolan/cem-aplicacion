@@ -102,7 +102,7 @@ def test_confirmar_corregir_y_descartar_cada_dato(escena, bucket, motor_app, mot
     with motor_migrate.connect() as c:
         eventos = c.execute(text(
             "select despues->>'clave', despues->>'decision' from auditoria.eventos"
-            " where accion = 'consorcio.liquidacion.resolver_campo' and consorcio_id = :c"
+            " where accion = 'consorcio.liquidacion.decidir_dato' and consorcio_id = :c"
             " order by secuencia"), {"c": e["cons"]}).all()  # fmt: skip
     assert [tuple(x) for x in eventos] == [
         ("gasto:1:1", "confirmado"),
@@ -142,7 +142,7 @@ def test_dos_decisiones_a_la_vez_sobre_un_dato_se_ordenan_y_la_auditoria_lo_dice
     with motor_migrate.connect() as c:
         eventos = c.execute(text(
             "select antes->>'estado', despues->>'decision' from auditoria.eventos"
-            " where accion = 'consorcio.liquidacion.resolver_campo' and entidad_id = :f"
+            " where accion = 'consorcio.liquidacion.decidir_dato' and entidad_id = :f"
             " order by secuencia"), {"f": campo}).all()  # fmt: skip
     pasos = [tuple(x) for x in eventos]
     assert pasos == [("pendiente", "confirmado"), ("confirmado", "descartado")]
@@ -261,6 +261,13 @@ def test_una_importacion_que_no_sirve_se_descarta_con_su_motivo(
     d = r.json()
     assert (d["estado"], d["motivo_descarte"], d["decidida_por"]) == (
         "descartada", "Es una foto, se carga a mano", str(e["mc"]))  # fmt: skip
+    # El motivo es texto libre: queda en la importación y no en la auditoría (E31).
+    with motor_migrate.connect() as c:
+        despues = c.execute(text(
+            "select despues from auditoria.eventos where entidad_id = :i"
+            " and accion = 'consorcio.liquidacion.descartar_importada'"),
+            {"i": sin_formato["id"]}).scalar_one()  # fmt: skip
+    assert despues == {"estado": "descartada"}
     # Una leída también se descarta, y sus datos quedan como estaban.
     i = leida(e, motor_app, motor_migrate)
     r = post(e, ruta(e, i["id"], "descarte"), {"motivo": "Es de otro edificio"})

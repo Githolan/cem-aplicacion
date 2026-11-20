@@ -38,12 +38,12 @@ depends_on = None
 FACULTAD = "liquidacion.importar"
 TRABAJO = "liquidacion.leer"
 ACCIONES = (
-    ("consorcio.liquidacion.resolver_campo", "Decidió sobre un dato leído de la liquidación",
+    ("consorcio.liquidacion.decidir_dato", "Decidió sobre un dato leído de la liquidación",
      "Dato de la liquidación importada", ("clave", "decision")),
-    ("consorcio.liquidacion.confirmar", "Confirmó la liquidación importada",
+    ("consorcio.liquidacion.confirmar_importada", "Confirmó la liquidación importada",
      "Liquidación importada", ("campos",)),
-    ("consorcio.liquidacion.descartar", "Descartó la liquidación importada",
-     "Liquidación importada", ("motivo",)),
+    ("consorcio.liquidacion.descartar_importada", "Descartó la liquidación importada",
+     "Liquidación importada", ("estado",)),
 )  # fmt: skip
 LARGO_FRAGMENTO = 500
 LARGO_MOTIVO = 500
@@ -346,7 +346,7 @@ create function nucleo.resolver_campo_preliminar(importacion uuid, campo uuid, d
     insert into auditoria.eventos
       (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, antes, despues,
        hash_previo, hash)
-    values (c, actor, origen_pedido, 'consorcio.liquidacion.resolver_campo', 'campo_preliminar',
+    values (c, actor, origen_pedido, 'consorcio.liquidacion.decidir_dato', 'campo_preliminar',
             campo, jsonb_build_object('estado', p.estado, 'valor_corregido', p.valor_corregido),
             jsonb_build_object('clave', p.clave, 'decision', decision, 'valor_corregido',
                                corregido),
@@ -385,7 +385,7 @@ create function nucleo.confirmar_importacion_liquidacion(importacion uuid, actor
     insert into auditoria.eventos
       (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, despues,
        hash_previo, hash)
-    values (c, actor, origen_pedido, 'consorcio.liquidacion.confirmar', 'importacion_liquidacion',
+    values (c, actor, origen_pedido, 'consorcio.liquidacion.confirmar_importada', 'importacion_liquidacion',
             importacion, jsonb_build_object('campos', n), '', '');
   end
   $$;
@@ -417,8 +417,8 @@ create function nucleo.descartar_importacion_liquidacion(importacion uuid, motiv
     insert into auditoria.eventos
       (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, despues,
        hash_previo, hash)
-    values (c, actor, origen_pedido, 'consorcio.liquidacion.descartar', 'importacion_liquidacion',
-            importacion, jsonb_build_object('motivo', btrim(motivo_pedido)), '', '');
+    values (c, actor, origen_pedido, 'consorcio.liquidacion.descartar_importada', 'importacion_liquidacion',
+            importacion, jsonb_build_object('estado', 'descartada'), '', '');
   end
   $$;
 """
