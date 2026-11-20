@@ -37,6 +37,7 @@ Anterior: 0112
 """
 
 from alembic import op
+from sqlalchemy import text
 
 revision = "0113"
 down_revision = "0112"
@@ -48,6 +49,18 @@ CATEGORIA = "liquidaciones_del_administrador"
 TRABAJO = "liquidacion.leer"
 """El de `TRABAJO_LEER`, en `app/liquidacion/importacion.py`."""
 ACCION = "consorcio.liquidacion.importar"
+REFERENCIAS_NUEVAS = (("nucleo.importacion_liquidacion", "documento_id"),)
+"""Lo que esta migración suma a `REFERENCIAS` de `0089`: la importación cita su documento, que ya
+no se quita ni se retira (`documento_citado_vigente`, `documento_referenciado`)."""
+REFERENCIADO = "nucleo.documento_referenciado(uuid, uuid)"
+REFERENCIADO_CAMBIOS = (
+    (
+        "        or exists (select 1 from nucleo.solicitud_formal_adjunto x\n",
+        "        or exists (select 1 from nucleo.importacion_liquidacion x\n"
+        "                    where x.consorcio_id = c and x.documento_id = documento)\n"
+        "        or exists (select 1 from nucleo.solicitud_formal_adjunto x\n",
+    ),
+)
 
 CATEGORIAS_ANTES = (
     "institucional",
@@ -135,6 +148,9 @@ alter table nucleo.importacion_liquidacion force row level security;
 create policy por_consorcio on nucleo.importacion_liquidacion for select
   using (consorcio_id = plataforma.consorcio_actual());
 revoke all on nucleo.importacion_liquidacion from public, cem_app;
+create trigger documento_citado_vigente before insert or update of documento_id
+  on nucleo.importacion_liquidacion
+  for each row execute function nucleo.documento_citado_vigente('documento_id');
 
 -- Solo el paso de la lectura: de `leyendo` a `para_confirmar` o `no_reconocida`, completando lo
 -- leído. Lo demás no cambia y nada se borra.
@@ -257,7 +273,45 @@ create function nucleo.unidad_de_la_lectura(c uuid, depto text, uf text)
       from nucleo.unidades_que_coinciden(c, depto, uf) as x
   $$;
 
--- Quien importa, por la API, con su sesión y sin gesto (no mueve dinero).
+-- Quien importa: la persona de la petición, por la API, con `{FACULTAD}` vigente, un modo
+-- registrado (los tres lo admiten, D2-A) y una sesión válida. Como la solicitud formal (`0108`) y
+-- no como los actos de egresos: en Modo Consejo también se importa, y no mueve dinero (sin gesto).
+create function nucleo.exigir_acto_importacion(c uuid, actor uuid, sesion uuid, origen_pedido text)
+  returns void
+  language plpgsql volatile
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    hoy date;
+  begin
+    if c is null then
+      raise exception 'sin consorcio en el ámbito' using errcode = '42501';
+    end if;
+    if origen_pedido is distinct from 'api' then
+      raise exception 'origen inválido' using errcode = 'P0001', hint = 'origen_invalido';
+    end if;
+    hoy := nucleo.hoy_del_consorcio(c);
+    if actor is null or actor is distinct from plataforma.persona_actual()
+       or not nucleo.tiene_facultad_vigente(c, actor, '{FACULTAD}', hoy) then
+      raise exception 'sin {FACULTAD} en este consorcio' using errcode = '42501';
+    end if;
+    -- El candado del modo de `0090`: un cambio de modo en curso termina antes de leerlo.
+    perform pg_advisory_xact_lock_shared(hashtextextended('modo:' || c::text, 0));
+    if not exists (
+         select 1 from nucleo.modo_operacion m
+          where m.consorcio_id = c and m.vigente_desde <= hoy
+            and (m.vigente_hasta is null or m.vigente_hasta > hoy)) then
+      raise exception 'sin modo registrado' using errcode = 'P0001', hint = 'modo_no_admitido';
+    end if;
+    if not exists (select 1 from nucleo.sesion x
+                    where x.id = sesion and x.persona_id = actor and x.revocada_en is null
+                      and x.vence_en > now()) then
+      raise exception 'la sesión no es válida' using errcode = 'P0001', hint = 'sesion_invalida';
+    end if;
+  end
+  $$;
+
+-- Quien importa, por la API.
 create function nucleo.crear_importacion_liquidacion(documento uuid, version uuid, actor uuid,
                                                      origen_pedido text, sesion uuid)
   returns uuid
@@ -269,7 +323,7 @@ create function nucleo.crear_importacion_liquidacion(documento uuid, version uui
     v nucleo.version_documento;
     i uuid;
   begin
-    perform nucleo.exigir_acto_sin_gesto(c, actor, sesion, '{FACULTAD}', origen_pedido);
+    perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
     select x.* into v from nucleo.version_documento x
       join nucleo.documento d on d.consorcio_id = x.consorcio_id and d.id = x.documento_id
      where x.consorcio_id = c and x.id = version and d.id = documento and d.estado = 'vigente'
@@ -380,7 +434,7 @@ create function nucleo.importacion_liquidacion_lectura(importacion uuid, actor u
   declare
     c uuid := plataforma.consorcio_actual();
   begin
-    perform nucleo.exigir_acto_sin_gesto(c, actor, sesion, '{FACULTAD}', origen_pedido);
+    perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
     return query
       select x.id, x.documento_id, x.version_documento_id, x.subida_por, x.creada_en,
              -- Si la lectura agotó sus intentos (`muerto`), la importación no queda «leyendo»
@@ -409,7 +463,7 @@ create function nucleo.campos_preliminares_lectura(importacion uuid, actor uuid,
   declare
     c uuid := plataforma.consorcio_actual();
   begin
-    perform nucleo.exigir_acto_sin_gesto(c, actor, sesion, '{FACULTAD}', origen_pedido);
+    perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
     return query
       select p.id, p.orden, p.tipo, p.clave, p.valor, p.confianza, p.origen, p.pagina,
              p.renglon, p.unidad_id, p.estado, p.valor_corregido
@@ -431,7 +485,7 @@ create function nucleo.campos_oficiales_liquidacion(importacion uuid, actor uuid
   declare
     c uuid := plataforma.consorcio_actual();
   begin
-    perform nucleo.exigir_acto_sin_gesto(c, actor, sesion, '{FACULTAD}', origen_pedido);
+    perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
     return query
       select p.orden, p.tipo, p.clave, coalesce(p.valor_corregido, p.valor), p.unidad_id
         from nucleo.campo_preliminar p
@@ -456,6 +510,7 @@ INTERNAS = (
     "nucleo.clave_designacion(text)",
     "nucleo.unidades_que_coinciden(uuid, text, text)",
     "nucleo.unidad_de_la_lectura(uuid, text, text)",
+    "nucleo.exigir_acto_importacion(uuid, uuid, uuid, text)",
 )
 
 GUARDA = f"""
@@ -470,6 +525,21 @@ begin
 end
 $guarda$;
 """
+
+
+def _referenciado(*, al_reves: bool) -> str:
+    definicion = (
+        op.get_bind()
+        .execute(text("select pg_get_functiondef(cast(:f as regprocedure))"), {"f": REFERENCIADO})
+        .scalar_one()
+    )
+    for antes, despues in REFERENCIADO_CAMBIOS:
+        if al_reves:
+            antes, despues = despues, antes
+        if definicion.count(antes) != 1:
+            raise RuntimeError(f"0113: {REFERENCIADO} no tiene exactamente una vez {antes!r}")
+        definicion = definicion.replace(antes, despues)
+    return definicion
 
 
 def upgrade() -> None:
@@ -487,6 +557,7 @@ def upgrade() -> None:
         op.execute(f"revoke all on function {funcion} from public")
     for funcion in RUTAS:
         op.execute(f"grant execute on function {funcion} to cem_app")
+    op.execute(_referenciado(al_reves=False))
     op.execute(
         "insert into auditoria.proyeccion (accion, texto, recurso, campos) values"
         f" ('{ACCION}', 'Subió la liquidación del administrador para leerla',"
@@ -497,6 +568,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(GUARDA)
     op.execute(f"delete from auditoria.proyeccion where accion = '{ACCION}'")
+    op.execute(_referenciado(al_reves=True))
     for funcion in reversed(RUTAS + INTERNAS):
         op.execute(f"drop function {funcion}")
     op.execute("drop table nucleo.campo_preliminar")

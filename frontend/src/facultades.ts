@@ -20,6 +20,7 @@ const NOMBRES: Readonly<Record<string, string>> = {
   "invitaciones.crear": "Invitar personas",
   "liquidacion.aprobar": "Aprobar la liquidación",
   "liquidacion.preparar": "Preparar la liquidación",
+  "liquidacion.importar": "Importar la liquidación del administrador",
   "liquidacion.revisar": "Revisar la liquidación",
   "mandatos.registrar": "Dar de alta y de baja mandatos",
   "mandatos.ver": "Ver los mandatos",

@@ -44,6 +44,7 @@ PAQUETE_CONSEJO = sorted(
         "fiscalizacion.ver_panel",
         "fondo_reserva.autorizar",
         "invitaciones.crear",
+        "liquidacion.importar",  # `0113`, H5 D2-A
         "liquidacion.revisar",
         "mandatos.registrar",
         "mandatos.ver",

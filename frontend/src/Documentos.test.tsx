@@ -1039,14 +1039,19 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
     vi.stubGlobal("fetch", conAcciones("documentos.ver", "documentos.cargar"));
     abrir();
     await abrirCarga();
-    expect(categorias()).toHaveLength(8);
+    expect(categorias()).toHaveLength(9);
   });
 
-  it("con solo `documentos.cargar_operativos`, las actas, los presupuestos y el mantenimiento", async () => {
+  it("con solo `documentos.cargar_operativos`, las actas, los presupuestos, el mantenimiento y las liquidaciones", async () => {
     vi.stubGlobal("fetch", conAcciones("documentos.ver", "documentos.cargar_operativos"));
     abrir();
     await abrirCarga();
-    expect(categorias()).toEqual(["Actas y decisiones", "Presupuestos", "Mantenimiento y certificados"]);
+    expect(categorias()).toEqual([
+      "Actas y decisiones",
+      "Presupuestos",
+      "Mantenimiento y certificados",
+      "Liquidaciones del administrador",
+    ]);
   });
 
   it("«Subir archivo» sigue la categoría del documento", async () => {
