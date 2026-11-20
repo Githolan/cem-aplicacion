@@ -568,11 +568,14 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
       {pantalla.tipo === "lista" && elegida === null && (
         <>
-          <p>
-            <button type="button" onClick={() => abrirVentana({ tipo: "subir" })}>
-              {SUBIR}
-            </button>
-          </p>
+          {/* Con un archivo en el antivirus o sin importar todavía, no se sube otro: se perdería el primero. */}
+          {subida === null && porImportar === null && (
+            <p>
+              <button type="button" onClick={() => abrirVentana({ tipo: "subir" })}>
+                {SUBIR}
+              </button>
+            </p>
+          )}
           {lectura.tipo === "cargando" && <p role="status">Cargando las liquidaciones…</p>}
           {lectura.tipo === "sin_servicio" && (
             <FallaDeLectura

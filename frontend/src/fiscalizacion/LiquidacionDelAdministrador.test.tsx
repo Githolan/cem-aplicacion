@@ -385,6 +385,25 @@ describe("pantalla /importar-liquidacion", () => {
     expect((await screen.findAllByText("Se está leyendo la liquidación.")).length).toBeGreaterThan(0);
   }, 15000);
 
+  it("mientras un archivo está en el antivirus no se ofrece subir otro", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([]),
+      [`POST ${BASE}/documentos`]: () => Response.json({ id: D1 }, { status: 201 }),
+      [`POST ${BASE}/documentos/${D1}/versiones`]: () => Response.json({ id: V1 }, { status: 201 }),
+      [`GET ${BASE}/documentos/${D1}/versiones/${V1}/estado`]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
+    }));  // prettier-ignore
+    abrir();
+    expect(await screen.findByText("Todavía no se subió ninguna liquidación del administrador.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: SUBIR }));
+    const ventana = await screen.findByRole("dialog", { name: SUBIR });
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "liquidacion.pdf", { type: "application/pdf" });
+    fireEvent.change(within(ventana).getByLabelText("Archivo de la liquidación"), { target: { files: [pdf] } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
+    expect(await screen.findByText(EN_ANTIVIRUS)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: SUBIR })).toBeNull();
+  });
+
   it("si el pedido de importar no llega, el archivo subido queda para reintentar con la misma clave", async () => {
     let intentos = 0;
     const api = backend({
