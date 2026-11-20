@@ -18,6 +18,7 @@ import {
   DESCARTAR_LIQUIDACION,
   EN_ANTIVIRUS,
   IMPORTAR_DE_NUEVO,
+  NUMERO_MAL,
   enPesos,
   FALTA_MOTIVO,
   hojasDe,
@@ -133,11 +134,19 @@ describe("importes", () => {
     expect(aImporte("007,5")).toBe("7.50");
   });
 
-  it("se corrigen los textos y los importes del dato, no los números de orden", () => {
-    expect(hojasDe(LUZ.valor).map((h) => [h.camino.join("."), h.importe])).toEqual([
-      ["concepto", false],
-      ["importes.Gastos Comunes", true],
-      ["total", true],
+  it("se corrige cada valor del dato, con su forma", () => {
+    expect(hojasDe(LUZ.valor).map((h) => [h.camino.join("."), h.forma])).toEqual([
+      ["rubro", "numero"],
+      ["concepto", "texto"],
+      ["importes.Gastos Comunes", "importe"],
+      ["total", "importe"],
+    ]);
+    // Un importe vacío sigue siendo importe por su clave; una lista se escribe separada por comas.
+    expect(hojasDe({ nombre: null, total: null, grupos: { A: null }, vencimientos: ["2026-10-10", "2026-10-20"] })).toEqual([
+      { camino: ["nombre"], etiqueta: "Nombre", leido: null, forma: "texto" },
+      { camino: ["total"], etiqueta: "Total", leido: null, forma: "importe" },
+      { camino: ["grupos", "A"], etiqueta: "Grupos · A", leido: null, forma: "importe" },
+      { camino: ["vencimientos"], etiqueta: "Vencimientos", leido: "2026-10-10, 2026-10-20", forma: "lista" },
     ]);
   });
 });
@@ -267,6 +276,42 @@ describe("pantalla /importar-liquidacion", () => {
       decision: "corregido",
       valor_corregido: { rubro: 1, concepto: "Luz SINTETICA", importes: { "Gastos Comunes": "1000.00" }, total: "1000.05" },
     });
+  });
+
+  it("corregir el número de rubro y una lista los manda en su forma", async () => {
+    const TOTAL = campo(F2, 1, { tipo: "total", clave: "total:gastos", valor: { total: "1000.00", vencimientos: ["2026-10-10"] } });
+    const DECISION_TOTAL = `${BASE}/liquidaciones-importadas/${I1}/campos/${F2}/decision`;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, campos: [LUZ, TOTAL] }),
+      [DECISION]: DETALLE({ ...IMPORTACION, campos: [LUZ, TOTAL] }),
+      [`POST ${DECISION_TOTAL}`]: DETALLE({ ...IMPORTACION, campos: [LUZ, TOTAL] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Gasto" })).getByRole("button", { name: CORREGIR_DATO }));
+    const ventana = await screen.findByRole("dialog", { name: "Corregir: Gasto" });
+    fireEvent.change(within(ventana).getByLabelText("Número de rubro"), { target: { value: "dos" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Guardar la corrección" }));
+    expect(await within(ventana).findByText(NUMERO_MAL)).toBeTruthy();
+    expect(pedidos(api, "POST", DECISION.split(" ")[1] ?? "")).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Número de rubro"), { target: { value: "2" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Guardar la corrección" }));
+    await waitFor(() => expect(pedidos(api, "POST", DECISION.split(" ")[1] ?? "")).toHaveLength(1));
+    const gasto = (await pedidos(api, "POST", DECISION.split(" ")[1] ?? "")[0]?.json()) as { valor_corregido: { rubro: unknown } };
+    expect(gasto.valor_corregido.rubro).toBe(2);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Corregir: Gasto" })).toBeNull());
+    fireEvent.click(within(await screen.findByRole("list", { name: "Datos leídos" })).getByRole("button", { name: /^Total/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Total" })).getByRole("button", { name: CORREGIR_DATO }));
+    const otra = await screen.findByRole("dialog", { name: "Corregir: Total" });
+    fireEvent.change(within(otra).getByLabelText("Vencimientos (separados por coma)"), { target: { value: "2026-10-10, 2026-10-25" } });
+    fireEvent.click(within(otra).getByRole("button", { name: "Guardar la corrección" }));
+    await waitFor(() => expect(pedidos(api, "POST", DECISION_TOTAL)).toHaveLength(1));
+    const total = (await pedidos(api, "POST", DECISION_TOTAL)[0]?.json()) as { valor_corregido: unknown };
+    expect(total.valor_corregido).toEqual({ total: "1000.00", vencimientos: ["2026-10-10", "2026-10-25"] });
   });
 
   it("sin datos pendientes ofrece confirmar la liquidación y la confirma", async () => {

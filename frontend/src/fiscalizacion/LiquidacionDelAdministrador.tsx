@@ -47,6 +47,7 @@ export const VOLVER_A_LA_LISTA = "Volver a la lista";
 export const FALTA_ARCHIVO = "Falta elegir el archivo.";
 export const FALTA_MOTIVO = "Falta escribir el motivo.";
 export const SIN_CAMBIOS = "El valor corregido es igual al leído: para dejarlo así, se confirma.";
+export const NUMERO_MAL = "Va un número entero, por ejemplo 2.";
 export const IMPORTE_MAL = "Un importe va con dos decimales, por ejemplo 1.234,50.";
 export const LARGO_MOTIVO = 500;
 const ESPERA_LECTURA_MS = 3000;
@@ -90,6 +91,9 @@ const TEXTO_CLAVE: Record<string, string> = {
   redondeo: "Redondeo",
   importes: "Importes",
   grupos: "Grupos",
+  rubro: "Número de rubro",
+  numero: "Número",
+  vencimientos: "Vencimientos",
 };
 const IMPORTE_LEIDO = /^-?\d{1,16}\.\d{2}$/;
 
@@ -136,16 +140,39 @@ export function resumenDe(c: Campo): string {
   }
 }
 
-/** Las hojas que se pueden corregir: textos e importes (y lo vacío), con su camino y su etiqueta. */
-type Hoja = { camino: string[]; etiqueta: string; leido: string | null; importe: boolean };
+// Como `forma_igual` del backend: un importe se reconoce por su clave (o lo que va dentro de
+// `importes` y `grupos`), aunque lo leído esté vacío, o porque lo leído tiene forma de importe.
+const CLAVES_DE_IMPORTE = new Set(["total", "saldo_anterior", "pagos", "deuda", "interes", "disponible", "otros_gastos", "redondeo", "porcentaje", "monto"]);
+const CLAVES_DE_GRUPOS = new Set(["importes", "grupos"]);
+
+/** Cada valor del dato que se corrige, con su camino, su etiqueta, lo leído como se escribe y su forma. */
+type Forma = "importe" | "texto" | "numero" | "lista";
+type Hoja = { camino: string[]; etiqueta: string; leido: string | null; forma: Forma };
 export function hojasDe(valor: Record<string, unknown>, camino: string[] = []): Hoja[] {
   return Object.entries(valor).flatMap(([clave, v]): Hoja[] => {
     const aca = [...camino, clave];
     if (v !== null && typeof v === "object" && !Array.isArray(v)) return hojasDe(v as Record<string, unknown>, aca);
-    if (v !== null && typeof v !== "string") return [];
     const etiqueta = aca.map((k) => TEXTO_CLAVE[k] ?? k).join(" · ");
-    return [{ camino: aca, etiqueta, leido: v, importe: v === null || IMPORTE_LEIDO.test(v) }];
+    if (Array.isArray(v)) return [{ camino: aca, etiqueta, leido: v.map(String).join(", "), forma: "lista" }];
+    if (typeof v === "number") return [{ camino: aca, etiqueta, leido: String(v), forma: "numero" }];
+    if (v !== null && typeof v !== "string") return [];
+    const importe = CLAVES_DE_IMPORTE.has(clave) || CLAVES_DE_GRUPOS.has(camino.at(-1) ?? "") || (v !== null && IMPORTE_LEIDO.test(v));
+    return [{ camino: aca, etiqueta, leido: v, forma: importe ? "importe" : "texto" }];
   });
+}
+
+/** Lo escrito en una hoja, en la forma del dato; `undefined` si no la tiene. */
+function enSuForma(h: Hoja, crudo: string): string | number | string[] | null | undefined {
+  switch (h.forma) {
+    case "importe":
+      return crudo === "" ? null : (aImporte(crudo) ?? undefined);
+    case "numero":
+      return /^-?\d{1,9}$/.test(crudo) ? Number(crudo) : undefined;
+    case "lista":
+      return crudo.split(",").map((x) => x.trim()).filter((x) => x !== "");
+    case "texto":
+      return crudo === "" ? null : crudo;
+  }
 }
 
 /** Cada valor del dato, con su etiqueta (también los números): lo que se confirma entero. */
@@ -166,7 +193,7 @@ function datosDelValor(c: Campo): { etiqueta: string; valor: string }[] {
   });
 }
 
-function conHoja(valor: Record<string, unknown>, camino: string[], nuevo: string | null): Record<string, unknown> {
+function conHoja(valor: Record<string, unknown>, camino: string[], nuevo: unknown): Record<string, unknown> {
   const [primera, ...resto] = camino;
   if (primera === undefined) return valor;
   return { ...valor, [primera]: resto.length === 0 ? nuevo : conHoja(valor[primera] as Record<string, unknown>, resto, nuevo) };
@@ -361,7 +388,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     setErrores(SIN_ERRORES);
     setArchivo(null);
     setMotivo("");
-    setEscrito(v.tipo === "corregir" ? Object.fromEntries(hojasDe((v.campo.valor_corregido ?? v.campo.valor) as Record<string, unknown>).map((h) => [h.camino.join("."), h.leido === null ? "" : h.importe ? enPesos(h.leido).replace("$ ", "") : h.leido])) : {});
+    setEscrito(v.tipo === "corregir" ? Object.fromEntries(hojasDe((v.campo.valor_corregido ?? v.campo.valor) as Record<string, unknown>).map((h) => [h.camino.join("."), h.leido === null ? "" : h.forma === "importe" ? enPesos(h.leido).replace("$ ", "") : h.leido])) : {});
     setVentana(v);
   }
 
@@ -466,13 +493,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     const marcados: Record<string, string> = {};
     for (const h of hojasDe(c.valor as Record<string, unknown>)) {
       const llave = h.camino.join(".");
-      const crudo = (escrito[llave] ?? "").trim();
-      let valor: string | null = crudo === "" ? null : crudo;
-      if (h.importe && valor !== null) {
-        valor = aImporte(valor);
-        if (valor === null) marcados[llave] = IMPORTE_MAL;
-      }
-      nuevo = conHoja(nuevo, h.camino, valor);
+      const valor = enSuForma(h, (escrito[llave] ?? "").trim());
+      if (valor === undefined) marcados[llave] = h.forma === "importe" ? IMPORTE_MAL : NUMERO_MAL;
+      else nuevo = conHoja(nuevo, h.camino, valor);
     }
     if (Object.keys(marcados).length > 0) {
       setErrores(marcados);
@@ -759,11 +782,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           const idCampo = `${id}-corregir-${i}`;
           return (
             <div key={llave}>
-              <label htmlFor={idCampo}>{h.etiqueta}</label>
+              <label htmlFor={idCampo}>{h.forma === "lista" ? `${h.etiqueta} (separados por coma)` : h.etiqueta}</label>
               <input
                 id={idCampo}
                 {...(i === 0 ? { "data-foco": true } : {})}
-                inputMode={h.importe ? "decimal" : undefined}
+                inputMode={h.forma === "importe" ? "decimal" : h.forma === "numero" ? "numeric" : undefined}
                 value={escrito[llave] ?? ""}
                 {...marcaDe(idCampo, errores[llave])}
                 onChange={(ev) => {
