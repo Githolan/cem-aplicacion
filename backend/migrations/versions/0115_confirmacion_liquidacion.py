@@ -385,7 +385,8 @@ create function nucleo.confirmar_importacion_liquidacion(importacion uuid, actor
     insert into auditoria.eventos
       (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, despues,
        hash_previo, hash)
-    values (c, actor, origen_pedido, 'consorcio.liquidacion.confirmar_importada', 'importacion_liquidacion',
+    values (c, actor, origen_pedido, 'consorcio.liquidacion.confirmar_importada',
+            'importacion_liquidacion',
             importacion, jsonb_build_object('campos', n), '', '');
   end
   $$;
@@ -417,7 +418,8 @@ create function nucleo.descartar_importacion_liquidacion(importacion uuid, motiv
     insert into auditoria.eventos
       (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, despues,
        hash_previo, hash)
-    values (c, actor, origen_pedido, 'consorcio.liquidacion.descartar_importada', 'importacion_liquidacion',
+    values (c, actor, origen_pedido, 'consorcio.liquidacion.descartar_importada',
+            'importacion_liquidacion',
             importacion, jsonb_build_object('estado', 'descartada'), '', '');
   end
   $$;
