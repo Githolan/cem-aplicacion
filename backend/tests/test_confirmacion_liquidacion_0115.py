@@ -176,6 +176,38 @@ def test_la_importacion_se_confirma_sin_pendientes_y_solo_eso_es_oficial(
         assert respuesta.json()["codigo"] == "importacion_decidida"
 
 
+def test_una_unidad_corregida_es_oficial_con_la_unidad_del_valor_corregido(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Si quien importa corrige el departamento de un dato de unidad, la lectura oficial lo asocia a
+    la unidad del padrón del valor corregido; lo leído conserva su unidad."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    with motor_migrate.connect() as c:
+        padron = dict(c.execute(
+            text("select designacion, id from nucleo.unidad where consorcio_id = :c"),
+            {"c": e["cons"]}).all())  # fmt: skip
+    cambios = {"unidad:002": {"depto": "PB-A"}, "importe_unidad:002": {"depto": "Z-9"}}
+    for c in i["campos"]:
+        if c["clave"] in cambios:
+            r = decidir(e, i, c["clave"], "corregido", c["valor"] | cambios[c["clave"]])
+            assert r.status_code == 200, r.text
+        else:
+            assert decidir(e, i, c["clave"], "confirmado").status_code == 200
+    assert post(e, ruta(e, i["id"], "confirmacion")).status_code == 200
+    with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
+        unidad = dict(c.execute(
+            text("select clave, unidad_id from nucleo.campos_oficiales_liquidacion("
+                 ":i, :a, 'api', :s)"),
+            {"i": i["id"], "a": e["mc"], "s": e["sesion"]}).all())  # fmt: skip
+    leido = {c["clave"]: c["unidad_id"] for c in i["campos"]}
+    assert leido["unidad:002"] == leido["importe_unidad:002"] == str(padron["1-A"])
+    # Control: lo confirmado sin corregir sigue con la unidad leída.
+    assert unidad["saldo_unidad:002"] == padron["1-A"]
+    assert unidad["unidad:002"] == padron["PB-A"]
+    assert unidad["importe_unidad:002"] is None  # «Z-9» no está en el padrón
+
+
 def test_una_importacion_que_no_sirve_se_descarta_con_su_motivo(
     escena, bucket, motor_app, motor_migrate
 ):

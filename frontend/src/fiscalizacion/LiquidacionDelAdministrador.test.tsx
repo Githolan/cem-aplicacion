@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../api/tipos";
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
+import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
 import {
   aImporte,
@@ -179,6 +180,61 @@ describe("pantalla /importar-liquidacion", () => {
     expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
     expect(await screen.findByText("Gasto: confirmado.")).toBeTruthy();
     expect(screen.getByText("Quedan 1 datos sin decidir.")).toBeTruthy();
+  });
+
+  it("la ficha muestra cada valor del dato y, corregido, cada cambio al lado de lo leído", async () => {
+    const saldo = campo(F2, 1, {
+      tipo: "saldo_unidad", clave: "saldo_unidad:1", estado: "corregido",
+      valor: { uf: "1", depto: "PB-A", saldo_anterior: "500.00", pagos: "100.00", deuda: "400.00", interes: "4.00", disponible: "0.00" },
+      valor_corregido: { uf: "1", depto: "PB-A", saldo_anterior: "500.00", pagos: "150.00", deuda: "400.00", interes: "4.00", disponible: "0.00" },
+    });  // prettier-ignore
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, campos: [LUZ, saldo] }),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Saldo de la unidad/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Saldo de la unidad" });
+    const valor = (etiqueta: string) => within(ficha).getByText(etiqueta).nextElementSibling?.textContent;
+    expect(valor("Pagos")).toBe("$ 100,00 → corregido: $ 150,00");
+    expect(valor("Deuda")).toBe("$ 400,00");
+    expect(valor("Interés")).toBe("$ 4,00");
+    expect(valor("Disponible")).toBe("$ 0,00");
+    expect(valor("Unidad funcional")).toBe("1");
+  });
+
+  it("un dato que el servidor no deja decidir dice por qué en la ficha", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
+      [DECISION]: () => Response.json({ codigo: "sin_permiso", mensaje: "sin permiso" }, { status: 403 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gasto" });
+    expect(within(ficha).queryByRole("alert")).toBeNull();  // control: antes del pedido no hay falla
+    fireEvent.click(within(ficha).getByRole("button", { name: CONFIRMAR_DATO }));
+    expect((await within(ficha).findByRole("alert")).textContent).toBe("Esta cuenta no tiene la facultad para esto en este edificio.");
+  });
+
+  it("si la confirmación de la liquidación no llega, lo dice", async () => {
+    const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "descartado" as const }] };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
+      [`POST ${BASE}/liquidaciones-importadas/${I1}/confirmacion`]: () => Promise.reject(new TypeError("Failed to fetch")),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();  // control
+    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    expect(await screen.findByText(SIN_CONEXION)).toBeTruthy();
   });
 
   it("corregir un importe manda el valor con la misma forma, en texto decimal", async () => {

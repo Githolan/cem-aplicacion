@@ -83,6 +83,37 @@ def _guardar(*, al_reves: bool) -> str:
     return definicion
 
 
+OFICIALES = "nucleo.campos_oficiales_liquidacion"
+# RN30 con correcciones: si quien importa corrigió `uf` o `depto` de un campo de unidad, la unidad
+# oficial sale del valor corregido (la de `unidad_id` es la del valor leído y queda como se leyó).
+OFICIALES_0115 = """
+create or replace function nucleo.campos_oficiales_liquidacion(importacion uuid, actor uuid,
+                                                               origen_pedido text, sesion uuid)
+  returns table (orden integer, tipo text, clave text, valor jsonb, unidad_id uuid)
+  language plpgsql volatile security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+  begin
+    perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
+    return query
+      select p.orden, p.tipo, p.clave, coalesce(p.valor_corregido, p.valor),
+             case when p.valor_corregido is null then p.unidad_id
+                  when p.tipo in ('unidad', 'importe_unidad', 'saldo_unidad') then
+                    nucleo.unidad_de_la_lectura(c, p.valor_corregido->>'depto',
+                                                p.valor_corregido->>'uf')
+             end
+        from nucleo.campo_preliminar p
+        join nucleo.importacion_liquidacion x
+          on x.consorcio_id = p.consorcio_id and x.id = p.importacion_id
+       where p.consorcio_id = c and p.importacion_id = importacion
+         and x.estado = 'confirmada' and p.estado in ('confirmado', 'corregido')
+       order by p.orden;
+  end
+  $$;
+"""
+
 TABLAS = f"""
 alter table nucleo.campo_preliminar
   add column fragmento text check (length(fragmento) between 1 and {LARGO_FRAGMENTO});
@@ -424,6 +455,7 @@ def upgrade() -> None:
     for funcion in LECTURAS_0113:
         op.execute(f"drop function {funcion}")
     op.execute(FUNCIONES)
+    op.execute(OFICIALES_0115)
     for funcion in INTERNAS + RUTAS:
         op.execute(f"revoke all on function {funcion} from public")
     for funcion in RUTAS:
@@ -448,6 +480,7 @@ def downgrade() -> None:
         op.execute(f"revoke all on function {funcion} from public")
         op.execute(f"grant execute on function {funcion} to cem_app")
     op.execute(_guardar(al_reves=True))
+    op.execute(_de_0113(OFICIALES).replace("create function", "create or replace function", 1))
     op.execute(
         """
 create or replace function nucleo.negar_cambio_campo_preliminar()

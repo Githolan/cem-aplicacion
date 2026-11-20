@@ -145,6 +145,24 @@ export function hojasDe(valor: Record<string, unknown>, camino: string[] = []): 
   });
 }
 
+/** Cada valor del dato, con su etiqueta (también los números): lo que se confirma entero. */
+export function valoresDe(valor: Record<string, unknown>, camino: string[] = []): { clave: string; etiqueta: string; valor: string }[] {
+  return Object.entries(valor).flatMap(([clave, v]) => {
+    const aca = [...camino, clave];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) return valoresDe(v as Record<string, unknown>, aca);
+    return [{ clave: aca.join("."), etiqueta: aca.map((k) => TEXTO_CLAVE[k] ?? k).join(" · "), valor: texto(Array.isArray(v) ? v.join(", ") : v) }];
+  });
+}
+
+/** Lo leído de un dato y, si se corrigió, cada valor que cambió con su corrección al lado. */
+function datosDelValor(c: Campo): { etiqueta: string; valor: string }[] {
+  const corregido = c.valor_corregido === null ? null : new Map(valoresDe(c.valor_corregido as Record<string, unknown>).map((v) => [v.clave, v.valor]));
+  return valoresDe(c.valor as Record<string, unknown>).map((v) => {
+    const nuevo = corregido?.get(v.clave);
+    return { etiqueta: v.etiqueta, valor: nuevo === undefined || nuevo === v.valor ? v.valor : `${v.valor} → corregido: ${nuevo}` };
+  });
+}
+
 function conHoja(valor: Record<string, unknown>, camino: string[], nuevo: string | null): Record<string, unknown> {
   const [primera, ...resto] = camino;
   if (primera === undefined) return valor;
@@ -176,6 +194,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const [escrito, setEscrito] = useState<Record<string, string>>({});
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [enviando, setEnviando] = useState(false);
+  const [fallaEnFicha, setFallaEnFicha] = useState<string | null>(null);
   const fichas = useFichas<string>();
   const clave = useRef<string | null>(null);
   const claveImportar = useRef<string | null>(null);
@@ -454,15 +473,26 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     );
   }
 
+  /** Un acto de un botón directo (sin ventana que muestre su rechazo): el rechazo queda a la vista. */
+  const directo = (fin: Promise<FinDeEnvio>, mostrar: (texto: string) => void) =>
+    void fin.then((r) => {
+      if (typeof r === "object") mostrar(r.rechazo);
+    });
+
+  const decidirDirecto = (c: Campo, decision: "confirmado" | "descartado") => {
+    setFallaEnFicha(null);
+    directo(decidir(c, decision), setFallaEnFicha);
+  };
+
   const confirmar = () =>
-    void actuar(
+    directo(actuar(
       (k) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion", {
           headers: encabezadoCsrf(),
           params: { path: { consorcio_id: consorcio, importacion_id: elegida ?? "" }, header: { [ENCABEZADO_IDEMPOTENCIA]: k } },
         }),
       "Se confirmó la liquidación: sus datos confirmados y corregidos ya cuentan.",
-    );
+    ), (texto) => setAviso({ texto, ok: false }));
 
   const elementos = lectura.tipo === "ok" ? lectura.elementos : [];
   const importacion = detalle.tipo === "ok" && elegida !== null ? detalle.importacion : null;
@@ -593,6 +623,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                         estado={TEXTO_ESTADO_CAMPO[c.estado]}
                         alAbrir={() => {
                           setAviso(null);
+                          setFallaEnFicha(null);
                           setVentana(null);
                           fichas.abrir(c.id);
                         }}
@@ -613,8 +644,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
         <FichaDeRegistro
           titulo={`${TEXTO_TIPO[enFicha.tipo]}`}
           datos={[
-            { etiqueta: "Leído", valor: resumenDe({ ...enFicha, valor_corregido: null }) },
-            ...(enFicha.valor_corregido ? [{ etiqueta: "Corregido", valor: resumenDe(enFicha) }] : []),
+            ...datosDelValor(enFicha),
             { etiqueta: "En el documento", valor: `Página ${enFicha.pagina}${enFicha.fragmento ? `: «${enFicha.fragmento}»` : ""}` },
             { etiqueta: "Confianza", valor: `${Math.round(Number(enFicha.confianza) * 100)} %${enFicha.origen === "ia" ? " (leído con IA)" : ""}` },
             { etiqueta: "Estado", valor: TEXTO_ESTADO_CAMPO[enFicha.estado] },
@@ -623,10 +653,15 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           ocupada={enviando}
           ventana={ventana?.tipo === "corregir" && ventanaCorregir(ventana.campo)}
         >
+          {fallaEnFicha !== null && (
+            <p className="aviso-error" role="alert">
+              {fallaEnFicha}
+            </p>
+          )}
           {seConfirma && (
             <p className="ficha-registro__acciones">
               {enFicha.estado !== "confirmado" && (
-                <button type="button" onClick={() => void decidir(enFicha, "confirmado")}>
+                <button type="button" onClick={() => decidirDirecto(enFicha, "confirmado")}>
                   {CONFIRMAR_DATO}
                 </button>
               )}
@@ -634,7 +669,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                 {CORREGIR_DATO}
               </button>
               {enFicha.estado !== "descartado" && (
-                <button type="button" className="secundario peligro" onClick={() => void decidir(enFicha, "descartado")}>
+                <button type="button" className="secundario peligro" onClick={() => decidirDirecto(enFicha, "descartado")}>
                   {DESCARTAR_DATO}
                 </button>
               )}
