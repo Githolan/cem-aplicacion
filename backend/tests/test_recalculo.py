@@ -32,7 +32,7 @@ def total(**grupos: str) -> Oficial:
                    None)  # fmt: skip
 
 
-def unidad(u: UUID | None, uf: str, monto: str, porcentaje: str | None = "33.33") -> Oficial:
+def unidad(u: UUID | None, uf: str, monto: str | None, porcentaje: str | None = "33.33") -> Oficial:
     return Oficial("importe_unidad", f"importe_unidad:{uf}",
                    {"uf": uf, "depto": "X", "grupos": {"Gastos Comunes": {
                        "porcentaje": porcentaje, "monto": monto}}}, u)  # fmt: skip
@@ -87,6 +87,24 @@ def test_una_unidad_que_no_figura_y_una_fila_fuera_del_padron():
     ajena = g.unidades[-1]
     resumen = (ajena.unidad_id, ajena.designacion, ajena.esperado, ajena.informado, ajena.senalada)
     assert resumen == (None, "UF 9 X", None, Decimal("200.00"), True)
+
+
+def test_un_monto_vacio_no_se_toma_como_cero_ni_se_compara():
+    """Un monto borrado al corregir (`null`) es desconocido: no se inventa una diferencia."""
+    oficiales = [total(gastos_comunes="1000.00"), unidad(A, "1", "500.00"), unidad(B, "2", None),
+                 unidad(C, "3", "200.00"), unidad(None, "9", None)]  # fmt: skip
+    (g,) = recalcular(oficiales, base(COEFICIENTES))
+    vacia = next(x for x in g.unidades if x.designacion == "1-A")
+    assert (vacia.informado, vacia.esperado, vacia.diferencia, vacia.senalada, vacia.sin_monto) == (
+        None, Decimal("300.00"), None, False, True)  # fmt: skip
+    ajena = g.unidades[-1]
+    assert (ajena.unidad_id, ajena.informado, ajena.senalada, ajena.sin_monto) == (
+        None, None, False, True)  # fmt: skip
+    assert (g.senaladas, g.sin_monto) == (0, 2)
+    # Control: la unidad que no figura sigue comparándose como cero y sin `sin_monto`.
+    (h,) = recalcular(oficiales[:2] + oficiales[3:4], base(COEFICIENTES))
+    falta = next(x for x in h.unidades if x.designacion == "1-A")
+    assert (falta.diferencia, falta.senalada, falta.sin_monto) == (Decimal("-300.00"), True, False)
 
 
 @pytest.mark.parametrize(

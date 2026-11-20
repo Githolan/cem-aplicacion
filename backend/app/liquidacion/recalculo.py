@@ -85,6 +85,7 @@ def _vacio(nombre: str, estado: EstadoGrupoRecalculado, base: Base | None) -> Gr
         nombre=nombre, estado=estado, grupo=base.grupo if base else None,
         esquema_version=base.esquema_version if base else None,
         vigente_desde=base.vigente_desde if base else None, total=None, unidades=[], senaladas=0,
+        sin_monto=0,
     )  # fmt: skip
 
 
@@ -109,39 +110,47 @@ def _grupo(nombre: str, oficiales: Sequence[Oficial], filas: Sequence[Base]) -> 
     esperado = {UUID(u): importe for u, importe in repartir(total, pesos).items()}
 
     # Lo informado, por unidad del padrón; las filas que no coinciden con una unidad activa van
-    # aparte, con lo que informan.
-    informado: dict[UUID, tuple[Decimal | None, Decimal]] = {}
+    # aparte, con lo que informan. Un monto vacío (leído así o borrado al corregir) queda vacío:
+    # no se compara ni se toma como cero.
+    informado: dict[UUID, tuple[Decimal | None, Decimal | None]] = {}
     aparte: list[UnidadRecalculada] = []
     for o in oficiales:
         parte = (o.valor.get("grupos") or {}).get(nombre) if o.tipo == "importe_unidad" else None
         if not isinstance(parte, dict):
             continue
-        monto = _decimal(parte.get("monto")) or Decimal(0)
+        monto = _decimal(parte.get("monto"))
         porcentaje = _decimal(parte.get("porcentaje"))
         if o.unidad_id in coeficientes:
-            antes = informado.get(o.unidad_id)
-            informado[o.unidad_id] = (porcentaje, monto + (antes[1] if antes else Decimal(0)))
+            if o.unidad_id in informado:
+                antes = informado[o.unidad_id][1]
+                monto = None if monto is None or antes is None else monto + antes
+            informado[o.unidad_id] = (porcentaje, monto)
         else:
             aparte.append(UnidadRecalculada(
                 unidad_id=o.unidad_id, designacion=_designacion(o.valor), coeficiente=None,
                 porcentaje_informado=porcentaje, esperado=None, informado=monto, diferencia=None,
-                senalada=abs(monto) > CENTAVO,
+                senalada=monto is not None and abs(monto) > CENTAVO, sin_monto=monto is None,
             ))  # fmt: skip
 
     unidades: list[UnidadRecalculada] = []
     for u, fila in sorted(coeficientes.items(), key=lambda par: par[1].designacion or ""):
-        porcentaje, monto = informado.get(u, (None, None))
-        diferencia = (monto if monto is not None else Decimal(0)) - esperado[u]
+        if u in informado:
+            porcentaje, monto = informado[u]
+            diferencia = None if monto is None else monto - esperado[u]
+        else:  # la unidad no figura en la liquidación: no se le informó ningún monto
+            porcentaje, monto, diferencia = None, None, -esperado[u]
         unidades.append(UnidadRecalculada(
             unidad_id=u, designacion=fila.designacion or "", coeficiente=fila.porcentaje,
             porcentaje_informado=porcentaje, esperado=esperado[u], informado=monto,
-            diferencia=diferencia, senalada=abs(diferencia) > CENTAVO,
+            diferencia=diferencia, senalada=diferencia is not None and abs(diferencia) > CENTAVO,
+            sin_monto=u in informado and monto is None,
         ))  # fmt: skip
     unidades.extend(aparte)
     return GrupoRecalculado(
         nombre=nombre, estado=EstadoGrupoRecalculado.RECALCULADO, grupo=cabeza.grupo,
         esquema_version=cabeza.esquema_version, vigente_desde=cabeza.vigente_desde, total=total,
         unidades=unidades, senaladas=sum(1 for x in unidades if x.senalada),
+        sin_monto=sum(1 for x in unidades if x.sin_monto),
     )  # fmt: skip
 
 

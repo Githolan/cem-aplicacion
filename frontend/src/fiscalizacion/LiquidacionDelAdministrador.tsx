@@ -840,8 +840,14 @@ function situacionDelGrupo(g: GrupoRecalculado, periodo: string): string {
   switch (g.estado) {
     case "recalculado": {
       const base = `Repartido con los coeficientes ${nombreDeEsquema(g.grupo ?? "")} (versión ${g.esquema_version ?? "—"}, vigentes desde el ${fechaLarga(g.vigente_desde ?? periodo)}): total del grupo ${pesos(g.total)}.`;
-      if (g.senaladas === 0) return `${base} Coincide con lo informado en todas las unidades, con hasta un centavo de diferencia.`;
-      return `${base} ${g.senaladas === 1 ? "Una unidad difiere" : `${g.senaladas} unidades difieren`} en más de un centavo.`;
+      // Un monto vacío no se compara: se nombra la unidad, no se inventa una diferencia.
+      const vacias = g.unidades.filter((u) => u.sin_monto).map((u) => u.designacion);
+      const sinMonto = vacias.length === 0 ? "" : ` Sin monto informado, no se ${vacias.length === 1 ? "compara" : "comparan"}: ${vacias.join(", ")}.`;
+      if (g.senaladas === 0) {
+        const todas = vacias.length === 0 ? "todas las unidades" : "las demás unidades";
+        return `${base} Coincide con lo informado en ${todas}, con hasta un centavo de diferencia.${sinMonto}`;
+      }
+      return `${base} ${g.senaladas === 1 ? "Una unidad difiere" : `${g.senaladas} unidades difieren`} en más de un centavo.${sinMonto}`;
     }
     case "sin_correspondencia":
       return "Falta indicar qué coeficientes del edificio corresponden a este grupo.";

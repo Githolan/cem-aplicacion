@@ -466,7 +466,7 @@ const ESQUEMAS = [
   { grupo: "agua", esquema_version: 1, vigente_desde: "2024-01-01" },
   { grupo: "expensas_comunes", esquema_version: 2, vigente_desde: "2025-03-01" },
 ];
-const SIN_ELEGIR: GrupoRecalculado = { nombre: "Gastos Comunes", estado: "sin_correspondencia", grupo: null, esquema_version: null, vigente_desde: null, total: null, unidades: [], senaladas: 0 };
+const SIN_ELEGIR: GrupoRecalculado = { nombre: "Gastos Comunes", estado: "sin_correspondencia", grupo: null, esquema_version: null, vigente_desde: null, total: null, unidades: [], senaladas: 0, sin_monto: 0 };
 const RECALCULADO: GrupoRecalculado = {
   nombre: "Gastos Comunes",
   estado: "recalculado",
@@ -475,9 +475,10 @@ const RECALCULADO: GrupoRecalculado = {
   vigente_desde: "2025-03-01",
   total: "1000.00",
   senaladas: 1,
+  sin_monto: 0,
   unidades: [
-    { unidad_id: U1, designacion: "PB-A", coeficiente: "50.000000", porcentaje_informado: "50.00", esperado: "500.00", informado: "500.00", diferencia: "0.00", senalada: false },
-    { unidad_id: U2, designacion: "1-A", coeficiente: "30.000000", porcentaje_informado: "35.00", esperado: "300.00", informado: "350.00", diferencia: "50.00", senalada: true },
+    { unidad_id: U1, designacion: "PB-A", coeficiente: "50.000000", porcentaje_informado: "50.00", esperado: "500.00", informado: "500.00", diferencia: "0.00", senalada: false, sin_monto: false },
+    { unidad_id: U2, designacion: "1-A", coeficiente: "30.000000", porcentaje_informado: "35.00", esperado: "300.00", informado: "350.00", diferencia: "50.00", senalada: true, sin_monto: false },
   ],
 };
 const recalculo = (grupos: GrupoRecalculado[], extra: Partial<Recalculo> = {}): Recalculo => ({
@@ -558,6 +559,23 @@ describe("recálculo con los coeficientes del edificio", () => {
     await abrirLaImportacion();
     expect(await screen.findByText(/Una unidad difiere/)).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("button", { name: PREPARAR_SOLICITUD })).toBeNull());
+  });
+
+  it("una unidad con el monto vacío se nombra y no se compara ni se pide", async () => {
+    const [pa] = RECALCULADO.unidades;
+    if (pa === undefined) throw new Error("falta la unidad de la prueba");
+    const vacia = { ...pa, unidad_id: U2, designacion: "1-A", informado: null, porcentaje_informado: null, esperado: "300.00", diferencia: null, senalada: false, sin_monto: true };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CONFIRMADA),
+      [`GET ${RECALCULO_URL}`]: () => Response.json(recalculo([{ ...RECALCULADO, senaladas: 0, sin_monto: 1, unidades: [pa, vacia] }])),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    expect(await screen.findByText(/Coincide con lo informado en las demás unidades, con hasta un centavo de diferencia\. Sin monto informado, no se compara: 1-A\./)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Diferencias en Gastos Comunes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: PREPARAR_SOLICITUD })).toBeNull();
   });
 
   it("una liquidación sin reparto por grupo lo dice y no ofrece nada", async () => {

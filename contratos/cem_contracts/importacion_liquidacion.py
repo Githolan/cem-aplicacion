@@ -207,7 +207,8 @@ class EstadoGrupoRecalculado(StrEnum):
 class UnidadRecalculada(BaseModel):
     """Una unidad en un grupo: lo que informó la administración y lo que da el reparto con el
     coeficiente cargado. `unidad_id` nulo: la fila de la liquidación no coincide con una unidad del
-    padrón. `informado` nulo: la unidad del padrón no figura en la liquidación."""
+    padrón. `informado` nulo: la unidad del padrón no figura en la liquidación (se compara como
+    cero) o figura con el monto vacío (`sin_monto`: no se compara)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -219,6 +220,10 @@ class UnidadRecalculada(BaseModel):
     informado: Decimal | None = Field(description="El monto que figura en la liquidación.")
     diferencia: Decimal | None = Field(description="`informado - esperado`.")
     senalada: bool = Field(description="La diferencia pasa de un centavo (D5-A).")
+    sin_monto: bool = Field(
+        description="Figura en la liquidación con el monto vacío: no se toma como cero ni se "
+        "compara."
+    )
 
 
 class GrupoRecalculado(BaseModel):
@@ -232,6 +237,7 @@ class GrupoRecalculado(BaseModel):
     total: Decimal | None = Field(description="El gasto del grupo según la liquidación.")
     unidades: list[UnidadRecalculada]
     senaladas: int = Field(ge=0)
+    sin_monto: int = Field(ge=0, description="Unidades con el monto vacío, que no se comparan.")
 
 
 class EsquemaDelPeriodo(BaseModel):
