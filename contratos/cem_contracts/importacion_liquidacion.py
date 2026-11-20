@@ -3,8 +3,9 @@
 En Modo Consejo, quien tiene `liquidacion.importar` sube el PDF que manda la administración como
 documento de la categoría `liquidaciones_del_administrador` y, cuando pasó el antivirus, pide
 importarlo. `cem-trabajos` lo lee sin IA (formato del Programa Mis Expensas) y deja cada dato como
-campo preliminar, con el renglón de la página de donde salió. Nada leído es oficial hasta que una
-persona lo confirma (H5-3).
+campo preliminar, con el renglón de la página de donde salió. Si el formato no se reconoce, lo lee
+el modelo (H5-2, `0114`), dentro del tope mensual de gasto: sus campos llevan origen `ia` y la
+confianza que informó. Nada leído es oficial hasta que una persona lo confirma (H5-3).
 
 Los importes van como texto decimal con dos decimales (`"1234.56"`), tal como los informa la
 liquidación: son lo leído, no un cálculo.
@@ -109,9 +110,14 @@ class ImportacionLiquidacion(BaseModel):
     subida_por: UUID
     creada_en: datetime
     estado: EstadoImportacion
-    formato: str | None = Field(description="`mis_expensas` cuando se reconoció el formato.")
+    formato: str | None = Field(
+        description="`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída con IA)."
+    )
     periodo: date | None
-    motivo: str | None = Field(description="Por qué no se reconoció, con `no_reconocida`.")
+    motivo: str | None = Field(
+        description="Por qué no se leyó, con `no_reconocida`: sin el formato y, si se intentó con"
+        " IA, por qué tampoco así (el tope del mes, una falla del modelo); se carga a mano."
+    )
     diferencias: list[DiferenciaLeida]
     leida_en: datetime | None
     campos: list[CampoPreliminar]

@@ -18,10 +18,11 @@ import signal
 import socket
 import threading
 import time
+from contextlib import AbstractContextManager
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
 
 from app import registros
 from app.config import cargar
@@ -123,6 +124,14 @@ class Trabajador:
             if tomados == 0:
                 detener.wait(espera)
         log.info("cem-trabajos %s detenido", self.nombre)
+
+
+def aparte(conn: Connection, trabajo: cola.Trabajo) -> AbstractContextManager[Connection]:
+    """Una transacción propia del trabajo, con su mismo ámbito, que queda aunque la del trabajo
+    se deshaga. Para lo que tiene que quedar anotado pase lo que pase: el gasto en IA de una
+    lectura se anota antes y después de la llamada, porque la llamada se paga aunque lo demás
+    falle. Vive acá porque solo `cem-trabajos` abre un ámbito sin persona."""
+    return transaccion(conn.engine, persona_id=None, consorcio_id=trabajo.consorcio_id)
 
 
 def _ms(inicio: float) -> float:

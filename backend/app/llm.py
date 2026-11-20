@@ -51,6 +51,10 @@ class Respuesta:
     texto: str
     modelo: str
     """El modelo que informó el proveedor, no el que se pidió."""
+    fichas_entrada: int | None = None
+    """Las que informó el proveedor; `None` si no las informó (quien mide el gasto lo cuenta como
+    el máximo que había reservado)."""
+    fichas_salida: int | None = None
 
 
 def exigir_variables() -> dict[str, str]:
@@ -126,7 +130,13 @@ def _con_anthropic(messages: list[Mensaje], opts: Opciones, variables: dict[str,
     except AnthropicError as e:
         raise ErrorDeModelo(type(e).__name__) from e
     texto = "".join(bloque.text for bloque in respuesta.content if bloque.type == "text")
-    return Respuesta(texto=texto, modelo=respuesta.model)
+    uso = respuesta.usage
+    return Respuesta(
+        texto=texto,
+        modelo=respuesta.model,
+        fichas_entrada=uso.input_tokens,
+        fichas_salida=uso.output_tokens,
+    )
 
 
 def _con_openai(messages: list[Mensaje], opts: Opciones, variables: dict[str, str]) -> Respuesta:
@@ -146,4 +156,10 @@ def _con_openai(messages: list[Mensaje], opts: Opciones, variables: dict[str, st
         )
     except OpenAIError as e:
         raise ErrorDeModelo(type(e).__name__) from e
-    return Respuesta(texto=respuesta.choices[0].message.content or "", modelo=respuesta.model)
+    uso = respuesta.usage
+    return Respuesta(
+        texto=respuesta.choices[0].message.content or "",
+        modelo=respuesta.model,
+        fichas_entrada=None if uso is None else uso.prompt_tokens,
+        fichas_salida=None if uso is None else uso.completion_tokens,
+    )

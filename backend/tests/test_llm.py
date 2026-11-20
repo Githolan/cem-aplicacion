@@ -28,7 +28,7 @@ RESPUESTAS = {
         "content": [{"type": "text", "text": "hola"}],
         "stop_reason": "end_turn",
         "stop_sequence": None,
-        "usage": {"input_tokens": 1, "output_tokens": 1},
+        "usage": {"input_tokens": 3, "output_tokens": 1},
     },
     "/chat/completions": {
         "id": "c1",
@@ -103,7 +103,9 @@ def test_anthropic_y_zai_usan_su_protocolo_y_separan_el_sistema(
     respuesta = llm.complete(
         [{"role": "system", "content": "regla"}, {"role": "user", "content": "hola"}], OPCIONES
     )
-    assert respuesta == llm.Respuesta(texto="hola", modelo="modelo-informado")
+    assert respuesta == llm.Respuesta(
+        texto="hola", modelo="modelo-informado", fichas_entrada=3, fichas_salida=1
+    )
     ((ruta, encabezados, cuerpo),) = proveedor.pedidos
     assert ruta == "/v1/messages"
     assert encabezados["authorization"] == f"Bearer {CLAVE}"
@@ -122,7 +124,10 @@ def test_los_demas_proveedores_usan_el_protocolo_de_openai(
         {"role": "system", "content": "regla"},
         {"role": "user", "content": "hola"},
     ]
-    assert llm.complete(mensajes, OPCIONES).texto == "hola"
+    respuesta = llm.complete(mensajes, OPCIONES)
+    assert respuesta.texto == "hola"
+    # Sin `usage` en la respuesta, las fichas no se inventan: quedan sin informar.
+    assert (respuesta.fichas_entrada, respuesta.fichas_salida) == (None, None)
     ((ruta, encabezados, cuerpo),) = proveedor.pedidos
     assert ruta == "/chat/completions"
     assert encabezados["authorization"] == f"Bearer {CLAVE}"
