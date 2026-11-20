@@ -45,7 +45,7 @@ from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
 from app.liquidacion import lectura_ia, mis_expensas, palabras_pdf
-from app.plataforma import almacen, cola
+from app.plataforma import almacen, cola, trabajos
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
 
 log = logging.getLogger("cem.liquidacion")
@@ -207,12 +207,6 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     return {"leida": True, "diferencias": len(lq.diferencias)}
 
 
-def _aparte(conn: Connection, trabajo: cola.Trabajo):
-    """Una transacción propia, que queda aunque la del trabajo se deshaga: el gasto en IA se anota
-    antes y después de la llamada, porque la llamada se paga aunque lo demás falle."""
-    return transaccion(conn.engine, persona_id=None, consorcio_id=trabajo.consorcio_id)
-
-
 def _leer_con_ia(
     conn: Connection,
     trabajo: cola.Trabajo,
@@ -234,7 +228,7 @@ def _leer_con_ia(
     doc = lectura_ia.documento(paginas)
     if doc.largo > lectura_ia.LARGO_MAXIMO:
         return no_reconocida("largo")
-    with _aparte(conn, trabajo) as c:
+    with trabajos.aparte(conn, trabajo) as c:
         reserva, motivo = c.execute(
             text("select * from plataforma.reservar_gasto_ia(:u, :i, :m, :e, :s)"),
             {"u": TRABAJO_LEER, "i": importacion, "m": llm.exigir_variables()["CEM_LLM_MODEL"],
@@ -247,7 +241,7 @@ def _leer_con_ia(
     except llm.ErrorDeModelo as e:
         log.warning("la lectura con IA de la liquidación falló: %s", e)
         respuesta = None
-    with _aparte(conn, trabajo) as c:
+    with trabajos.aparte(conn, trabajo) as c:
         # Una llamada que falló pudo haberse cobrado: sin modelo informado, cuenta el máximo.
         c.execute(
             text("select plataforma.registrar_gasto_ia(:r, :m, :e, :s)"),

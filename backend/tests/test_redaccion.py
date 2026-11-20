@@ -19,6 +19,8 @@ NO_SE_MUESTRAN = {
     ("consorcios/lectura_carga.py", "PEDIDO"): "instrucciones al modelo que lee el archivo",
     ("consorcios/lectura_comprobantes.py", "INSTRUCCIONES"): "instrucciones al modelo",
     ("consorcios/lectura_comprobantes.py", "PEDIDO"): "instrucciones al modelo",
+    ("liquidacion/lectura_ia.py", "INSTRUCCIONES"): "instrucciones al modelo",
+    ("liquidacion/lectura_ia.py", "PEDIDO"): "instrucciones al modelo",
 }
 """Textos que nunca llegan a la persona: se los lee el modelo que copia los datos de un archivo."""
 
