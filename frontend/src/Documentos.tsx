@@ -105,6 +105,7 @@ export const TEXTO_CATEGORIA: Record<Categoria, string> = {
   presupuestos: "Presupuestos",
   mantenimiento_y_certificados: "Mantenimiento y certificados",
   otros: "Otros",
+  liquidaciones_del_administrador: "Liquidaciones del administrador",
 };
 
 const TEXTO_MOTIVO: Record<Motivo, string> = {
@@ -196,7 +197,12 @@ export function mensajeDeRetiro(estado: number, codigo: string | undefined): str
 }
 
 /** Las que también se cargan con `documentos.cargar_operativos` (`CATEGORIAS_OPERATIVAS` del contrato). */
-export const CATEGORIAS_OPERATIVAS: readonly Categoria[] = ["actas_y_decisiones", "presupuestos", "mantenimiento_y_certificados"];
+export const CATEGORIAS_OPERATIVAS: readonly Categoria[] = [
+  "actas_y_decisiones",
+  "presupuestos",
+  "mantenimiento_y_certificados",
+  "liquidaciones_del_administrador",
+];
 
 /** Las acciones que cargan una categoría (`ACCIONES_DE_CARGA` del contrato). */
 function accionesDeCarga(categoria: Categoria): string[] {

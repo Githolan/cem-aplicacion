@@ -534,7 +534,7 @@ describe("los códigos existen en la política", () => {
     const bloque = /CATEGORIAS_OPERATIVAS = frozenset\(([\s\S]*?)\n\)/.exec(contrato)?.[1] ?? "";
     const nombres = [...bloque.matchAll(/CategoriaDocumento\.([A-Z_]+)/g)].map((m) => (m[1] ?? "").toLowerCase());
     // Control: el bloque se leyó; sin él, una lista vacía no probaría nada.
-    expect(nombres).toHaveLength(3);
+    expect(nombres).toHaveLength(4);
     expect([...CATEGORIAS_OPERATIVAS].sort()).toEqual(nombres.sort());
   });
 });

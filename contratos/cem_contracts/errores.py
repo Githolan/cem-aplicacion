@@ -206,6 +206,8 @@ class CodigoError(StrEnum):
     """Ya hay un proveedor con ese CUIT en este consorcio."""
     DOCUMENTO_INVALIDO = "documento_invalido"
     """El documento de respaldo no existe en este consorcio o no está vigente."""
+    LIQUIDACION_YA_IMPORTADA = "liquidacion_ya_importada"
+    """Esa versión de la liquidación ya se importó (`0113`)."""
     FACTURA_YA_ADJUNTA = "factura_ya_adjunta"
     """La orden ya tiene su factura, o hay otra subida en el antivirus (`0099`)."""
     FACTURA_NO_VIGENTE = "factura_no_vigente"

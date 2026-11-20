@@ -21,6 +21,15 @@ argon2-cffi-bindings==26.1.0
 boto3==1.43.113
 # Análisis de PDF de los documentos (H2c §3, paso 5): contenido activo, cifrado o mal formado.
 pypdf==6.21.4
+# Lectura de liquidaciones con la posición de cada palabra (H5-1, app/liquidacion/palabras_pdf.py)
+# y sus dependencias.
+pdfplumber==0.11.10
+pdfminer.six==20260107
+pillow==13.0.0
+pypdfium2==5.15.2
+charset-normalizer==3.5.2
+cffi==2.1.1
+pycparser==3.12
 # Modelo de lenguaje (app/llm.py) y sus dependencias.
 anthropic==2.3.0
 openai==3.42.0

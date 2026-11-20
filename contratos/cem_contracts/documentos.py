@@ -39,8 +39,8 @@ TOPE_BYTES = 20 * 1024 * 1024
 
 
 class CategoriaDocumento(StrEnum):
-    """Las 8 categorías de §4. Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y
-    `ACCIONES_DE_CARGA`."""
+    """Las 8 categorías de §4 y la liquidación del administrador (H5-1, `0113`). Quién ve y quién
+    carga cada una: `ACCION_DE_LECTURA` y `ACCIONES_DE_CARGA`."""
 
     INSTITUCIONAL = "institucional"
     ACTAS_Y_DECISIONES = "actas_y_decisiones"
@@ -50,6 +50,7 @@ class CategoriaDocumento(StrEnum):
     PRESUPUESTOS = "presupuestos"
     MANTENIMIENTO_Y_CERTIFICADOS = "mantenimiento_y_certificados"
     OTROS = "otros"
+    LIQUIDACIONES_DEL_ADMINISTRADOR = "liquidaciones_del_administrador"
 
 
 CATEGORIAS_RESTRINGIDAS = frozenset(
@@ -62,10 +63,11 @@ CATEGORIAS_OPERATIVAS = frozenset(
         CategoriaDocumento.ACTAS_Y_DECISIONES,
         CategoriaDocumento.PRESUPUESTOS,
         CategoriaDocumento.MANTENIMIENTO_Y_CERTIFICADOS,
+        CategoriaDocumento.LIQUIDACIONES_DEL_ADMINISTRADOR,
     }
 )
 """Las que el Consejo carga con `documentos.cargar_operativos` (inferencia de §4, va al
-propietario en §8)."""
+propietario en §8). La liquidación del administrador la sube el Consejo en Modo Consejo (H5, D2)."""
 
 ACCION_DE_LECTURA: dict[CategoriaDocumento, str] = {
     c: "documentos.ver_restringidos" if c in CATEGORIAS_RESTRINGIDAS else "documentos.ver"

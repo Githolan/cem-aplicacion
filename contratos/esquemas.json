@@ -1017,6 +1017,7 @@
           "cuit_repetido",
           "cuit_ya_cargado",
           "documento_invalido",
+          "liquidacion_ya_importada",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",
