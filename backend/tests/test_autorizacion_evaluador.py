@@ -351,8 +351,9 @@ def test_las_acciones_de_la_tabla():
     # verlos (`proveedores.autorizar`, 0105) y el salteo con motivo del bloqueo por documentación
     # legal (`egresos.saltear_documentacion`, 0106) y los cuatro actos nuevos de la solicitud
     # formal (`solicitud_formal.retirar`, `.registrar_envio`, `.registrar_respuesta` y
-    # `.responder`, 0108)
-    assert len(POLITICAS) == 58
+    # `.responder`, 0108) e importar la liquidación del administrador (`liquidacion.importar`,
+    # 0113)
+    assert len(POLITICAS) == 59
 
 
 def _archivo(tmp_path, nombre, politicas):

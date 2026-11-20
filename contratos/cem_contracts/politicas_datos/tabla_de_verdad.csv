@@ -523,3 +523,8 @@ RF49,solicitud_formal.responder,AE,AG,,vigente,si,,200,concedido_por_ambito,en c
 RF49,solicitud_formal.responder,AD,—,,vigente,si,,200,concedido_por_ambito,también sin modo registrado
 RF49,solicitud_formal.responder,P,C,,sin_mandato,si,,200,concedido_por_ambito,P pasa el ámbito y la base lo niega: no es el destinatario
 RF49,solicitud_formal.responder,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+H5-1,liquidacion.importar,MC,C,,vigente,si,,200,concedido_por_facultad,MC sube la liquidación del administrador en Consejo (H5 D2-A)
+H5-1,liquidacion.importar,AD,AA,,vigente,si,,200,concedido_por_facultad,la administración la importa en Administrador Aumentado (H5 D2-A)
+H5-1,liquidacion.importar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
+H5-1,liquidacion.importar,P,C,,sin_mandato,si,,403,sin_concesion,P no importa: ve lo de su unidad (H5 D3)
+H5-1,liquidacion.importar,AE,C,,vigente,si,,403,sin_concesion,el administrador externo no importa

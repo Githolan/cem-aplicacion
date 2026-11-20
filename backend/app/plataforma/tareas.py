@@ -11,6 +11,7 @@ from sqlalchemy import Connection, text
 
 from app.consorcios import avisos_pagos, documentos_analisis, pagos  # noqa: F401 (registran sus tipos)
 from app.identidad import sesiones
+from app.liquidacion import importacion  # noqa: F401 (registra su tipo)
 from app.plataforma import almacen, cola, copias, correo, indices, outbox, replica_documentos
 from app.plataforma.planificador import periodica
 

@@ -669,6 +669,95 @@
         "title": "CampoComprobante",
         "type": "string"
       },
+      "CampoPreliminar": {
+        "description": "Un dato leído. `clave` es estable dentro de la importación (`gasto:3:2`, `unidad:001`).",
+        "properties": {
+          "clave": {
+            "title": "Clave",
+            "type": "string"
+          },
+          "confianza": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Confianza",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoCampo"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "orden": {
+            "title": "Orden",
+            "type": "integer"
+          },
+          "origen": {
+            "$ref": "#/components/schemas/OrigenCampo"
+          },
+          "pagina": {
+            "minimum": 1.0,
+            "title": "Pagina",
+            "type": "integer"
+          },
+          "renglon": {
+            "description": "`top` del renglón en la página, en puntos.",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Renglon",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoCampo"
+          },
+          "unidad_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La unidad del padrón, en los campos de una unidad que coincide.",
+            "title": "Unidad Id"
+          },
+          "valor": {
+            "additionalProperties": true,
+            "title": "Valor",
+            "type": "object"
+          },
+          "valor_corregido": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valor Corregido"
+          }
+        },
+        "required": [
+          "id",
+          "orden",
+          "tipo",
+          "clave",
+          "valor",
+          "confianza",
+          "origen",
+          "pagina",
+          "renglon",
+          "unidad_id",
+          "estado",
+          "valor_corregido"
+        ],
+        "title": "CampoPreliminar",
+        "type": "object"
+      },
       "CandidatoMandato": {
         "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
         "properties": {
@@ -923,7 +1012,7 @@
         "type": "object"
       },
       "CategoriaDocumento": {
-        "description": "Las 8 categorías de §4. Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y\n`ACCIONES_DE_CARGA`.",
+        "description": "Las 8 categorías de §4 y la liquidación del administrador (H5-1, `0113`). Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y\n`ACCIONES_DE_CARGA`.",
         "enum": [
           "institucional",
           "actas_y_decisiones",
@@ -932,7 +1021,8 @@
           "facturas_y_comprobantes",
           "presupuestos",
           "mantenimiento_y_certificados",
-          "otros"
+          "otros",
+          "liquidaciones_del_administrador"
         ],
         "title": "CategoriaDocumento",
         "type": "string"
@@ -1120,6 +1210,7 @@
           "cuit_repetido",
           "cuit_ya_cargado",
           "documento_invalido",
+          "liquidacion_ya_importada",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",
@@ -3082,6 +3173,37 @@
         "title": "DespuesDelActo",
         "type": "string"
       },
+      "DiferenciaLeida": {
+        "additionalProperties": true,
+        "description": "Lo que no cierra al cruzar lo leído (D5: más de un centavo) o una unidad que no está en el\npadrón. Dice la diferencia y su base; no califica (RN33).",
+        "properties": {
+          "detalle": {
+            "title": "Detalle",
+            "type": "string"
+          },
+          "pagina": {
+            "title": "Pagina",
+            "type": "integer"
+          },
+          "regla": {
+            "title": "Regla",
+            "type": "string"
+          },
+          "renglon": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Renglon",
+            "type": "string"
+          }
+        },
+        "required": [
+          "regla",
+          "detalle",
+          "pagina",
+          "renglon"
+        ],
+        "title": "DiferenciaLeida",
+        "type": "object"
+      },
       "DiferenciaPagoManual": {
         "description": "Lo que se pagó de verdad, sin la cuenta completa.",
         "properties": {
@@ -4197,6 +4319,16 @@
         "title": "EsquemaCoeficientes",
         "type": "object"
       },
+      "EstadoCampo": {
+        "enum": [
+          "pendiente",
+          "confirmado",
+          "corregido",
+          "descartado"
+        ],
+        "title": "EstadoCampo",
+        "type": "string"
+      },
       "EstadoCaso": {
         "enum": [
           "abierto",
@@ -4329,6 +4461,17 @@
           "vigente"
         ],
         "title": "EstadoDocumentacionProveedor",
+        "type": "string"
+      },
+      "EstadoImportacion": {
+        "enum": [
+          "leyendo",
+          "para_confirmar",
+          "no_reconocida",
+          "confirmada",
+          "descartada"
+        ],
+        "title": "EstadoImportacion",
         "type": "string"
       },
       "EstadoInvitacion": {
@@ -5871,6 +6014,152 @@
           "invitaciones_reemplazadas"
         ],
         "title": "ImportacionAplicada",
+        "type": "object"
+      },
+      "ImportacionCreada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ImportacionCreada",
+        "type": "object"
+      },
+      "ImportacionLiquidacion": {
+        "properties": {
+          "campos": {
+            "items": {
+              "$ref": "#/components/schemas/CampoPreliminar"
+            },
+            "title": "Campos",
+            "type": "array"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "diferencias": {
+            "items": {
+              "$ref": "#/components/schemas/DiferenciaLeida"
+            },
+            "title": "Diferencias",
+            "type": "array"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoImportacion"
+          },
+          "formato": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`mis_expensas` cuando se reconoció el formato.",
+            "title": "Formato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "leida_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leida En"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por qué no se reconoció, con `no_reconocida`.",
+            "title": "Motivo"
+          },
+          "periodo": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodo"
+          },
+          "subida_por": {
+            "format": "uuid",
+            "title": "Subida Por",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "documento_id",
+          "version_documento_id",
+          "subida_por",
+          "creada_en",
+          "estado",
+          "formato",
+          "periodo",
+          "motivo",
+          "diferencias",
+          "leida_en",
+          "campos"
+        ],
+        "title": "ImportacionLiquidacion",
+        "type": "object"
+      },
+      "ImportacionNueva": {
+        "additionalProperties": false,
+        "description": "La versión del documento que se importa: un PDF `disponible` de la categoría\n`liquidaciones_del_administrador`.",
+        "properties": {
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "version_documento_id"
+        ],
+        "title": "ImportacionNueva",
         "type": "object"
       },
       "InformeImportacion": {
@@ -9389,6 +9678,14 @@
         "title": "OrdenesPorEstado",
         "type": "object"
       },
+      "OrigenCampo": {
+        "enum": [
+          "determinista",
+          "ia"
+        ],
+        "title": "OrigenCampo",
+        "type": "string"
+      },
       "OrigenEvento": {
         "description": "De dónde vino el evento, en términos funcionales.",
         "enum": [
@@ -12517,6 +12814,18 @@
           "image/png"
         ],
         "title": "TipoArchivo",
+        "type": "string"
+      },
+      "TipoCampo": {
+        "enum": [
+          "total",
+          "rubro",
+          "gasto",
+          "unidad",
+          "importe_unidad",
+          "saldo_unidad"
+        ],
+        "title": "TipoCampo",
         "type": "string"
       },
       "TipoCarga": {
@@ -17552,6 +17861,130 @@
           }
         },
         "summary": "Abrir el borrador de un período (versión siguiente; uno solo a la vez)",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas": {
+      "post": {
+        "operationId": "importar_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportacionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportacionCreada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "409": {
+            "description": "Esa versión ya se importó (`liquidacion_ya_importada`)."
+          },
+          "422": {
+            "description": "No es un PDF disponible de una liquidación del administrador."
+          }
+        },
+        "summary": "Importar la liquidación del administrador: la lectura corre en segundo plano",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}": {
+      "get": {
+        "description": "Mientras `estado` es `leyendo`, se vuelve a preguntar.",
+        "operationId": "importacion_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportacionLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "404": {
+            "description": "La importación no existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Una liquidación importada: lo leído, campo por campo, y sus diferencias",
         "tags": [
           "liquidaciones"
         ]

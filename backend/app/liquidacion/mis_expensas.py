@@ -157,6 +157,7 @@ class LiquidacionLeida:
     total_gastos: Decimal
     unidades: tuple[FilaUnidad, ...]
     totales_prorrateo: TotalesProrrateo
+    origen_totales_gastos: Origen
     diferencias: tuple[Diferencia, ...] = field(default=())
 
 
@@ -642,6 +643,7 @@ def leer(paginas: Sequence[Pagina]) -> LiquidacionLeida:
         rubros=tuple(rubros),
         totales_gastos=totales,
         total_gastos=total,
+        origen_totales_gastos=origen_totales,
         unidades=tuple(unidades),
         totales_prorrateo=totales_prorrateo,
     )

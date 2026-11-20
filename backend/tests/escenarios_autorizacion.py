@@ -161,6 +161,13 @@ ADICIONES_0110 = {
     "administrador": [],
     "administrador_externo": [],
 }
+# `0113` (H5-1, D2-A del 19-11-2026): importar la liquidación del administrador, MC y AD.
+CATALOGO |= {"liquidacion.importar": False}
+ADICIONES_0113 = {
+    "miembro_consejo": ["liquidacion.importar"],
+    "administrador": ["liquidacion.importar"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -170,6 +177,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0036[tipo]
     + ADICIONES_0046[tipo]
     + ADICIONES_0110[tipo]
+    + ADICIONES_0113[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

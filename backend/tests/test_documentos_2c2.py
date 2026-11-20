@@ -41,9 +41,13 @@ firmas_de_la_imagen = carga.firmas_de_la_imagen
 TODAS = [
     "institucional", "actas_y_decisiones", "seguros", "contratos_proveedores",
     "facturas_y_comprobantes", "presupuestos", "mantenimiento_y_certificados", "otros",
+    "liquidaciones_del_administrador",
 ]  # fmt: skip
 RESTRINGIDAS = {"contratos_proveedores", "otros"}
-OPERATIVAS = {"actas_y_decisiones", "presupuestos", "mantenimiento_y_certificados"}
+OPERATIVAS = {
+    "actas_y_decisiones", "presupuestos", "mantenimiento_y_certificados",
+    "liquidaciones_del_administrador",
+}  # fmt: skip
 
 
 def documento_con_archivo(e, motor_app, categoria: str, contenido: bytes | None = None):
@@ -89,12 +93,12 @@ def denegadas(motor_migrate, cons, accion: str) -> list[str]:
 # Lista ----------------------------------------------------------------------------------
 
 
-def test_el_propietario_ve_seis_categorias_y_el_consejo_las_ocho(escena, bucket, motor_app):
+def test_el_propietario_ve_siete_categorias_y_el_consejo_las_nueve(escena, bucket, motor_app):
     e = escena
     for categoria in TODAS:
         documento_con_archivo(e, motor_app, categoria)
     # La propietaria (por su vínculo) no ve contratos ni otros; el Consejo, con la facultad
-    # `documentos.ver`, ve las ocho.
+    # `documentos.ver`, ve las nueve (la novena, la liquidación del administrador, es de `0113`).
     assert categorias(listar(e["prop"], e["cons"])) == set(TODAS) - RESTRINGIDAS
     assert categorias(listar(e["mc"], e["cons"])) == set(TODAS)
 
