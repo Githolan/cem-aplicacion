@@ -327,6 +327,13 @@ def test_lo_leido_no_cambia_y_la_decision_solo_mientras_se_confirma(
         ({"a": 1}, {"a": True}, False),
         ({"a": ["x"]}, {"a": ["y"]}, True),
         ({"a": "x"}, {"a": " "}, False),
+        # Un importe vacío (la IA puede no leer el total de un rubro) se corrige con un importe.
+        ({"nombre": "Luz", "total": None}, {"nombre": "Luz", "total": "12.50"}, True),
+        ({"nombre": "Luz", "total": None}, {"nombre": "Luz", "total": "no es un importe"}, False),
+        ({"nombre": "Luz", "total": None}, {"nombre": "Luz", "total": "1,25"}, False),
+        ({"total": None}, {"total": "12345678901234567.00"}, False),
+        ({"importes": {"AySA": None}}, {"importes": {"AySA": "texto"}}, False),
+        ({"grupos": {"A": {"monto": None}}}, {"grupos": {"A": {"monto": "x"}}}, False),
     ],
 )
 def test_forma_igual(leido, corregido, vale):

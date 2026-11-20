@@ -415,15 +415,25 @@ def importaciones_liquidacion(
     return [ImportacionResumen(**f) for f in filas]
 
 
-def forma_igual(leido: Any, corregido: Any) -> bool:
+# Las claves de un valor leído que son importes (o porcentajes, con la misma forma), y las que
+# agrupan importes por nombre de grupo: lo que vale ahí es un importe aunque lo leído esté vacío.
+CLAVES_DE_IMPORTE = frozenset({
+    "total", "saldo_anterior", "pagos", "deuda", "interes", "disponible", "otros_gastos",
+    "redondeo", "porcentaje", "monto",
+})  # fmt: skip
+CLAVES_DE_GRUPOS = frozenset({"importes", "grupos"})
+
+
+def forma_igual(leido: Any, corregido: Any, clave: str = "", de: str = "") -> bool:
     """El valor corregido tiene la forma del leído: las mismas claves en cada nivel, un importe
-    donde había un importe (o vacío), un número donde había un número y un texto corto donde había
-    un texto. Ningún texto con una cuenta bancaria."""
+    donde va un importe (por su clave, o porque lo leído lo era; vacío también vale), un número
+    donde había un número y un texto corto donde había un texto. Ningún texto con una cuenta
+    bancaria."""
     if isinstance(leido, dict):
         return (
             isinstance(corregido, dict)
             and leido.keys() == corregido.keys()
-            and all(forma_igual(leido[k], corregido[k]) for k in leido)
+            and all(forma_igual(leido[k], corregido[k], k, clave) for k in leido)
         )
     if isinstance(leido, list):
         return isinstance(corregido, list) and all(forma_igual("", x) for x in corregido)
@@ -431,7 +441,8 @@ def forma_igual(leido: Any, corregido: Any) -> bool:
         return type(leido) is type(corregido)
     if isinstance(leido, int):
         return type(corregido) is int
-    if isinstance(leido, str) and IMPORTE_TEXTO.match(leido):
+    es_importe = clave in CLAVES_DE_IMPORTE or de in CLAVES_DE_GRUPOS
+    if es_importe or (isinstance(leido, str) and IMPORTE_TEXTO.match(leido)):
         return corregido is None or (
             isinstance(corregido, str) and IMPORTE_TEXTO.match(corregido) is not None
         )
