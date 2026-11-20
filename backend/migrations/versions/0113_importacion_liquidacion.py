@@ -22,7 +22,8 @@ de `cem-trabajos` la pasa a `para_confirmar` (con formato, período y diferencia
 (`jsonb`, los importes como texto decimal), confianza, origen (`determinista` o `ia`) y el renglón
 de la página de donde salió. Las filas de unidades llevan la unidad del padrón si su departamento o
 su número coinciden con una sola designación; si ninguna, la lectura suma la diferencia
-`unidad_fuera_del_padron`, y si más de una (`1-A` y `1-a`), `unidad_ambigua`. Solo se agregan: un `trigger` niega cambiarlas o borrarlas (H5-3 abre la
+`unidad_fuera_del_padron`, y si más de una (`1-A` y `1-a`), `unidad_ambigua`.
+Solo se agregan: un `trigger` niega cambiarlas o borrarlas (H5-3 abre la
 confirmación con su propia función).
 
 **RN30 en la base** (`campos_oficiales_liquidacion`): solo campos `confirmado` o `corregido` de una
