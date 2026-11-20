@@ -6069,7 +6069,7 @@
                 "type": "null"
               }
             ],
-            "description": "`mis_expensas` cuando se reconoció el formato.",
+            "description": "`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída por el modelo).",
             "title": "Formato"
           },
           "id": {
@@ -6098,7 +6098,7 @@
                 "type": "null"
               }
             ],
-            "description": "Por qué no se reconoció, con `no_reconocida`.",
+            "description": "Por qué no se leyó, con `no_reconocida`: sin el formato y, si se intentó con IA, por qué tampoco así (el tope del mes, una falla del modelo); se carga a mano.",
             "title": "Motivo"
           },
           "periodo": {

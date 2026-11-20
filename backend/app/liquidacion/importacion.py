@@ -5,14 +5,16 @@
   en la misma transacción.
 - **Lectura en `cem-trabajos`** (`liquidacion.leer`): palabras con su recuadro (`palabras_pdf`),
   formato Mis Expensas (`mis_expensas`) y cada dato como campo preliminar con su renglón de origen.
-  Si el formato no se reconoce, la importación queda `no_reconocida` con el motivo. Sin IA: lo que
-  la lectura determinista no resuelve es H5-2.
+  Si el formato no se reconoce y el PDF tiene texto, lo lee el modelo (`lectura_ia`, H5-2), dentro
+  del tope mensual de gasto que lleva la base (`0114`, D4). Si tampoco así se lee, la importación
+  queda `no_reconocida` con el motivo.
 - **`GET …/liquidaciones-importadas/{id}`** (`liquidacion.importar`): la importación, sus
   diferencias y sus campos, con su estado. No es una lectura oficial: lo oficial sale solo de
   `nucleo.campos_oficiales_liquidacion` (RN30).
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, timedelta
@@ -34,15 +36,19 @@ from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
+from app import llm
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
+from app.consorcios import lectura_comprobantes
 from app.consorcios.padron import Discrepancia
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
-from app.liquidacion import mis_expensas, palabras_pdf
+from app.liquidacion import lectura_ia, mis_expensas, palabras_pdf
 from app.plataforma import almacen, cola
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
+
+log = logging.getLogger("cem.liquidacion")
 
 ACCION = "liquidacion.importar"
 TRABAJO_LEER = "liquidacion.leer"
@@ -188,16 +194,82 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         lugar["VersionId"] = v["version_objeto"]
     contenido = origen.cliente().get_object(**lugar)["Body"].read()
     try:
-        lq = mis_expensas.leer(palabras_pdf.paginas(contenido))
+        paginas = palabras_pdf.paginas(contenido)
     except PdfminerException:
         _guardar(conn, importacion, None, None, PDF_ILEGIBLE, [], [])
         return {"leida": False, "motivo": "pdf_ilegible"}
+    try:
+        lq = mis_expensas.leer(paginas)
     except mis_expensas.FormatoNoReconocido as e:
-        _guardar(conn, importacion, None, None, str(e)[:LARGO_MOTIVO], [], [])
-        return {"leida": False, "motivo": "formato_no_reconocido"}
+        return _leer_con_ia(conn, trabajo, importacion, paginas, str(e))
     ano, mes = lq.periodo
     _guardar(conn, importacion, FORMATO, date(ano, mes, 1), None, diferencias(lq), campos(lq))
     return {"leida": True, "diferencias": len(lq.diferencias)}
+
+
+def _aparte(conn: Connection, trabajo: cola.Trabajo):
+    """Una transacción propia, que queda aunque la del trabajo se deshaga: el gasto en IA se anota
+    antes y después de la llamada, porque la llamada se paga aunque lo demás falle."""
+    return transaccion(conn.engine, persona_id=None, consorcio_id=trabajo.consorcio_id)
+
+
+def _leer_con_ia(
+    conn: Connection,
+    trabajo: cola.Trabajo,
+    importacion: UUID,
+    paginas: list[mis_expensas.Pagina],
+    sin_formato: str,
+) -> dict[str, Any]:
+    """Lo que el formato conocido no resuelve, con el modelo. Cada salida sin lectura guarda la
+    importación `no_reconocida` con el motivo: después se carga a mano (H5-3)."""
+
+    def no_reconocida(clave: str) -> dict[str, Any]:
+        motivo = f"{lectura_ia.MOTIVOS[clave]} Sin IA: {sin_formato}"
+        _guardar(conn, importacion, None, None, motivo[:LARGO_MOTIVO], [], [])
+        return {"leida": False, "motivo": clave}
+
+    if not lectura_comprobantes.encendida() or not any(p.palabras for p in paginas):
+        _guardar(conn, importacion, None, None, sin_formato[:LARGO_MOTIVO], [], [])
+        return {"leida": False, "motivo": "formato_no_reconocido"}
+    doc = lectura_ia.documento(paginas)
+    if doc.largo > lectura_ia.LARGO_MAXIMO:
+        return no_reconocida("largo")
+    with _aparte(conn, trabajo) as c:
+        reserva, motivo = c.execute(
+            text("select * from plataforma.reservar_gasto_ia(:u, :i, :e, :s)"),
+            {"u": TRABAJO_LEER, "i": importacion, "e": doc.fichas_maximas_entrada,
+             "s": lectura_ia.MAX_TOKENS},
+        ).one()  # fmt: skip
+    if reserva is None:
+        return no_reconocida(motivo)
+    try:
+        respuesta: llm.Respuesta | None = lectura_ia.pedir(doc)
+    except llm.ErrorDeModelo as e:
+        log.warning("la lectura con IA de la liquidación falló: %s", e)
+        respuesta = None
+    with _aparte(conn, trabajo) as c:
+        # Una llamada que falló pudo haberse cobrado: sin modelo informado, cuenta el máximo.
+        c.execute(
+            text("select plataforma.registrar_gasto_ia(:r, :m, :e, :s)"),
+            {"r": reserva} | (
+                {"m": None, "e": None, "s": None} if respuesta is None else
+                {"m": respuesta.modelo, "e": respuesta.fichas_entrada,
+                 "s": respuesta.fichas_salida}
+            ),
+        )  # fmt: skip
+    if respuesta is None:
+        return no_reconocida("falla_del_modelo")
+    try:
+        leida = lectura_ia.interpretar(respuesta.texto, doc)
+    except lectura_ia.RespuestaInvalida as e:
+        log.warning("la lectura con IA de la liquidación no validó: %s", e)
+        return no_reconocida("respuesta_invalida")
+    if isinstance(leida, str):
+        return no_reconocida(leida)
+    _guardar(conn, importacion, lectura_ia.FORMATO, leida.periodo, None, leida.diferencias,
+             leida.campos)  # fmt: skip
+    return {"leida": True, "con_ia": True, "prompt": lectura_ia.VERSION_PROMPT,
+            "modelo": respuesta.modelo, "diferencias": len(leida.diferencias)}  # fmt: skip
 
 
 # --- Rutas -------------------------------------------------------------------------------------

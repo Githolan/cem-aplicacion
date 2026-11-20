@@ -166,7 +166,7 @@ class LiquidacionLeida:
 
 
 @dataclass(frozen=True)
-class _Renglon:
+class Renglon:
     pagina: int
     top: float
     palabras: tuple[Palabra, ...]
@@ -184,14 +184,14 @@ class _Renglon:
         return Origen(self.pagina, round(self.top, 1))
 
 
-def _renglones(pagina: Pagina, numero: int) -> list[_Renglon]:
+def renglones_de(pagina: Pagina, numero: int) -> list[Renglon]:
     filas: list[list[Palabra]] = []
     for p in sorted(pagina.palabras, key=lambda p: (p.top, p.x0)):
         if filas and abs(filas[-1][0].top - p.top) <= TOLERANCIA_RENGLON:
             filas[-1].append(p)
         else:
             filas.append([p])
-    return [_Renglon(numero, f[0].top, tuple(sorted(f, key=lambda p: p.x0))) for f in filas]
+    return [Renglon(numero, f[0].top, tuple(sorted(f, key=lambda p: p.x0))) for f in filas]
 
 
 def _ancho_caracter(p: Palabra) -> float:
@@ -252,7 +252,7 @@ def _columna(columnas: Sequence[tuple[str, float]], x1: float) -> str | None:
 # Encabezado
 
 
-def _periodo(renglones: Sequence[_Renglon]) -> tuple[int, int]:
+def _periodo(renglones: Sequence[Renglon]) -> tuple[int, int]:
     for r in renglones:
         m = PERIODO.search(r.texto)
         if m and _normal(m.group(1)) in MESES:
@@ -260,7 +260,7 @@ def _periodo(renglones: Sequence[_Renglon]) -> tuple[int, int]:
     raise FormatoNoReconocido("no se encontró «Liquidación de <mes> <año>»")
 
 
-def _vencimientos(renglones: Sequence[_Renglon]) -> tuple[str, ...]:
+def _vencimientos(renglones: Sequence[Renglon]) -> tuple[str, ...]:
     vistos: dict[str, str] = {}
     for r in renglones:
         for m in VENCIMIENTO.finditer(r.texto):
@@ -272,7 +272,7 @@ def _vencimientos(renglones: Sequence[_Renglon]) -> tuple[str, ...]:
 # Tabla de gastos
 
 
-def _encabezado_gastos(r: _Renglon) -> list[tuple[str, float]] | None:
+def _encabezado_gastos(r: Renglon) -> list[tuple[str, float]] | None:
     """Columnas de importes del encabezado de la tabla de gastos, o `None` si no lo es."""
     celdas = _celdas(r.palabras)
     textos = [_normal(c.texto) for c in celdas]
@@ -289,7 +289,7 @@ def _encabezado_gastos(r: _Renglon) -> list[tuple[str, float]] | None:
 
 
 def _leer_gastos(
-    renglones: Sequence[_Renglon],
+    renglones: Sequence[Renglon],
 ) -> tuple[tuple[str, ...], list[Rubro], dict[str, Decimal], Decimal, Origen]:
     grupos: tuple[str, ...] | None = None
     columnas: list[tuple[str, float]] = []
@@ -405,7 +405,7 @@ class _ColumnasProrrateo:
     el nombre del propietario, alineado a la izquierda, termina después."""
 
 
-def _columnas_prorrateo(banda: Sequence[_Renglon], grupos: Sequence[str]) -> _ColumnasProrrateo:
+def _columnas_prorrateo(banda: Sequence[Renglon], grupos: Sequence[str]) -> _ColumnasProrrateo:
     celdas = [c for r in banda for c in _celdas(r.palabras)]
     normales = {_normal(g) for g in grupos}
     rotulos = [c for c in celdas if _normal(c.texto) in normales]
@@ -460,7 +460,7 @@ def _columnas_prorrateo(banda: Sequence[_Renglon], grupos: Sequence[str]) -> _Co
     return _ColumnasProrrateo(columnas, columnas[0][1], hojas[1].x0, hojas[1].x1 + SANGRIA)
 
 
-def _valores_prorrateo(r: _Renglon, cols: _ColumnasProrrateo) -> dict[str, str]:
+def _valores_prorrateo(r: Renglon, cols: _ColumnasProrrateo) -> dict[str, str]:
     valores: dict[str, str] = {}
     for p in r.palabras:
         if p.x1 > cols.inicio_valores and _es_valor(p.texto):
@@ -486,11 +486,11 @@ def _partes(
 
 
 def _leer_prorrateo(
-    renglones: Sequence[_Renglon], grupos: Sequence[str]
+    renglones: Sequence[Renglon], grupos: Sequence[str]
 ) -> tuple[list[FilaUnidad], TotalesProrrateo]:
     unidades: list[FilaUnidad] = []
     cols: _ColumnasProrrateo | None = None
-    banda: list[_Renglon] | None = None
+    banda: list[Renglon] | None = None
     for r in renglones:
         texto = _normal(r.texto)
         if "prorrateo" in texto and not any(_es_valor(t) for t in r.textos):
@@ -635,7 +635,7 @@ def _verificar(lq: LiquidacionLeida, origen_totales: Origen) -> tuple[Diferencia
 
 def leer(paginas: Sequence[Pagina]) -> LiquidacionLeida:
     """Lee una liquidación de Mis Expensas a partir de las palabras de sus páginas."""
-    renglones = [r for i, p in enumerate(paginas, 1) for r in _renglones(p, i)]
+    renglones = [r for i, p in enumerate(paginas, 1) for r in renglones_de(p, i)]
     if not renglones:
         raise FormatoNoReconocido("el documento no tiene texto")
     grupos, rubros, totales, total, origen_totales = _leer_gastos(renglones)

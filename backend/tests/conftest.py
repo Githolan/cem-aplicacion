@@ -385,6 +385,12 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "   end if;"
                 # Las liquidaciones importadas y lo leído (0113) citan sus versiones y unidades.
                 "   if to_regclass('nucleo.importacion_liquidacion') is not null then"
+                # El gasto en IA de cada lectura (0114) cita la importación: va antes.
+                "     if to_regclass('plataforma.gasto_ia') is not null then"
+                "       alter table plataforma.gasto_ia disable trigger user;"
+                "       delete from plataforma.gasto_ia;"
+                "       alter table plataforma.gasto_ia enable trigger user;"
+                "     end if;"
                 "     alter table nucleo.campo_preliminar disable trigger user;"
                 "     delete from nucleo.campo_preliminar;"
                 "     alter table nucleo.campo_preliminar enable trigger user;"
