@@ -355,3 +355,20 @@ def test_dos_importes_en_la_misma_columna_cortan_la_lectura():
 def test_un_documento_sin_texto_no_es_una_liquidacion():
     with pytest.raises(FormatoNoReconocido, match="no tiene texto"):
         leer([Pagina(595.0, 841.0, ())])
+
+
+def test_el_porcentaje_de_totales_se_compara_con_la_suma_de_las_unidades():
+    totales = [*TOTALES_PRORRATEO[:5], "90,00", *TOTALES_PRORRATEO[6:]]
+    dif = leer(liquidacion(totales_prorrateo=totales)).diferencias
+    assert [(d.regla, d.detalle, d.esperado, d.informado) for d in dif] == [
+        ("prorrateo_columna", "% Gastos Comunes", D("100.00"), D("90.00")),
+    ]
+
+
+def test_un_encabezado_de_prorrateo_incompleto_no_se_lee():
+    paginas = liquidacion()
+    # Queda UF, Depto. y Propietario; se quitan los demás rótulos del encabezado.
+    corte = [p for p in paginas[2].palabras if not (54 <= p.top <= 67 and p.x0 > 200)]
+    paginas[2] = Pagina(841.0, 595.0, tuple(corte))
+    with pytest.raises(FormatoNoReconocido, match="sin columna"):
+        leer(paginas)

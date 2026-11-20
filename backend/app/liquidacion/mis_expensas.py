@@ -420,13 +420,17 @@ def _columnas_prorrateo(banda: Sequence[_Renglon], grupos: Sequence[str]) -> _Co
             hojas.append(c)
     hojas.sort(key=lambda c: c.x0)
     nombres = [_normal(h.texto) for h in hojas]
+
+    def en(i: int) -> str:
+        return nombres[i] if i < len(nombres) else "(sin columna)"
+
     if nombres[:3] != ["uf", "depto.", "propietario"]:
         raise FormatoNoReconocido(f"el prorrateo no empieza con UF, Depto., Propietario: {nombres}")
     columnas: list[tuple[str, float]] = []
     i = 3
     for clave in _FIJAS:
-        if not nombres[i].startswith(clave):
-            raise FormatoNoReconocido(f"se esperaba la columna {clave!r} y está {nombres[i]!r}")
+        if not en(i).startswith(clave):
+            raise FormatoNoReconocido(f"se esperaba la columna {clave!r} y está {en(i)!r}")
         columnas.append((clave, hojas[i].x0))
         i += 1
     for g in grupos:
@@ -438,8 +442,8 @@ def _columnas_prorrateo(banda: Sequence[_Renglon], grupos: Sequence[str]) -> _Co
             raise FormatoNoReconocido(f"el grupo {g!r} no está sobre sus columnas % y Monto")
         columnas += [(f"%:{g}", hojas[i].x0), (f"monto:{g}", hojas[i + 1].x0)]
         i += 2
-    if not nombres[i].startswith("otros"):
-        raise FormatoNoReconocido(f"se esperaba «Otros gastos» y está {nombres[i]!r}")
+    if not en(i).startswith("otros"):
+        raise FormatoNoReconocido(f"se esperaba «Otros gastos» y está {en(i)!r}")
     columnas.append(("otros", hojas[i].x0))
     resto = nombres[i + 1 :]
     if len(resto) != 2 or resto[-1] != "total":
@@ -608,6 +612,14 @@ def _verificar(lq: LiquidacionLeida, origen_totales: Origen) -> tuple[Diferencia
         )
         pcts = sum((u.grupos[grupo].porcentaje or Decimal(0) for u in lq.unidades), Decimal(0))
         comparar("prorrateo_porcentaje_100", grupo, Decimal(100), pcts, tp.origen)
+        informado = tp.grupos[grupo].porcentaje
+        comparar(
+            "prorrateo_columna",
+            f"% {grupo}",
+            pcts,
+            Decimal(0) if informado is None else informado,
+            tp.origen,
+        )
     return tuple(dif)
 
 
