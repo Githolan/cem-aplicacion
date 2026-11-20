@@ -15,7 +15,7 @@
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
@@ -50,6 +50,9 @@ TRABAJO_LEER = "liquidacion.leer"
 FORMATO = "mis_expensas"
 CONFIANZA_DETERMINISTA = Decimal("1.00")
 """Un dato leído por posición y verificado por las sumas; la IA (H5-2) informa la suya."""
+INTENTOS_LEER = 5
+"""Una falla pasajera (el almacén, un reinicio) se reintenta; agotados, la lectura informa
+`falla_de_lectura`. Un PDF que no se lee o sin el formato no es una falla: se guarda."""
 LARGO_MOTIVO = 500
 """El de `nucleo.importacion_liquidacion.motivo`."""
 PDF_ILEGIBLE = "El archivo no se pudo leer como PDF."
@@ -156,7 +159,12 @@ def _guardar(
     ).scalar_one()  # fmt: skip
 
 
-@cola.REGISTRO.tipo(TRABAJO_LEER, maximo_intentos=1)
+@cola.REGISTRO.tipo(
+    TRABAJO_LEER,
+    maximo_intentos=INTENTOS_LEER,
+    retroceso_base=timedelta(minutes=1),
+    retroceso_tope=timedelta(hours=1),
+)
 def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     """Lee el PDF de una importación y guarda lo leído. El resultado no lleva lo leído:
     `plataforma.jobs` la lee soporte."""

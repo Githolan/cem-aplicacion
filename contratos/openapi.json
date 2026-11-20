@@ -1012,7 +1012,7 @@
         "type": "object"
       },
       "CategoriaDocumento": {
-        "description": "Las 8 categorías de §4 y la liquidación del administrador (H5-1, `0113`). Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y\n`ACCIONES_DE_CARGA`.",
+        "description": "Las 8 categorías de §4 y la liquidación del administrador (H5-1, `0113`). Quién ve y quién\ncarga cada una: `ACCION_DE_LECTURA` y `ACCIONES_DE_CARGA`.",
         "enum": [
           "institucional",
           "actas_y_decisiones",
@@ -4469,7 +4469,8 @@
           "para_confirmar",
           "no_reconocida",
           "confirmada",
-          "descartada"
+          "descartada",
+          "falla_de_lectura"
         ],
         "title": "EstadoImportacion",
         "type": "string"

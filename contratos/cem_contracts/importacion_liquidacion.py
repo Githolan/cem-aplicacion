@@ -41,6 +41,9 @@ class EstadoImportacion(StrEnum):
     NO_RECONOCIDA = "no_reconocida"
     CONFIRMADA = "confirmada"
     DESCARTADA = "descartada"
+    FALLA_DE_LECTURA = "falla_de_lectura"
+    """No se guarda: la lectura agotó sus intentos. Se reintenta subiendo una versión nueva del
+    documento."""
 
 
 class TipoCampo(StrEnum):

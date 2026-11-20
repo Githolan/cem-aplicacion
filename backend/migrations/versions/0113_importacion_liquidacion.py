@@ -382,7 +382,14 @@ create function nucleo.importacion_liquidacion_lectura(importacion uuid, actor u
   begin
     perform nucleo.exigir_acto_sin_gesto(c, actor, sesion, '{FACULTAD}', origen_pedido);
     return query
-      select x.id, x.documento_id, x.version_documento_id, x.subida_por, x.creada_en, x.estado,
+      select x.id, x.documento_id, x.version_documento_id, x.subida_por, x.creada_en,
+             -- Si la lectura agotó sus intentos (`muerto`), la importación no queda «leyendo»
+             -- para siempre: se dice, y se reintenta con una versión nueva del documento.
+             case when x.estado = 'leyendo' and exists (
+                    select 1 from plataforma.jobs j
+                     where j.consorcio_id = c and j.clave_unica = '{TRABAJO}:' || x.id::text
+                       and j.estado::text = 'muerto')
+                  then 'falla_de_lectura' else x.estado end,
              x.formato, x.periodo, x.motivo, x.diferencias, x.leida_en
         from nucleo.importacion_liquidacion x
        where x.consorcio_id = c and x.id = importacion;

@@ -322,3 +322,18 @@ def test_dos_unidades_que_coinciden_quedan_como_ambiguas(escena, bucket, motor_a
     ]
     assert {c["unidad_id"] for c in i["campos"] if c["valor"].get("uf") == "003"} == {None}
     assert {c["unidad_id"] is None for c in i["campos"] if c["valor"].get("uf") == "001"} == {False}
+
+
+def test_una_lectura_que_agoto_sus_intentos_lo_dice(escena, bucket, motor_app, motor_migrate):
+    """Una falla pasajera se reintenta (`INTENTOS_LEER`); si el trabajo muere, la importación no
+    queda «leyendo»: la lectura dice `falla_de_lectura`. Control: antes de matarlo, `leyendo`."""
+    assert importacion.INTENTOS_LEER > 1
+    doc, v = subida(escena, motor_app, pdf_de(liquidacion()))
+    r = importar(escena, doc, v)
+    assert r.status_code == 201, r.text
+    i = r.json()["id"]
+    assert ver(escena, i).json()["estado"] == "leyendo"
+    with motor_migrate.begin() as c:
+        c.execute(text("update plataforma.jobs set estado = 'muerto' where clave_unica = :k"),
+                  {"k": f"{importacion.TRABAJO_LEER}:{i}"})  # fmt: skip
+    assert ver(escena, i).json()["estado"] == "falla_de_lectura"
