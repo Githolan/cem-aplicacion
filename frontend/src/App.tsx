@@ -30,6 +30,7 @@ import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS, RUTA_SIN_EXPLICAR }
 import { SinExplicar } from "./pagos/SinExplicar";
 import { Padron, RUTA_PADRON } from "./Padron";
 import { Panel, RUTA_PANEL } from "./panel/Panel";
+import { LiquidacionDelAdministrador, RUTA_LIQUIDACION_ADMINISTRADOR } from "./fiscalizacion/LiquidacionDelAdministrador";
 import { RUTA_SOLICITUDES, Solicitudes } from "./fiscalizacion/Solicitudes";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
@@ -132,6 +133,10 @@ export function App() {
           ))}
           <Route path={RUTA_LIQUIDACION} element={<Exige requisito={REQUISITOS.liquidacion}><Liquidacion /></Exige>} />
           <Route path={RUTA_PANEL} element={<Exige requisito={REQUISITOS.panel}><Panel /></Exige>} />
+          <Route
+            path={RUTA_LIQUIDACION_ADMINISTRADOR}
+            element={<Exige requisito={REQUISITOS.importarLiquidacion}><LiquidacionDelAdministrador /></Exige>}
+          />
           <Route path={RUTA_SOLICITUDES} element={<Exige requisito={REQUISITOS.solicitudes}><Solicitudes /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />

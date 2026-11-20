@@ -68,6 +68,8 @@ LARGO_DESIGNACION = 40
 MAXIMO_RUBROS = 100
 MAXIMO_GASTOS = 1000
 MAXIMO_UNIDADES = 2000
+LARGO_FRAGMENTO = 500
+"""El de `nucleo.campo_preliminar.fragmento` (`0115`)."""
 
 MOTIVOS = {
     "largo": "El documento es demasiado largo para leerlo con IA; se carga a mano.",
@@ -279,8 +281,10 @@ def interpretar(texto: str, doc: Documento) -> Leida | str:
 
     def campo(tipo: str, clave: str, valor: dict[str, Any], dato: _Ubicado) -> dict[str, Any]:
         pagina, renglon = ubicar(dato, clave)
+        fragmento = doc.paginas[pagina - 1][dato.renglon - 1].texto[:LARGO_FRAGMENTO]
         return {"tipo": tipo, "clave": clave, "valor": valor, "confianza": dato.confianza,
-                "origen": "ia", "pagina": pagina, "renglon": renglon}  # fmt: skip
+                "origen": "ia", "pagina": pagina, "renglon": renglon,
+                "fragmento": fragmento}  # fmt: skip
 
     for g in leido.gastos:
         if not 1 <= g.rubro <= len(leido.rubros):

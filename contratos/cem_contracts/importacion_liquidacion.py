@@ -5,7 +5,9 @@ documento de la categoría `liquidaciones_del_administrador` y, cuando pasó el 
 importarlo. `cem-trabajos` lo lee sin IA (formato del Programa Mis Expensas) y deja cada dato como
 campo preliminar, con el renglón de la página de donde salió. Si el formato no se reconoce, lo lee
 el modelo (H5-2, `0114`), dentro del tope mensual de gasto: sus campos llevan origen `ia` y la
-confianza que informó. Nada leído es oficial hasta que una persona lo confirma (H5-3).
+confianza que informó. Nada leído es oficial hasta que una persona lo confirma (H5-3, `0115`):
+campo por campo (confirmar, corregir o descartar) y, cuando no queda ninguno pendiente, la
+importación entera.
 
 Los importes van como texto decimal con dos decimales (`"1234.56"`), tal como los informa la
 liquidación: son lo leído, no un cálculo.
@@ -87,6 +89,11 @@ class CampoPreliminar(BaseModel):
     )
     estado: EstadoCampo
     valor_corregido: dict[str, Any] | None
+    fragmento: str | None = Field(
+        description="El texto del renglón de donde salió; vacío en lecturas anteriores a `0115`."
+    )
+    confirmado_por: UUID | None = Field(description="Quién tomó la última decisión.")
+    confirmado_en: datetime | None
 
 
 class DiferenciaLeida(BaseModel):
@@ -120,4 +127,52 @@ class ImportacionLiquidacion(BaseModel):
     )
     diferencias: list[DiferenciaLeida]
     leida_en: datetime | None
+    decidida_por: UUID | None = Field(description="Quién la confirmó o la descartó.")
+    decidida_en: datetime | None
+    motivo_descarte: str | None
     campos: list[CampoPreliminar]
+
+
+class ImportacionResumen(BaseModel):
+    """Una importación en la lista del consorcio, con cuántos datos tiene y cuántos faltan
+    decidir."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    documento_id: UUID
+    version_documento_id: UUID
+    subida_por: UUID
+    creada_en: datetime
+    estado: EstadoImportacion
+    formato: str | None
+    periodo: date | None
+    motivo: str | None
+    diferencias: int = Field(ge=0)
+    campos: int = Field(ge=0)
+    pendientes: int = Field(ge=0)
+    decidida_por: UUID | None
+    decidida_en: datetime | None
+    motivo_descarte: str | None
+
+
+class DecisionCampo(StrEnum):
+    CONFIRMADO = "confirmado"
+    CORREGIDO = "corregido"
+    DESCARTADO = "descartado"
+
+
+class DecisionSobreCampo(BaseModel):
+    """Confirmar, corregir o descartar un dato leído. `valor_corregido` va solo al corregir: las
+    mismas claves que el valor leído, y los importes como texto decimal con dos decimales."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: DecisionCampo
+    valor_corregido: dict[str, Any] | None = None
+
+
+class DescarteImportacion(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: str = Field(min_length=1, max_length=500, description="Por qué no sirve.")

@@ -681,8 +681,45 @@
             "title": "Confianza",
             "type": "string"
           },
+          "confirmado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado En"
+          },
+          "confirmado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quién tomó la última decisión.",
+            "title": "Confirmado Por"
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoCampo"
+          },
+          "fragmento": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El texto del renglón de donde salió; vacío en lecturas anteriores a `0115`.",
+            "title": "Fragmento"
           },
           "id": {
             "format": "uuid",
@@ -753,7 +790,10 @@
           "renglon",
           "unidad_id",
           "estado",
-          "valor_corregido"
+          "valor_corregido",
+          "fragmento",
+          "confirmado_por",
+          "confirmado_en"
         ],
         "title": "CampoPreliminar",
         "type": "object"
@@ -1211,6 +1251,9 @@
           "cuit_ya_cargado",
           "documento_invalido",
           "liquidacion_ya_importada",
+          "importacion_decidida",
+          "campos_pendientes",
+          "correccion_invalida",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",
@@ -2888,6 +2931,15 @@
         "title": "DatosContacto",
         "type": "object"
       },
+      "DecisionCampo": {
+        "enum": [
+          "confirmado",
+          "corregido",
+          "descartado"
+        ],
+        "title": "DecisionCampo",
+        "type": "string"
+      },
       "DecisionDetalle": {
         "description": "El detalle autorizado. Quién la registró no sale: solo si fue quien lee (A15: no puede\nusarla para dar de alta ni para remover) o el equipo.",
         "properties": {
@@ -3072,6 +3124,32 @@
         "title": "DecisionResumen",
         "type": "object"
       },
+      "DecisionSobreCampo": {
+        "additionalProperties": false,
+        "description": "Confirmar, corregir o descartar un dato leído. `valor_corregido` va solo al corregir: las\nmismas claves que el valor leído, y los importes como texto decimal con dos decimales.",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/DecisionCampo"
+          },
+          "valor_corregido": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valor Corregido"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "DecisionSobreCampo",
+        "type": "object"
+      },
       "DeclaracionPagoNoRealizado": {
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/pago-manual/no-realizado`: no se pagó. Lo confirma otro ser\nhumano del Consejo; recién entonces la orden queda Fallida.",
@@ -3162,6 +3240,23 @@
           "sesiones_revocadas"
         ],
         "title": "DesasociacionHecha",
+        "type": "object"
+      },
+      "DescarteImportacion": {
+        "additionalProperties": false,
+        "properties": {
+          "motivo": {
+            "description": "Por qué no sirve.",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "DescarteImportacion",
         "type": "object"
       },
       "DespuesDelActo": {
@@ -6045,6 +6140,31 @@
             "title": "Creada En",
             "type": "string"
           },
+          "decidida_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidida En"
+          },
+          "decidida_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quién la confirmó o la descartó.",
+            "title": "Decidida Por"
+          },
           "diferencias": {
             "items": {
               "$ref": "#/components/schemas/DiferenciaLeida"
@@ -6101,6 +6221,17 @@
             "description": "Por qué no se leyó, con `no_reconocida`: sin el formato y, si se intentó con IA, por qué tampoco así (el tope del mes, una falla del modelo); se carga a mano.",
             "title": "Motivo"
           },
+          "motivo_descarte": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Descarte"
+          },
           "periodo": {
             "anyOf": [
               {
@@ -6136,6 +6267,9 @@
           "motivo",
           "diferencias",
           "leida_en",
+          "decidida_por",
+          "decidida_en",
+          "motivo_descarte",
           "campos"
         ],
         "title": "ImportacionLiquidacion",
@@ -6161,6 +6295,142 @@
           "version_documento_id"
         ],
         "title": "ImportacionNueva",
+        "type": "object"
+      },
+      "ImportacionResumen": {
+        "description": "Una importación en la lista del consorcio, con cuántos datos tiene y cuántos faltan\ndecidir.",
+        "properties": {
+          "campos": {
+            "minimum": 0.0,
+            "title": "Campos",
+            "type": "integer"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "decidida_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidida En"
+          },
+          "decidida_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidida Por"
+          },
+          "diferencias": {
+            "minimum": 0.0,
+            "title": "Diferencias",
+            "type": "integer"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoImportacion"
+          },
+          "formato": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo"
+          },
+          "motivo_descarte": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Descarte"
+          },
+          "pendientes": {
+            "minimum": 0.0,
+            "title": "Pendientes",
+            "type": "integer"
+          },
+          "periodo": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodo"
+          },
+          "subida_por": {
+            "format": "uuid",
+            "title": "Subida Por",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "documento_id",
+          "version_documento_id",
+          "subida_por",
+          "creada_en",
+          "estado",
+          "formato",
+          "periodo",
+          "motivo",
+          "diferencias",
+          "campos",
+          "pendientes",
+          "decidida_por",
+          "decidida_en",
+          "motivo_descarte"
+        ],
+        "title": "ImportacionResumen",
         "type": "object"
       },
       "InformeImportacion": {
@@ -17868,6 +18138,54 @@
       }
     },
     "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas": {
+      "get": {
+        "operationId": "importaciones_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportacionResumen"
+                  },
+                  "title": "Response Importaciones Liquidacion Api V1 Consorcios  Consorcio Id  Liquidaciones Importadas Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Las liquidaciones importadas del consorcio, la más nueva primero",
+        "tags": [
+          "liquidaciones"
+        ]
+      },
       "post": {
         "operationId": "importar_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas_post",
         "parameters": [
@@ -17986,6 +18304,251 @@
           }
         },
         "summary": "Una liquidación importada: lo leído, campo por campo, y sus diferencias",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/campos/{campo_id}/decision": {
+      "post": {
+        "operationId": "decidir_campo_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__campos__campo_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "campo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campo Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionSobreCampo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportacionLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "404": {
+            "description": "La importación o el dato no existen en este consorcio."
+          },
+          "409": {
+            "description": "Ya se confirmó o se descartó (`importacion_decidida`)."
+          },
+          "422": {
+            "description": "Decisión o corrección inválida (`correccion_invalida`)."
+          }
+        },
+        "summary": "Confirmar, corregir o descartar un dato leído de la liquidación",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion": {
+      "post": {
+        "operationId": "confirmar_importacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__confirmacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportacionLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "404": {
+            "description": "La importación o el dato no existen en este consorcio."
+          },
+          "409": {
+            "description": "Ya decidida, o quedan datos sin decidir (`campos_pendientes`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar la liquidación importada: desde ahí sus datos decididos son oficiales",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/descarte": {
+      "post": {
+        "operationId": "descartar_importacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__descarte_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DescarteImportacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportacionLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "404": {
+            "description": "La importación o el dato no existen en este consorcio."
+          },
+          "409": {
+            "description": "Ya se confirmó o se descartó (`importacion_decidida`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Descartar la liquidación importada, con el motivo",
         "tags": [
           "liquidaciones"
         ]

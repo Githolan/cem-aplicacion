@@ -208,6 +208,13 @@ class CodigoError(StrEnum):
     """El documento de respaldo no existe en este consorcio o no está vigente."""
     LIQUIDACION_YA_IMPORTADA = "liquidacion_ya_importada"
     """Esa versión de la liquidación ya se importó (`0113`)."""
+    IMPORTACION_DECIDIDA = "importacion_decidida"
+    """La liquidación importada ya se confirmó o se descartó, o no está para ese paso (`0115`)."""
+    CAMPOS_PENDIENTES = "campos_pendientes"
+    """Quedan datos leídos sin decidir: la importación todavía no se confirma (`0115`)."""
+    CORRECCION_INVALIDA = "correccion_invalida"
+    """El valor corregido no tiene la forma del leído, no cambia nada o un importe no es un
+    importe (`0115`)."""
     FACTURA_YA_ADJUNTA = "factura_ya_adjunta"
     """La orden ya tiene su factura, o hay otra subida en el antivirus (`0099`)."""
     FACTURA_NO_VIGENTE = "factura_no_vigente"

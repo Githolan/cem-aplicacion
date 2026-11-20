@@ -13,6 +13,7 @@ import { RUTA_MANDATOS } from "./Mandatos";
 import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
+import { RUTA_LIQUIDACION_ADMINISTRADOR, TITULO_LIQUIDACION_ADMINISTRADOR } from "./fiscalizacion/LiquidacionDelAdministrador";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
 import { useSolicitudesDirigidas } from "./fiscalizacion/solicitudesDirigidas";
 import { cumpleEnAlguno, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
@@ -78,6 +79,7 @@ export const DE_ADMINISTRACION: readonly Destino[] = [
   // Con la navegación a la vista también en el Panel (informe de fricción, AC-09).
   { ruta: RUTA_PANEL, texto: TITULO_PANEL, icono: "grafico", requisito: REQUISITOS.panel },
   { ruta: RUTA_SOLICITUDES, texto: TITULO_SOLICITUDES, icono: "sobre", requisito: REQUISITOS.panel },
+  { ruta: RUTA_LIQUIDACION_ADMINISTRADOR, texto: TITULO_LIQUIDACION_ADMINISTRADOR, icono: "documento", requisito: REQUISITOS.importarLiquidacion },
 ];
 
 /**
