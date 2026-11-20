@@ -111,7 +111,7 @@ class ImportacionLiquidacion(BaseModel):
     creada_en: datetime
     estado: EstadoImportacion
     formato: str | None = Field(
-        description="`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída por el modelo)."
+        description="`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída con IA)."
     )
     periodo: date | None
     motivo: str | None = Field(

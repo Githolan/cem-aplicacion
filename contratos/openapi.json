@@ -6069,7 +6069,7 @@
                 "type": "null"
               }
             ],
-            "description": "`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída por el modelo).",
+            "description": "`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída con IA).",
             "title": "Formato"
           },
           "id": {
