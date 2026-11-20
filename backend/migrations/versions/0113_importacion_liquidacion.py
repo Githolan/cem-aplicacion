@@ -21,8 +21,8 @@ de `cem-trabajos` la pasa a `para_confirmar` (con formato, período y diferencia
 **`nucleo.campo_preliminar`.** Cada dato leído: tipo, clave estable dentro de la importación, valor
 (`jsonb`, los importes como texto decimal), confianza, origen (`determinista` o `ia`) y el renglón
 de la página de donde salió. Las filas de unidades llevan la unidad del padrón si su departamento o
-su número coinciden con la designación; si no, la lectura suma la diferencia
-`unidad_fuera_del_padron`. Solo se agregan: un `trigger` niega cambiarlas o borrarlas (H5-3 abre la
+su número coinciden con una sola designación; si ninguna, la lectura suma la diferencia
+`unidad_fuera_del_padron`, y si más de una (`1-A` y `1-a`), `unidad_ambigua`. Solo se agregan: un `trigger` niega cambiarlas o borrarlas (H5-3 abre la
 confirmación con su propia función).
 
 **RN30 en la base** (`campos_oficiales_liquidacion`): solo campos `confirmado` o `corregido` de una
@@ -229,6 +229,33 @@ create function nucleo.clave_designacion(designacion text)
   set search_path = pg_catalog, pg_temp
   as $$ select lower(regexp_replace(btrim(designacion), '\\s+', ' ', 'g')) $$;
 
+-- Las unidades vigentes cuya designación coincide con el departamento leído; si ninguna, con el
+-- número de la unidad. Más de una es una ambigüedad (como `_unidades` del padrón, RF02).
+create function nucleo.unidades_que_coinciden(c uuid, depto text, uf text)
+  returns uuid[]
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select coalesce(
+      (select array_agg(u.id) from nucleo.unidad u
+        where u.consorcio_id = c and u.eliminado_en is null
+          and nucleo.clave_designacion(u.designacion) = nucleo.clave_designacion(depto)),
+      (select array_agg(u.id) from nucleo.unidad u
+        where u.consorcio_id = c and u.eliminado_en is null
+          and nucleo.clave_designacion(u.designacion) = nucleo.clave_designacion(uf)),
+      '{{}}'::uuid[])
+  $$;
+
+-- La unidad de una fila leída: solo si coincide exactamente una.
+create function nucleo.unidad_de_la_lectura(c uuid, depto text, uf text)
+  returns uuid
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select case when cardinality(x) = 1 then x[1] end
+      from nucleo.unidades_que_coinciden(c, depto, uf) as x
+  $$;
+
 -- Quien importa, por la API, con su sesión y sin gesto (no mueve dinero).
 create function nucleo.crear_importacion_liquidacion(documento uuid, version uuid, actor uuid,
                                                      origen_pedido text, sesion uuid)
@@ -318,18 +345,14 @@ create function nucleo.guardar_lectura_liquidacion(importacion uuid, formato_lei
     select c, importacion, (e.ord - 1)::integer, e.campo->>'tipo', e.campo->>'clave',
            e.campo->'valor', (e.campo->>'confianza')::numeric, e.campo->>'origen',
            (e.campo->>'pagina')::integer, (e.campo->>'renglon')::numeric,
-           (select u.id from nucleo.unidad u
-             where u.consorcio_id = c and u.eliminado_en is null
-               and e.campo->>'tipo' in ('unidad', 'importe_unidad', 'saldo_unidad')
-               and nucleo.clave_designacion(u.designacion)
-                   in (nucleo.clave_designacion(e.campo->'valor'->>'depto'),
-                       nucleo.clave_designacion(e.campo->'valor'->>'uf'))
-             order by nucleo.clave_designacion(u.designacion)
-                      = nucleo.clave_designacion(e.campo->'valor'->>'depto') desc
-             limit 1)
+           case when e.campo->>'tipo' in ('unidad', 'importe_unidad', 'saldo_unidad') then
+             nucleo.unidad_de_la_lectura(c, e.campo->'valor'->>'depto', e.campo->'valor'->>'uf')
+           end
       from jsonb_array_elements(campos) with ordinality as e (campo, ord);
     select coalesce(jsonb_agg(jsonb_build_object(
-             'regla', 'unidad_fuera_del_padron',
+             'regla', case when cardinality(nucleo.unidades_que_coinciden(
+                                  c, p.valor->>'depto', p.valor->>'uf')) > 1
+                           then 'unidad_ambigua' else 'unidad_fuera_del_padron' end,
              'detalle', 'UF ' || (p.valor->>'uf') || ' ' || (p.valor->>'depto'),
              'pagina', p.pagina, 'renglon', p.renglon) order by p.orden), '[]'::jsonb)
       into fuera
@@ -421,7 +444,11 @@ RUTAS = (
     "nucleo.campos_preliminares_lectura(uuid, uuid, text, uuid)",
     "nucleo.campos_oficiales_liquidacion(uuid, uuid, text, uuid)",
 )
-INTERNAS = ("nucleo.clave_designacion(text)",)
+INTERNAS = (
+    "nucleo.clave_designacion(text)",
+    "nucleo.unidades_que_coinciden(uuid, text, text)",
+    "nucleo.unidad_de_la_lectura(uuid, text, text)",
+)
 
 GUARDA = f"""
 do $guarda$

@@ -307,3 +307,18 @@ def test_un_trabajo_repetido_no_vuelve_a_escribir(escena, bucket, motor_app, mot
         ).scalar_one()  # fmt: skip
     assert otra is False
     assert ver(escena, i["id"]).json()["estado"] == "para_confirmar"
+
+
+def test_dos_unidades_que_coinciden_quedan_como_ambiguas(escena, bucket, motor_app, motor_migrate):
+    """`1-B` y `1-b` caben en el padrón (el índice compara el texto exacto) y las dos coinciden con
+    el departamento leído: ninguna se asigna."""
+    con_1b(motor_migrate, escena)
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into nucleo.unidad (consorcio_id, designacion) values (:c, '1-b')"),
+                  {"c": escena["cons"]})  # fmt: skip
+    i = importada(escena, motor_app, pdf_de(liquidacion()))
+    assert [(d["regla"], d["detalle"]) for d in i["diferencias"]] == [
+        ("unidad_ambigua", "UF 003 1-B")
+    ]
+    assert {c["unidad_id"] for c in i["campos"] if c["valor"].get("uf") == "003"} == {None}
+    assert {c["unidad_id"] is None for c in i["campos"] if c["valor"].get("uf") == "001"} == {False}

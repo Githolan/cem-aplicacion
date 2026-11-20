@@ -372,3 +372,12 @@ def test_un_encabezado_de_prorrateo_incompleto_no_se_lee():
     paginas[2] = Pagina(841.0, 595.0, tuple(corte))
     with pytest.raises(FormatoNoReconocido, match="sin columna"):
         leer(paginas)
+
+
+def test_un_departamento_con_espacio_queda_entero():
+    paginas = liquidacion()
+    sin_002 = [p for p in paginas[2].palabras if p.top != 93]
+    fila = fila_unidad(93, "002", "PB A", "Beto Ensayo", UNIDAD_2)
+    paginas[2] = Pagina(841.0, 595.0, (*sin_002, *fila))
+    beto = leer(paginas).unidades[1]
+    assert (beto.uf, beto.depto, beto.nombre) == ("002", "PB A", "Beto Ensayo")

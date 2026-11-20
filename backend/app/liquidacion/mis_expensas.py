@@ -398,6 +398,11 @@ class _ColumnasProrrateo:
     """(clave, x0) en orden; claves: saldo, pagos, …, `%:<grupo>`, `monto:<grupo>`, otros,
     redondeo, total."""
     inicio_valores: float
+    fin_uf: float
+    """Donde empieza el encabezado «Depto.»: el número de la unidad termina antes."""
+    fin_depto: float
+    """Donde termina el encabezado «Depto.» (más la sangría): el departamento termina antes y
+    el nombre del propietario, alineado a la izquierda, termina después."""
 
 
 def _columnas_prorrateo(banda: Sequence[_Renglon], grupos: Sequence[str]) -> _ColumnasProrrateo:
@@ -452,7 +457,7 @@ def _columnas_prorrateo(banda: Sequence[_Renglon], grupos: Sequence[str]) -> _Co
             f"después de «Otros gastos» se esperaba redondeo y TOTAL: {resto}"
         )
     columnas += [("redondeo", hojas[i + 1].x0), ("total", hojas[i + 2].x0)]
-    return _ColumnasProrrateo(columnas, columnas[0][1])
+    return _ColumnasProrrateo(columnas, columnas[0][1], hojas[1].x0, hojas[1].x1 + SANGRIA)
 
 
 def _valores_prorrateo(r: _Renglon, cols: _ColumnasProrrateo) -> dict[str, str]:
@@ -517,13 +522,14 @@ def _leer_prorrateo(
         )
         if _normal(r.textos[0]) == "totales":
             return unidades, TotalesProrrateo(**comunes)
-        texto_izq = [p.texto for p in r.palabras if p.x1 <= cols.inicio_valores]
-        if len(texto_izq) < 2:
-            raise FormatoNoReconocido(f"la fila de la unidad no tiene departamento en {o}")
+        izq = [p for p in r.palabras if p.x1 <= cols.inicio_valores]
+        uf = [p.texto for p in izq if p.x1 <= cols.fin_uf]
+        depto = [p.texto for p in izq if cols.fin_uf < p.x1 <= cols.fin_depto]
+        nombre = [p.texto for p in izq if p.x1 > cols.fin_depto]
+        if len(uf) != 1 or not depto:
+            raise FormatoNoReconocido(f"la fila de la unidad no tiene número y departamento en {o}")
         unidades.append(
-            FilaUnidad(
-                uf=texto_izq[0], depto=texto_izq[1], nombre=" ".join(texto_izq[2:]), **comunes
-            )
+            FilaUnidad(uf=uf[0], depto=" ".join(depto), nombre=" ".join(nombre), **comunes)
         )
     raise FormatoNoReconocido("el prorrateo no tiene encabezado o no cierra con TOTALES")
 
