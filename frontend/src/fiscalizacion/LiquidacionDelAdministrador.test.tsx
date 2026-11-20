@@ -15,6 +15,11 @@ import {
   CONFIRMAR_DATO,
   CONFIRMAR_LIQUIDACION,
   CORREGIR_DATO,
+  ELEGIR_COEFICIENTES,
+  FALTA_ESQUEMA,
+  PREPARAR_SOLICITUD,
+  SIN_GRUPOS,
+  textoDeSolicitud,
   DESCARTAR_LIQUIDACION,
   EN_ANTIVIRUS,
   IMPORTAR_DE_NUEVO,
@@ -444,5 +449,139 @@ describe("pantalla /importar-liquidacion", () => {
     abrir();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Liquidación del administrador" })).toBeNull());
     expect(screen.queryByRole("button", { name: SUBIR })).toBeNull();
+  });
+});
+
+// Recálculo con los coeficientes del edificio (H5-4, app 0116). Datos SINTETICOS.
+
+type Recalculo = components["schemas"]["RecalculoLiquidacion"];
+type GrupoRecalculado = components["schemas"]["GrupoRecalculado"];
+
+const U1 = "77777777-7777-4777-8777-777777777771";
+const U2 = "77777777-7777-4777-8777-777777777772";
+const CONFIRMADA: Importacion = { ...IMPORTACION, estado: "confirmada", decidida_por: PERSONA, decidida_en: "2026-11-20T13:00:00Z", campos: [{ ...LUZ, estado: "confirmado" }] };
+const RECALCULO_URL = `${BASE}/liquidaciones-importadas/${I1}/recalculo`;
+const CORRESPONDENCIAS = `${BASE}/liquidaciones-importadas/${I1}/correspondencias`;
+const ESQUEMAS = [
+  { grupo: "agua", esquema_version: 1, vigente_desde: "2024-01-01" },
+  { grupo: "expensas_comunes", esquema_version: 2, vigente_desde: "2025-03-01" },
+];
+const SIN_ELEGIR: GrupoRecalculado = { nombre: "Gastos Comunes", estado: "sin_correspondencia", grupo: null, esquema_version: null, vigente_desde: null, total: null, unidades: [], senaladas: 0 };
+const RECALCULADO: GrupoRecalculado = {
+  nombre: "Gastos Comunes",
+  estado: "recalculado",
+  grupo: "expensas_comunes",
+  esquema_version: 2,
+  vigente_desde: "2025-03-01",
+  total: "1000.00",
+  senaladas: 1,
+  unidades: [
+    { unidad_id: U1, designacion: "PB-A", coeficiente: "50.000000", porcentaje_informado: "50.00", esperado: "500.00", informado: "500.00", diferencia: "0.00", senalada: false },
+    { unidad_id: U2, designacion: "1-A", coeficiente: "30.000000", porcentaje_informado: "35.00", esperado: "300.00", informado: "350.00", diferencia: "50.00", senalada: true },
+  ],
+};
+const recalculo = (grupos: GrupoRecalculado[], extra: Partial<Recalculo> = {}): Recalculo => ({
+  importacion_id: I1,
+  periodo: "2026-09-01",
+  sin_grupos: false,
+  grupos,
+  esquemas: ESQUEMAS,
+  ...extra,
+});
+
+describe("recálculo con los coeficientes del edificio", () => {
+  it("elige los coeficientes de un grupo, recalcula y muestra la diferencia con su base", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CONFIRMADA),
+      [`GET ${RECALCULO_URL}`]: () => Response.json(recalculo([SIN_ELEGIR])),
+      [`POST ${CORRESPONDENCIAS}`]: () => Response.json(recalculo([RECALCULADO])),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir();
+    await abrirLaImportacion();
+    expect(await screen.findByText("Falta indicar qué coeficientes del edificio corresponden a este grupo.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: ELEGIR_COEFICIENTES }));
+    const ventana = await screen.findByRole("dialog", { name: "Coeficientes para «Gastos Comunes»" });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Recalcular" }));
+    expect(await within(ventana).findByText(FALTA_ESQUEMA)).toBeTruthy();
+    expect(pedidos(api, "POST", CORRESPONDENCIAS)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Coeficientes del edificio"), { target: { value: "expensas_comunes" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Recalcular" }));
+    await waitFor(() => expect(pedidos(api, "POST", CORRESPONDENCIAS)).toHaveLength(1));
+    const [pedido] = pedidos(api, "POST", CORRESPONDENCIAS);
+    expect(await pedido?.json()).toEqual({ nombre: "Gastos Comunes", grupo: "expensas_comunes" });
+    expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await screen.findByText("«Gastos Comunes» se recalcula con los coeficientes «expensas comunes».")).toBeTruthy();
+    expect(screen.getByText(/Una unidad difiere en más de un centavo\./)).toBeTruthy();
+    // Solo la unidad con diferencia tiene su fila; su ficha dice la base de la diferencia.
+    const diferencias = screen.getByRole("list", { name: "Diferencias en Gastos Comunes" });
+    expect(within(diferencias).getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(within(diferencias).getByRole("button", { name: /1-A · informado \$ 350,00 · según los coeficientes \$ 300,00/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gastos Comunes · 1-A" });
+    expect(within(ficha).getByText("Coeficiente cargado").nextElementSibling?.textContent).toBe("30 %");
+    expect(within(ficha).getByText("Porcentaje informado").nextElementSibling?.textContent).toBe("35 %");
+    expect(within(ficha).getByText("Diferencia").nextElementSibling?.textContent).toBe("$ 50,00");
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+
+  it("una diferencia se convierte en el borrador de una solicitud formal ya redactado", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CONFIRMADA),
+      [`GET ${RECALCULO_URL}`]: () => Response.json(recalculo([RECALCULADO])),
+      [`GET ${BASE}/solicitudes-formales`]: () =>
+        Response.json({ elementos: [], puede_preparar: true, plazo_por_defecto_dias: 15, plazo_minimo_dias: 5, plazo_maximo_dias: 60, hay_administrador_vigente: true }),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    fireEvent.click(await screen.findByRole("button", { name: PREPARAR_SOLICITUD }));
+    const ventana = await screen.findByRole("dialog", { name: "Preparar una solicitud" });
+    expect((within(ventana).getByLabelText(/^Cuál/) as HTMLInputElement).value).toBe("Liquidación de septiembre de 2026");
+    const texto = (within(ventana).getByLabelText(/Documentación o aclaración/) as HTMLTextAreaElement).value;
+    expect(texto).toContain("- Gastos Comunes, 1-A: informado $ 350,00; según los coeficientes «expensas comunes» $ 300,00 (coeficiente 30 %; porcentaje informado 35 %).");
+    expect(texto).not.toContain("PB-A");
+  });
+
+  it("sin `solicitud_formal.preparar` no se ofrece la solicitud", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: alcanza("liquidacion.importar"),
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CONFIRMADA),
+      [`GET ${RECALCULO_URL}`]: () => Response.json(recalculo([RECALCULADO])),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    expect(await screen.findByText(/Una unidad difiere/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("button", { name: PREPARAR_SOLICITUD })).toBeNull());
+  });
+
+  it("una liquidación sin reparto por grupo lo dice y no ofrece nada", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CONFIRMADA),
+      [`GET ${RECALCULO_URL}`]: () => Response.json(recalculo([], { sin_grupos: true })),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    expect(await screen.findByText(SIN_GRUPOS)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: ELEGIR_COEFICIENTES })).toBeNull();
+    expect(screen.queryByRole("button", { name: PREPARAR_SOLICITUD })).toBeNull();
+  });
+
+  it("el texto de la solicitud entra en el largo que admite y dice cuántas diferencias quedan afuera", () => {
+    const base = RECALCULADO.unidades[1];
+    if (base === undefined) throw new Error("falta la unidad de la prueba");
+    const muchas: GrupoRecalculado = { ...RECALCULADO, unidades: Array.from({ length: 40 }, (_, i) => ({ ...base, unidad_id: null, designacion: `UF ${i + 1} SINTETICA` })) };
+    const texto = textoDeSolicitud(recalculo([muchas]));
+    expect(texto.length).toBeLessThanOrEqual(2000);
+    expect(texto.startsWith("Se pide la base de cálculo del reparto de la liquidación de septiembre de 2026")).toBe(true);
+    expect(texto).toMatch(/- Y \d+ diferencias más, en el recálculo de la aplicación\./);
+    expect(texto.endsWith("se pide indicar cuál.")).toBe(true);
   });
 });

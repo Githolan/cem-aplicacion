@@ -1021,6 +1021,8 @@
           "importacion_decidida",
           "campos_pendientes",
           "correccion_invalida",
+          "importacion_sin_confirmar",
+          "grupo_inexistente",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",

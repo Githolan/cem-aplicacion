@@ -1254,6 +1254,8 @@
           "importacion_decidida",
           "campos_pendientes",
           "correccion_invalida",
+          "importacion_sin_confirmar",
+          "grupo_inexistente",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",
@@ -2747,6 +2749,29 @@
           "datos"
         ],
         "title": "CopiaDatosPropios",
+        "type": "object"
+      },
+      "CorrespondenciaNueva": {
+        "additionalProperties": false,
+        "description": "Qué esquema de coeficientes del edificio (`grupo` de RF05, p. ej. `expensas_comunes`)\ncorresponde a un grupo de la liquidación, con su nombre tal como figura (p. ej. «Gastos\nComunes»). El edificio la recuerda para los meses siguientes.",
+        "properties": {
+          "grupo": {
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Grupo",
+            "type": "string"
+          },
+          "nombre": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nombre",
+          "grupo"
+        ],
+        "title": "CorrespondenciaNueva",
         "type": "object"
       },
       "CotejoAnulado": {
@@ -4414,6 +4439,30 @@
         "title": "EsquemaCoeficientes",
         "type": "object"
       },
+      "EsquemaDelPeriodo": {
+        "properties": {
+          "esquema_version": {
+            "title": "Esquema Version",
+            "type": "integer"
+          },
+          "grupo": {
+            "title": "Grupo",
+            "type": "string"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo",
+          "esquema_version",
+          "vigente_desde"
+        ],
+        "title": "EsquemaDelPeriodo",
+        "type": "object"
+      },
       "EstadoCampo": {
         "enum": [
           "pendiente",
@@ -4556,6 +4605,17 @@
           "vigente"
         ],
         "title": "EstadoDocumentacionProveedor",
+        "type": "string"
+      },
+      "EstadoGrupoRecalculado": {
+        "enum": [
+          "recalculado",
+          "sin_correspondencia",
+          "sin_esquema",
+          "sin_total",
+          "coeficientes_incompletos"
+        ],
+        "title": "EstadoGrupoRecalculado",
         "type": "string"
       },
       "EstadoImportacion": {
@@ -5996,6 +6056,90 @@
         ],
         "title": "GrupoPago",
         "type": "string"
+      },
+      "GrupoRecalculado": {
+        "properties": {
+          "esquema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Esquema Version"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoGrupoRecalculado"
+          },
+          "grupo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El esquema de coeficientes que le corresponde.",
+            "title": "Grupo"
+          },
+          "nombre": {
+            "description": "El grupo como figura en la liquidación.",
+            "title": "Nombre",
+            "type": "string"
+          },
+          "senaladas": {
+            "minimum": 0.0,
+            "title": "Senaladas",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El gasto del grupo según la liquidación.",
+            "title": "Total"
+          },
+          "unidades": {
+            "items": {
+              "$ref": "#/components/schemas/UnidadRecalculada"
+            },
+            "title": "Unidades",
+            "type": "array"
+          },
+          "vigente_desde": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vigente Desde"
+          }
+        },
+        "required": [
+          "nombre",
+          "estado",
+          "grupo",
+          "esquema_version",
+          "vigente_desde",
+          "total",
+          "unidades",
+          "senaladas"
+        ],
+        "title": "GrupoRecalculado",
+        "type": "object"
       },
       "GrupoSimulado": {
         "properties": {
@@ -11549,6 +11693,49 @@
         "title": "ProveedorVersionNueva",
         "type": "object"
       },
+      "RecalculoLiquidacion": {
+        "description": "El reparto de cada grupo de una importación confirmada con los coeficientes del edificio\nvigentes en el período, frente a lo que informó la administración. Usa solo los datos\nconfirmados o corregidos (RN30). Dice la diferencia y su base; no la califica (RN33).\n`sin_grupos`: la liquidación no informa el reparto por grupo (p. ej. leída con IA).",
+        "properties": {
+          "esquemas": {
+            "description": "Los esquemas de coeficientes vigentes en el período, para elegir.",
+            "items": {
+              "$ref": "#/components/schemas/EsquemaDelPeriodo"
+            },
+            "title": "Esquemas",
+            "type": "array"
+          },
+          "grupos": {
+            "items": {
+              "$ref": "#/components/schemas/GrupoRecalculado"
+            },
+            "title": "Grupos",
+            "type": "array"
+          },
+          "importacion_id": {
+            "format": "uuid",
+            "title": "Importacion Id",
+            "type": "string"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "sin_grupos": {
+            "title": "Sin Grupos",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "importacion_id",
+          "periodo",
+          "sin_grupos",
+          "grupos",
+          "esquemas"
+        ],
+        "title": "RecalculoLiquidacion",
+        "type": "object"
+      },
       "Rechazo": {
         "additionalProperties": false,
         "properties": {
@@ -13298,6 +13485,108 @@
           "invitable"
         ],
         "title": "Unidad",
+        "type": "object"
+      },
+      "UnidadRecalculada": {
+        "description": "Una unidad en un grupo: lo que informó la administración y lo que da el reparto con el\ncoeficiente cargado. `unidad_id` nulo: la fila de la liquidación no coincide con una unidad del\npadrón. `informado` nulo: la unidad del padrón no figura en la liquidación.",
+        "properties": {
+          "coeficiente": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El porcentaje cargado en el esquema (RF05).",
+            "title": "Coeficiente"
+          },
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "diferencia": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`informado - esperado`.",
+            "title": "Diferencia"
+          },
+          "esperado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El reparto del total del grupo, en pesos.",
+            "title": "Esperado"
+          },
+          "informado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El monto que figura en la liquidación.",
+            "title": "Informado"
+          },
+          "porcentaje_informado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Porcentaje Informado"
+          },
+          "senalada": {
+            "description": "La diferencia pasa de un centavo (D5-A).",
+            "title": "Senalada",
+            "type": "boolean"
+          },
+          "unidad_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad Id"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "designacion",
+          "coeficiente",
+          "porcentaje_informado",
+          "esperado",
+          "informado",
+          "diferencia",
+          "senalada"
+        ],
+        "title": "UnidadRecalculada",
         "type": "object"
       },
       "UnidadSimulada": {
@@ -18470,6 +18759,83 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/correspondencias": {
+      "post": {
+        "operationId": "definir_correspondencia_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__correspondencias_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrespondenciaNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculoLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "404": {
+            "description": "La importación no existe en este consorcio."
+          },
+          "409": {
+            "description": "La importación no está confirmada (`importacion_sin_confirmar`)."
+          },
+          "422": {
+            "description": "El edificio no tiene ese esquema (`grupo_inexistente`)."
+          }
+        },
+        "summary": "Qué coeficientes del edificio corresponden a un grupo de la liquidación",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/descarte": {
       "post": {
         "operationId": "descartar_importacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__descarte_post",
@@ -18549,6 +18915,68 @@
           }
         },
         "summary": "Descartar la liquidación importada, con el motivo",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/recalculo": {
+      "get": {
+        "operationId": "recalcular_importacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__recalculo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculoLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` en el consorcio."
+          },
+          "404": {
+            "description": "La importación no existe en este consorcio."
+          },
+          "409": {
+            "description": "La importación no está confirmada (`importacion_sin_confirmar`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "El reparto de cada grupo con los coeficientes del edificio, frente a lo informado",
         "tags": [
           "liquidaciones"
         ]
