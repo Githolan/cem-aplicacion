@@ -315,14 +315,16 @@ create function nucleo.resolver_campo_preliminar(importacion uuid, campo uuid, d
     p nucleo.campo_preliminar;
   begin
     perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
+    -- Primero el bloqueo de la importación y después el campo: dos decisiones a la vez sobre el
+    -- mismo campo se ordenan, y la segunda lee (y audita como `antes`) lo que dejó la primera.
+    if nucleo.importacion_para_decidir(c, importacion) <> 'para_confirmar' then
+      raise exception 'la importación ya no se confirma' using errcode = 'P0001',
+        hint = 'importacion_decidida';
+    end if;
     select x.* into p from nucleo.campo_preliminar x
      where x.consorcio_id = c and x.id = campo and x.importacion_id = importacion;
     if p.id is null then
       raise exception 'campo inexistente' using errcode = 'P0001', hint = 'no_encontrado';
-    end if;
-    if nucleo.importacion_para_decidir(c, p.importacion_id) <> 'para_confirmar' then
-      raise exception 'la importación ya no se confirma' using errcode = 'P0001',
-        hint = 'importacion_decidida';
     end if;
     if decision not in ('confirmado', 'corregido', 'descartado')
        or (decision = 'corregido') <> (corregido is not null) then

@@ -4,6 +4,7 @@ Contra servicios reales: PostgreSQL, el almacén S3 de pruebas y ClamAV. La liqu
 inventada de H5-1 (`test_mis_expensas.liquidacion`), leída sin IA. Datos SINTETICOS / NO REAL.
 """
 
+import threading
 from uuid import uuid4
 
 import pytest
@@ -13,6 +14,7 @@ from sqlalchemy.exc import DBAPIError
 from app.db import transaccion
 from app.liquidacion.importacion import forma_igual
 from tests.conftest import clave_idempotencia
+from tests.test_cerrojos_0041 import esperar_trabado
 from tests.test_documentos_2c1 import pdf
 from tests.test_importacion_liquidacion_0113 import (
     bucket,
@@ -108,6 +110,42 @@ def test_confirmar_corregir_y_descartar_cada_dato(escena, bucket, motor_app, mot
         ("unidad:003", "descartado"),
         ("gasto:1:1", "descartado"),
     ]
+
+
+def test_dos_decisiones_a_la_vez_sobre_un_dato_se_ordenan_y_la_auditoria_lo_dice(
+    escena, bucket, motor_app, motor_migrate
+):
+    """La segunda decisión espera a la primera y audita como `antes` lo que la primera dejó."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    campo = next(c["id"] for c in i["campos"] if c["clave"] == "gasto:1:1")
+    resolver = text("select nucleo.resolver_campo_preliminar(:i, :f, :d, null, :a, 'api', :s)")
+    valores = {"i": i["id"], "f": campo, "a": e["mc"], "s": e["sesion"]}
+    fallas: list[BaseException] = []
+
+    def descartar():
+        try:
+            with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
+                c.execute(resolver, valores | {"d": "descartado"})
+        except BaseException as falla:  # se vuelve a lanzar abajo, en el hilo de la prueba
+            fallas.append(falla)
+
+    with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as primera:
+        pid = primera.execute(text("select pg_backend_pid()")).scalar_one()
+        primera.execute(resolver, valores | {"d": "confirmado"})
+        hilo = threading.Thread(target=descartar)
+        hilo.start()
+        assert esperar_trabado(motor_migrate, pid) == 1  # control: la segunda espera a la primera
+    hilo.join()
+    if fallas:
+        raise fallas[0]
+    with motor_migrate.connect() as c:
+        eventos = c.execute(text(
+            "select antes->>'estado', despues->>'decision' from auditoria.eventos"
+            " where accion = 'consorcio.liquidacion.resolver_campo' and entidad_id = :f"
+            " order by secuencia"), {"f": campo}).all()  # fmt: skip
+    pasos = [tuple(x) for x in eventos]
+    assert pasos == [("pendiente", "confirmado"), ("confirmado", "descartado")]
 
 
 @pytest.mark.parametrize(
