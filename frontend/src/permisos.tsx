@@ -270,6 +270,8 @@ export const REQUISITOS = {
    * solo lee. Las mismas lecturas que la bandeja. */
   sinExplicar: [["egresos.preparar_orden"], ["egresos.revisar_orden"]],
   liquidacion: [["liquidacion.preparar"]],
+  /** La liquidación del administrador: subirla y confirmar lo leído (H5-3, app 0115; D2-A). */
+  importarLiquidacion: [["liquidacion.importar"]],
   /** El panel completo del Consejo y la administración (RF48). */
   panel: [["fiscalizacion.ver_panel"]],
   /** La pantalla de solicitudes formales (RF49, app 0108): quien ve el panel las ve todas; el

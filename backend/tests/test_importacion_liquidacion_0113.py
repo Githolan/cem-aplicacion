@@ -260,8 +260,8 @@ def test_nada_sin_confirmar_sale_en_la_lectura_oficial(escena, bucket, motor_app
     assert oficiales() == []  # el campo confirmado, pero la importación no
     como_migracion(
         "nucleo.importacion_liquidacion",
-        "update nucleo.importacion_liquidacion set estado = 'confirmada'"
-        " where id = :i and :p is not null",
+        "update nucleo.importacion_liquidacion set estado = 'confirmada', decidida_por = :p,"
+        " decidida_en = now() where id = :i",
     )
     assert oficiales() == ["rubro:2"]
 

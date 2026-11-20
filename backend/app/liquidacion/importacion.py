@@ -8,13 +8,19 @@
   Si el formato no se reconoce y el PDF tiene texto, lo lee el modelo (`lectura_ia`, H5-2), dentro
   del tope mensual de gasto que lleva la base (`0114`, D4). Si tampoco así se lee, la importación
   queda `no_reconocida` con el motivo.
-- **`GET …/liquidaciones-importadas/{id}`** (`liquidacion.importar`): la importación, sus
-  diferencias y sus campos, con su estado. No es una lectura oficial: lo oficial sale solo de
+- **`GET …/liquidaciones-importadas`** y **`GET …/liquidaciones-importadas/{id}`**
+  (`liquidacion.importar`): la lista del consorcio y una importación con sus diferencias y sus
+  campos, con su estado. No es una lectura oficial: lo oficial sale solo de
   `nucleo.campos_oficiales_liquidacion` (RN30).
+- **Confirmación (H5-3, `0115`)**, con la misma facultad (D2-A): la decisión sobre cada campo
+  (`…/campos/{campo}/decision`: confirmar, corregir o descartar), la confirmación de la importación
+  entera sin campos pendientes (`…/confirmacion`) y su descarte con motivo (`…/descarte`). Cada una
+  devuelve la importación como queda.
 """
 
 import json
 import logging
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, timedelta
@@ -25,10 +31,14 @@ from uuid import UUID
 from cem_contracts.errores import CodigoError
 from cem_contracts.importacion_liquidacion import (
     CampoPreliminar,
+    DecisionCampo,
+    DecisionSobreCampo,
+    DescarteImportacion,
     DiferenciaLeida,
     ImportacionCreada,
     ImportacionLiquidacion,
     ImportacionNueva,
+    ImportacionResumen,
 )
 from fastapi import APIRouter, Depends, Response
 from pdfplumber.utils.exceptions import PdfminerException
@@ -62,6 +72,11 @@ INTENTOS_LEER = 5
 LARGO_MOTIVO = 500
 """El de `nucleo.importacion_liquidacion.motivo`."""
 PDF_ILEGIBLE = "El archivo no se pudo leer como PDF."
+LARGO_FRAGMENTO = 500
+"""El de `nucleo.campo_preliminar.fragmento` (`0115`)."""
+LARGO_TEXTO_CORREGIDO = 300
+"""El texto más largo de un valor leído (`lectura_ia.LARGO_CONCEPTO`)."""
+IMPORTE_TEXTO = re.compile(r"^-?[0-9]{1,16}\.[0-9]{2}$")
 
 router = APIRouter(prefix="/api/v1", tags=["liquidaciones"], dependencies=[Depends(sin_cache)])
 
@@ -73,6 +88,18 @@ ERRORES = {
     "ya_importada": (
         409, CodigoError.LIQUIDACION_YA_IMPORTADA, "Esa versión de la liquidación ya se importó.",
     ),
+    "no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO),
+    "importacion_decidida": (
+        409, CodigoError.IMPORTACION_DECIDIDA,
+        "La liquidación importada ya se confirmó o se descartó.",
+    ),
+    "campos_pendientes": (409, CodigoError.CAMPOS_PENDIENTES, "Quedan datos leídos sin decidir."),
+    "correccion_invalida": (
+        422, CodigoError.CORRECCION_INVALIDA,
+        "El valor corregido no tiene la forma del leído o no cambia nada.",
+    ),
+    "decision_invalida": (422, CodigoError.DECISION_INVALIDA, "La decisión no es válida."),
+    "motivo_invalido": (422, CodigoError.PETICION_INVALIDA, "Falta el motivo."),
 }  # fmt: skip
 
 
@@ -83,15 +110,21 @@ def _texto(importe: Decimal | None) -> str | None:
     return None if importe is None else f"{importe:.2f}"
 
 
-def _campo(tipo: str, clave: str, valor: dict[str, Any], origen: mis_expensas.Origen) -> dict:
-    return {
-        "tipo": tipo, "clave": clave, "valor": valor, "confianza": str(CONFIANZA_DETERMINISTA),
-        "origen": "determinista", "pagina": origen.pagina, "renglon": str(origen.renglon),
-    }  # fmt: skip
+def campos(lq: mis_expensas.LiquidacionLeida, paginas: list[mis_expensas.Pagina]) -> list[dict]:
+    """Cada dato de la liquidación como campo preliminar, en el orden del documento, con el texto
+    del renglón de donde salió."""
+    textos = {
+        r.origen: r.texto for i, p in enumerate(paginas, 1) for r in mis_expensas.renglones_de(p, i)
+    }
 
+    def _campo(tipo: str, clave: str, valor: dict[str, Any], origen: mis_expensas.Origen) -> dict:
+        return {
+            "tipo": tipo, "clave": clave, "valor": valor,
+            "confianza": str(CONFIANZA_DETERMINISTA), "origen": "determinista",
+            "pagina": origen.pagina, "renglon": str(origen.renglon),
+            "fragmento": textos[origen][:LARGO_FRAGMENTO],
+        }  # fmt: skip
 
-def campos(lq: mis_expensas.LiquidacionLeida) -> list[dict]:
-    """Cada dato de la liquidación como campo preliminar, en el orden del documento."""
     salida = [
         _campo("total", "total:gastos", {
             "grupos": {g: _texto(i) for g, i in lq.totales_gastos.items()},
@@ -203,7 +236,8 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     except mis_expensas.FormatoNoReconocido as e:
         return _leer_con_ia(conn, trabajo, importacion, paginas, str(e))
     ano, mes = lq.periodo
-    _guardar(conn, importacion, FORMATO, date(ano, mes, 1), None, diferencias(lq), campos(lq))
+    _guardar(conn, importacion, FORMATO, date(ano, mes, 1), None, diferencias(lq),
+             campos(lq, paginas))  # fmt: skip
     return {"leida": True, "diferencias": len(lq.diferencias)}
 
 
@@ -342,18 +376,183 @@ def importacion_liquidacion(
 ) -> ImportacionLiquidacion:
     """Mientras `estado` es `leyendo`, se vuelve a preguntar."""
     with _transaccion(permiso, motor) as c:
-        cabeza = _ejecutar(
-            c, permiso,
-            "select * from nucleo.importacion_liquidacion_lectura(:i, :actor, 'api', :sesion)",
-            {"i": importacion_id},
-        ).mappings().one_or_none()  # fmt: skip
-        if cabeza is None:
-            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-        filas = _ejecutar(
-            c, permiso,
-            "select * from nucleo.campos_preliminares_lectura(:i, :actor, 'api', :sesion)",
-            {"i": importacion_id},
-        ).mappings().all()  # fmt: skip
+        return _importacion(c, permiso, importacion_id)
+
+
+def _importacion(conn: Connection, permiso: Permiso, i: UUID) -> ImportacionLiquidacion:
+    cabeza = _ejecutar(
+        conn, permiso,
+        "select * from nucleo.importacion_liquidacion_lectura(:i, :actor, 'api', :sesion)",
+        {"i": i},
+    ).mappings().one_or_none()  # fmt: skip
+    if cabeza is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    filas = _ejecutar(
+        conn, permiso,
+        "select * from nucleo.campos_preliminares_lectura(:i, :actor, 'api', :sesion)",
+        {"i": i},
+    ).mappings().all()  # fmt: skip
     datos = dict(cabeza)
     datos["diferencias"] = [DiferenciaLeida(**d) for d in datos["diferencias"]]
     return ImportacionLiquidacion(**datos, campos=[CampoPreliminar(**f) for f in filas])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas",
+    response_model=list[ImportacionResumen],
+    summary="Las liquidaciones importadas del consorcio, la más nueva primero",
+    responses={403: {"description": "Sin `liquidacion.importar` en el consorcio."}},
+)
+def importaciones_liquidacion(
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    motor: MotorDep,
+) -> list[ImportacionResumen]:
+    with _transaccion(permiso, motor) as c:
+        filas = _ejecutar(
+            c, permiso,
+            "select * from nucleo.importaciones_liquidacion_lectura(:actor, 'api', :sesion)", {},
+        ).mappings().all()  # fmt: skip
+    return [ImportacionResumen(**f) for f in filas]
+
+
+# Las claves de un valor leído que son importes (o porcentajes, con la misma forma), y las que
+# agrupan importes por nombre de grupo: lo que vale ahí es un importe aunque lo leído esté vacío.
+CLAVES_DE_IMPORTE = frozenset({
+    "total", "saldo_anterior", "pagos", "deuda", "interes", "disponible", "otros_gastos",
+    "redondeo", "porcentaje", "monto",
+})  # fmt: skip
+CLAVES_DE_GRUPOS = frozenset({"importes", "grupos"})
+
+
+def forma_igual(leido: Any, corregido: Any, clave: str = "", de: str = "") -> bool:
+    """El valor corregido tiene la forma del leído: las mismas claves en cada nivel, un importe
+    donde va un importe (por su clave, o porque lo leído lo era; vacío también vale), un número
+    donde había un número y un texto corto donde había un texto. Ningún texto con una cuenta
+    bancaria."""
+    if isinstance(leido, dict):
+        return (
+            isinstance(corregido, dict)
+            and leido.keys() == corregido.keys()
+            and all(forma_igual(leido[k], corregido[k], k, clave) for k in leido)
+        )
+    if isinstance(leido, list):
+        return isinstance(corregido, list) and all(forma_igual("", x) for x in corregido)
+    if isinstance(leido, bool) or isinstance(corregido, bool):
+        return type(leido) is type(corregido)
+    if isinstance(leido, int):
+        return type(corregido) is int
+    es_importe = clave in CLAVES_DE_IMPORTE or de in CLAVES_DE_GRUPOS
+    if es_importe or (isinstance(leido, str) and IMPORTE_TEXTO.match(leido)):
+        return corregido is None or (
+            isinstance(corregido, str) and IMPORTE_TEXTO.match(corregido) is not None
+        )
+    if corregido is None:
+        return True
+    return (
+        isinstance(corregido, str)
+        and 1 <= len(corregido.strip()) <= LARGO_TEXTO_CORREGIDO
+        and not lectura_comprobantes.CON_CUENTA.search(corregido)
+    )
+
+
+_ACTOS: dict[int | str, dict[str, Any]] = {
+    403: {"description": "Sin `liquidacion.importar` en el consorcio."},
+    404: {"description": "La importación o el dato no existen en este consorcio."},
+    409: {"description": "Ya se confirmó o se descartó (`importacion_decidida`)."},
+}
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/campos/{campo_id}"
+    "/decision",
+    response_model=ImportacionLiquidacion,
+    summary="Confirmar, corregir o descartar un dato leído de la liquidación",
+    responses=_ACTOS
+    | {422: {"description": "Decisión o corrección inválida (`correccion_invalida`)."}},
+)
+def decidir_campo(
+    importacion_id: UUID,
+    campo_id: UUID,
+    decision: DecisionSobreCampo,
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = permiso.ctx
+    permiso.verificar(Entidad())
+    corrige = decision.decision == DecisionCampo.CORREGIDO
+    if corrige != (decision.valor_corregido is not None):
+        raise ErrorApi(*ERRORES["decision_invalida"])
+
+    def efecto(conn: Connection) -> tuple[int, ImportacionLiquidacion]:
+        if corrige:
+            campos_ = _importacion(conn, permiso, importacion_id).campos
+            actual = next((c for c in campos_ if c.id == campo_id), None)
+            if actual is None:
+                raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+            if not forma_igual(actual.valor, decision.valor_corregido):
+                raise ErrorApi(*ERRORES["correccion_invalida"])
+        valor = None if decision.valor_corregido is None else json.dumps(decision.valor_corregido)
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.resolver_campo_preliminar(:i, :campo, :d, cast(:v as jsonb), :actor,"
+            " 'api', :sesion)",
+            {"i": importacion_id, "campo": campo_id, "d": decision.decision.value, "v": valor},
+        )  # fmt: skip
+        return 200, _importacion(conn, permiso, importacion_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion",
+    response_model=ImportacionLiquidacion,
+    summary="Confirmar la liquidación importada: desde ahí sus datos decididos son oficiales",
+    responses=_ACTOS
+    | {409: {"description": "Ya decidida, o quedan datos sin decidir (`campos_pendientes`)."}},
+)
+def confirmar_importacion(
+    importacion_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = permiso.ctx
+    permiso.verificar(Entidad())
+
+    def efecto(conn: Connection) -> tuple[int, ImportacionLiquidacion]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.confirmar_importacion_liquidacion(:i, :actor, 'api', :sesion)",
+            {"i": importacion_id},
+        )  # fmt: skip
+        return 200, _importacion(conn, permiso, importacion_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/descarte",
+    response_model=ImportacionLiquidacion,
+    summary="Descartar la liquidación importada, con el motivo",
+    responses=_ACTOS,
+)
+def descartar_importacion(
+    importacion_id: UUID,
+    descarte: DescarteImportacion,
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = permiso.ctx
+    permiso.verificar(Entidad())
+
+    def efecto(conn: Connection) -> tuple[int, ImportacionLiquidacion]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.descartar_importacion_liquidacion(:i, :m, :actor, 'api', :sesion)",
+            {"i": importacion_id, "m": descarte.motivo},
+        )  # fmt: skip
+        return 200, _importacion(conn, permiso, importacion_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)

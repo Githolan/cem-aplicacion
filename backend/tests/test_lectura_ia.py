@@ -109,6 +109,8 @@ def test_una_lectura_buena_da_cada_campo_con_su_renglon_y_sin_diferencias():
     gasto = next(c for c in leida.campos if c["clave"] == "gasto:2:1")
     assert gasto["renglon"] == str(TOP + 3 * PASO)
     assert gasto["valor"] == {"rubro": 2, "concepto": "Abono ascensor", "total": "500.50"}
+    # Con el texto del renglón citado, para comparar sin abrir el PDF (H5-3).
+    assert gasto["fragmento"] == RENGLONES[3]
     saldo = next(c for c in leida.campos if c["clave"] == "saldo_unidad:2")
     assert saldo["valor"] == {"uf": "2", "depto": "1-A", "saldo_anterior": "-10.00"}
 
