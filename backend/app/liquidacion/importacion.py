@@ -236,9 +236,9 @@ def _leer_con_ia(
         return no_reconocida("largo")
     with _aparte(conn, trabajo) as c:
         reserva, motivo = c.execute(
-            text("select * from plataforma.reservar_gasto_ia(:u, :i, :e, :s)"),
-            {"u": TRABAJO_LEER, "i": importacion, "e": doc.fichas_maximas_entrada,
-             "s": lectura_ia.MAX_TOKENS},
+            text("select * from plataforma.reservar_gasto_ia(:u, :i, :m, :e, :s)"),
+            {"u": TRABAJO_LEER, "i": importacion, "m": llm.exigir_variables()["CEM_LLM_MODEL"],
+             "e": doc.fichas_maximas_entrada, "s": lectura_ia.MAX_TOKENS},
         ).one()  # fmt: skip
     if reserva is None:
         return no_reconocida(motivo)

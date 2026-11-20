@@ -12,10 +12,12 @@ origen `ia`. Esta migración pone lo que la base tiene que saber para eso:
 - `plataforma.precio_modelo_ia`: el precio por millón de fichas de cada modelo, con su fuente.
 - `plataforma.gasto_ia`: una fila por llamada. **Antes** de llamar, `reservar_gasto_ia` anota el
   costo máximo de la llamada (las fichas de entrada acotadas por el tamaño del texto y las de
-  salida por `max_tokens`, al precio más alto de la tabla) y la niega si con ella se pasa el tope.
+  salida por `max_tokens`, al precio del modelo que se va a pedir, `CEM_LLM_MODEL`) y la niega si
+  con ella se pasa el tope. Un modelo pedido sin precio no se llama: sin precio no hay cota.
   **Después**, `registrar_gasto_ia` anota el modelo, las fichas y el costo real. Una reserva sin
-  registrar (la llamada se cortó) o un modelo sin precio cuentan por su costo máximo: el tope nunca
-  queda por debajo de lo gastado.
+  registrar (la llamada se cortó) o un modelo informado sin precio (el proveedor puede informar un
+  nombre distinto del pedido) cuentan por su costo máximo: el tope nunca queda por debajo de lo
+  gastado.
 - Una sola reserva por importación: una lectura repetida (un reintento del trabajo) no vuelve a
   llamar al modelo.
 - Las dos funciones toman el mismo candado por uso, así que dos lecturas a la vez no pasan el tope
@@ -127,10 +129,11 @@ create trigger historia_gasto_ia_truncate before truncate on plataforma.gasto_ia
 
 FUNCIONES = """
 -- Para `cem-trabajos`, antes de llamar al modelo. Devuelve la reserva, o el motivo sin reserva:
--- `ya_intentada` (la importación ya tuvo su llamada) o `tope_alcanzado`. Sin tope o sin precios
--- para el uso, falla: es configuración que falta, no un «no».
+-- `sin_precio` (el modelo que se va a pedir no tiene precio: no hay cota), `ya_intentada` (la
+-- importación ya tuvo su llamada) o `tope_alcanzado`. Sin tope para el uso, falla: es
+-- configuración que falta, no un «no».
 create function plataforma.reservar_gasto_ia(uso_pedido text, importacion uuid,
-                                             fichas_entrada_max integer,
+                                             modelo_pedido text, fichas_entrada_max integer,
                                              fichas_salida_max integer)
   returns table (reserva uuid, motivo text)
   language plpgsql volatile security definer
@@ -139,8 +142,7 @@ create function plataforma.reservar_gasto_ia(uso_pedido text, importacion uuid,
   declare
     c uuid := plataforma.consorcio_actual();
     t plataforma.tope_gasto_ia;
-    precio_entrada numeric;
-    precio_salida numeric;
+    p plataforma.precio_modelo_ia;
     maximo numeric;
     mes_actual date;
     gastado numeric;
@@ -156,17 +158,17 @@ create function plataforma.reservar_gasto_ia(uso_pedido text, importacion uuid,
     if t.uso is null then
       raise exception 'sin tope de gasto en IA para %', uso_pedido using errcode = 'P0001';
     end if;
-    select max(p.usd_por_millon_entrada), max(p.usd_por_millon_salida)
-      into precio_entrada, precio_salida from plataforma.precio_modelo_ia p;
-    if precio_entrada is null then
-      raise exception 'sin precios de modelos de IA' using errcode = 'P0001';
+    select x.* into p from plataforma.precio_modelo_ia x where x.modelo = modelo_pedido;
+    if p.modelo is null then
+      return query select null::uuid, 'sin_precio'::text;
+      return;
     end if;
     if exists (select 1 from plataforma.gasto_ia g where g.importacion_id = importacion) then
       return query select null::uuid, 'ya_intentada'::text;
       return;
     end if;
-    maximo := (fichas_entrada_max * precio_entrada + fichas_salida_max * precio_salida)
-              / 1000000;
+    maximo := (fichas_entrada_max * p.usd_por_millon_entrada
+               + fichas_salida_max * p.usd_por_millon_salida) / 1000000;
     mes_actual := date_trunc('month', now() at time zone t.zona_horaria)::date;
     select coalesce(sum(coalesce(g.costo, g.costo_maximo)), 0) into gastado
       from plataforma.gasto_ia g where g.uso = uso_pedido and g.mes = mes_actual;
@@ -223,7 +225,7 @@ create function plataforma.registrar_gasto_ia(reserva uuid, modelo_informado tex
 """
 
 RUTAS = (
-    "plataforma.reservar_gasto_ia(text, uuid, integer, integer)",
+    "plataforma.reservar_gasto_ia(text, uuid, text, integer, integer)",
     "plataforma.registrar_gasto_ia(uuid, text, integer, integer)",
 )
 

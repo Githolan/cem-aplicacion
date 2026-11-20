@@ -69,18 +69,35 @@ def gasto(motor_migrate, i) -> dict | None:
     return None if fila is None else dict(fila)
 
 
-@pytest.fixture
-def precio(motor_migrate) -> Iterator[None]:
-    """El precio del modelo que informa el servidor local: 2 y 10 dólares por millón."""
+def poner_precio(motor_migrate, nombre: str) -> None:
     with motor_migrate.begin() as c:
         c.execute(text(
             "insert into plataforma.precio_modelo_ia"
             " (modelo, usd_por_millon_entrada, usd_por_millon_salida, fuente)"
-            " values ('modelo-informado', 2, 10, 'prueba SINTETICA')"
-        ))  # fmt: skip
-    yield
+            " values (:m, 2, 10, 'prueba SINTETICA')"
+        ), {"m": nombre})  # fmt: skip
+
+
+def sacar_precio(motor_migrate, nombre: str) -> None:
     with motor_migrate.begin() as c:
-        c.execute(text("delete from plataforma.precio_modelo_ia where modelo = 'modelo-informado'"))
+        c.execute(text("delete from plataforma.precio_modelo_ia where modelo = :m"), {"m": nombre})
+
+
+@pytest.fixture(autouse=True)
+def precio_pedido(motor_migrate) -> Iterator[None]:
+    """El precio del modelo que pide la capa en las pruebas (`CEM_LLM_MODEL` de `configurar`): sin
+    él no hay cota y no se llama."""
+    poner_precio(motor_migrate, "modelo-pedido")
+    yield
+    sacar_precio(motor_migrate, "modelo-pedido")
+
+
+@pytest.fixture
+def precio(motor_migrate) -> Iterator[None]:
+    """El precio del modelo que informa el servidor local: 2 y 10 dólares por millón."""
+    poner_precio(motor_migrate, "modelo-informado")
+    yield
+    sacar_precio(motor_migrate, "modelo-informado")
 
 
 @pytest.fixture
@@ -143,6 +160,20 @@ def test_un_modelo_sin_precio_cuenta_por_su_maximo(
     assert i["estado"] == "para_confirmar"
     g = gasto(motor_migrate, i["id"])
     assert g["modelo"] == "modelo-informado" and g["costo"] == g["costo_maximo"] > 0
+
+
+def test_un_modelo_pedido_sin_precio_no_se_llama(escena, bucket, motor_app, motor_migrate, modelo):
+    """Sin el precio del modelo que se va a pedir no hay cota del gasto: no se llama. Control: con
+    el precio, la misma hoja se lee."""
+    responder(modelo, respuesta())
+    sacar_precio(motor_migrate, "modelo-pedido")
+    i = leida(escena, motor_app)
+    assert i["estado"] == "no_reconocida" and modelo.pedidos == []
+    assert i["motivo"].startswith(lectura_ia.MOTIVOS["sin_precio"])
+    assert gasto(motor_migrate, i["id"]) is None
+    poner_precio(motor_migrate, "modelo-pedido")
+    otra = leida(escena, motor_app, sin_formato((*RENGLONES, "Hoja SINTETICA 2")))
+    assert otra["estado"] == "para_confirmar" and len(modelo.pedidos) == 1
 
 
 def test_apagada_no_llama_ni_gasta(
@@ -248,7 +279,8 @@ def test_una_importacion_tiene_una_sola_llamada(escena, bucket, motor_app, motor
     i = r.json()["id"]
     with transaccion(motor_app, persona_id=None, consorcio_id=escena["cons"]) as c:
         reserva, motivo = c.execute(
-            text("select * from plataforma.reservar_gasto_ia(:u, :i, 10, 10)"), {"u": USO, "i": i}
+            text("select * from plataforma.reservar_gasto_ia(:u, :i, 'modelo-pedido', 10, 10)"),
+            {"u": USO, "i": i},
         ).one()  # fmt: skip
     assert reserva is not None and motivo is None
     assert analizar(motor_app) == 1
@@ -277,7 +309,7 @@ def test_solo_un_trabajo_reserva_y_la_app_no_lee_el_gasto(escena, motor_app):
     with pytest.raises(DBAPIError, match="solo un trabajo"):
         with transaccion(motor_app, persona_id=escena["mc"], consorcio_id=escena["cons"]) as c:
             c.execute(text("select * from plataforma.reservar_gasto_ia(:u, gen_random_uuid(),"
-                           " 1, 1)"), {"u": USO})  # fmt: skip
+                           " 'modelo-pedido', 1, 1)"), {"u": USO})  # fmt: skip
     for tabla in ("plataforma.gasto_ia", "plataforma.tope_gasto_ia", "plataforma.precio_modelo_ia"):
         with pytest.raises(DBAPIError, match="permission denied"):
             with transaccion(motor_app, persona_id=None, consorcio_id=escena["cons"]) as c:

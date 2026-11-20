@@ -71,6 +71,10 @@ MAXIMO_UNIDADES = 2000
 
 MOTIVOS = {
     "largo": "El documento es demasiado largo para leerlo con IA; se carga a mano.",
+    "sin_precio": (
+        "El modelo de IA configurado no tiene precio cargado, así que no hay cota de gasto; se"
+        " carga a mano."
+    ),
     "tope_alcanzado": (
         "Se alcanzó el tope mensual de gasto en IA para leer liquidaciones; se carga a mano."
     ),
@@ -186,6 +190,9 @@ class LecturaDelModelo(BaseModel):
     def _unidades(cls, valor: list[UnidadLeida]) -> list[UnidadLeida]:
         if len(valor) > MAXIMO_UNIDADES or any(u.uf is None and u.depto is None for u in valor):
             raise ValueError("unidades de más o sin número ni departamento")
+        if any(lectura_comprobantes.CON_CUENTA.search(x) for u in valor
+               for x in (u.uf, u.depto) if x is not None):  # fmt: skip
+            raise ValueError("una unidad con una cuenta")
         return valor
 
 

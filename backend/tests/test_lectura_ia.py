@@ -178,6 +178,20 @@ def _con_gasto(**cambios) -> dict:
         pytest.param(
             respuesta(
                 unidades=[
+                    {
+                        "uf": "1",
+                        "depto": "0170099220000067797370",
+                        "total": "1.00",
+                        "saldo_anterior": None,
+                    }
+                    | ubicado(6)
+                ]
+            ),
+            id="una cuenta en el departamento",
+        ),  # fmt: skip
+        pytest.param(
+            respuesta(
+                unidades=[
                     {"uf": None, "depto": None, "total": "1.00", "saldo_anterior": None}
                     | ubicado(6)
                 ]
