@@ -230,6 +230,25 @@ describe("pantalla /importar-liquidacion", () => {
     await waitFor(() => expect(within(screen.getByRole("list", { name: ENLACES })).queryAllByRole("button")).toHaveLength(0));
   });
 
+  it("con un traído aprobado que espera su importación no se ofrece traer otro", async () => {
+    const CON_ENLACES: Importacion = { ...IMPORTACION, enlaces: [{ orden: 1, url: "https://comprobantes.prueba/2026-09.pdf", origen: "qr", pagina: 2 }] };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_ENLACES),
+      [`POST ${BASE}/liquidaciones-importadas/${I1}/enlaces/1/descarga`]: () => Response.json({ documento_id: D1, version_documento_id: V1, tipo: "application/pdf", tamano: 10 }, { status: 201 }),
+      [`GET ${BASE}/documentos/${D1}/versiones/${V1}/estado`]: () => Response.json({ estado: "disponible", motivo_rechazo: null }),
+      [`POST ${BASE}/liquidaciones-importadas`]: () => Promise.reject(new TypeError("Failed to fetch")),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await abrirLaImportacion();
+    fireEvent.click(within(screen.getByRole("list", { name: ENLACES })).getByRole("button", { name: `${TRAER} de comprobantes.prueba` }));
+    // Aprobado por el antivirus, la importación no llega: queda para reintentar (Codex).
+    expect(await screen.findByRole("button", { name: IMPORTAR_DE_NUEVO }, { timeout: 6000 })).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: ENLACES })).queryAllByRole("button")).toHaveLength(0);
+  }, 15000);
+
   it("un enlace que el servidor no deja traer dice por qué", async () => {
     vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,

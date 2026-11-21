@@ -84,8 +84,12 @@ create function nucleo.guardar_enlaces_liquidacion(importacion uuid, enlaces jso
     n integer;
   begin
     perform nucleo.exigir_trabajo(c);
+    -- `no key update` y no `update`: después, en la misma lectura, la reserva del gasto de IA va
+    -- en una transacción aparte e inserta en `plataforma.gasto_ia`, cuya clave foránea a esta
+    -- importación pide `key share`. Con `for update` la reserva esperaría a esta transacción, que
+    -- la espera a ella (Codex). Dos lecturas de la misma importación igual se ordenan.
     select x.estado into actual from nucleo.importacion_liquidacion x
-     where x.consorcio_id = c and x.id = importacion for update;
+     where x.consorcio_id = c and x.id = importacion for no key update;
     if actual is null then
       raise exception 'importación inexistente' using errcode = 'P0001', hint = 'no_encontrado';
     end if;

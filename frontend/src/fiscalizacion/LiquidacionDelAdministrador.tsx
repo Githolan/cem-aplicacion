@@ -504,7 +504,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
   /** Trae el archivo de un enlace: entra como documento en el antivirus y, cuando pasa, se importa como uno subido. */
   async function traerEnlace(orden: number) {
-    if (elegida === null || enviando) return;
+    // Como la carga: mientras hay un archivo aprobado esperando su importación, no se trae otro,
+    // que la pisaría (Codex).
+    if (elegida === null || enviando || subida !== null || porImportar !== null) return;
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     try {
@@ -722,7 +724,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                         {!e.url.toLowerCase().startsWith("https://") ? (
                           SOLO_HTTPS
                         ) : (
-                          subida === null && (
+                          subida === null &&
+                          porImportar === null && (
                             <button type="button" className="secundario" aria-label={`${TRAER} de ${sitioDe(e.url)}`} onClick={() => void traerEnlace(e.orden)}>
                               {TRAER}
                             </button>
