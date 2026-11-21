@@ -37,6 +37,8 @@ from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
+import anyio
+import anyio.to_thread
 from cem_contracts.documentos import CategoriaDocumento
 from cem_contracts.errores import CodigoError
 from cem_contracts.importacion_liquidacion import (
@@ -769,7 +771,7 @@ TITULO_TRAIDO = "Liquidación traída de un enlace"
         },
     },
 )
-def traer_enlace(
+async def traer_enlace(
     importacion_id: UUID,
     numero: int,
     permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
@@ -779,26 +781,29 @@ def traer_enlace(
     motor: MotorDep,
 ) -> Response:
     ctx = permiso.ctx
-    permiso.verificar(Entidad())
-    documentos.verificar_carga(cargar, operativos,
-                               CategoriaDocumento.LIQUIDACIONES_DEL_ADMINISTRADOR)  # fmt: skip
-    # Un reintento de una descarga ya guardada recibe la respuesta guardada sin volver a pedir el
-    # enlace, que pudo vencer o cambiar (Codex). Un pedido nuevo sigue serializado por la clave en
-    # `guardar_archivo`, que vuelve a mirar con el bloqueo tomado.
-    guardada = repetida(motor, ctx, idempotencia)
-    if guardada is not None:
-        return guardada
-    with _transaccion(permiso, motor) as conn:
-        url = _ejecutar(
-            conn, permiso,
-            "select nucleo.enlace_para_traer(:i, :n, :actor, 'api', :sesion)",
-            {"i": importacion_id, "n": numero},
-        ).scalar_one()  # fmt: skip
-    try:
-        traido = descarga.traer(url, tipo_real=documentos.tipo_real)
-    except descarga.DescargaRechazada as e:
-        raise ErrorApi(422, CodigoError.ENLACE_NO_TRAIDO,
-                       MOTIVOS_DESCARGA[e.motivo]) from None  # fmt: skip
+
+    def antes() -> Response | str:
+        """La respuesta guardada de un reintento, o la dirección del enlace. Corre en un hilo,
+        como todo lo que toca la base."""
+        permiso.verificar(Entidad())
+        documentos.verificar_carga(cargar, operativos,
+                                   CategoriaDocumento.LIQUIDACIONES_DEL_ADMINISTRADOR)  # fmt: skip
+        # Un reintento de una descarga ya guardada recibe la respuesta guardada sin volver a pedir
+        # el enlace, que pudo vencer o cambiar (Codex). Un pedido nuevo sigue serializado por la
+        # clave en `guardar_archivo`, que vuelve a mirar con el bloqueo tomado.
+        guardada = repetida(motor, ctx, idempotencia)
+        if guardada is not None:
+            return guardada
+        with _transaccion(permiso, motor) as conn:
+            return _ejecutar(
+                conn, permiso,
+                "select nucleo.enlace_para_traer(:i, :n, :actor, 'api', :sesion)",
+                {"i": importacion_id, "n": numero},
+            ).scalar_one()  # fmt: skip
+
+    url = await anyio.to_thread.run_sync(antes)
+    if isinstance(url, Response):
+        return url
     documento_id: list[UUID] = []
 
     def nueva(conn: Connection, tipo: str, tamano: int, suma: str):
@@ -826,5 +831,15 @@ def traer_enlace(
         return EnlaceTraido(documento_id=documento_id[0], version_documento_id=cargada.id,
                             tipo=cargada.tipo.value, tamano=cargada.tamano)  # fmt: skip
 
-    return documentos.guardar_archivo(motor, ctx, idempotencia, traido.contenido, traido.tipo,
-                                      nueva, respuesta)  # fmt: skip
+    def traer_y_guardar() -> Response:
+        try:
+            traido = descarga.traer(url, tipo_real=documentos.tipo_real)
+        except descarga.DescargaRechazada as e:
+            raise ErrorApi(422, CodigoError.ENLACE_NO_TRAIDO,
+                           MOTIVOS_DESCARGA[e.motivo]) from None  # fmt: skip
+        return documentos.guardar_archivo(motor, ctx, idempotencia, traido.contenido, traido.tipo,
+                                          nueva, respuesta)  # fmt: skip
+
+    # Lo traído está en memoria hasta guardarse, como una carga: toma uno de sus lugares (Codex).
+    async with documentos.turno_de_carga():
+        return await anyio.to_thread.run_sync(traer_y_guardar)

@@ -46,8 +46,8 @@ contrato): la categoría elige la acción.
 
 import hashlib
 import re
-from collections.abc import Callable, Iterator
-from contextlib import closing
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, closing
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
@@ -175,6 +175,28 @@ def _semaforo() -> anyio.Semaphore:
     if _turnos is None:
         _turnos = anyio.Semaphore(CARGAS_POR_PROCESO)
     return _turnos
+
+
+@asynccontextmanager
+async def turno_de_carga() -> AsyncIterator[None]:
+    """Uno de los `CARGAS_POR_PROCESO` lugares para tener un archivo en memoria mientras se guarda,
+    o 503 si no se libera uno en `ESPERA_TURNO`. Lo toman la carga y el archivo traído de un enlace
+    de la liquidación (H5-5), que también tiene hasta 20 MB en memoria (Codex)."""
+    turnos = _semaforo()
+    try:
+        with anyio.fail_after(ESPERA_TURNO):
+            await turnos.acquire()
+    except TimeoutError:
+        raise ErrorApi(
+            503,
+            CodigoError.SERVICIO_NO_DISPONIBLE,
+            "Hay muchas cargas en curso. Reintentar en un momento.",
+            {"Retry-After": str(ESPERA_TURNO)},
+        ) from None
+    try:
+        yield
+    finally:
+        turnos.release()
 
 
 def tipo_real(cuerpo: bytes) -> TipoArchivo | None:
@@ -356,18 +378,7 @@ async def subir_archivo(
     declarado = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if declarado not in {t.value for t in TipoArchivo}:
         raise _no_admitido()
-    turnos = _semaforo()
-    try:
-        with anyio.fail_after(ESPERA_TURNO):
-            await turnos.acquire()
-    except TimeoutError:
-        raise ErrorApi(
-            503,
-            CodigoError.SERVICIO_NO_DISPONIBLE,
-            "Hay muchas cargas en curso. Reintentar en un momento.",
-            {"Retry-After": str(ESPERA_TURNO)},
-        ) from None
-    try:
+    async with turno_de_carga():
         cuerpo = await _leer_con_tope(request)
         tipo = tipo_real(cuerpo)
         if tipo is None or tipo.value != declarado:
@@ -376,8 +387,6 @@ async def subir_archivo(
         return await anyio.to_thread.run_sync(
             lambda: guardar_archivo(motor, ctx, pedido, cuerpo, tipo, nueva, respuesta)
         )
-    finally:
-        turnos.release()
 
 
 def guardar_archivo(

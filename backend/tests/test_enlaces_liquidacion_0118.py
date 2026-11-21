@@ -8,10 +8,12 @@ Datos SINTETICOS / NO REAL.
 
 import functools
 
+import anyio
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.consorcios import documentos
 from app.consorcios.documentos import tipo_real
 from app.liquidacion import descarga, importacion
 from tests.conftest import clave_idempotencia
@@ -200,3 +202,19 @@ def test_un_enlace_no_cambia_ni_se_borra(escena, bucket, motor_app, motor_migrat
 def test_tipo_real_es_el_de_las_cargas():
     """La descarga comprueba el tipo como una carga: por los primeros bytes."""
     assert tipo_real(PDF) is not None and tipo_real(b"<html>") is None
+
+
+def test_sin_lugar_para_cargas_no_se_pide_el_enlace(
+    escena, bucket, motor_app, motor_migrate, al_servidor_de_prueba, monkeypatch
+):
+    """Lo traído toma uno de los lugares de las cargas, que acotan la memoria (Codex): sin lugar,
+    503 y el enlace no se pide. El control es la prueba que trae el archivo con lugar libre."""
+    url = f"https://{NOMBRE}:{al_servidor_de_prueba.server_address[1]}/liq.pdf"
+    al_servidor_de_prueba.respuestas["/liq.pdf"] = (200, {}, pdf())
+    i = importada_con(escena, motor_app, url)
+    pedidos = len(al_servidor_de_prueba.pedidos)
+    monkeypatch.setattr(documentos, "_turnos", anyio.Semaphore(0))  # todos los lugares ocupados
+    monkeypatch.setattr(documentos, "ESPERA_TURNO", 0.2)
+    r = traer(escena, i["id"], 1)
+    assert r.status_code == 503 and r.json()["codigo"] == "servicio_no_disponible", r.text
+    assert len(al_servidor_de_prueba.pedidos) == pedidos
