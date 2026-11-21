@@ -1,3 +1,5 @@
+import { connect } from "node:net";
+
 import { expect, type Page, test } from "@playwright/test";
 
 import { simularPermisos, sinFaltasDeAccesibilidad } from "./entorno";
@@ -14,6 +16,36 @@ const ALTO_TOQUE_PX = 44;
 const BYTES_SOBRE_EL_TOPE_DE_NGINX = 2 * 1024 * 1024;
 const RAZON_LARGA = "Mantenimiento Integral de Ascensores y Equipos Electromecánicos del Río de la Plata S.R.L.";
 const CSV = "Fecha valor;Detalle;Debito;Referencia\n05/11/2026;Pago;-184350,00;0048213377\n";
+
+/** Manda los encabezados de un POST con ese Content-Length, sin el cuerpo, y lee la respuesta. */
+function soloEncabezados(base: string, ruta: string, largo: number): Promise<{ estado: number; tipo: string }> {
+  const url = new URL(ruta, base);
+  if (url.protocol !== "http:") throw new Error(`soloEncabezados habla HTTP plano y la base es ${base}`);
+  return new Promise((resolver, rechazar) => {
+    const socket = connect(Number(url.port || "80"), url.hostname);
+    let leido = "";
+    socket.setEncoding("latin1");
+    socket.on("connect", () => {
+      socket.write(
+        `POST ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nContent-Type: text/csv\r\n` +
+          `Content-Length: ${largo}\r\nConnection: close\r\n\r\n`,
+      );
+    });
+    socket.on("data", (parte: string) => {
+      leido += parte;
+      const fin = leido.indexOf("\r\n\r\n");
+      if (fin < 0) return;
+      socket.destroy();
+      const [primera, ...encabezados] = leido.slice(0, fin).split("\r\n");
+      const estado = Number(primera?.split(" ")[1]);
+      const tipo = encabezados.find((e) => e.toLowerCase().startsWith("content-type:"))?.slice("content-type:".length).trim();
+      if (!Number.isInteger(estado) || tipo === undefined) rechazar(new Error(`respuesta inesperada: ${leido.slice(0, fin)}`));
+      else resolver({ estado, tipo });
+    });
+    socket.on("error", rechazar);
+    socket.on("close", () => rechazar(new Error(`se cerró sin respuesta completa: ${leido}`)));
+  });
+}
 
 const pago = (pago_id: string, numero: string, puede_cotejar = true) => ({
   pago_id, orden_id: ORDEN, proveedor: RAZON_LARGA, concepto: "SINTETICO: ascensor", numero_operacion: numero,
@@ -155,15 +187,18 @@ test.describe("cotejar con el banco", () => {
     expect(errores).toEqual([]);
   });
 
-  test("nginx deja pasar el extracto hasta el backend, que es quien dice el tope", async ({ request }) => {
-    const cuerpo = Buffer.alloc(BYTES_SOBRE_EL_TOPE_DE_NGINX, "a");
-    const opciones = { data: cuerpo, headers: { "Content-Type": "text/csv" } };
+  // Solo los encabezados: nginx decide su tope por el Content-Length, antes del cuerpo. Mandar los
+  // 2 MB de verdad era una carrera: el backend contesta 401 sin leerlos (no hay sesión) y cerraba
+  // mientras el cuerpo seguía saliendo («socket hang up» en cotejo.e2e.ts:152 y :166).
+  test("nginx deja pasar el extracto hasta el backend, que es quien dice el tope", async ({ baseURL }) => {
     for (const final of ["columnas", "extracto"]) {
-      const r = await request.post(`/api/v1/consorcios/${A}/pagos/cotejo/${final}`, opciones);
-      expect(r.status(), final).not.toBe(413);
+      const r = await soloEncabezados(baseURL!, `/api/v1/consorcios/${A}/pagos/cotejo/${final}`, BYTES_SOBRE_EL_TOPE_DE_NGINX);
+      // Lo contesta el backend (JSON, sin sesión), no nginx (sus errores son HTML).
+      expect(r.estado, final).toBe(401);
+      expect(r.tipo, final).toContain("application/json");
     }
-    // Control: la misma carga por otra ruta la corta nginx con su tope por omisión.
-    const otra = await request.post(`/api/v1/consorcios/${A}/pagos/cotejo`, opciones);
-    expect(otra.status()).toBe(413);
+    // Control: el mismo pedido por otra ruta lo corta nginx con su tope por omisión.
+    const otra = await soloEncabezados(baseURL!, `/api/v1/consorcios/${A}/pagos/cotejo`, BYTES_SOBRE_EL_TOPE_DE_NGINX);
+    expect(otra.estado).toBe(413);
   });
 });
