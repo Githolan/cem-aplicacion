@@ -98,12 +98,15 @@ def _destino(url: str, resolver: Resolver, publica: EsPublica,
     primero: un servidor sin ruta IPv6 igual llega por la IPv4 del mismo nombre (Codex)."""
     if len(url) > LARGO_MAXIMO_URL:
         raise DescargaRechazada("enlace_invalido")
-    partes = urlsplit(url)
+    try:
+        partes = urlsplit(url)
+        nombre = partes.hostname
+    except ValueError:  # por ejemplo `https://[`
+        raise DescargaRechazada("enlace_invalido") from None
     if partes.scheme != ESQUEMA:
         raise DescargaRechazada("esquema_no_admitido")
     if partes.username is not None or partes.password is not None:
         raise DescargaRechazada("enlace_invalido")
-    nombre = partes.hostname
     if not nombre:
         raise DescargaRechazada("enlace_invalido")
     # Un nombre con acentos va en IDNA (punycode): así lo piden el DNS, el SNI y el encabezado Host.
@@ -271,7 +274,10 @@ def _traer(url: str, corrida: _Corrida, resolver: Resolver, publica: EsPublica,
                 siguiente = respuesta.getheader("Location")
                 if not siguiente:
                     raise DescargaRechazada("redireccion_invalida")
-                actual = urljoin(actual, siguiente)
+                try:
+                    actual = urljoin(actual, siguiente)
+                except ValueError:  # un `Location` mal formado (Codex)
+                    raise DescargaRechazada("redireccion_invalida") from None
                 continue
             if respuesta.status != 200:
                 raise DescargaRechazada("respuesta_no_valida")

@@ -353,3 +353,13 @@ def test_cada_motivo_de_la_descarga_tiene_su_mensaje():
     motivos |= {"plazo_vencido", "sin_respuesta"}  # los de `_motivo`
     assert {"incompleto", "esquema_no_admitido"} <= motivos  # la búsqueda encuentra los conocidos
     assert motivos <= set(importacion.MOTIVOS_DESCARGA)
+
+
+def test_una_redireccion_mal_formada_es_un_rechazo(servidor, tls):
+    """`Location: https://[` no es un 500: es `redireccion_invalida` (Codex)."""
+    servidor.respuestas["/r"] = (302, {"Location": "https://["}, b"")
+    assert rechazo(traer, servidor, tls, "/r") == "redireccion_invalida"
+
+
+def test_un_enlace_mal_formado_es_un_rechazo():
+    assert rechazo(descarga.traer, "https://[", tipo_real=tipo_real) == "enlace_invalido"
