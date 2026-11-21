@@ -56,6 +56,18 @@ def _dentro(imagen: Image.Image) -> Image.Image:
     return imagen.resize(tamano, Image.Resampling.LANCZOS)
 
 
+def _sobre_blanco(imagen: Image.Image) -> Image.Image:
+    """La imagen en RGB; si tiene transparencia, apoyada sobre blanco. Convertir a RGB a secas
+    descarta el canal alfa y deja ver el color de los píxeles transparentes, que suele ser negro: un
+    PNG de texto negro sobre fondo transparente saldría todo negro (Codex)."""
+    if imagen.mode in ("RGBA", "LA", "PA") or "transparency" in imagen.info:
+        con_alfa = imagen.convert("RGBA")
+        fondo = Image.new("RGB", con_alfa.size, "white")
+        fondo.paste(con_alfa, mask=con_alfa.getchannel("A"))
+        return fondo
+    return imagen.convert("RGB")
+
+
 def _jpeg(imagen: Image.Image) -> bytes:
     salida = io.BytesIO()
     imagen.convert("RGB").save(salida, format="JPEG", quality=CALIDAD_JPEG)
@@ -67,7 +79,7 @@ def de_foto(contenido: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(contenido)) as abierta:
             abierta.load()
-            derecha = ImageOps.exif_transpose(abierta)
+            derecha = _sobre_blanco(ImageOps.exif_transpose(abierta))
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as e:
         raise ImagenIlegible(type(e).__name__) from None
     return _jpeg(_dentro(derecha))  # una foto no se agranda: no ganaría nada legible

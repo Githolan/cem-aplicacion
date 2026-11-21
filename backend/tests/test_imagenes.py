@@ -87,3 +87,27 @@ def test_un_pdf_de_mas_paginas_que_el_tope_no_se_dibuja():
 def test_lo_que_no_es_un_pdf_no_se_dibuja():
     with pytest.raises(imagenes.ImagenIlegible):
         imagenes.de_pdf(b"%PDF-1.4 roto")
+
+
+@pytest.mark.parametrize("modo", ["RGBA", "LA", "P"])
+def test_un_png_transparente_se_apoya_sobre_blanco(modo):
+    """Texto negro sobre fondo transparente cuyos píxeles son negros: sin apoyarlo sobre blanco,
+    el JPEG saldría todo negro (Codex). Se mira el color de los píxeles, no solo el formato."""
+    salida = io.BytesIO()
+    if modo == "P":
+        # Paleta con dos negros: el 0 es el transparente del fondo, el 1 el del bloque.
+        hoja = Image.new("P", (400, 300), 0)
+        hoja.putpalette([0, 0, 0, 0, 0, 0])
+        hoja.paste(1, (100, 100, 300, 200))
+        hoja.save(salida, format="PNG", transparency=0)
+    else:
+        hoja = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+        hoja.paste((0, 0, 0, 255), (100, 100, 300, 200))  # el "texto": un bloque negro opaco
+        hoja.convert(modo).save(salida, format="PNG")
+    with Image.open(io.BytesIO(imagenes.de_foto(salida.getvalue()))) as hecha:
+        gris = hecha.convert("L")
+        assert gris.getpixel((20, 20)) > 240  # el fondo, blanco
+        assert gris.getpixel((200, 150)) < 15  # el bloque, negro
+    # Control: el mismo PNG convertido a RGB a secas sale negro en el fondo.
+    with Image.open(io.BytesIO(salida.getvalue())) as abierta:
+        assert abierta.convert("RGB").convert("L").getpixel((20, 20)) < 15
