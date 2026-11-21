@@ -6,8 +6,9 @@
 - **Lectura en `cem-trabajos`** (`liquidacion.leer`): palabras con su recuadro (`palabras_pdf`),
   formato Mis Expensas (`mis_expensas`) y cada dato como campo preliminar con su renglón de origen.
   Si el formato no se reconoce y el PDF tiene texto, lo lee el modelo (`lectura_ia`, H5-2), dentro
-  del tope mensual de gasto que lleva la base (`0114`, D4). Si tampoco así se lee, la importación
-  queda `no_reconocida` con el motivo.
+  del tope mensual de gasto que lleva la base (`0114`, D4). Una foto (JPEG o PNG) o un PDF sin
+  texto van al modelo como imágenes de tamaño acotado (`imagenes`, H5-5, `0117`). Si tampoco así
+  se lee, la importación queda `no_reconocida` con el motivo.
 - **`GET …/liquidaciones-importadas`** y **`GET …/liquidaciones-importadas/{id}`**
   (`liquidacion.importar`): la lista del consorcio y una importación con sus diferencias y sus
   campos, con su estado. No es una lectura oficial: lo oficial sale solo de
@@ -25,7 +26,7 @@
 import json
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date, timedelta
 from decimal import Decimal
@@ -62,7 +63,7 @@ from app.consorcios.padron import Discrepancia
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
-from app.liquidacion import lectura_ia, mis_expensas, palabras_pdf, recalculo
+from app.liquidacion import imagenes, lectura_ia, mis_expensas, palabras_pdf, recalculo
 from app.plataforma import almacen, cola, trabajos
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
 
@@ -80,6 +81,8 @@ INTENTOS_LEER = 5
 LARGO_MOTIVO = 500
 """El de `nucleo.importacion_liquidacion.motivo`."""
 PDF_ILEGIBLE = "El archivo no se pudo leer como PDF."
+SIN_TEXTO_FOTO = "Es una foto: no tiene texto que leer por posición."
+SIN_TEXTO_PDF = "El PDF no tiene texto (está escaneado)."
 LARGO_FRAGMENTO = 500
 """El de `nucleo.campo_preliminar.fragmento` (`0115`)."""
 LARGO_TEXTO_CORREGIDO = 300
@@ -91,7 +94,8 @@ router = APIRouter(prefix="/api/v1", tags=["liquidaciones"], dependencies=[Depen
 ERRORES = {
     "documento_invalido": (
         422, CodigoError.DOCUMENTO_INVALIDO,
-        "La versión no es un PDF disponible de un documento de liquidaciones del administrador.",
+        "La versión no es un PDF, JPEG o PNG disponible de un documento de liquidaciones del"
+        " administrador.",
     ),
     "ya_importada": (
         409, CodigoError.LIQUIDACION_YA_IMPORTADA, "Esa versión de la liquidación ya se importó.",
@@ -238,6 +242,8 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     if v["version_objeto"]:
         lugar["VersionId"] = v["version_objeto"]
     contenido = origen.cliente().get_object(**lugar)["Body"].read()
+    if v["tipo"] != "application/pdf":
+        return _leer_con_ia(conn, trabajo, importacion, lambda: _de_foto(contenido), SIN_TEXTO_FOTO)
     try:
         paginas = palabras_pdf.paginas(contenido)
     except PdfminerException:
@@ -246,33 +252,61 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     try:
         lq = mis_expensas.leer(paginas)
     except mis_expensas.FormatoNoReconocido as e:
-        return _leer_con_ia(conn, trabajo, importacion, paginas, str(e))
+        if any(p.palabras for p in paginas):
+            return _leer_con_ia(conn, trabajo, importacion,
+                                lambda: lectura_ia.documento(paginas), str(e))  # fmt: skip
+        return _leer_con_ia(conn, trabajo, importacion, lambda: _de_pdf(contenido),
+                            f"{e} {SIN_TEXTO_PDF}")  # fmt: skip
     ano, mes = lq.periodo
     _guardar(conn, importacion, FORMATO, date(ano, mes, 1), None, diferencias(lq),
              campos(lq, paginas))  # fmt: skip
     return {"leida": True, "diferencias": len(lq.diferencias)}
 
 
+class _NoSeManda(Exception):
+    """El documento no va al modelo; lleva la clave de `lectura_ia.MOTIVOS`."""
+
+
+def _de_foto(contenido: bytes) -> lectura_ia.DocumentoImagen:
+    try:
+        return lectura_ia.DocumentoImagen((imagenes.de_foto(contenido),))
+    except imagenes.ImagenIlegible:
+        raise _NoSeManda("imagen_ilegible") from None
+
+
+def _de_pdf(contenido: bytes) -> lectura_ia.DocumentoImagen:
+    try:
+        return lectura_ia.DocumentoImagen(tuple(imagenes.de_pdf(contenido)))
+    except imagenes.DemasiadasPaginas:
+        raise _NoSeManda("demasiadas_paginas") from None
+    except imagenes.ImagenIlegible:
+        raise _NoSeManda("imagen_ilegible") from None
+
+
 def _leer_con_ia(
     conn: Connection,
     trabajo: cola.Trabajo,
     importacion: UUID,
-    paginas: list[mis_expensas.Pagina],
+    armar: Callable[[], lectura_ia.Documento | lectura_ia.DocumentoImagen],
     sin_formato: str,
 ) -> dict[str, Any]:
-    """Lo que el formato conocido no resuelve, con el modelo. Cada salida sin lectura guarda la
-    importación `no_reconocida` con el motivo: después se carga a mano (H5-3)."""
+    """Lo que el formato conocido no resuelve, con el modelo. `armar` da lo que va al modelo: el
+    texto delimitado o las imágenes; se arma recién con la lectura encendida. Cada salida sin
+    lectura guarda la importación `no_reconocida` con el motivo: después se carga a mano (H5-3)."""
 
     def no_reconocida(clave: str) -> dict[str, Any]:
         motivo = f"{lectura_ia.MOTIVOS[clave]} Sin IA: {sin_formato}"
         _guardar(conn, importacion, None, None, motivo[:LARGO_MOTIVO], [], [])
         return {"leida": False, "motivo": clave}
 
-    if not lectura_comprobantes.encendida() or not any(p.palabras for p in paginas):
+    if not lectura_comprobantes.encendida():
         _guardar(conn, importacion, None, None, sin_formato[:LARGO_MOTIVO], [], [])
         return {"leida": False, "motivo": "formato_no_reconocido"}
-    doc = lectura_ia.documento(paginas)
-    if doc.largo > lectura_ia.LARGO_MAXIMO:
+    try:
+        doc = armar()
+    except _NoSeManda as e:
+        return no_reconocida(str(e))
+    if isinstance(doc, lectura_ia.Documento) and doc.largo > lectura_ia.LARGO_MAXIMO:
         return no_reconocida("largo")
     with trabajos.aparte(conn, trabajo) as c:
         reserva, motivo = c.execute(
@@ -306,10 +340,12 @@ def _leer_con_ia(
         return no_reconocida("respuesta_invalida")
     if isinstance(leida, str):
         return no_reconocida(leida)
-    _guardar(conn, importacion, lectura_ia.FORMATO, leida.periodo, None, leida.diferencias,
-             leida.campos)  # fmt: skip
-    return {"leida": True, "con_ia": True, "prompt": lectura_ia.VERSION_PROMPT,
-            "modelo": respuesta.modelo, "diferencias": len(leida.diferencias)}  # fmt: skip
+    de_imagen = isinstance(doc, lectura_ia.DocumentoImagen)
+    formato = lectura_ia.FORMATO_IMAGEN if de_imagen else lectura_ia.FORMATO
+    _guardar(conn, importacion, formato, leida.periodo, None, leida.diferencias, leida.campos)
+    prompt = lectura_ia.VERSION_PROMPT_IMAGEN if de_imagen else lectura_ia.VERSION_PROMPT
+    return {"leida": True, "con_ia": True, "prompt": prompt, "modelo": respuesta.modelo,
+            "diferencias": len(leida.diferencias)}  # fmt: skip
 
 
 # --- Rutas -------------------------------------------------------------------------------------

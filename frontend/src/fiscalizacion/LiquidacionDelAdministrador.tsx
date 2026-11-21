@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
-import { hoyDelDispositivo, PDF, TOPE_BYTES } from "../archivos";
+import { hoyDelDispositivo, JPEG, PDF, PNG, TOPE_BYTES } from "../archivos";
 import { encabezadoCsrf } from "../csrf";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { codigoDe, esPasajera, SIN_CONEXION } from "../fallas";
@@ -21,8 +21,9 @@ import { exigirSesion, SinSesion, useConsultaDelAntivirus, useConsorcio } from "
 import { type Propuesta, RUTA_SOLICITUDES } from "./Solicitudes";
 
 // Página /importar-liquidacion (H5-3, app 0115; diseño H5 §5): en Modo Consejo, quien tiene
-// `liquidacion.importar` sube el PDF que manda la administración, la aplicación lo lee (sin IA el
-// formato Mis Expensas; con IA, dentro del tope del mes, lo demás) y una persona confirma cada dato
+// `liquidacion.importar` sube el PDF que manda la administración, o una foto (H5-5, app 0117), la
+// aplicación lo lee (sin IA el formato Mis Expensas; con IA, dentro del tope del mes, lo demás, y
+// una foto o un PDF sin texto como imágenes, de las que la IA transcribe cada renglón) y una persona confirma cada dato
 // antes de que cuente (RN30). Cada dato muestra su valor, su confianza y el renglón del documento de
 // donde salió; se confirma, se corrige o se descarta, y cuando no queda ninguno pendiente se confirma
 // la liquidación entera. Nada se borra: lo descartado queda con su motivo.
@@ -38,6 +39,14 @@ export const CATEGORIA = "liquidaciones_del_administrador";
 export const SUBIR = "Subir la liquidación";
 export const SIN_IMPORTACIONES = "Todavía no se subió ninguna liquidación del administrador.";
 export const IMPORTAR_DE_NUEVO = "Importar el archivo subido";
+/** Cómo se leyó la importación, junto al estado. */
+export const TEXTO_FORMATO: Record<string, string> = {
+  mis_expensas: "Formato Mis Expensas",
+  lectura_ia: "Leída con IA",
+  lectura_ia_imagen: "Leída con IA de una imagen",
+};
+/** De una imagen, el fragmento es lo que transcribió la IA, no el texto del archivo. */
+export const TRANSCRITO = "transcripción de la IA";
 export const EN_ANTIVIRUS = "El archivo está en la revisión del antivirus; cuando pase, se lee solo.";
 export const LEYENDO = "Se está leyendo la liquidación.";
 export const CONFIRMAR_DATO = "Confirmar";
@@ -394,7 +403,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     setVentana(v);
   }
 
-  /** Sube el PDF: crea el documento de la categoría y sube el archivo; el antivirus y la lectura siguen solos. */
+  /** Sube el PDF o la foto: crea el documento de la categoría y sube el archivo; el antivirus y la lectura siguen solos. */
   async function subir(): Promise<FinDeEnvio> {
     if (archivo === null) {
       setErrores({ archivo: FALTA_ARCHIVO });
@@ -633,7 +642,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               <h2 id={`${id}-titulo`}>{importacion.periodo ? `Período ${importacion.periodo.slice(0, 7)}` : TITULO_LIQUIDACION_ADMINISTRADOR}</h2>
               <p>
                 {TEXTO_ESTADO[importacion.estado]}
-                {importacion.formato === "lectura_ia" ? " · Leída con IA" : importacion.formato === "mis_expensas" ? " · Formato Mis Expensas" : ""}
+                {importacion.formato ? ` · ${TEXTO_FORMATO[importacion.formato]}` : ""}
               </p>
               {importacion.estado === "leyendo" && <p role="status">{LEYENDO}</p>}
               {importacion.motivo && <p className="tarjeta">{importacion.motivo}</p>}
@@ -707,7 +716,10 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           titulo={`${TEXTO_TIPO[enFicha.tipo]}`}
           datos={[
             ...datosDelValor(enFicha),
-            { etiqueta: "En el documento", valor: `Página ${enFicha.pagina}${enFicha.fragmento ? `: «${enFicha.fragmento}»` : ""}` },
+            {
+              etiqueta: "En el documento",
+              valor: `Página ${enFicha.pagina}${enFicha.fragmento ? `${importacion.formato === "lectura_ia_imagen" ? ` (${TRANSCRITO})` : ""}: «${enFicha.fragmento}»` : ""}`,
+            },
             { etiqueta: "Confianza", valor: `${Math.round(Number(enFicha.confianza) * 100)} %${enFicha.origen === "ia" ? " (leído con IA)" : ""}` },
             { etiqueta: "Estado", valor: TEXTO_ESTADO_CAMPO[enFicha.estado] },
           ]}
@@ -744,7 +756,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
         <VentanaDeFormulario titulo={SUBIR} textoEnviar="Subir" alEnviar={subir} alCerrar={() => setVentana(null)}>
           <SubirArchivo
             de="de la liquidación"
-            tipos={[PDF]}
+            tipos={[PDF, JPEG, PNG]}
             tope={TOPE_BYTES}
             elegido={archivo?.name}
             conArchivo={archivo !== null}

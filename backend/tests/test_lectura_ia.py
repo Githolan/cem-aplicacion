@@ -239,3 +239,62 @@ def test_el_costo_maximo_de_una_llamada_entra_varias_veces_en_el_tope():
     entrada = len((lectura_ia.INSTRUCCIONES + lectura_ia.PEDIDO).encode()) + lectura_ia.LARGO_MAXIMO
     costo = (Decimal(entrada + lectura_ia.MARGEN_FICHAS) * 2 + lectura_ia.MAX_TOKENS * 10) / 10**6
     assert costo < 1
+
+
+# --- Imágenes (H5-5) ---------------------------------------------------------------------------
+
+
+def leer_imagen(datos: dict | str, paginas: int = 1):
+    doc = lectura_ia.DocumentoImagen(tuple(b"jpeg" for _ in range(paginas)))
+    texto = datos if isinstance(datos, str) else json.dumps(datos)
+    return lectura_ia.interpretar(texto, doc)
+
+
+def test_de_una_imagen_cada_dato_cita_un_renglon_de_su_transcripcion():
+    leida = leer_imagen(respuesta(transcripcion=[list(RENGLONES)]))
+    assert not isinstance(leida, str)
+    total = next(c for c in leida.campos if c["clave"] == "total:gastos")
+    # Sin posición en la página: el renglón es su número en la transcripción.
+    assert (total["fragmento"], total["renglon"], total["pagina"]) == (RENGLONES[4], "5", 1)
+
+
+def test_de_una_imagen_un_renglon_que_no_transcribio_no_vale():
+    corta = list(RENGLONES[:3])
+    with pytest.raises(lectura_ia.RespuestaInvalida, match="renglón inexistente"):
+        leer_imagen(respuesta(transcripcion=[corta]))
+
+
+def test_de_una_imagen_la_transcripcion_tiene_una_pagina_por_imagen():
+    with pytest.raises(lectura_ia.RespuestaInvalida, match="una página por imagen"):
+        leer_imagen(respuesta(transcripcion=[list(RENGLONES)]), paginas=2)
+    # Control: con dos imágenes y dos páginas transcritas, vale.
+    assert not isinstance(
+        leer_imagen(respuesta(transcripcion=[list(RENGLONES), ["Hoja 2"]]), paginas=2), str
+    )
+
+
+def test_de_una_imagen_sin_transcripcion_no_vale():
+    with pytest.raises(lectura_ia.RespuestaInvalida, match="errores de esquema"):
+        leer_imagen(respuesta())
+
+
+def test_una_transcripcion_con_una_cuenta_no_vale():
+    con_cuenta = [*RENGLONES, "CBU 0000003100012345678901"]
+    with pytest.raises(lectura_ia.RespuestaInvalida, match="errores de esquema"):
+        leer_imagen(respuesta(transcripcion=[con_cuenta]))
+    # Control: con la cuenta tapada como pide el prompt, vale.
+    tapada = [*RENGLONES, "CBU [cuenta]"]
+    assert not isinstance(leer_imagen(respuesta(transcripcion=[tapada])), str)
+
+
+def test_las_instrucciones_de_imagen_piden_las_mismas_claves_y_la_transcripcion():
+    claves = lectura_ia.INSTRUCCIONES.split("exactamente estas claves:\n", 1)[1]
+    assert lectura_ia.INSTRUCCIONES_IMAGEN.endswith(claves)
+    assert '"transcripcion"' in lectura_ia.INSTRUCCIONES_IMAGEN
+    assert "<documento>" not in lectura_ia.INSTRUCCIONES_IMAGEN
+
+
+def test_la_cota_de_entrada_de_las_imagenes_crece_por_imagen():
+    una = lectura_ia.DocumentoImagen((b"a",)).fichas_maximas_entrada
+    tres = lectura_ia.DocumentoImagen((b"a", b"b", b"c")).fichas_maximas_entrada
+    assert tres - una == 2 * lectura_ia.FICHAS_POR_IMAGEN
