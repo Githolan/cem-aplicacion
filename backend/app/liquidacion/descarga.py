@@ -26,6 +26,7 @@ pasa por el antivirus como cualquier carga (`documentos.guardar_archivo`).
 from __future__ import annotations
 
 import errno
+import http.client
 import ipaddress
 import socket
 import ssl
@@ -34,7 +35,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
-import urllib3
 from cem_contracts.documentos import TOPE_BYTES, TipoArchivo
 
 ESQUEMA = "https"
@@ -136,6 +136,10 @@ class _Corrida:
         if cortada:
             raise DescargaRechazada("plazo_vencido")
 
+    def usar_sin_controlar(self, sock: socket.socket | None) -> None:
+        with self._cerrojo:
+            self._socket = sock
+
     def cortar(self) -> None:
         with self._cerrojo:
             self.cortada = True
@@ -194,53 +198,78 @@ def traer(
     return traido
 
 
+def _motivo(corrida: _Corrida) -> str:
+    return "plazo_vencido" if corrida.cortada else "sin_respuesta"
+
+
+def _conectar(direccion: str, nombre: str, puerto: int, contexto: ssl.SSLContext,
+              corrida: _Corrida) -> ssl.SSLSocket:  # fmt: skip
+    """La conexión TLS a la dirección ya revisada, con el nombre en el SNI y en el certificado.
+    El socket queda en `corrida` antes del saludo TLS y antes de leer nada: el plazo de reloj lo
+    corta aunque el servidor gotee el saludo o los encabezados (Codex)."""
+    try:
+        crudo = socket.create_connection((direccion, puerto), timeout=PLAZO_CONEXION_S)
+    except OSError as e:
+        raise DescargaRechazada(_motivo(corrida)) from e
+    try:
+        corrida.usar(crudo)
+        crudo.settimeout(PLAZO_LECTURA_S)
+        cifrado = contexto.wrap_socket(crudo, server_hostname=nombre)
+    except (OSError, DescargaRechazada) as e:
+        crudo.close()
+        if isinstance(e, DescargaRechazada):
+            raise
+        raise DescargaRechazada(_motivo(corrida)) from e
+    try:
+        corrida.usar(cifrado)  # `wrap_socket` desprendió el socket crudo: se corta este
+    except DescargaRechazada:
+        cifrado.close()
+        raise
+    return cifrado
+
+
 def _traer(url: str, corrida: _Corrida, resolver: Resolver, publica: EsPublica,
            contexto: ssl.SSLContext, puerto: int,
            tipo_real: Callable[[bytes], TipoArchivo | None]) -> Traido:  # fmt: skip
-    plazo = urllib3.Timeout(connect=PLAZO_CONEXION_S, read=PLAZO_LECTURA_S)
     actual = url
     for _ in range(REDIRECCIONES + 1):
         nombre, direccion, camino = _destino(actual, resolver, publica, puerto)
         corrida.usar(None)  # vencido mientras se resolvía: no se conecta
-        conexion = urllib3.HTTPSConnectionPool(
-            direccion, port=puerto,
-            server_hostname=nombre, assert_hostname=nombre, ssl_context=contexto,
-            timeout=plazo, retries=False, maxsize=1,
-        )  # fmt: skip
+        cifrado = _conectar(direccion, nombre, puerto, contexto, corrida)
+        conexion = http.client.HTTPConnection(nombre, puerto, timeout=PLAZO_LECTURA_S)
+        conexion.sock = cifrado
         try:
-            respuesta = conexion.urlopen(
-                "GET", camino, headers={"Host": nombre, "Accept": "application/pdf, image/*"},
-                redirect=False, preload_content=False, assert_same_host=False,
-            )  # fmt: skip
-        except urllib3.exceptions.HTTPError as e:
-            raise DescargaRechazada("sin_respuesta") from e
-        try:
-            corrida.usar(respuesta.connection.sock if respuesta.connection else None)
+            try:
+                conexion.request(
+                    "GET", camino, headers={"Host": nombre, "Accept": "application/pdf, image/*"}
+                )
+                respuesta = conexion.getresponse()
+            except (OSError, http.client.HTTPException) as e:
+                raise DescargaRechazada(_motivo(corrida)) from e
             if respuesta.status in CODIGOS_REDIRECCION:
-                siguiente = respuesta.headers.get("Location")
+                siguiente = respuesta.getheader("Location")
                 if not siguiente:
                     raise DescargaRechazada("redireccion_invalida")
                 actual = urljoin(actual, siguiente)
                 continue
             if respuesta.status != 200:
                 raise DescargaRechazada("respuesta_no_valida")
-            declarado = respuesta.headers.get("Content-Length")
+            declarado = respuesta.getheader("Content-Length")
             if declarado is not None and declarado.isdigit() and int(declarado) > TOPE_BYTES:
                 raise DescargaRechazada("demasiado_grande")
             cuerpo = bytearray()
             try:
-                for tramo in respuesta.stream(TRAMO):
+                while tramo := respuesta.read(TRAMO):
                     cuerpo += tramo
                     if len(cuerpo) > TOPE_BYTES:
                         raise DescargaRechazada("demasiado_grande")
-            except (urllib3.exceptions.HTTPError, OSError) as e:
-                motivo = "plazo_vencido" if corrida.cortada else "sin_respuesta"
-                raise DescargaRechazada(motivo) from e
+            except (OSError, http.client.HTTPException) as e:
+                raise DescargaRechazada(_motivo(corrida)) from e
             tipo = tipo_real(bytes(cuerpo))
             if tipo is None:
                 raise DescargaRechazada("tipo_no_admitido")
             return Traido(bytes(cuerpo), tipo, actual)
         finally:
-            respuesta.release_conn()
+            corrida.usar_sin_controlar(None)
             conexion.close()
     raise DescargaRechazada("demasiadas_redirecciones")

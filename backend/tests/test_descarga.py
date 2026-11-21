@@ -33,6 +33,8 @@ SIN_LARGO = "X-Prueba-Sin-Largo"
 """Encabezado de la prueba (no se manda): el servidor responde sin `Content-Length`."""
 GOTEO = "X-Prueba-Goteo"
 """Encabezado de la prueba (no se manda): segundos entre byte y byte del cuerpo."""
+CABECERA_LENTA = "X-Prueba-Cabecera-Lenta"
+"""Encabezado de la prueba (no se manda): manda la primera línea y gotea los encabezados."""
 
 
 def _certificado(carpeta: Path) -> tuple[Path, Path]:
@@ -68,6 +70,18 @@ class Atencion(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.server.pedidos.append((self.path, self.headers.get("Host", "")))
         estado, encabezados, cuerpo = self.server.respuestas.get(self.path, (404, {}, b""))
+        if CABECERA_LENTA in encabezados:
+            pausa = float(encabezados[CABECERA_LENTA])
+            try:
+                self.wfile.write(b"HTTP/1.0 200 OK\r\n")
+                relleno = b"X-Relleno: a\r\n"
+                for k in range(200):
+                    self.wfile.write(relleno[k % len(relleno) : k % len(relleno) + 1])
+                    self.wfile.flush()
+                    time.sleep(pausa)
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+                return  # el cliente cortó: es lo que prueba el plazo
+            return
         self.send_response(estado)
         sin_largo = encabezados.get(SIN_LARGO) is not None
         for k, v in encabezados.items():
@@ -244,6 +258,32 @@ def test_un_servidor_que_gotea_no_pasa_del_plazo_de_reloj(servidor, tls):
     inicio = time.monotonic()
     assert rechazo(traer, servidor, tls, "/gotea", plazo_total=1.0) == "plazo_vencido"
     assert time.monotonic() - inicio < 3.0
+    assert hilos_de_descarga_vivos() == 0
     # Control: el mismo goteo, con un cuerpo que entra en el plazo, se trae entero.
     servidor.respuestas["/corto"] = (200, {GOTEO: "0.001"}, PDF)
     assert traer(servidor, tls, "/corto", plazo_total=5.0).contenido == PDF
+
+
+def hilos_de_descarga_vivos(espera: float = 5.0) -> int:
+    """Los hilos de descarga que siguen vivos después de dar `espera` segundos para terminar."""
+    limite = time.monotonic() + espera
+    while time.monotonic() < limite:
+        vivos = [h for h in threading.enumerate() if h.name == "descarga-enlace" and h.is_alive()]
+        if not vivos:
+            return 0
+        time.sleep(0.05)
+    return len(vivos)
+
+
+def test_un_servidor_que_gotea_los_encabezados_no_deja_la_descarga_viva(servidor, tls):
+    """Con los encabezados a medio llegar, el plazo de reloj corta el socket y el hilo de la
+    descarga termina (Codex): no se acumulan hilos ni conexiones."""
+    servidor.respuestas["/lenta"] = (200, {CABECERA_LENTA: "0.2"}, b"")
+    inicio = time.monotonic()
+    assert rechazo(traer, servidor, tls, "/lenta", plazo_total=1.0) == "plazo_vencido"
+    assert time.monotonic() - inicio < 3.0
+    assert hilos_de_descarga_vivos() == 0
+    # Control: una descarga que termina tampoco deja hilos.
+    servidor.respuestas["/liq.pdf"] = (200, {}, PDF)
+    assert traer(servidor, tls, "/liq.pdf").contenido == PDF
+    assert hilos_de_descarga_vivos() == 0
