@@ -238,3 +238,20 @@ def test_la_respuesta_de_imagen_es_json(modelo):
     texto = json.dumps(de_imagen())
     leido = lectura_ia.LecturaDeImagen.model_validate_json(texto)
     assert leido.transcripcion == [RENGLONES]
+
+
+def test_una_foto_con_un_qr_se_lee_con_ia_y_anota_el_enlace(
+    escena, bucket, motor_app, motor_migrate, modelo, precio
+):
+    """Anotar el enlace no traba la reserva del gasto de IA, que va en una transacción aparte
+    con una clave foránea a la misma importación (Codex): la lectura termina."""
+    from tests.test_enlaces import COMPROBANTES, qr
+
+    imagen = hoja()
+    imagen.paste(qr(COMPROBANTES, escala=4), (500, 700))
+    salida = io.BytesIO()
+    imagen.save(salida, format="PNG")
+    responder(modelo, de_imagen())
+    i = leida(escena, motor_app, salida.getvalue(), "image/png")
+    assert (i["estado"], i["formato"]) == ("para_confirmar", "lectura_ia_imagen")
+    assert [(e["url"], e["origen"]) for e in i["enlaces"]] == [(COMPROBANTES, "qr")]

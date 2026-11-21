@@ -29,6 +29,10 @@ import {
   hojasDe,
   RUTA_LIQUIDACION_ADMINISTRADOR,
   SUBIR,
+  ENLACES,
+  NO_SE_TRAJO,
+  SOLO_HTTPS,
+  TRAER,
   TRANSCRITO,
 } from "./LiquidacionDelAdministrador";
 
@@ -66,6 +70,7 @@ const IMPORTACION: Importacion = {
   estado: "para_confirmar", formato: "mis_expensas", periodo: "2026-09-01", motivo: null, diferencias: [],
   leida_en: "2026-11-20T12:00:10Z", decidida_por: null, decidida_en: null, motivo_descarte: null,
   campos: [LUZ, UNIDAD],
+  enlaces: [],
 };
 const RESUMEN = {
   id: I1, documento_id: D1, version_documento_id: V1, subida_por: PERSONA, creada_en: "2026-11-20T12:00:00Z",
@@ -192,6 +197,70 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
     const ficha = await screen.findByRole("dialog", { name: "Gasto" });
     expect(within(ficha).getByText(`Página 1 (${TRANSCRITO}): «Luz SINTETICA 1.000,00 1.000,00»`)).toBeTruthy();
+  });
+
+  it("muestra los enlaces del documento y trae el de https: entra al antivirus y se importa como uno subido", async () => {
+    const CON_ENLACES: Importacion = {
+      ...IMPORTACION,
+      enlaces: [
+        { orden: 1, url: "https://comprobantes.prueba/2026-09.pdf", origen: "qr", pagina: 2 },
+        { orden: 2, url: "http://viejo.prueba/estado", origen: "texto", pagina: 1 },
+      ],
+    };
+    const TRAER_URL = `${BASE}/liquidaciones-importadas/${I1}/enlaces/1/descarga`;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_ENLACES),
+      [`POST ${TRAER_URL}`]: () => Response.json({ documento_id: D1, version_documento_id: V1, tipo: "application/pdf", tamano: 10 }, { status: 201 }),
+      [`GET ${BASE}/documentos/${D1}/versiones/${V1}/estado`]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await abrirLaImportacion();
+    const lista = screen.getByRole("list", { name: ENLACES });
+    expect(within(lista).getByText(/comprobantes\.prueba \(QR, página 2\)/)).toBeTruthy();
+    // Sin https no se ofrece traerlo (sería un error que se sabe de antemano): solo se dice.
+    expect(within(lista).getByText(/viejo\.prueba \(escrito, página 1\)/).textContent).toContain(SOLO_HTTPS);
+    expect(within(lista).getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(within(lista).getByRole("button", { name: `${TRAER} de comprobantes.prueba` }));
+    expect(await screen.findByText(EN_ANTIVIRUS)).toBeTruthy();
+    expect(pedidos(api, "POST", TRAER_URL)).toHaveLength(1);
+    // Mientras el traído está en el antivirus no se ofrece traer otro.
+    await waitFor(() => expect(within(screen.getByRole("list", { name: ENLACES })).queryAllByRole("button")).toHaveLength(0));
+  });
+
+  it("con un traído aprobado que espera su importación no se ofrece traer otro", async () => {
+    const CON_ENLACES: Importacion = { ...IMPORTACION, enlaces: [{ orden: 1, url: "https://comprobantes.prueba/2026-09.pdf", origen: "qr", pagina: 2 }] };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_ENLACES),
+      [`POST ${BASE}/liquidaciones-importadas/${I1}/enlaces/1/descarga`]: () => Response.json({ documento_id: D1, version_documento_id: V1, tipo: "application/pdf", tamano: 10 }, { status: 201 }),
+      [`GET ${BASE}/documentos/${D1}/versiones/${V1}/estado`]: () => Response.json({ estado: "disponible", motivo_rechazo: null }),
+      [`POST ${BASE}/liquidaciones-importadas`]: () => Promise.reject(new TypeError("Failed to fetch")),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await abrirLaImportacion();
+    fireEvent.click(within(screen.getByRole("list", { name: ENLACES })).getByRole("button", { name: `${TRAER} de comprobantes.prueba` }));
+    // Aprobado por el antivirus, la importación no llega: queda para reintentar (Codex).
+    expect(await screen.findByRole("button", { name: IMPORTAR_DE_NUEVO }, { timeout: 6000 })).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: ENLACES })).queryAllByRole("button")).toHaveLength(0);
+  }, 15000);
+
+  it("un enlace que el servidor no deja traer dice por qué", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, enlaces: [{ orden: 1, url: "https://listado.prueba/", origen: "anotacion", pagina: 1 }] }),
+      [`POST ${BASE}/liquidaciones-importadas/${I1}/enlaces/1/descarga`]: () =>
+        Response.json({ codigo: "enlace_no_traido", mensaje: "El enlace no lleva a un PDF, JPEG o PNG (puede ser una página web)." }, { status: 422 }),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    fireEvent.click(screen.getByRole("button", { name: `${TRAER} de listado.prueba` }));
+    expect(await screen.findByText(`${NO_SE_TRAJO} El enlace no lleva a un PDF, JPEG o PNG (puede ser una página web).`)).toBeTruthy();
   });
 
   it("del formato conocido no habla de transcripción", async () => {

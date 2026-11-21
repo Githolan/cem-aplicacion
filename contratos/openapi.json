@@ -1256,6 +1256,7 @@
           "correccion_invalida",
           "importacion_sin_confirmar",
           "grupo_inexistente",
+          "enlace_no_traido",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",
@@ -4134,6 +4135,36 @@
         "title": "Emision",
         "type": "object"
       },
+      "EnlaceLeido": {
+        "description": "Un enlace que trae la liquidación (Disposición 1146/24: comprobantes y estado de pagos),\nanotado al leerla y sin seguirlo (H5-5, `0118`).",
+        "properties": {
+          "orden": {
+            "description": "Su número en la importación, desde 1.",
+            "title": "Orden",
+            "type": "integer"
+          },
+          "origen": {
+            "$ref": "#/components/schemas/OrigenEnlace",
+            "description": "`anotacion` (enlace del PDF), `texto` (escrito en la página) o `qr`."
+          },
+          "pagina": {
+            "title": "Pagina",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden",
+          "url",
+          "origen",
+          "pagina"
+        ],
+        "title": "EnlaceLeido",
+        "type": "object"
+      },
       "EnlacePedido": {
         "description": "Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3).",
         "properties": {
@@ -4153,6 +4184,37 @@
           "mensaje"
         ],
         "title": "EnlacePedido",
+        "type": "object"
+      },
+      "EnlaceTraido": {
+        "description": "El archivo traído de un enlace: un documento nuevo de la categoría, en cuarentena hasta que\npasa el antivirus; después se importa como cualquier archivo subido.",
+        "properties": {
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "tamano": {
+            "title": "Tamano",
+            "type": "integer"
+          },
+          "tipo": {
+            "title": "Tipo",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "version_documento_id",
+          "tipo",
+          "tamano"
+        ],
+        "title": "EnlaceTraido",
         "type": "object"
       },
       "EntradaContrasena": {
@@ -6328,6 +6390,14 @@
             "title": "Documento Id",
             "type": "string"
           },
+          "enlaces": {
+            "description": "Los enlaces del documento, sin seguir (H5-5); se trae uno a pedido.",
+            "items": {
+              "$ref": "#/components/schemas/EnlaceLeido"
+            },
+            "title": "Enlaces",
+            "type": "array"
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoImportacion"
           },
@@ -6421,7 +6491,8 @@
           "decidida_por",
           "decidida_en",
           "motivo_descarte",
-          "campos"
+          "campos",
+          "enlaces"
         ],
         "title": "ImportacionLiquidacion",
         "type": "object"
@@ -10106,6 +10177,15 @@
           "ia"
         ],
         "title": "OrigenCampo",
+        "type": "string"
+      },
+      "OrigenEnlace": {
+        "enum": [
+          "anotacion",
+          "texto",
+          "qr"
+        ],
+        "title": "OrigenEnlace",
         "type": "string"
       },
       "OrigenEvento": {
@@ -18928,6 +19008,79 @@
           }
         },
         "summary": "Descartar la liquidación importada, con el motivo",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/enlaces/{numero}/descarga": {
+      "post": {
+        "operationId": "traer_enlace_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__enlaces__numero__descarga_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "numero",
+            "required": true,
+            "schema": {
+              "title": "Numero",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnlaceTraido"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `liquidacion.importar` o sin la carga de la categoría."
+          },
+          "404": {
+            "description": "La importación o el enlace no existen."
+          },
+          "422": {
+            "description": "No se trajo: destino, tamaño o tipo no admitidos (`enlace_no_traido`)."
+          }
+        },
+        "summary": "Traer el archivo de un enlace de la liquidación: entra como documento en cuarentena",
         "tags": [
           "liquidaciones"
         ]

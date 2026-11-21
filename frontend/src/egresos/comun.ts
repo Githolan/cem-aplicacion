@@ -242,6 +242,7 @@ const MENSAJES: Record<string, string> = {
   correccion_invalida: "El valor corregido no tiene la forma del leído o no cambia nada.",
   importacion_sin_confirmar: "La liquidación importada todavía no está confirmada: se recalcula cuando se confirma.",
   grupo_inexistente: "El edificio no tiene esos coeficientes. La pantalla ya está actualizada.",
+  enlace_no_traido: "No se pudo traer el archivo del enlace.",
   aprobacion_vencida: "La aprobación tiene más de 7 días: hay que renovar la orden para que el Consejo la apruebe de nuevo.",
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",
