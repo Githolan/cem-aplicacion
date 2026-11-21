@@ -34,7 +34,9 @@ MAXIMO_ENLACES = 20
 ESQUEMAS = frozenset({"http", "https"})
 EN_EL_TEXTO = re.compile(r"https?://[^\s<>\"'()\[\]{}]+", re.IGNORECASE)
 PUNTUACION_FINAL = ".,;:!?»"
-"""Lo que termina una oración y no el enlace: «ver https://x.org/a.» deja `https://x.org/a`."""
+"""Lo que termina una oración y no el enlace: «ver https://x.org/a.» deja `https://x.org/a`. Solo
+en lo escrito en el texto: una anotación o un QR traen la dirección exacta, que puede terminar en
+`!` o `?` (Codex)."""
 
 Origen = Literal["anotacion", "texto", "qr"]
 
@@ -46,8 +48,10 @@ class Enlace:
     pagina: int
 
 
-def _admitido(url: str) -> str | None:
-    url = url.strip().rstrip(PUNTUACION_FINAL)
+def _admitido(url: str, origen: Origen) -> str | None:
+    url = url.strip()
+    if origen == "texto":
+        url = url.rstrip(PUNTUACION_FINAL)
     if not url or len(url) > descarga.LARGO_MAXIMO_URL:
         return None
     try:
@@ -63,7 +67,7 @@ def _unicos(candidatos: Iterable[Enlace]) -> list[Enlace]:
     vistos: set[str] = set()
     salida: list[Enlace] = []
     for e in candidatos:
-        url = _admitido(e.url)
+        url = _admitido(e.url, e.origen)
         if url is None or url in vistos:
             continue
         vistos.add(url)

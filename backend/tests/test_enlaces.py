@@ -80,3 +80,13 @@ def test_solo_http_y_https_y_hasta_el_tope():
     salida = enlaces._unicos(candidatos)
     assert len(salida) == enlaces.MAXIMO_ENLACES
     assert all(e.url.startswith("https://e") for e in salida)
+
+
+def test_una_anotacion_o_un_qr_quedan_exactos_y_el_texto_pierde_el_punto_final():
+    """Codex: `?token=abc!` en una anotación o un QR es parte de la dirección."""
+    exacta = "https://comprobantes.prueba/descarga?token=abc!"
+    candidatos = [enlaces.Enlace(exacta, "anotacion", 1), enlaces.Enlace(exacta + "?", "qr", 1),
+                  enlaces.Enlace("https://escrito.prueba/a.", "texto", 1)]  # fmt: skip
+    assert [e.url for e in enlaces._unicos(candidatos)] == [
+        exacta, exacta + "?", "https://escrito.prueba/a"
+    ]  # fmt: skip
