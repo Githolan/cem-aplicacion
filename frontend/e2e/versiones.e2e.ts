@@ -5,6 +5,7 @@ import {
   IMAGEN_ACTUAL,
   IMAGEN_ANTERIOR,
   IMAGEN_SIGUIENTE,
+  ESPERA_ARRANQUE_MS,
   bajarTodos,
   levantar,
   reemplazar,
@@ -20,6 +21,12 @@ const RUTA_CANJE = "/api/v1/auth/canje";
 const CLAVE_GUARDADO = "cem.entrar.enlace";
 // Para afirmar que algo NO pasa (una recarga sin pedirla), hace falta dejarle tiempo a que pase.
 const ESPERA_NEGATIVA_MS = 3_000;
+// Cada prueba levanta hasta dos contenedores y espera a cada uno hasta ESPERA_ARRANQUE_MS; el
+// plazo de Playwright por omisión (30 s) no alcanzaba ni para uno con la máquina cargada
+// (vencidas en versiones.e2e.ts:42 y :122). El plazo sale de lo que la prueba hace: los
+// arranques más el plazo por omisión para el resto de los pasos.
+const CONTENEDORES_POR_PRUEBA = 2;
+const PLAZO_DE_LOS_PASOS_MS = 30_000;
 
 async function instalarServiceWorker(pagina: Page, origen: string) {
   await pagina.goto(`${origen}/`);
@@ -41,6 +48,7 @@ function sigueSinRecargar(pagina: Page) {
 test.describe("versiones en caché", () => {
   // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
   test.use(otroCliente(9));
+  test.describe.configure({ timeout: CONTENEDORES_POR_PRUEBA * ESPERA_ARRANQUE_MS + PLAZO_DE_LOS_PASOS_MS });
 
   test("con la versión anterior a /entrar en caché, el enlace del correo llega al canje", async ({ page }, info) => {
     const etiquetas = [`${info.project.name}-${info.repeatEachIndex}-entrar-anterior`, `${info.project.name}-${info.repeatEachIndex}-entrar-actual`];

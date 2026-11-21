@@ -24,7 +24,7 @@ const SUFIJO = requerida("CEM_E2E_SUFIJO");
 const PREFIJO = requerida("CEM_E2E_PREFIJO_VERSIONES");
 
 /** Lo que se espera a que nginx del contenedor nuevo responda. */
-const ESPERA_ARRANQUE_MS = 30_000;
+export const ESPERA_ARRANQUE_MS = 30_000;
 const PAUSA_SONDEO_MS = 250;
 
 export interface Servidor {
