@@ -80,7 +80,7 @@ from app.liquidacion import (
     recalculo,
 )
 from app.plataforma import almacen, cola, trabajos
-from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
+from app.plataforma.idempotencia import IdempotenciaDep, repetida, responder_una_vez
 
 log = logging.getLogger("cem.liquidacion")
 
@@ -745,6 +745,7 @@ MOTIVOS_DESCARGA = {
     "nombre_inexistente": "El nombre del enlace no existe.",
     "destino_no_admitido": "El enlace lleva a una dirección que no se admite.",
     "sin_respuesta": "El servidor del enlace no respondió.",
+    "plazo_vencido": "El servidor del enlace tardó demasiado en entregar el archivo.",
     "redireccion_invalida": "El servidor del enlace redirigió mal.",
     "demasiadas_redirecciones": "El enlace redirige demasiadas veces.",
     "respuesta_no_valida": "El servidor del enlace no entregó el archivo.",
@@ -781,6 +782,12 @@ def traer_enlace(
     permiso.verificar(Entidad())
     documentos.verificar_carga(cargar, operativos,
                                CategoriaDocumento.LIQUIDACIONES_DEL_ADMINISTRADOR)  # fmt: skip
+    # Un reintento de una descarga ya guardada recibe la respuesta guardada sin volver a pedir el
+    # enlace, que pudo vencer o cambiar (Codex). Un pedido nuevo sigue serializado por la clave en
+    # `guardar_archivo`, que vuelve a mirar con el bloqueo tomado.
+    guardada = repetida(motor, ctx, idempotencia)
+    if guardada is not None:
+        return guardada
     with _transaccion(permiso, motor) as conn:
         url = _ejecutar(
             conn, permiso,

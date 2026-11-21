@@ -14,7 +14,8 @@ así que la descarga está acotada en **destino, tamaño y tipo** (SSRF):
   mismo control.
 - **Tamaño.** Se lee en tramos con un contador y se corta al pasar `TOPE_BYTES` (el de los
   documentos), aunque el servidor no diga el largo o diga uno falso. El pedido entero tiene
-  un plazo.
+  un plazo de reloj (`PLAZO_TOTAL_S`) que cubre la resolución, las redirecciones y la lectura: un
+  servidor que manda de a poco no retiene el pedido a la API más allá de ese plazo.
 - **Tipo.** Lo que llega tiene que ser PDF, JPEG o PNG por sus primeros bytes, como una carga
   (`documentos.tipo_real`); lo que diga el servidor no alcanza.
 
@@ -24,9 +25,11 @@ pasa por el antivirus como cualquier carga (`documentos.guardar_archivo`).
 
 from __future__ import annotations
 
+import errno
 import ipaddress
 import socket
 import ssl
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
@@ -39,9 +42,10 @@ PUERTO = 443
 REDIRECCIONES = 3
 PLAZO_CONEXION_S = 5.0
 PLAZO_LECTURA_S = 20.0
-"""Por tramo: el pedido entero lo acota además `PLAZO_TOTAL_S`."""
+"""Por lectura del socket. No acota el pedido: un servidor que manda un byte cada 19 segundos nunca
+lo vence. Eso lo acota `PLAZO_TOTAL_S`."""
 PLAZO_TOTAL_S = 45.0
-"""Por debajo del plazo de un pedido a la API detrás de nginx."""
+"""De reloj, para toda la descarga; por debajo del plazo de un pedido a la API detrás de nginx."""
 TRAMO = 64 * 1024
 LARGO_MAXIMO_URL = 2000
 CODIGOS_REDIRECCION = frozenset({301, 302, 303, 307, 308})
@@ -117,6 +121,35 @@ def _destino(url: str, resolver: Resolver, publica: EsPublica,
     return nombre, direcciones[0], camino
 
 
+class _Corrida:
+    """El socket de la respuesta en curso, para cortarlo desde afuera cuando vence el plazo."""
+
+    def __init__(self) -> None:
+        self._cerrojo = threading.Lock()
+        self._socket: socket.socket | None = None
+        self.cortada = False
+
+    def usar(self, sock: socket.socket | None) -> None:
+        with self._cerrojo:
+            self._socket = sock
+            cortada = self.cortada
+        if cortada:
+            raise DescargaRechazada("plazo_vencido")
+
+    def cortar(self) -> None:
+        with self._cerrojo:
+            self.cortada = True
+            sock = self._socket
+        if sock is not None:
+            # `shutdown` despierta una lectura bloqueada en otro hilo; `close` solo, no.
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError as e:
+                if e.errno not in (errno.ENOTCONN, errno.EBADF):
+                    raise
+                # Ya cerrado: no hay lectura que despertar.
+
+
 def traer(
     url: str,
     *,
@@ -124,18 +157,51 @@ def traer(
     publica: EsPublica = es_publica,
     contexto_tls: ssl.SSLContext | None = None,
     puerto: int = PUERTO,
+    plazo_total: float = PLAZO_TOTAL_S,
     tipo_real: Callable[[bytes], TipoArchivo | None],
 ) -> Traido:
     """El archivo del enlace, dentro de los topes, o `DescargaRechazada` con el motivo.
 
-    `resolver`, `publica`, `contexto_tls` y `puerto` existen para las pruebas, que sirven el archivo
-    desde la misma máquina, en otro puerto y con un certificado propio; en la aplicación van los de
-    omisión."""
-    contexto = contexto_tls or ssl.create_default_context()
-    plazo = urllib3.Timeout(connect=PLAZO_CONEXION_S, read=PLAZO_LECTURA_S, total=PLAZO_TOTAL_S)
+    La descarga corre en un hilo aparte y este la espera `plazo_total` segundos de reloj. Si vence,
+    corta el socket en curso (el hilo termina solo con el error de lectura) y responde
+    `plazo_vencido`. Una resolución de DNS en curso no se puede interrumpir: su hilo sigue hasta que
+    el resolutor del sistema se rinde, pero el pedido a la API ya respondió.
+
+    `resolver`, `publica`, `contexto_tls`, `puerto` y `plazo_total` existen para las pruebas, que
+    sirven el archivo desde la misma máquina, en otro puerto, con un certificado propio y con plazos
+    cortos; en la aplicación van los de omisión."""
+    corrida = _Corrida()
+    resultado: dict[str, Traido | BaseException] = {}
+
+    def trabajo() -> None:
+        try:
+            resultado["traido"] = _traer(url, corrida, resolver, publica,
+                                         contexto_tls or ssl.create_default_context(), puerto,
+                                         tipo_real)  # fmt: skip
+        except BaseException as e:  # se relanza en el hilo del pedido
+            resultado["error"] = e
+
+    hilo = threading.Thread(target=trabajo, name="descarga-enlace", daemon=True)
+    hilo.start()
+    hilo.join(plazo_total)
+    if hilo.is_alive():
+        corrida.cortar()
+        raise DescargaRechazada("plazo_vencido")
+    if "error" in resultado:
+        raise resultado["error"]
+    traido = resultado["traido"]
+    assert isinstance(traido, Traido)
+    return traido
+
+
+def _traer(url: str, corrida: _Corrida, resolver: Resolver, publica: EsPublica,
+           contexto: ssl.SSLContext, puerto: int,
+           tipo_real: Callable[[bytes], TipoArchivo | None]) -> Traido:  # fmt: skip
+    plazo = urllib3.Timeout(connect=PLAZO_CONEXION_S, read=PLAZO_LECTURA_S)
     actual = url
     for _ in range(REDIRECCIONES + 1):
         nombre, direccion, camino = _destino(actual, resolver, publica, puerto)
+        corrida.usar(None)  # vencido mientras se resolvía: no se conecta
         conexion = urllib3.HTTPSConnectionPool(
             direccion, port=puerto,
             server_hostname=nombre, assert_hostname=nombre, ssl_context=contexto,
@@ -149,6 +215,7 @@ def traer(
         except urllib3.exceptions.HTTPError as e:
             raise DescargaRechazada("sin_respuesta") from e
         try:
+            corrida.usar(respuesta.connection.sock if respuesta.connection else None)
             if respuesta.status in CODIGOS_REDIRECCION:
                 siguiente = respuesta.headers.get("Location")
                 if not siguiente:
@@ -166,8 +233,9 @@ def traer(
                     cuerpo += tramo
                     if len(cuerpo) > TOPE_BYTES:
                         raise DescargaRechazada("demasiado_grande")
-            except urllib3.exceptions.HTTPError as e:
-                raise DescargaRechazada("sin_respuesta") from e
+            except (urllib3.exceptions.HTTPError, OSError) as e:
+                motivo = "plazo_vencido" if corrida.cortada else "sin_respuesta"
+                raise DescargaRechazada(motivo) from e
             tipo = tipo_real(bytes(cuerpo))
             if tipo is None:
                 raise DescargaRechazada("tipo_no_admitido")

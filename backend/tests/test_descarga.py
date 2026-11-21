@@ -9,6 +9,7 @@ aplicación. Datos SINTETICOS / NO REAL.
 import ipaddress
 import ssl
 import threading
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,8 @@ PDF = b"%PDF-1.4\n% liquidacion SINTETICA\n"
 LOCAL = "127.0.0.1"
 SIN_LARGO = "X-Prueba-Sin-Largo"
 """Encabezado de la prueba (no se manda): el servidor responde sin `Content-Length`."""
+GOTEO = "X-Prueba-Goteo"
+"""Encabezado de la prueba (no se manda): segundos entre byte y byte del cuerpo."""
 
 
 def _certificado(carpeta: Path) -> tuple[Path, Path]:
@@ -68,13 +71,23 @@ class Atencion(BaseHTTPRequestHandler):
         self.send_response(estado)
         sin_largo = encabezados.get(SIN_LARGO) is not None
         for k, v in encabezados.items():
-            if k != SIN_LARGO:
+            if k not in (SIN_LARGO, GOTEO):
                 self.send_header(k, v)
         # Sin largo, HTTP/1.0 termina el cuerpo cerrando la conexión.
         if "Content-Length" not in encabezados and not sin_largo:
             self.send_header("Content-Length", str(len(cuerpo)))
         self.end_headers()
-        self.wfile.write(cuerpo)
+        if GOTEO not in encabezados:
+            self.wfile.write(cuerpo)
+            return
+        pausa = float(encabezados[GOTEO])
+        try:
+            for k in range(len(cuerpo)):
+                self.wfile.write(cuerpo[k : k + 1])
+                self.wfile.flush()
+                time.sleep(pausa)
+        except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+            return  # el cliente cortó: es lo que prueba el plazo
 
     def log_message(self, *_: object) -> None:
         pass
@@ -223,3 +236,14 @@ def test_un_certificado_de_otro_nombre_no_se_acepta(servidor, tls):
     assert rechazo(descarga.traer, f"https://otro.prueba:{puerto}/liq.pdf",
                    resolver=lambda _: [LOCAL], publica=solo_local, contexto_tls=tls[0],
                    puerto=puerto, tipo_real=tipo_real) == "sin_respuesta"  # fmt: skip
+
+
+def test_un_servidor_que_gotea_no_pasa_del_plazo_de_reloj(servidor, tls):
+    """Un byte cada 0,2 s nunca vence el plazo de lectura (20 s), pero sí el de reloj (Codex)."""
+    servidor.respuestas["/gotea"] = (200, {GOTEO: "0.2"}, PDF + b"0" * 200)
+    inicio = time.monotonic()
+    assert rechazo(traer, servidor, tls, "/gotea", plazo_total=1.0) == "plazo_vencido"
+    assert time.monotonic() - inicio < 3.0
+    # Control: el mismo goteo, con un cuerpo que entra en el plazo, se trae entero.
+    servidor.respuestas["/corto"] = (200, {GOTEO: "0.001"}, PDF)
+    assert traer(servidor, tls, "/corto", plazo_total=5.0).contenido == PDF

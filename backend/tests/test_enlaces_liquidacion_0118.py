@@ -51,11 +51,11 @@ def importada_con(e, motor_app, url: str) -> dict:
     return i
 
 
-def traer(e, i: str, numero: int, quien=None):
+def traer(e, i: str, numero: int, quien=None, clave: dict[str, str] | None = None):
     with cliente(quien or e["mc"], e["sesion"] if quien is None else None) as c:
         return c.post(
             f"/api/v1/consorcios/{e['cons']}/liquidaciones-importadas/{i}/enlaces/{numero}/descarga",
-            headers=clave_idempotencia(),
+            headers=clave or clave_idempotencia(),
         )
 
 
@@ -118,6 +118,33 @@ def test_traer_un_enlace_lo_guarda_como_documento_en_cuarentena_y_lo_audita(
     with motor_migrate.connect() as c:
         assert c.execute(text("select estado from nucleo.version_documento where id = :v"),
                          {"v": t["version_documento_id"]}).scalar_one() == "disponible"  # fmt: skip
+
+
+def test_un_reintento_recibe_lo_guardado_sin_volver_a_pedir_el_enlace(
+    escena, bucket, motor_app, motor_migrate, al_servidor_de_prueba
+):
+    """Si la respuesta se perdió y el enlace ya no sirve, el reintento con la misma clave recibe el
+    documento ya guardado, no un 422 (Codex)."""
+    url = f"https://{NOMBRE}:{al_servidor_de_prueba.server_address[1]}/liq.pdf"
+    al_servidor_de_prueba.respuestas["/liq.pdf"] = (200, {}, pdf())
+    i = importada_con(escena, motor_app, url)
+    clave = clave_idempotencia()
+    primera = traer(escena, i["id"], 1, clave=clave)
+    assert primera.status_code == 201, primera.text
+    pedidos = len(al_servidor_de_prueba.pedidos)
+    del al_servidor_de_prueba.respuestas["/liq.pdf"]  # el enlace venció: ahora da 404
+    antes = documentos_de(motor_migrate, escena["cons"])
+    otra = traer(escena, i["id"], 1, clave=clave)
+    assert otra.status_code == 201, otra.text
+    assert otra.json() == primera.json()
+    assert otra.headers.get("Idempotent-Replayed") == "true"
+    assert len(al_servidor_de_prueba.pedidos) == pedidos  # no se volvió a pedir
+    assert documentos_de(motor_migrate, escena["cons"]) == antes
+    # Control: con otra clave, el mismo enlace vencido sí se pide y no se trae.
+    nueva = traer(escena, i["id"], 1)
+    assert nueva.status_code == 422
+    assert nueva.json()["mensaje"] == importacion.MOTIVOS_DESCARGA["respuesta_no_valida"]
+    assert len(al_servidor_de_prueba.pedidos) == pedidos + 1
 
 
 def test_un_enlace_sin_https_no_se_trae_ni_crea_nada(escena, bucket, motor_app, motor_migrate):
