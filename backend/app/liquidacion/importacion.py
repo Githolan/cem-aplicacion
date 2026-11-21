@@ -16,6 +16,10 @@
   (`…/campos/{campo}/decision`: confirmar, corregir o descartar), la confirmación de la importación
   entera sin campos pendientes (`…/confirmacion`) y su descarte con motivo (`…/descarte`). Cada una
   devuelve la importación como queda.
+- **Recálculo (H5-4, `0116`)**, con la misma facultad: `GET …/{id}/recalculo` reparte el gasto de
+  cada grupo de una importación confirmada con los coeficientes vigentes en el período y lo compara
+  con lo informado (`recalculo`); `POST …/{id}/correspondencias` dice qué esquema de coeficientes
+  corresponde a un grupo (el edificio lo recuerda) y devuelve el recálculo como queda.
 """
 
 import json
@@ -31,14 +35,18 @@ from uuid import UUID
 from cem_contracts.errores import CodigoError
 from cem_contracts.importacion_liquidacion import (
     CampoPreliminar,
+    CorrespondenciaNueva,
     DecisionCampo,
     DecisionSobreCampo,
     DescarteImportacion,
     DiferenciaLeida,
+    EsquemaDelPeriodo,
+    EstadoImportacion,
     ImportacionCreada,
     ImportacionLiquidacion,
     ImportacionNueva,
     ImportacionResumen,
+    RecalculoLiquidacion,
 )
 from fastapi import APIRouter, Depends, Response
 from pdfplumber.utils.exceptions import PdfminerException
@@ -54,7 +62,7 @@ from app.consorcios.padron import Discrepancia
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
-from app.liquidacion import lectura_ia, mis_expensas, palabras_pdf
+from app.liquidacion import lectura_ia, mis_expensas, palabras_pdf, recalculo
 from app.plataforma import almacen, cola, trabajos
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
 
@@ -100,6 +108,10 @@ ERRORES = {
     ),
     "decision_invalida": (422, CodigoError.DECISION_INVALIDA, "La decisión no es válida."),
     "motivo_invalido": (422, CodigoError.PETICION_INVALIDA, "Falta el motivo."),
+    "nombre_invalido": (422, CodigoError.PETICION_INVALIDA, "Falta el nombre del grupo."),
+    "grupo_inexistente": (
+        422, CodigoError.GRUPO_INEXISTENTE, "El edificio no tiene ese esquema de coeficientes.",
+    ),
 }  # fmt: skip
 
 
@@ -554,5 +566,94 @@ def descartar_importacion(
             {"i": importacion_id, "m": descarte.motivo},
         )  # fmt: skip
         return 200, _importacion(conn, permiso, importacion_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+# --- Recálculo (H5-4, `0116`) -----------------------------------------------------------------
+
+
+def _recalculo(conn: Connection, permiso: Permiso, i: UUID) -> RecalculoLiquidacion:
+    importacion = _importacion(conn, permiso, i)
+    if importacion.estado != EstadoImportacion.CONFIRMADA or importacion.periodo is None:
+        raise ErrorApi(
+            409, CodigoError.IMPORTACION_SIN_CONFIRMAR,
+            "La liquidación importada no está confirmada: todavía no tiene datos oficiales.",
+        )  # fmt: skip
+    oficiales = [
+        recalculo.Oficial(tipo=f["tipo"], clave=f["clave"], valor=f["valor"],
+                          unidad_id=f["unidad_id"])
+        for f in _ejecutar(
+            conn, permiso,
+            "select * from nucleo.campos_oficiales_liquidacion(:i, :actor, 'api', :sesion)",
+            {"i": i},
+        ).mappings()
+    ]  # fmt: skip
+    base = [
+        recalculo.Base(**f)
+        for f in _ejecutar(
+            conn, permiso,
+            "select * from nucleo.base_recalculo_liquidacion(:i, :actor, 'api', :sesion)",
+            {"i": i},
+        ).mappings()
+    ]  # fmt: skip
+    esquemas = _ejecutar(
+        conn, permiso,
+        "select * from nucleo.grupos_para_recalculo(:i, :actor, 'api', :sesion)", {"i": i},
+    ).mappings().all()  # fmt: skip
+    grupos = recalculo.recalcular(oficiales, base)
+    return RecalculoLiquidacion(
+        importacion_id=i, periodo=importacion.periodo, sin_grupos=not grupos, grupos=grupos,
+        esquemas=[EsquemaDelPeriodo(**e) for e in esquemas],
+    )  # fmt: skip
+
+
+_RECALCULO: dict[int | str, dict[str, Any]] = {
+    403: {"description": "Sin `liquidacion.importar` en el consorcio."},
+    404: {"description": "La importación no existe en este consorcio."},
+    409: {"description": "La importación no está confirmada (`importacion_sin_confirmar`)."},
+}
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/recalculo",
+    response_model=RecalculoLiquidacion,
+    summary="El reparto de cada grupo con los coeficientes del edificio, frente a lo informado",
+    responses=_RECALCULO,
+)
+def recalcular_importacion(
+    importacion_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    motor: MotorDep,
+) -> RecalculoLiquidacion:
+    with _transaccion(permiso, motor) as c:
+        return _recalculo(c, permiso, importacion_id)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/correspondencias",
+    response_model=RecalculoLiquidacion,
+    summary="Qué coeficientes del edificio corresponden a un grupo de la liquidación",
+    responses=_RECALCULO
+    | {422: {"description": "El edificio no tiene ese esquema (`grupo_inexistente`)."}},
+)
+def definir_correspondencia(
+    importacion_id: UUID,
+    nueva: CorrespondenciaNueva,
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = permiso.ctx
+    permiso.verificar(Entidad())
+
+    def efecto(conn: Connection) -> tuple[int, RecalculoLiquidacion]:
+        _recalculo(conn, permiso, importacion_id)  # 404 o 409 antes de guardar nada
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.definir_correspondencia_grupo(:n, :g, :actor, 'api', :sesion)",
+            {"n": nueva.nombre, "g": nueva.grupo},
+        )  # fmt: skip
+        return 200, _recalculo(conn, permiso, importacion_id)
 
     return responder_una_vez(motor, ctx, idempotencia, efecto)

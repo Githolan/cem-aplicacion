@@ -240,6 +240,8 @@ const MENSAJES: Record<string, string> = {
   importacion_decidida: "La liquidación importada ya se confirmó o se descartó. La pantalla ya está actualizada.",
   campos_pendientes: "Quedan datos leídos sin decidir: cada uno se confirma, se corrige o se descarta antes.",
   correccion_invalida: "El valor corregido no tiene la forma del leído o no cambia nada.",
+  importacion_sin_confirmar: "La liquidación importada todavía no está confirmada: se recalcula cuando se confirma.",
+  grupo_inexistente: "El edificio no tiene esos coeficientes. La pantalla ya está actualizada.",
   aprobacion_vencida: "La aprobación tiene más de 7 días: hay que renovar la orden para que el Consejo la apruebe de nuevo.",
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",

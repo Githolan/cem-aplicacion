@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
@@ -10,13 +11,14 @@ import { codigoDe, esPasajera, SIN_CONEXION } from "../fallas";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { RUTA_INICIO } from "../enlace";
 import { fechaCorta } from "../pagos/textos";
-import { REQUISITOS } from "../permisos";
+import { REQUISITOS, usePuede } from "../permisos";
 import { SubirArchivo } from "../SubirArchivo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { type Aviso, cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, ESTADO, mensajeDeActo, mensajeDeError, renovarClave, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus, useConsorcio } from "../egresos/useConsorcio";
+import { type Propuesta, RUTA_SOLICITUDES } from "./Solicitudes";
 
 // Página /importar-liquidacion (H5-3, app 0115; diseño H5 §5): en Modo Consejo, quien tiene
 // `liquidacion.importar` sube el PDF que manda la administración, la aplicación lo lee (sin IA el
@@ -672,6 +674,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                 </p>
               )}
               {seConfirma && pendientes > 0 && <p>{`Quedan ${pendientes} datos sin decidir.`}</p>}
+              {importacion.estado === "confirmada" && <RecalculoDeLaLiquidacion key={importacion.id} consorcio={consorcio} importacion={importacion.id} aEntrar={aEntrar} />}
               {importacion.campos.length > 0 && (
                 <ul className="filas-registro" aria-label="Datos leídos">
                   {importacion.campos.map((c) => (
@@ -805,4 +808,284 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       </VentanaDeFormulario>
     );
   }
+}
+
+// --- Recálculo con los coeficientes del edificio (H5-4, app 0116; diseño H5 §5) ---------------
+// En una importación confirmada: el gasto de cada grupo de la liquidación repartido con los
+// coeficientes del edificio vigentes en el período, frente a lo que informó la administración. Dice
+// la diferencia y su base; no la califica (RN33). Una diferencia se convierte, si quien mira tiene
+// `solicitud_formal.preparar`, en el borrador de una solicitud formal ya redactado (RF49).
+
+type Recalculo = components["schemas"]["RecalculoLiquidacion"];
+type GrupoRecalculado = components["schemas"]["GrupoRecalculado"];
+type UnidadRecalculada = components["schemas"]["UnidadRecalculada"];
+
+export const RECALCULO = "Recálculo con los coeficientes del edificio";
+export const ELEGIR_COEFICIENTES = "Elegir los coeficientes";
+export const CAMBIAR_COEFICIENTES = "Cambiar los coeficientes";
+export const PREPARAR_SOLICITUD = "Preparar una solicitud formal";
+export const SIN_GRUPOS = "Esta liquidación no informa el reparto por grupo: no hay nada que recalcular.";
+export const FALTA_ESQUEMA = "Falta elegir los coeficientes.";
+const LARGO_SOLICITUD = 2000;
+
+const nombreDeEsquema = (grupo: string) => `«${grupo.replaceAll("_", " ")}»`;
+/** Un día como «1 de enero de 2024»; al mediodía para que la zona horaria no lo corra. */
+const fechaLarga = (dia: string) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${dia}T12:00:00`));
+const mesDe = (periodo: string) => new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" }).format(new Date(`${periodo}T12:00:00`));
+const porcentajeDe = (texto: string | null | undefined) =>
+  texto === null || texto === undefined ? "—" : `${Number(texto).toLocaleString("es-AR", { maximumFractionDigits: 6 })} %`;
+const pesos = (texto: string | null | undefined) => (texto === null || texto === undefined ? "—" : enPesos(texto));
+
+function situacionDelGrupo(g: GrupoRecalculado, periodo: string): string {
+  switch (g.estado) {
+    case "recalculado": {
+      const base = `Repartido con los coeficientes ${nombreDeEsquema(g.grupo ?? "")} (versión ${g.esquema_version ?? "—"}, vigentes desde el ${fechaLarga(g.vigente_desde ?? periodo)}): total del grupo ${pesos(g.total)}.`;
+      // Un monto vacío no se compara: se nombra la unidad, no se inventa una diferencia.
+      const vacias = g.unidades.filter((u) => u.sin_monto).map((u) => u.designacion);
+      const sinMonto = vacias.length === 0 ? "" : ` Sin monto informado, no se ${vacias.length === 1 ? "compara" : "comparan"}: ${vacias.join(", ")}.`;
+      if (g.senaladas === 0) {
+        const todas = vacias.length === 0 ? "todas las unidades" : "las demás unidades";
+        return `${base} Coincide con lo informado en ${todas}, con hasta un centavo de diferencia.${sinMonto}`;
+      }
+      return `${base} ${g.senaladas === 1 ? "Una unidad difiere" : `${g.senaladas} unidades difieren`} en más de un centavo.${sinMonto}`;
+    }
+    case "sin_correspondencia":
+      return "Falta indicar qué coeficientes del edificio corresponden a este grupo.";
+    case "sin_esquema":
+      return `Los coeficientes ${nombreDeEsquema(g.grupo ?? "")} no estaban vigentes en ${mesDe(periodo)}.`;
+    case "sin_total":
+      return "El total de este grupo no está entre los datos confirmados de la liquidación.";
+    case "coeficientes_incompletos":
+      return `Hay unidades sin coeficiente en ${nombreDeEsquema(g.grupo ?? "")}: se completan en la carga de coeficientes.`;
+  }
+}
+
+/** Una unidad con diferencia, en una línea: lo informado y lo que da el reparto. */
+function lineaDeUnidad(u: UnidadRecalculada): string {
+  if (u.esperado === null) return `${u.designacion} · informado ${pesos(u.informado)} · no está en el padrón del edificio`;
+  if (u.informado === null) return `${u.designacion} · no figura en la liquidación · según los coeficientes ${pesos(u.esperado)}`;
+  return `${u.designacion} · informado ${pesos(u.informado)} · según los coeficientes ${pesos(u.esperado)}`;
+}
+
+/** El texto de la solicitud formal: cada diferencia con su base, sin calificarla (RN33), dentro del
+ * largo que admite la solicitud. */
+export function textoDeSolicitud(r: Recalculo): string {
+  const encabezado = `Se pide la base de cálculo del reparto de la liquidación de ${mesDe(r.periodo)} en estos grupos y unidades, donde el monto informado no coincide con el reparto del gasto del grupo según los coeficientes cargados en el edificio:`;
+  const cierre = "Si se aplicó un criterio distinto del coeficiente (por ejemplo, un gasto particular de una unidad), se pide indicar cuál.";
+  const lineas = r.grupos.flatMap((g) =>
+    g.unidades
+      .filter((u) => u.senalada)
+      .map((u) => {
+        const base =
+          u.esperado === null
+            ? "no está en el padrón del edificio"
+            : `según los coeficientes ${nombreDeEsquema(g.grupo ?? "")} ${pesos(u.esperado)} (coeficiente ${porcentajeDe(u.coeficiente)}; porcentaje informado ${porcentajeDe(u.porcentaje_informado)})`;
+        const informado = u.informado === null ? "no figura en la liquidación" : `informado ${pesos(u.informado)}`;
+        return `- ${g.nombre}, ${u.designacion}: ${informado}; ${base}.`;
+      }),
+  );
+  const mas = (n: number) => `- Y ${n === 1 ? "una diferencia más" : `${n} diferencias más`}, en el recálculo de la aplicación.`;
+  const partes = [encabezado];
+  for (const [i, linea] of lineas.entries()) {
+    const quedan = lineas.length - i - 1;
+    if ([...partes, linea, ...(quedan > 0 ? [mas(quedan)] : []), cierre].join("\n").length > LARGO_SOLICITUD) {
+      partes.push(mas(lineas.length - i));
+      break;
+    }
+    partes.push(linea);
+  }
+  partes.push(cierre);
+  return partes.join("\n");
+}
+
+type PropsRecalculo = { consorcio: string; importacion: string; aEntrar: () => void };
+
+function RecalculoDeLaLiquidacion({ consorcio, importacion, aEntrar }: PropsRecalculo) {
+  const id = useId();
+  const [lectura, setLectura] = useState<{ tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; r: Recalculo }>({ tipo: "cargando" });
+  const [vuelta, setVuelta] = useState(0);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [eligiendo, setEligiendo] = useState<GrupoRecalculado | null>(null);
+  const [elegido, setElegido] = useState("");
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
+  const clave = useRef<string | null>(null);
+  const fichas = useFichas<string>();
+  const puede = usePuede(consorcio);
+  const navegar = useNavigate();
+
+  useEffect(() => {
+    let vigente = true;
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/recalculo", {
+        params: { path: { consorcio_id: consorcio, importacion_id: importacion } },
+      })
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (!vigente) return;
+        if (data === undefined) {
+          setLectura({ tipo: "sin_servicio" });
+          setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
+          return;
+        }
+        setLectura({ tipo: "ok", r: data });
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else if (vigente) {
+          setLectura({ tipo: "sin_servicio" });
+          setAviso({ texto: SIN_CONEXION, ok: false });
+        }
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [consorcio, importacion, vuelta, aEntrar]);
+
+  async function guardarCorrespondencia(g: GrupoRecalculado): Promise<FinDeEnvio> {
+    if (elegido === "") {
+      setErrores({ esquema: FALTA_ESQUEMA });
+      return "seguir";
+    }
+    clave.current ??= crypto.randomUUID();
+    try {
+      const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/correspondencias", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio, importacion_id: importacion }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current } },
+        body: { nombre: g.nombre, grupo: elegido },
+      });
+      exigirSesion(response);
+      if (data === undefined) {
+        if (renovarClave(response.status, codigoDe(error))) clave.current = null;
+        return { rechazo: mensajeDeActo(response.status, error) };
+      }
+      clave.current = null;
+      setLectura({ tipo: "ok", r: data });
+      setAviso({ texto: `«${g.nombre}» se recalcula con los coeficientes ${nombreDeEsquema(elegido)}.`, ok: true });
+      setEligiendo(null);
+      return "cerrar";
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) {
+        aEntrar();
+        return "seguir";
+      }
+      return { rechazo: SIN_CONEXION };
+    }
+  }
+
+  const r = lectura.tipo === "ok" ? lectura.r : null;
+  const senaladas = r?.grupos.reduce((n, g) => n + g.senaladas, 0) ?? 0;
+  const llaveDe = (g: GrupoRecalculado, u: UnidadRecalculada) => `${g.nombre}|${u.unidad_id ?? u.designacion}`;
+  const enFicha = r?.grupos.flatMap((g) => g.unidades.map((u) => ({ g, u }))).find(({ g, u }) => llaveDe(g, u) === fichas.abierta);
+
+  function prepararSolicitud(recalculo: Recalculo) {
+    const propuesta: Propuesta = { consorcio, objeto: "periodo", referencia: `Liquidación de ${mesDe(recalculo.periodo)}`, documentacion: textoDeSolicitud(recalculo) };
+    void navegar(RUTA_SOLICITUDES, { state: { propuesta } });
+  }
+
+  return (
+    <section aria-labelledby={`${id}-recalculo`}>
+      <h3 id={`${id}-recalculo`}>{RECALCULO}</h3>
+      <AvisoPantalla aviso={aviso} />
+      {lectura.tipo === "cargando" && <p role="status">Recalculando…</p>}
+      {lectura.tipo === "sin_servicio" && (
+        <FallaDeLectura
+          alReintentar={() => {
+            setAviso(sinLaFalla);
+            setLectura({ tipo: "cargando" });
+            setVuelta((v) => v + 1);
+          }}
+          avisar={setAviso}
+        />
+      )}
+      {r !== null && r.sin_grupos && <p className="tarjeta">{SIN_GRUPOS}</p>}
+      {r !== null && !r.sin_grupos && r.esquemas.length === 0 && (
+        <p className="tarjeta">{`El edificio no tiene coeficientes vigentes en ${mesDe(r.periodo)}: se cargan desde los coeficientes del padrón.`}</p>
+      )}
+      {r?.grupos.map((g) => {
+        const conDiferencia = g.unidades.filter((u) => u.senalada);
+        return (
+          <div key={g.nombre}>
+            <h4>{g.nombre}</h4>
+            <p>{situacionDelGrupo(g, r.periodo)}</p>
+            {conDiferencia.length > 0 && (
+              <ul className="filas-registro" aria-label={`Diferencias en ${g.nombre}`}>
+                {conDiferencia.map((u) => (
+                  <li key={llaveDe(g, u)}>
+                    <FilaDeRegistro
+                      titulo={lineaDeUnidad(u)}
+                      estado={u.diferencia === null ? undefined : `Diferencia ${enPesos(u.diferencia)}`}
+                      alAbrir={() => fichas.abrir(llaveDe(g, u))}
+                      refFila={fichas.refFila(llaveDe(g, u))}
+                      abierta={fichas.abierta === llaveDe(g, u)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {r.esquemas.length > 0 && g.estado !== "sin_total" && (
+              <p>
+                <button
+                  type="button"
+                  className="secundario"
+                  onClick={() => {
+                    clave.current = null;
+                    setErrores(SIN_ERRORES);
+                    setElegido(g.grupo !== null && r.esquemas.some((e) => e.grupo === g.grupo) ? g.grupo : "");
+                    setEligiendo(g);
+                  }}
+                >
+                  {g.estado === "sin_correspondencia" ? ELEGIR_COEFICIENTES : CAMBIAR_COEFICIENTES}
+                </button>
+              </p>
+            )}
+          </div>
+        );
+      })}
+      {r !== null && senaladas > 0 && puede("solicitud_formal.preparar") && (
+        <p>
+          <button type="button" onClick={() => prepararSolicitud(r)}>
+            {PREPARAR_SOLICITUD}
+          </button>
+        </p>
+      )}
+      {enFicha !== undefined && (
+        <FichaDeRegistro
+          titulo={`${enFicha.g.nombre} · ${enFicha.u.designacion}`}
+          datos={[
+            { etiqueta: "Coeficiente cargado", valor: porcentajeDe(enFicha.u.coeficiente) },
+            { etiqueta: "Porcentaje informado", valor: porcentajeDe(enFicha.u.porcentaje_informado) },
+            { etiqueta: "Según los coeficientes", valor: pesos(enFicha.u.esperado) },
+            { etiqueta: "Informado", valor: pesos(enFicha.u.informado) },
+            { etiqueta: "Diferencia", valor: pesos(enFicha.u.diferencia) },
+          ]}
+          alCerrar={() => fichas.cerrar()}
+        />
+      )}
+      {eligiendo !== null && r !== null && (
+        <VentanaDeFormulario titulo={`Coeficientes para «${eligiendo.nombre}»`} textoEnviar="Recalcular" alEnviar={() => guardarCorrespondencia(eligiendo)} alCerrar={() => setEligiendo(null)}>
+          <p>El edificio recuerda la elección para las liquidaciones siguientes.</p>
+          <label htmlFor={`${id}-esquema`}>Coeficientes del edificio</label>
+          <select
+            id={`${id}-esquema`}
+            data-foco
+            value={elegido}
+            {...marcaDe(`${id}-esquema`, errores.esquema)}
+            onChange={(ev) => {
+              clave.current = null;
+              setErrores(SIN_ERRORES);
+              setElegido(ev.target.value);
+            }}
+          >
+            <option value="">Elegir…</option>
+            {r.esquemas.map((e) => (
+              <option key={e.grupo} value={e.grupo}>
+                {`${e.grupo.replaceAll("_", " ")} (versión ${e.esquema_version}, desde el ${fechaLarga(e.vigente_desde)})`}
+              </option>
+            ))}
+          </select>
+          <ErrorDeCampo idCampo={`${id}-esquema`} mensaje={errores.esquema} />
+        </VentanaDeFormulario>
+      )}
+    </section>
+  );
 }

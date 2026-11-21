@@ -176,3 +176,90 @@ class DescarteImportacion(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     motivo: str = Field(min_length=1, max_length=500, description="Por qué no sirve.")
+
+
+# --- Recálculo con los coeficientes del edificio (H5-4, `0116`) --------------------------------
+
+
+class CorrespondenciaNueva(BaseModel):
+    """Qué esquema de coeficientes del edificio (`grupo` de RF05, p. ej. `expensas_comunes`)
+    corresponde a un grupo de la liquidación, con su nombre tal como figura (p. ej. «Gastos
+    Comunes»). El edificio la recuerda para los meses siguientes."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    nombre: str = Field(min_length=1, max_length=80)
+    grupo: str = Field(pattern=r"^[a-z][a-z0-9_]{1,39}$")
+
+
+class EstadoGrupoRecalculado(StrEnum):
+    RECALCULADO = "recalculado"
+    SIN_CORRESPONDENCIA = "sin_correspondencia"
+    """Falta decir qué esquema de coeficientes le corresponde."""
+    SIN_ESQUEMA = "sin_esquema"
+    """El esquema que le corresponde no estaba vigente en el período."""
+    SIN_TOTAL = "sin_total"
+    """El total del grupo no está entre los datos confirmados de la importación."""
+    COEFICIENTES_INCOMPLETOS = "coeficientes_incompletos"
+    """Alguna unidad activa no tiene coeficiente en el esquema, o suman cero."""
+
+
+class UnidadRecalculada(BaseModel):
+    """Una unidad en un grupo: lo que informó la administración y lo que da el reparto con el
+    coeficiente cargado. `unidad_id` nulo: la fila de la liquidación no coincide con una unidad del
+    padrón. `informado` nulo: la unidad del padrón no figura en la liquidación (se compara como
+    cero) o figura con el monto vacío (`sin_monto`: no se compara)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    unidad_id: UUID | None
+    designacion: str
+    coeficiente: Decimal | None = Field(description="El porcentaje cargado en el esquema (RF05).")
+    porcentaje_informado: Decimal | None
+    esperado: Decimal | None = Field(description="El reparto del total del grupo, en pesos.")
+    informado: Decimal | None = Field(description="El monto que figura en la liquidación.")
+    diferencia: Decimal | None = Field(description="`informado - esperado`.")
+    senalada: bool = Field(description="La diferencia pasa de un centavo (D5-A).")
+    sin_monto: bool = Field(
+        description="Figura en la liquidación con el monto vacío: no se toma como cero ni se "
+        "compara."
+    )
+
+
+class GrupoRecalculado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    nombre: str = Field(description="El grupo como figura en la liquidación.")
+    estado: EstadoGrupoRecalculado
+    grupo: str | None = Field(description="El esquema de coeficientes que le corresponde.")
+    esquema_version: int | None
+    vigente_desde: date | None
+    total: Decimal | None = Field(description="El gasto del grupo según la liquidación.")
+    unidades: list[UnidadRecalculada]
+    senaladas: int = Field(ge=0)
+    sin_monto: int = Field(ge=0, description="Unidades con el monto vacío, que no se comparan.")
+
+
+class EsquemaDelPeriodo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    grupo: str
+    esquema_version: int
+    vigente_desde: date
+
+
+class RecalculoLiquidacion(BaseModel):
+    """El reparto de cada grupo de una importación confirmada con los coeficientes del edificio
+    vigentes en el período, frente a lo que informó la administración. Usa solo los datos
+    confirmados o corregidos (RN30). Dice la diferencia y su base; no la califica (RN33).
+    `sin_grupos`: la liquidación no informa el reparto por grupo (p. ej. leída con IA)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    importacion_id: UUID
+    periodo: date
+    sin_grupos: bool
+    grupos: list[GrupoRecalculado]
+    esquemas: list[EsquemaDelPeriodo] = Field(
+        description="Los esquemas de coeficientes vigentes en el período, para elegir."
+    )

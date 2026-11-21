@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
@@ -187,13 +187,39 @@ type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; l
 /** Lo que pone el Resumen de pagos en `state.desde` al abrir las solicitudes: el círculo vuelve ahí. */
 export const DESDE_EL_PANEL = "panel";
 
+/** Un borrador ya redactado que otra pantalla propone (el recálculo de la liquidación importada,
+ * H5-4): viaja en `state.propuesta` y abre «Preparar una solicitud» con sus datos, para revisarlos.
+ * Vale solo en su edificio. */
+export type Propuesta = { consorcio: string; objeto: Objeto; referencia: string; documentacion: string };
+
+function propuestaDe(estado: unknown): Propuesta | null {
+  if (typeof estado !== "object" || estado === null || !("propuesta" in estado)) return null;
+  const p = estado.propuesta as Partial<Propuesta> | null;
+  if (p === null || typeof p !== "object") return null;
+  const { consorcio, objeto, referencia, documentacion } = p;
+  if (typeof consorcio !== "string" || typeof referencia !== "string" || typeof documentacion !== "string") return null;
+  if (objeto === undefined || !(objeto in TEXTO_OBJETO)) return null;
+  return { consorcio, objeto, referencia, documentacion };
+}
+
 export function Solicitudes() {
   const elegido = useConsorcio(REQUISITOS.solicitudes);
   // Se lee una vez, al llegar: `AvisoLlegada` borra el `state` apenas lo ve. Desde el Resumen de
   // pagos, volver vuelve al Resumen (FL-SOL-07).
-  const estado: unknown = useLocation().state;
+  const lugar = useLocation();
+  const estado: unknown = lugar.state;
   const desdePanel = useRef(typeof estado === "object" && estado !== null && "desde" in estado && estado.desde === DESDE_EL_PANEL);
-  return <DelEdificio key={elegido.consorcio} {...elegido} desdePanel={desdePanel.current} />;
+  // La propuesta también se lee una vez y se saca del historial: volver a esta dirección no la repite.
+  const propuesta = useRef(propuestaDe(estado));
+  const navegar = useNavigate();
+  useEffect(() => {
+    if (propuestaDe(lugar.state) === null) return;
+    const { pathname, search, hash } = lugar;
+    const resto = Object.fromEntries(Object.entries(lugar.state as Record<string, unknown>).filter(([k]) => k !== "propuesta"));
+    navegar({ pathname, search, hash }, { replace: true, state: Object.keys(resto).length > 0 ? resto : null });
+  }, [lugar, navegar]);
+  const deEsteEdificio = propuesta.current !== null && propuesta.current.consorcio === elegido.consorcio ? propuesta.current : null;
+  return <DelEdificio key={elegido.consorcio} {...elegido} desdePanel={desdePanel.current} propuesta={deEsteEdificio} />;
 }
 
 function DelEdificio({
@@ -204,14 +230,17 @@ function DelEdificio({
   aInicio,
   reintentar,
   desdePanel,
-}: ReturnType<typeof useConsorcio> & { desdePanel: boolean }) {
+  propuesta,
+}: ReturnType<typeof useConsorcio> & { desdePanel: boolean; propuesta: Propuesta | null }) {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   /** Por qué no llegó la lista. */
   const [aviso, setAviso] = useState<Aviso | null>(null);
   /** El resultado del último acto: en la lista, o en la ficha de la solicitud recién preparada. */
   const [resultado, setResultado] = useState<{ es: Resultado; enFicha: boolean } | null>(null);
-  const [preparando, setPreparando] = useState(false);
+  const [preparando, setPreparando] = useState(propuesta !== null);
+  /** Lo que propone otra pantalla, solo para la primera vez que se abre «Preparar». */
+  const [inicial, setInicial] = useState(propuesta);
   const fichas = useFichas<string>();
 
   useEffect(() => {
@@ -353,13 +382,18 @@ function DelEdificio({
                   )}
                 </>
               )}
-              {preparando && (
+              {preparando && lista.puede_preparar && (
                 <VentanaPreparar
                   consorcio={consorcio}
                   lista={lista}
+                  inicial={inicial}
                   aEntrar={aEntrar}
-                  alCerrar={() => setPreparando(false)}
+                  alCerrar={() => {
+                    setPreparando(false);
+                    setInicial(null);
+                  }}
                   alPreparar={(nueva) => {
+                    setInicial(null);
                     // Se abre la ficha del borrador nuevo, que es donde se firma (SOL-02).
                     conLaNueva(nueva);
                     fichas.abrir(nueva.id);
@@ -416,16 +450,17 @@ function useActo(aEntrar: () => void) {
 type PropsPreparar = {
   consorcio: string;
   lista: Lista;
+  inicial: Propuesta | null;
   aEntrar: () => void;
   alCerrar: () => void;
   alPreparar: (s: Solicitud) => void;
 };
 
-function VentanaPreparar({ consorcio, lista, aEntrar, alCerrar, alPreparar }: PropsPreparar) {
+function VentanaPreparar({ consorcio, lista, inicial, aEntrar, alCerrar, alPreparar }: PropsPreparar) {
   const id = useId();
-  const [objeto, setObjeto] = useState<Objeto>("periodo");
-  const [referencia, setReferencia] = useState("");
-  const [documentacion, setDocumentacion] = useState("");
+  const [objeto, setObjeto] = useState<Objeto>(inicial?.objeto ?? "periodo");
+  const [referencia, setReferencia] = useState(inicial?.referencia ?? "");
+  const [documentacion, setDocumentacion] = useState(inicial?.documentacion ?? "");
   const [plazo, setPlazo] = useState(String(lista.plazo_por_defecto_dias));
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const hacer = useActo(aEntrar);
