@@ -7,7 +7,7 @@ campo preliminar, con el renglón de la página de donde salió. Si el formato n
 el modelo (H5-2, `0114`), dentro del tope mensual de gasto: sus campos llevan origen `ia` y la
 confianza que informó. Nada leído es oficial hasta que una persona lo confirma (H5-3, `0115`):
 campo por campo (confirmar, corregir o descartar) y, cuando no queda ninguno pendiente, la
-importación entera.
+importación entera. Una foto o un PDF sin texto los lee el modelo como imágenes (H5-5, `0117`).
 
 Los importes van como texto decimal con dos decimales (`"1234.56"`), tal como los informa la
 liquidación: son lo leído, no un cálculo.
@@ -23,8 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ImportacionNueva(BaseModel):
-    """La versión del documento que se importa: un PDF `disponible` de la categoría
-    `liquidaciones_del_administrador`."""
+    """La versión del documento que se importa: un PDF, JPEG o PNG `disponible` de la categoría
+    `liquidaciones_del_administrador` (la foto o el PDF escaneado, desde H5-5, `0117`)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -118,7 +118,10 @@ class ImportacionLiquidacion(BaseModel):
     creada_en: datetime
     estado: EstadoImportacion
     formato: str | None = Field(
-        description="`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída con IA)."
+        description=(
+            "`mis_expensas` (formato conocido, sin IA), `lectura_ia` (leída con IA) o"
+            " `lectura_ia_imagen` (leída con IA de una foto o un PDF sin texto)."
+        )
     )
     periodo: date | None
     motivo: str | None = Field(

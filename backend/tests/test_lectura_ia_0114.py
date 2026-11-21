@@ -187,12 +187,17 @@ def test_apagada_no_llama_ni_gasta(
     assert proveedor.pedidos == [] and gasto(motor_migrate, i["id"]) is None
 
 
-def test_un_pdf_sin_texto_no_va_al_modelo(escena, bucket, motor_app, motor_migrate, modelo):
+def test_un_pdf_sin_texto_no_va_como_texto(escena, bucket, motor_app, motor_migrate, modelo):
+    """Sin una palabra no hay texto que mandar: desde H5-5 va como imagen (`0117`, ver
+    `test_liquidacion_imagen_0117.py`), nunca como un documento delimitado vacío."""
     from tests.test_documentos_2c1 import pdf
 
     i = leida(escena, motor_app, pdf())
-    assert i["estado"] == "no_reconocida" and "no tiene texto" in i["motivo"]
-    assert modelo.pedidos == [] and gasto(motor_migrate, i["id"]) is None
+    assert len(modelo.pedidos) == 1
+    _, _, cuerpo = modelo.pedidos[0]
+    assert cuerpo["system"] == lectura_ia.INSTRUCCIONES_IMAGEN
+    assert "<documento>" not in json.dumps(cuerpo)
+    assert i["estado"] == "no_reconocida"  # el servidor local no respondió una lectura
 
 
 def test_el_tope_corta_antes_de_llamar(escena, bucket, motor_app, motor_migrate, modelo, tope):
