@@ -314,3 +314,21 @@ def test_las_ipv4_se_prueban_antes_que_las_ipv6():
         descarga.PUERTO,
     )  # fmt: skip
     assert direcciones == ["93.184.216.34", "2001:db8::1"]
+
+
+def test_un_camino_con_acentos_se_pide_escapado(servidor, tls):
+    """La línea del pedido es ASCII: «liquidación» va con %, y un escape que ya venía queda igual
+    (Codex)."""
+    servidor.respuestas["/liquidaci%C3%B3n.pdf?mes=a%20b&x=%C3%B1"] = (200, {}, PDF)
+    t = traer(servidor, tls, "/liquidación.pdf?mes=a%20b&x=ñ")
+    assert t.contenido == PDF
+    assert [p for p, _ in servidor.pedidos] == ["/liquidaci%C3%B3n.pdf?mes=a%20b&x=%C3%B1"]
+
+
+def test_un_nombre_con_acentos_se_resuelve_en_idna():
+    pedidos = []
+    with pytest.raises(descarga.DescargaRechazada):
+        descarga._destino("https://liquidación.prueba/a.pdf",
+                          lambda n: pedidos.append(n) or [], lambda _: True,
+                          descarga.PUERTO)  # fmt: skip
+    assert pedidos == ["xn--liquidacin-obb.prueba"]

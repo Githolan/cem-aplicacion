@@ -33,7 +33,7 @@ import ssl
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 from cem_contracts.documentos import TOPE_BYTES, TipoArchivo
 
@@ -49,6 +49,9 @@ PLAZO_TOTAL_S = 45.0
 TRAMO = 64 * 1024
 LARGO_MAXIMO_URL = 2000
 CODIGOS_REDIRECCION = frozenset({301, 302, 303, 307, 308})
+SEGURO = "/?:@!$&'()*+,;=-._~%"
+"""Lo que no se escapa en el camino y la consulta: los reservados de RFC 3986 y el `%` de un escape
+que ya venía."""
 
 Resolver = Callable[[str], list[str]]
 EsPublica = Callable[[ipaddress.IPv4Address | ipaddress.IPv6Address], bool]
@@ -103,6 +106,11 @@ def _destino(url: str, resolver: Resolver, publica: EsPublica,
     nombre = partes.hostname
     if not nombre:
         raise DescargaRechazada("enlace_invalido")
+    # Un nombre con acentos va en IDNA (punycode): así lo piden el DNS, el SNI y el encabezado Host.
+    try:
+        nombre = nombre.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise DescargaRechazada("enlace_invalido") from None
     try:
         ipaddress.ip_address(nombre)
     except ValueError:
@@ -118,7 +126,11 @@ def _destino(url: str, resolver: Resolver, publica: EsPublica,
     direcciones = resolver(nombre)
     if not direcciones or not all(publica(ipaddress.ip_address(d)) for d in direcciones):
         raise DescargaRechazada("destino_no_admitido")
-    camino = (partes.path or "/") + (f"?{partes.query}" if partes.query else "")
+    # La línea del pedido es ASCII: lo que no lo es va con %; lo que ya venía escapado queda
+    # igual (Codex).
+    camino = quote(partes.path or "/", safe=SEGURO) + (
+        f"?{quote(partes.query, safe=SEGURO)}" if partes.query else ""
+    )
     return nombre, sorted(direcciones, key=lambda d: ipaddress.ip_address(d).version), camino
 
 
