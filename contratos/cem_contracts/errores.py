@@ -219,6 +219,9 @@ class CodigoError(StrEnum):
     """La liquidación importada no está confirmada: sin datos oficiales no se recalcula (`0116`)."""
     GRUPO_INEXISTENTE = "grupo_inexistente"
     """El edificio no tiene ese esquema de coeficientes (`0116`)."""
+    ENLACE_NO_TRAIDO = "enlace_no_traido"
+    """El archivo del enlace de la liquidación no se trajo: el destino, el tamaño o el tipo no
+    están admitidos, o el servidor no respondió (H5-5, `0118`)."""
     FACTURA_YA_ADJUNTA = "factura_ya_adjunta"
     """La orden ya tiene su factura, o hay otra subida en el antivirus (`0099`)."""
     FACTURA_NO_VIGENTE = "factura_no_vigente"

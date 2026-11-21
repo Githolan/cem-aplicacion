@@ -47,6 +47,21 @@ export const TEXTO_FORMATO: Record<string, string> = {
 };
 /** De una imagen, el fragmento es lo que transcribió la IA, no el texto del archivo. */
 export const TRANSCRITO = "transcripción de la IA";
+export const ENLACES = "Enlaces del documento";
+export const TRAER = "Traer el archivo";
+/** Solo se traen archivos de enlaces https (la descarga acotada del servidor, H5-5). */
+export const SOLO_HTTPS = "Sin https: no se trae desde la aplicación.";
+export const NO_SE_TRAJO = "No se trajo el archivo del enlace.";
+const TEXTO_ORIGEN_ENLACE: Record<string, string> = { anotacion: "enlace", texto: "escrito", qr: "QR" };
+
+/** El nombre del sitio del enlace, para leerlo sin la dirección entera. */
+export function sitioDe(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
 export const EN_ANTIVIRUS = "El archivo está en la revisión del antivirus; cuando pase, se lee solo.";
 export const LEYENDO = "Se está leyendo la liquidación.";
 export const CONFIRMAR_DATO = "Confirmar";
@@ -487,6 +502,42 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     }
   }
 
+  /** Trae el archivo de un enlace: entra como documento en el antivirus y, cuando pasa, se importa como uno subido. */
+  async function traerEnlace(orden: number) {
+    // Como la carga: mientras hay un archivo aprobado esperando su importación, no se trae otro,
+    // que la pisaría (Codex).
+    if (elegida === null || enviando || subida !== null || porImportar !== null) return;
+    clave.current ??= crypto.randomUUID();
+    setEnviando(true);
+    try {
+      const { data, error, response } = await api.POST(
+        "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/enlaces/{numero}/descarga",
+        {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, importacion_id: elegida, numero: orden }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current } },
+        },
+      );
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) clave.current = null;
+        // El servidor dice por qué no se trajo (el destino, el tamaño o el tipo): se muestra.
+        const motivo = (error as { mensaje?: unknown } | undefined)?.mensaje;
+        const texto = codigo === "enlace_no_traido" && typeof motivo === "string" ? `${NO_SE_TRAJO} ${motivo}` : mensajeDeActo(response.status, error);
+        setAviso({ texto, ok: false });
+        return;
+      }
+      clave.current = null;
+      setSubida({ consorcio, documento: data.documento_id, version: data.version_documento_id });
+      setAviso({ texto: EN_ANTIVIRUS, ok: true });
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else setAviso({ texto: SIN_CONEXION, ok: false });
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   const decidir = (c: Campo, decision: "confirmado" | "corregido" | "descartado", corregido?: Record<string, unknown>) =>
     actuar(
       (k) =>
@@ -660,6 +711,28 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                         </li>
                       );
                     })}
+                  </ul>
+                </>
+              )}
+              {importacion.enlaces.length > 0 && (
+                <>
+                  <h3>{ENLACES}</h3>
+                  <ul aria-label={ENLACES}>
+                    {importacion.enlaces.map((e) => (
+                      <li key={e.orden}>
+                        {`${sitioDe(e.url)} (${TEXTO_ORIGEN_ENLACE[e.origen]}, página ${e.pagina})`}{" "}
+                        {!e.url.toLowerCase().startsWith("https://") ? (
+                          SOLO_HTTPS
+                        ) : (
+                          subida === null &&
+                          porImportar === null && (
+                            <button type="button" className="secundario" aria-label={`${TRAER} de ${sitioDe(e.url)}`} onClick={() => void traerEnlace(e.orden)}>
+                              {TRAER}
+                            </button>
+                          )
+                        )}
+                      </li>
+                    ))}
                   </ul>
                 </>
               )}

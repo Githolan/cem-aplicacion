@@ -214,6 +214,17 @@ def responder_una_vez(
         return _guardar(conn, claves, pedido, estado, cuerpo)
 
 
+def repetida(motor: Engine, ctx: Contexto, pedido: PedidoIdempotente) -> Response | None:
+    """La respuesta guardada de la clave, si hay, sin hacer ningún efecto.
+
+    Para una ruta que antes del efecto hace algo que no tiene que repetir en un reintento, como
+    traer un archivo de afuera (H5-5). El bloqueo se suelta al volver: el efecto va después con
+    `responder_una_vez`, que vuelve a mirar con el bloqueo tomado, así dos pedidos nuevos con la
+    misma clave siguen serializados."""
+    with _turno(motor, ctx, pedido) as (_conn, _claves, guardada):
+        return guardada
+
+
 async def responder_una_vez_con_cupo(
     motor: Engine,
     ctx: Contexto,

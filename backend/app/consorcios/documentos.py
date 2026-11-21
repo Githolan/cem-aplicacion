@@ -46,8 +46,8 @@ contrato): la categoría elige la acción.
 
 import hashlib
 import re
-from collections.abc import Callable, Iterator
-from contextlib import closing
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, closing
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
@@ -93,6 +93,7 @@ from app.plataforma import almacen, cola
 from app.plataforma.idempotencia import (
     ClaveIdempotenciaDep,
     IdempotenciaDep,
+    PedidoIdempotente,
     pedido_con_cuerpo,
     responder_una_vez,
 )
@@ -176,11 +177,33 @@ def _semaforo() -> anyio.Semaphore:
     return _turnos
 
 
+@asynccontextmanager
+async def turno_de_carga() -> AsyncIterator[None]:
+    """Uno de los `CARGAS_POR_PROCESO` lugares para tener un archivo en memoria mientras se guarda,
+    o 503 si no se libera uno en `ESPERA_TURNO`. Lo toman la carga y el archivo traído de un enlace
+    de la liquidación (H5-5), que también tiene hasta 20 MB en memoria (Codex)."""
+    turnos = _semaforo()
+    try:
+        with anyio.fail_after(ESPERA_TURNO):
+            await turnos.acquire()
+    except TimeoutError:
+        raise ErrorApi(
+            503,
+            CodigoError.SERVICIO_NO_DISPONIBLE,
+            "Hay muchas cargas en curso. Reintentar en un momento.",
+            {"Retry-After": str(ESPERA_TURNO)},
+        ) from None
+    try:
+        yield
+    finally:
+        turnos.release()
+
+
 def tipo_real(cuerpo: bytes) -> TipoArchivo | None:
     return next((t for firma, t in FIRMAS if cuerpo.startswith(firma)), None)
 
 
-def _verificar_carga(
+def verificar_carga(
     cargar: Permiso, operativos: Permiso, categoria: CategoriaDocumento | None
 ) -> None:
     """Concede si alguna acción de carga de la categoría lo permite; si no, niega y audita con
@@ -243,7 +266,7 @@ def crear_documento(
     motor: MotorDep,
 ) -> Response:
     ctx = cargar.ctx
-    _verificar_carga(cargar, operativos, nuevo.categoria)
+    verificar_carga(cargar, operativos, nuevo.categoria)
 
     def efecto(conn: Connection) -> tuple[int, DocumentoId]:
         nuevo_id = _escribir(
@@ -319,8 +342,8 @@ async def subir_version(
 
     def autorizar() -> None:
         # Lee la categoría y, si niega, audita: las dos van a la base, fuera del bucle de eventos.
-        _verificar_carga(cargar, operativos, None)
-        _verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
+        verificar_carga(cargar, operativos, None)
+        verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
 
     await anyio.to_thread.run_sync(autorizar)
 
@@ -355,57 +378,62 @@ async def subir_archivo(
     declarado = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if declarado not in {t.value for t in TipoArchivo}:
         raise _no_admitido()
-    turnos = _semaforo()
-    try:
-        with anyio.fail_after(ESPERA_TURNO):
-            await turnos.acquire()
-    except TimeoutError:
-        raise ErrorApi(
-            503,
-            CodigoError.SERVICIO_NO_DISPONIBLE,
-            "Hay muchas cargas en curso. Reintentar en un momento.",
-            {"Retry-After": str(ESPERA_TURNO)},
-        ) from None
-    try:
+    async with turno_de_carga():
         cuerpo = await _leer_con_tope(request)
         tipo = tipo_real(cuerpo)
         if tipo is None or tipo.value != declarado:
             raise _no_admitido()
-        suma = hashlib.sha256(cuerpo).hexdigest()
         pedido = pedido_con_cuerpo(request, clave, cuerpo)
-        destino = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
+        return await anyio.to_thread.run_sync(
+            lambda: guardar_archivo(motor, ctx, pedido, cuerpo, tipo, nueva, respuesta)
+        )
 
-        def efecto(conn: Connection) -> tuple[int, VersionCargada]:
-            fila = nueva(conn, tipo.value, len(cuerpo), suma)
-            subida = destino.cliente().put_object(
-                Bucket=destino.bucket, Key=fila.clave_objeto, Body=cuerpo,
-                ContentType=tipo.value, Metadata={"sha256": suma},
-            )  # fmt: skip
-            # El `VersionId` es con el que el análisis borra un rechazado. OCI lo devuelve también
-            # en un bucket sin versiones (staging, visto el 26-10); un almacén que no lo devuelve
-            # deja la versión sin él, y el análisis borra por la clave.
-            if subida.get("VersionId"):
-                _escribir(
-                    conn,
-                    "select nucleo.fijar_version_objeto(:v, :vo, :a, 'api')",
-                    {"v": fila.id, "vo": subida["VersionId"], "a": ctx.persona_id},
-                )
-            cola.encolar(
+
+def guardar_archivo(
+    motor,
+    ctx: Contexto,
+    pedido: PedidoIdempotente,
+    cuerpo: bytes,
+    tipo: TipoArchivo,
+    nueva: NuevaVersion,
+    respuesta: Respuesta | None = None,
+) -> Response:
+    """Un archivo ya leído y con su tipo real comprobado: crea la versión con `nueva`, lo guarda en
+    el almacén y encola el análisis, bajo la clave de reintento de `pedido`. Es lo que comparten la
+    carga (`subir_archivo`) y el archivo traído de un enlace de la liquidación (H5-5). Corre fuera
+    del bucle de eventos."""
+    suma = hashlib.sha256(cuerpo).hexdigest()
+    destino = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
+
+    def efecto(conn: Connection) -> tuple[int, VersionCargada]:
+        fila = nueva(conn, tipo.value, len(cuerpo), suma)
+        subida = destino.cliente().put_object(
+            Bucket=destino.bucket, Key=fila.clave_objeto, Body=cuerpo,
+            ContentType=tipo.value, Metadata={"sha256": suma},
+        )  # fmt: skip
+        # El `VersionId` es con el que el análisis borra un rechazado. OCI lo devuelve también
+        # en un bucket sin versiones (staging, visto el 26-10); un almacén que no lo devuelve
+        # deja la versión sin él, y el análisis borra por la clave.
+        if subida.get("VersionId"):
+            _escribir(
                 conn,
-                TRABAJO_VERIFICAR,
-                carga={"version": str(fila.id)},
-                consorcio_id=ctx.consorcio_id,
-                clave_unica=f"{TRABAJO_VERIFICAR}:{fila.id}",
-                maximo_intentos=INTENTOS_VERIFICAR,
+                "select nucleo.fijar_version_objeto(:v, :vo, :a, 'api')",
+                {"v": fila.id, "vo": subida["VersionId"], "a": ctx.persona_id},
             )
-            cargada = VersionCargada(
-                id=fila.id, estado="en_cuarentena", tipo=tipo, tamano=len(cuerpo), sha256=suma
-            )
-            return 201, cargada if respuesta is None else respuesta(fila, cargada)
+        cola.encolar(
+            conn,
+            TRABAJO_VERIFICAR,
+            carga={"version": str(fila.id)},
+            consorcio_id=ctx.consorcio_id,
+            clave_unica=f"{TRABAJO_VERIFICAR}:{fila.id}",
+            maximo_intentos=INTENTOS_VERIFICAR,
+        )
+        cargada = VersionCargada(
+            id=fila.id, estado="en_cuarentena", tipo=tipo, tamano=len(cuerpo), sha256=suma
+        )
+        return 201, cargada if respuesta is None else respuesta(fila, cargada)
 
-        return await anyio.to_thread.run_sync(lambda: responder_una_vez(motor, ctx, pedido, efecto))
-    finally:
-        turnos.release()
+    return responder_una_vez(motor, ctx, pedido, efecto)
 
 
 @router.post(
@@ -436,7 +464,7 @@ def retirar_documento(
     motor: MotorDep,
 ) -> Response:
     ctx = cargar.ctx
-    _verificar_carga(cargar, operativos, None)
+    verificar_carga(cargar, operativos, None)
     restringidos.verificar(Entidad())
 
     def efecto(conn: Connection) -> tuple[int, DocumentoId]:
@@ -447,7 +475,7 @@ def retirar_documento(
         ).scalar_one()
         if categoria is None:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-        _verificar_carga(cargar, operativos, CategoriaDocumento(categoria))
+        verificar_carga(cargar, operativos, CategoriaDocumento(categoria))
         _escribir(
             conn,
             "select nucleo.retirar_documento(:d, :m, :a, 'api')",
@@ -731,7 +759,7 @@ def mis_cargas(
     """FL-DOC-04 (18-11-2026): para quien carga sin ver la lista, «Lo que cargó esta cuenta». Sin
     esto, al salir de Documentos perdía el resultado del antivirus. Solo lo propio (`0111`)."""
     ctx = cargar.ctx
-    _verificar_carga(cargar, operativos, None)
+    verificar_carga(cargar, operativos, None)
     desde = datetime.now(UTC) - timedelta(days=CARGAS_PROPIAS_DIAS)
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         try:
@@ -769,7 +797,7 @@ def estado_de_mi_version(
     pregunta hasta que el antivirus termina y dice si quedó disponible o fue rechazado (G-09). Solo
     las versiones propias: una ajena responde igual que una inexistente."""
     ctx = cargar.ctx
-    _verificar_carga(cargar, operativos, None)
+    verificar_carga(cargar, operativos, None)
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         try:
             filas = conn.execute(
