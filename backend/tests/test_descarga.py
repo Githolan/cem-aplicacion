@@ -332,3 +332,24 @@ def test_un_nombre_con_acentos_se_resuelve_en_idna():
                           lambda n: pedidos.append(n) or [], lambda _: True,
                           descarga.PUERTO)  # fmt: skip
     assert pedidos == ["xn--liquidacin-obb.prueba"]
+
+
+def test_un_cuerpo_mas_corto_que_su_largo_declarado_no_se_trae(servidor, tls):
+    """El servidor declara 1000 bytes, manda el comienzo de un PDF y corta (Codex)."""
+    servidor.respuestas["/corto"] = (200, {"Content-Length": "1000"}, PDF)
+    assert rechazo(traer, servidor, tls, "/corto") == "incompleto"
+    # Control: con el largo justo, se trae.
+    servidor.respuestas["/justo"] = (200, {"Content-Length": str(len(PDF))}, PDF)
+    assert traer(servidor, tls, "/justo").contenido == PDF
+
+
+def test_cada_motivo_de_la_descarga_tiene_su_mensaje():
+    import re
+
+    from app.liquidacion import importacion
+
+    codigo = Path(descarga.__file__).read_text(encoding="utf-8")
+    motivos = set(re.findall(r'DescargaRechazada\("([a-z_]+)"\)', codigo))
+    motivos |= {"plazo_vencido", "sin_respuesta"}  # los de `_motivo`
+    assert {"incompleto", "esquema_no_admitido"} <= motivos  # la búsqueda encuentra los conocidos
+    assert motivos <= set(importacion.MOTIVOS_DESCARGA)

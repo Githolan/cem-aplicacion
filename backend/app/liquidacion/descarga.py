@@ -286,6 +286,10 @@ def _traer(url: str, corrida: _Corrida, resolver: Resolver, publica: EsPublica,
                         raise DescargaRechazada("demasiado_grande")
             except (OSError, http.client.HTTPException) as e:
                 raise DescargaRechazada(_motivo(corrida)) from e
+            # Sin error, `read` termina también si el servidor corta antes del largo que declaró:
+            # un PDF a medias no se guarda como entero (Codex).
+            if declarado is not None and declarado.isdigit() and len(cuerpo) != int(declarado):
+                raise DescargaRechazada("incompleto")
             tipo = tipo_real(bytes(cuerpo))
             if tipo is None:
                 raise DescargaRechazada("tipo_no_admitido")

@@ -752,6 +752,7 @@ MOTIVOS_DESCARGA = {
     "demasiadas_redirecciones": "El enlace redirige demasiadas veces.",
     "respuesta_no_valida": "El servidor del enlace no entregó el archivo.",
     "demasiado_grande": "El archivo del enlace pasa de 20 MB.",
+    "incompleto": "El servidor del enlace cortó el archivo antes de terminarlo.",
     "tipo_no_admitido": "El enlace no lleva a un PDF, JPEG o PNG (puede ser una página web).",
 }
 """El mensaje de cada `descarga.DescargaRechazada.motivo`. No repite la dirección."""
