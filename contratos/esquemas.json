@@ -1023,6 +1023,7 @@
           "correccion_invalida",
           "importacion_sin_confirmar",
           "grupo_inexistente",
+          "enlace_no_traido",
           "factura_ya_adjunta",
           "factura_no_vigente",
           "documentacion_no_vigente",

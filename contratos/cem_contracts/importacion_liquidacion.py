@@ -108,6 +108,38 @@ class DiferenciaLeida(BaseModel):
     renglon: Decimal
 
 
+class OrigenEnlace(StrEnum):
+    ANOTACION = "anotacion"
+    TEXTO = "texto"
+    QR = "qr"
+
+
+class EnlaceLeido(BaseModel):
+    """Un enlace que trae la liquidación (Disposición 1146/24: comprobantes y estado de pagos),
+    anotado al leerla y sin seguirlo (H5-5, `0118`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden: int = Field(description="Su número en la importación, desde 1.")
+    url: str
+    origen: OrigenEnlace = Field(
+        description="`anotacion` (enlace del PDF), `texto` (escrito en la página) o `qr`."
+    )
+    pagina: int
+
+
+class EnlaceTraido(BaseModel):
+    """El archivo traído de un enlace: un documento nuevo de la categoría, en cuarentena hasta que
+    pasa el antivirus; después se importa como cualquier archivo subido."""
+
+    model_config = ConfigDict(frozen=True)
+
+    documento_id: UUID
+    version_documento_id: UUID
+    tipo: str
+    tamano: int
+
+
 class ImportacionLiquidacion(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -134,6 +166,9 @@ class ImportacionLiquidacion(BaseModel):
     decidida_en: datetime | None
     motivo_descarte: str | None
     campos: list[CampoPreliminar]
+    enlaces: list[EnlaceLeido] = Field(
+        description="Los enlaces del documento, sin seguir (H5-5); se trae uno a pedido."
+    )
 
 
 class ImportacionResumen(BaseModel):

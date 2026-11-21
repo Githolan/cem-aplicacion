@@ -27,6 +27,10 @@ pdfplumber==0.11.10
 pdfminer.six==20260107
 pillow==13.0.0
 pypdfium2==5.15.2
+# Los QR de la liquidación (H5-5, app/liquidacion/enlaces.py): ruedas abi3 para x86_64 y aarch64.
+zxing-cpp==3.1.1
+# La descarga acotada de un enlace (H5-5, app/liquidacion/descarga.py); ya venía con botocore.
+urllib3==2.8.0
 charset-normalizer==3.5.2
 cffi==2.1.1
 pycparser==3.12

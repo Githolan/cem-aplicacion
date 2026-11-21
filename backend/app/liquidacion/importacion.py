@@ -17,6 +17,10 @@
   (`…/campos/{campo}/decision`: confirmar, corregir o descartar), la confirmación de la importación
   entera sin campos pendientes (`…/confirmacion`) y su descarte con motivo (`…/descarte`). Cada una
   devuelve la importación como queda.
+- **Enlaces (H5-5, `0118`)**: la lectura anota los enlaces del documento (anotados, escritos o en
+  un QR) sin seguirlos, y la importación los muestra. `POST …/{id}/enlaces/{n}/descarga`
+  (`liquidacion.importar` y la carga de la categoría) trae el archivo de uno con la descarga
+  acotada (`descarga`) y lo guarda como un documento nuevo, en cuarentena, como una carga.
 - **Recálculo (H5-4, `0116`)**, con la misma facultad: `GET …/{id}/recalculo` reparte el gasto de
   cada grupo de una importación confirmada con los coeficientes vigentes en el período y lo compara
   con lo informado (`recalculo`); `POST …/{id}/correspondencias` dice qué esquema de coeficientes
@@ -33,6 +37,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
+from cem_contracts.documentos import CategoriaDocumento
 from cem_contracts.errores import CodigoError
 from cem_contracts.importacion_liquidacion import (
     CampoPreliminar,
@@ -41,6 +46,8 @@ from cem_contracts.importacion_liquidacion import (
     DecisionSobreCampo,
     DescarteImportacion,
     DiferenciaLeida,
+    EnlaceLeido,
+    EnlaceTraido,
     EsquemaDelPeriodo,
     EstadoImportacion,
     ImportacionCreada,
@@ -58,12 +65,20 @@ from sqlalchemy.exc import DBAPIError
 from app import llm
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
-from app.consorcios import lectura_comprobantes
+from app.consorcios import documentos, lectura_comprobantes
 from app.consorcios.padron import Discrepancia
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
-from app.liquidacion import imagenes, lectura_ia, mis_expensas, palabras_pdf, recalculo
+from app.liquidacion import (
+    descarga,
+    enlaces,
+    imagenes,
+    lectura_ia,
+    mis_expensas,
+    palabras_pdf,
+    recalculo,
+)
 from app.plataforma import almacen, cola, trabajos
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
 
@@ -82,6 +97,7 @@ LARGO_MOTIVO = 500
 """El de `nucleo.importacion_liquidacion.motivo`."""
 PDF_ILEGIBLE = "El archivo no se pudo leer como PDF."
 SIN_TEXTO_FOTO = "Es una foto: no tiene texto que leer por posición."
+IMAGEN_ILEGIBLE = "El archivo no se pudo abrir como imagen."
 SIN_TEXTO_PDF = "El PDF no tiene texto (está escaneado)."
 LARGO_FRAGMENTO = 500
 """El de `nucleo.campo_preliminar.fragmento` (`0115`)."""
@@ -243,19 +259,32 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         lugar["VersionId"] = v["version_objeto"]
     contenido = origen.cliente().get_object(**lugar)["Body"].read()
     if v["tipo"] != "application/pdf":
-        return _leer_con_ia(conn, trabajo, importacion, lambda: _de_foto(contenido), SIN_TEXTO_FOTO)
+        try:
+            foto = lectura_ia.DocumentoImagen((imagenes.de_foto(contenido),))
+        except imagenes.ImagenIlegible:
+            _guardar(conn, importacion, None, None, IMAGEN_ILEGIBLE, [], [])
+            return {"leida": False, "motivo": "imagen_ilegible"}
+        _anotar_enlaces(conn, importacion, enlaces.de_imagenes(foto.imagenes))
+        return _leer_con_ia(conn, trabajo, importacion, lambda: foto, SIN_TEXTO_FOTO)
     try:
         paginas = palabras_pdf.paginas(contenido)
     except PdfminerException:
         _guardar(conn, importacion, None, None, PDF_ILEGIBLE, [], [])
         return {"leida": False, "motivo": "pdf_ilegible"}
+    # Las páginas dibujadas sirven para los QR y, si el PDF no tiene texto, para el modelo. Un PDF
+    # de más páginas que el tope no se dibuja: se buscan sus enlaces sin los QR.
+    try:
+        dibujadas: list[bytes] | None = imagenes.de_pdf(contenido)
+    except (imagenes.DemasiadasPaginas, imagenes.ImagenIlegible):
+        dibujadas = None
+    _anotar_enlaces(conn, importacion, enlaces.de_pdf(contenido, paginas, dibujadas or []))
     try:
         lq = mis_expensas.leer(paginas)
     except mis_expensas.FormatoNoReconocido as e:
         if any(p.palabras for p in paginas):
             return _leer_con_ia(conn, trabajo, importacion,
                                 lambda: lectura_ia.documento(paginas), str(e))  # fmt: skip
-        return _leer_con_ia(conn, trabajo, importacion, lambda: _de_pdf(contenido),
+        return _leer_con_ia(conn, trabajo, importacion, lambda: _de_pdf(contenido, dibujadas),
                             f"{e} {SIN_TEXTO_PDF}")  # fmt: skip
     ano, mes = lq.periodo
     _guardar(conn, importacion, FORMATO, date(ano, mes, 1), None, diferencias(lq),
@@ -267,20 +296,28 @@ class _NoSeManda(Exception):
     """El documento no va al modelo; lleva la clave de `lectura_ia.MOTIVOS`."""
 
 
-def _de_foto(contenido: bytes) -> lectura_ia.DocumentoImagen:
-    try:
-        return lectura_ia.DocumentoImagen((imagenes.de_foto(contenido),))
-    except imagenes.ImagenIlegible:
-        raise _NoSeManda("imagen_ilegible") from None
-
-
-def _de_pdf(contenido: bytes) -> lectura_ia.DocumentoImagen:
+def _de_pdf(contenido: bytes, dibujadas: list[bytes] | None) -> lectura_ia.DocumentoImagen:
+    """Las páginas ya dibujadas; si no se pudieron dibujar, el motivo (se vuelve a intentar para
+    saber cuál)."""
+    if dibujadas is not None:
+        return lectura_ia.DocumentoImagen(tuple(dibujadas))
     try:
         return lectura_ia.DocumentoImagen(tuple(imagenes.de_pdf(contenido)))
     except imagenes.DemasiadasPaginas:
         raise _NoSeManda("demasiadas_paginas") from None
     except imagenes.ImagenIlegible:
         raise _NoSeManda("imagen_ilegible") from None
+
+
+def _anotar_enlaces(conn: Connection, importacion: UUID, hallados: list[enlaces.Enlace]) -> None:
+    """Los enlaces del documento, sin seguirlos (`0118`); una lectura repetida no los duplica."""
+    if hallados:
+        conn.execute(
+            text("select nucleo.guardar_enlaces_liquidacion(:i, cast(:e as jsonb))"),
+            {"i": importacion, "e": json.dumps([
+                {"url": h.url, "origen": h.origen, "pagina": h.pagina} for h in hallados
+            ])},
+        )  # fmt: skip
 
 
 def _leer_con_ia(
@@ -440,9 +477,15 @@ def _importacion(conn: Connection, permiso: Permiso, i: UUID) -> ImportacionLiqu
         "select * from nucleo.campos_preliminares_lectura(:i, :actor, 'api', :sesion)",
         {"i": i},
     ).mappings().all()  # fmt: skip
+    hallados = _ejecutar(
+        conn, permiso,
+        "select * from nucleo.enlaces_liquidacion_lectura(:i, :actor, 'api', :sesion)",
+        {"i": i},
+    ).mappings().all()  # fmt: skip
     datos = dict(cabeza)
     datos["diferencias"] = [DiferenciaLeida(**d) for d in datos["diferencias"]]
-    return ImportacionLiquidacion(**datos, campos=[CampoPreliminar(**f) for f in filas])
+    return ImportacionLiquidacion(**datos, campos=[CampoPreliminar(**f) for f in filas],
+                                  enlaces=[EnlaceLeido(**e) for e in hallados])  # fmt: skip
 
 
 @router.get(
@@ -693,3 +736,88 @@ def definir_correspondencia(
         return 200, _recalculo(conn, permiso, importacion_id)
 
     return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+MOTIVOS_DESCARGA = {
+    "enlace_invalido": "El enlace no es una dirección válida.",
+    "esquema_no_admitido": "Solo se traen archivos de enlaces https.",
+    "puerto_no_admitido": "El enlace usa un puerto que no se admite.",
+    "nombre_inexistente": "El nombre del enlace no existe.",
+    "destino_no_admitido": "El enlace lleva a una dirección que no se admite.",
+    "sin_respuesta": "El servidor del enlace no respondió.",
+    "redireccion_invalida": "El servidor del enlace redirigió mal.",
+    "demasiadas_redirecciones": "El enlace redirige demasiadas veces.",
+    "respuesta_no_valida": "El servidor del enlace no entregó el archivo.",
+    "demasiado_grande": "El archivo del enlace pasa de 20 MB.",
+    "tipo_no_admitido": "El enlace no lleva a un PDF, JPEG o PNG (puede ser una página web).",
+}
+"""El mensaje de cada `descarga.DescargaRechazada.motivo`. No repite la dirección."""
+TITULO_TRAIDO = "Liquidación traída de un enlace"
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/enlaces/{numero}/descarga",
+    status_code=201,
+    response_model=EnlaceTraido,
+    summary="Traer el archivo de un enlace de la liquidación: entra como documento en cuarentena",
+    responses={
+        403: {"description": "Sin `liquidacion.importar` o sin la carga de la categoría."},
+        404: {"description": "La importación o el enlace no existen."},
+        422: {
+            "description": "No se trajo: destino, tamaño o tipo no admitidos (`enlace_no_traido`)."
+        },
+    },
+)
+def traer_enlace(
+    importacion_id: UUID,
+    numero: int,
+    permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = permiso.ctx
+    permiso.verificar(Entidad())
+    documentos.verificar_carga(cargar, operativos,
+                               CategoriaDocumento.LIQUIDACIONES_DEL_ADMINISTRADOR)  # fmt: skip
+    with _transaccion(permiso, motor) as conn:
+        url = _ejecutar(
+            conn, permiso,
+            "select nucleo.enlace_para_traer(:i, :n, :actor, 'api', :sesion)",
+            {"i": importacion_id, "n": numero},
+        ).scalar_one()  # fmt: skip
+    try:
+        traido = descarga.traer(url, tipo_real=documentos.tipo_real)
+    except descarga.DescargaRechazada as e:
+        raise ErrorApi(422, CodigoError.ENLACE_NO_TRAIDO,
+                       MOTIVOS_DESCARGA[e.motivo]) from None  # fmt: skip
+    documento_id: list[UUID] = []
+
+    def nueva(conn: Connection, tipo: str, tamano: int, suma: str):
+        d = _ejecutar(
+            conn, permiso,
+            "select nucleo.crear_documento(:cat, :tit, nucleo.hoy_del_consorcio(:c), :actor,"
+            " 'api')",
+            {"cat": CategoriaDocumento.LIQUIDACIONES_DEL_ADMINISTRADOR.value,
+             "tit": TITULO_TRAIDO, "c": ctx.consorcio_id},
+        ).scalar_one()  # fmt: skip
+        fila = _ejecutar(
+            conn, permiso,
+            "select id, clave_objeto from nucleo.nueva_version(:d, :t, :n, :s, :actor, 'api')",
+            {"d": d, "t": tipo, "n": tamano, "s": suma},
+        ).one()  # fmt: skip
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.registrar_enlace_traido(:i, :n, :d, :v, :actor, 'api', :sesion)",
+            {"i": importacion_id, "n": numero, "d": d, "v": fila.id},
+        )  # fmt: skip
+        documento_id.append(d)
+        return fila
+
+    def respuesta(fila, cargada) -> EnlaceTraido:
+        return EnlaceTraido(documento_id=documento_id[0], version_documento_id=cargada.id,
+                            tipo=cargada.tipo.value, tamano=cargada.tamano)  # fmt: skip
+
+    return documentos.guardar_archivo(motor, ctx, idempotencia, traido.contenido, traido.tipo,
+                                      nueva, respuesta)  # fmt: skip
