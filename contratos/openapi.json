@@ -6340,7 +6340,7 @@
                 "type": "null"
               }
             ],
-            "description": "`mis_expensas` (formato conocido, sin IA) o `lectura_ia` (leída con IA).",
+            "description": "`mis_expensas` (formato conocido, sin IA), `lectura_ia` (leída con IA) o `lectura_ia_imagen` (leída con IA de una foto o un PDF sin texto).",
             "title": "Formato"
           },
           "id": {
@@ -6428,7 +6428,7 @@
       },
       "ImportacionNueva": {
         "additionalProperties": false,
-        "description": "La versión del documento que se importa: un PDF `disponible` de la categoría\n`liquidaciones_del_administrador`.",
+        "description": "La versión del documento que se importa: un PDF, JPEG o PNG `disponible` de la categoría\n`liquidaciones_del_administrador` (la foto o el PDF escaneado, desde H5-5, `0117`).",
         "properties": {
           "documento_id": {
             "format": "uuid",

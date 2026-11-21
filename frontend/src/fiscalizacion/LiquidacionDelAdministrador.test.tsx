@@ -29,6 +29,7 @@ import {
   hojasDe,
   RUTA_LIQUIDACION_ADMINISTRADOR,
   SUBIR,
+  TRANSCRITO,
 } from "./LiquidacionDelAdministrador";
 
 // Liquidación del administrador (H5-3, app 0115). Datos SINTETICOS: ningún edificio ni importe real.
@@ -177,6 +178,32 @@ describe("pantalla /importar-liquidacion", () => {
     expect(within(ficha).getByText("100 %")).toBeTruthy();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+
+  it("leída de una imagen, lo dice y la ficha avisa que el fragmento es la transcripción de la IA", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([{ ...RESUMEN, formato: "lectura_ia_imagen" }]),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, formato: "lectura_ia_imagen" }),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    expect(screen.getByText(/Leída con IA de una imagen/)).toBeTruthy();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gasto" });
+    expect(within(ficha).getByText(`Página 1 (${TRANSCRITO}): «Luz SINTETICA 1.000,00 1.000,00»`)).toBeTruthy();
+  });
+
+  it("del formato conocido no habla de transcripción", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    expect(screen.getByText(/Formato Mis Expensas/)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(TRANSCRITO))).toBeNull();
   });
 
   it("confirmar un dato lo manda sin valor corregido y muestra la importación como queda", async () => {
@@ -379,6 +406,10 @@ describe("pantalla /importar-liquidacion", () => {
     const ventana = await screen.findByRole("dialog", { name: SUBIR });
     fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
     expect(await within(ventana).findByText("Falta elegir el archivo.")).toBeTruthy();
+    // Acepta el PDF y también una foto (H5-5).
+    expect((within(ventana).getByLabelText("Archivo de la liquidación") as HTMLInputElement).accept).toBe(
+      ".pdf,application/pdf,.jpg,.jpeg,image/jpeg,.png,image/png",
+    );
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "liquidacion.pdf", { type: "application/pdf" });
     fireEvent.change(within(ventana).getByLabelText("Archivo de la liquidación"), { target: { files: [pdf] } });
     fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
