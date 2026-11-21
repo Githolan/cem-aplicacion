@@ -90,8 +90,9 @@ def es_publica(direccion: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool
 
 
 def _destino(url: str, resolver: Resolver, publica: EsPublica,
-             puerto_admitido: int) -> tuple[str, str, str]:  # fmt: skip
-    """(nombre, dirección revisada, camino con la consulta) o `DescargaRechazada`."""
+             puerto_admitido: int) -> tuple[str, list[str], str]:  # fmt: skip
+    """(nombre, direcciones revisadas, camino con la consulta) o `DescargaRechazada`. Las IPv4 van
+    primero: un servidor sin ruta IPv6 igual llega por la IPv4 del mismo nombre (Codex)."""
     if len(url) > LARGO_MAXIMO_URL:
         raise DescargaRechazada("enlace_invalido")
     partes = urlsplit(url)
@@ -118,7 +119,7 @@ def _destino(url: str, resolver: Resolver, publica: EsPublica,
     if not direcciones or not all(publica(ipaddress.ip_address(d)) for d in direcciones):
         raise DescargaRechazada("destino_no_admitido")
     camino = (partes.path or "/") + (f"?{partes.query}" if partes.query else "")
-    return nombre, direcciones[0], camino
+    return nombre, sorted(direcciones, key=lambda d: ipaddress.ip_address(d).version), camino
 
 
 class _Corrida:
@@ -202,15 +203,23 @@ def _motivo(corrida: _Corrida) -> str:
     return "plazo_vencido" if corrida.cortada else "sin_respuesta"
 
 
-def _conectar(direccion: str, nombre: str, puerto: int, contexto: ssl.SSLContext,
+def _conectar(direcciones: list[str], nombre: str, puerto: int, contexto: ssl.SSLContext,
               corrida: _Corrida) -> ssl.SSLSocket:  # fmt: skip
-    """La conexión TLS a la dirección ya revisada, con el nombre en el SNI y en el certificado.
-    El socket queda en `corrida` antes del saludo TLS y antes de leer nada: el plazo de reloj lo
-    corta aunque el servidor gotee el saludo o los encabezados (Codex)."""
-    try:
-        crudo = socket.create_connection((direccion, puerto), timeout=PLAZO_CONEXION_S)
-    except OSError as e:
-        raise DescargaRechazada(_motivo(corrida)) from e
+    """La conexión TLS a una de las direcciones ya revisadas, en orden, con el nombre en el SNI y
+    en el certificado. Sin volver a resolver: solo se prueban las revisadas. El socket queda en
+    `corrida` antes del saludo TLS y antes de leer nada: el plazo de reloj lo corta aunque el
+    servidor gotee el saludo o los encabezados (Codex)."""
+    crudo: socket.socket | None = None
+    falla: OSError | None = None
+    for direccion in direcciones:
+        corrida.usar(None)  # vencido entre intentos: no se prueba otra
+        try:
+            crudo = socket.create_connection((direccion, puerto), timeout=PLAZO_CONEXION_S)
+            break
+        except OSError as e:
+            falla = e
+    if crudo is None:
+        raise DescargaRechazada(_motivo(corrida)) from falla
     try:
         corrida.usar(crudo)
         crudo.settimeout(PLAZO_LECTURA_S)
@@ -233,9 +242,9 @@ def _traer(url: str, corrida: _Corrida, resolver: Resolver, publica: EsPublica,
            tipo_real: Callable[[bytes], TipoArchivo | None]) -> Traido:  # fmt: skip
     actual = url
     for _ in range(REDIRECCIONES + 1):
-        nombre, direccion, camino = _destino(actual, resolver, publica, puerto)
+        nombre, direcciones, camino = _destino(actual, resolver, publica, puerto)
         corrida.usar(None)  # vencido mientras se resolvía: no se conecta
-        cifrado = _conectar(direccion, nombre, puerto, contexto, corrida)
+        cifrado = _conectar(direcciones, nombre, puerto, contexto, corrida)
         conexion = http.client.HTTPConnection(nombre, puerto, timeout=PLAZO_LECTURA_S)
         conexion.sock = cifrado
         try:

@@ -287,3 +287,30 @@ def test_un_servidor_que_gotea_los_encabezados_no_deja_la_descarga_viva(servidor
     servidor.respuestas["/liq.pdf"] = (200, {}, PDF)
     assert traer(servidor, tls, "/liq.pdf").contenido == PDF
     assert hilos_de_descarga_vivos() == 0
+
+
+def test_si_una_direccion_no_responde_se_prueba_la_siguiente_revisada(servidor, tls):
+    """Un nombre con dos direcciones: la primera rechaza la conexión y se usa la segunda, sin
+    resolver de nuevo (Codex). 127.0.0.2 es del lazo local, pero el servidor escucha solo en
+    127.0.0.1."""
+    servidor.respuestas["/liq.pdf"] = (200, {}, PDF)
+    locales = {"127.0.0.2", LOCAL}
+    resoluciones = []
+
+    def dos(nombre: str) -> list[str]:
+        resoluciones.append(nombre)
+        return ["127.0.0.2", LOCAL]
+
+    t = traer(servidor, tls, "/liq.pdf", resolver=dos, publica=lambda d: str(d) in locales)
+    assert t.contenido == PDF and resoluciones == [NOMBRE]
+    # Control: con solo la que no responde, no se trae.
+    assert rechazo(traer, servidor, tls, "/liq.pdf", resolver=lambda _: ["127.0.0.2"],
+                   publica=lambda d: str(d) in locales) == "sin_respuesta"  # fmt: skip
+
+
+def test_las_ipv4_se_prueban_antes_que_las_ipv6():
+    _, direcciones, _ = descarga._destino(
+        "https://liq.prueba/a.pdf", lambda _: ["2001:db8::1", "93.184.216.34"], lambda _: True,
+        descarga.PUERTO,
+    )  # fmt: skip
+    assert direcciones == ["93.184.216.34", "2001:db8::1"]
