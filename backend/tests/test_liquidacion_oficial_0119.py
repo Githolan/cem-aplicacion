@@ -438,7 +438,16 @@ def test_la_propietaria_ve_el_resumen_de_la_vigente_sin_gastos_ni_diferencias_ni
     cuerpo = r.json()
     assert [p["periodo"] for p in cuerpo["periodos"]] == [OCTUBRE, SEPTIEMBRE]
     s = cuerpo["liquidacion"]
-    assert set(s) == {"periodo", "confirmada_en", "rubros", "grupos", "total", "vencimientos"}
+    assert set(s) == {
+        "importacion_id",
+        "periodo",
+        "confirmada_en",
+        "rubros",
+        "grupos",
+        "total",
+        "vencimientos",
+    }
+    assert s["importacion_id"] == b  # la vigente del período, la que reemplazó
     assert s["periodo"] == SEPTIEMBRE
     # La vigente (la que reemplazó), con la corrección; ni la reemplazada ni sus gastos.
     assert [(x["numero"], Decimal(x["total"])) for x in s["rubros"]] == [
@@ -483,6 +492,7 @@ def test_la_propietaria_ve_solo_sus_unidades_y_la_que_no_figura_vuelve_marcada(
     assert r.status_code == 200, r.text
     cuenta = r.json()["liquidacion"]
     assert cuenta["periodo"] == SEPTIEMBRE and cuenta["vencimientos"]
+    assert cuenta["importacion_id"] == a
     unidades = {u["designacion"]: u for u in cuenta["unidades"]}
     assert set(unidades) == {"1-A", "1° A"}  # nunca «PB-A» ni «1-B» (RN15)
     beto = unidades["1-A"]
@@ -493,14 +503,46 @@ def test_la_propietaria_ve_solo_sus_unidades_y_la_que_no_figura_vuelve_marcada(
     assert beto["saldo_anterior"] is not None
     ausente = unidades["1° A"]
     assert ausente["figura"] is False and ausente["total"] is None and ausente["grupos"] == []
-    # La unidad corregida cuenta por el valor corregido: si 002 pasa a «PB-A», «1-A» no figura.
-    b = importar(e, motor_app, corregir={"saldo_unidad:002": {"depto": "PB-A"},
-                                          "importe_unidad:002": {"depto": "PB-A"}})  # fmt: skip
-    assert confirmar(e, b, {"reemplaza_a": a, "motivo": "Otra unidad"}).status_code == 200
+    # La unidad corregida cuenta por el valor corregido: si 002 pasa a «1° A», «1-A» no figura y
+    # «1° A» sí, con el saldo y el importe de 002.
+    a_1a = {"depto": "1° A"}
+    b = importar(e, motor_app, corregir={"unidad:002": a_1a, "saldo_unidad:002": a_1a,
+                                          "importe_unidad:002": a_1a})  # fmt: skip
+    r = confirmar(e, b, {"reemplaza_a": a, "motivo": "Otra unidad"})
+    assert r.status_code == 200, r.text
     unidades = {u["designacion"]: u for u in get(e, "prop", "mi-cuenta").json()["liquidacion"][
         "unidades"]}  # fmt: skip
     assert set(unidades) == {"1-A", "1° A"} and unidades["1-A"]["figura"] is False
+    assert unidades["1° A"]["figura"] is True
+    assert Decimal(unidades["1° A"]["total"]) == Decimal(beto["total"])
     assert get(e, "prop", "mi-cuenta", params={"periodo": OCTUBRE}).status_code == 404
+
+
+def test_no_se_confirma_si_una_correccion_deja_dos_datos_del_mismo_tipo_en_una_unidad(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Si el saldo y el importe de 002 pasan a «PB-A», que ya tiene los suyos, la cuenta de «PB-A»
+    no se sabría: la confirmación se niega con la unidad, el tipo y los dos datos, y nada cambia.
+    Tampoco entra reemplazando."""
+    e = escena
+    a = confirmada(e, motor_app)
+    b = importar(e, motor_app, corregir={"saldo_unidad:002": {"depto": "PB-A"},
+                                          "importe_unidad:002": {"depto": "PB-A"}})  # fmt: skip
+    orden = {c["clave"]: c["orden"] for c in estado(e, b)["campos"]}
+    for cuerpo in (None, {"reemplaza_a": a, "motivo": "Otra unidad"}):
+        r = confirmar(e, b, cuerpo)
+        assert codigo(r) == (409, "unidad_repetida"), r.text
+        detalle = r.json()["detalle"]
+        tipo = detalle["tipo"]
+        assert detalle["unidad"] == "PB-A" and tipo in ("saldo_unidad", "importe_unidad")
+        assert detalle["campos"] == sorted([orden[f"{tipo}:001"], orden[f"{tipo}:002"]])
+    assert estado(e, b)["estado"] == "para_confirmar" and estado(e, a)["estado"] == "confirmada"
+    # La misma negativa en la base, sin la API.
+    with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
+        with pytest.raises(DBAPIError) as falla:
+            c.execute(CONFIRMAR, {"i": b, "r": a, "m": "Otra unidad", "a": e["mc"],
+                                  "s": e["sesion"]})  # fmt: skip
+    assert falla.value.orig.diag.message_hint == "unidad_repetida"
 
 
 def test_mi_cuenta_no_la_ven_inquilinos_ni_mandatos_sin_vinculo_ni_propietarios_sin_confirmar(
@@ -524,6 +566,7 @@ def test_las_lecturas_son_solo_para_cem_app_y_las_internas_para_nadie(motor_migr
         "nucleo.confirmar_importacion_liquidacion(uuid, uuid, text, uuid, text, uuid)",
     )  # fmt: skip
     internas = (
+        "nucleo.unidad_oficial_del_campo(uuid, text, jsonb, uuid)",
         "nucleo.campos_oficiales_de(uuid, uuid)",
         "nucleo.exigir_propietario_confirmado(uuid, uuid)",
         "nucleo.liquidacion_vigente(uuid, date)",

@@ -38,7 +38,21 @@ export const segunLaLiquidacion = (periodo: string, confirmada: string) =>
 
 const enPesosOVacio = (importe: string | null) => (importe === null ? "—" : enPesos(importe));
 
-type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; cuenta: MiCuenta | null; resumen: Resumen | null };
+export const CAMBIO_AL_LEER = "La liquidación oficial cambió mientras se leía. Recargue la página para ver la vigente.";
+
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "distintas" } | { tipo: "ok"; cuenta: MiCuenta | null; resumen: Resumen | null };
+
+/** La liquidación oficial de la que sale una respuesta: `null` si no hay ninguna; `undefined` si no
+ * se pidió o falló (nada que comparar). */
+const liquidacionDe = (x: { data?: { liquidacion: { importacion_id: string } | null } } | null) =>
+  x?.data === undefined ? undefined : (x.data.liquidacion?.importacion_id ?? null);
+
+/** La cuenta y el resumen describen liquidaciones oficiales distintas (o una sí y la otra no). */
+function sonDistintas(c: Parameters<typeof liquidacionDe>[0], r: Parameters<typeof liquidacionDe>[0]): boolean {
+  const a = liquidacionDe(c);
+  const b = liquidacionDe(r);
+  return a !== undefined && b !== undefined && a !== b;
+}
 
 export function MisExpensas() {
   const elegido = useConsorcio(REQUISITOS.misExpensas);
@@ -59,15 +73,35 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   useEffect(() => {
     if (consorcio === "" || acciones === null) return;
     let vigente = true;
-    const params = { path: { consorcio_id: consorcio }, query: elegido === null ? {} : { periodo: elegido } };
-    const pedirCuenta = veCuenta ? api.GET("/api/v1/consorcios/{consorcio_id}/mi-cuenta", { params }) : null;
-    const pedirResumen = veResumen ? api.GET("/api/v1/consorcios/{consorcio_id}/resumen", { params }) : null;
-    void Promise.all([pedirCuenta, pedirResumen])
+    const path = { consorcio_id: consorcio };
+    const delPeriodo = (periodo: string | null) => ({ path, query: periodo === null ? {} : { periodo } });
+    // Primero la cuenta; el resumen, del período que trajo la cuenta. Cada respuesta dice de qué
+    // liquidación oficial sale: si entre las dos se confirmó o se reemplazó una, no coinciden.
+    async function leerUnaVez() {
+      const c = veCuenta ? await api.GET("/api/v1/consorcios/{consorcio_id}/mi-cuenta", { params: delPeriodo(elegido) }) : null;
+      if (c !== null) exigirSesion(c.response);
+      if (c !== null && c.data === undefined) return [c, null] as const;
+      const periodo = c?.data?.liquidacion?.periodo ?? elegido;
+      const r = veResumen ? await api.GET("/api/v1/consorcios/{consorcio_id}/resumen", { params: delPeriodo(periodo) }) : null;
+      if (r !== null) exigirSesion(r.response);
+      return [c, r] as const;
+    }
+    void (async () => {
+      let [c, r] = await leerUnaVez();
+      // Otra liquidación entró entre las dos lecturas: se lee una vez más, nunca en bucle.
+      if (sonDistintas(c, r)) [c, r] = await leerUnaVez();
+      return [c, r] as const;
+    })()
       .then(([c, r]) => {
-        for (const x of [c, r]) if (x !== null) exigirSesion(x.response);
         if (!vigente) return;
         const falla = [c, r].find((x) => x !== null && x.data === undefined);
         if (falla === undefined || falla === null) {
+          if (sonDistintas(c, r)) {
+            // Siguen sin coincidir: no se mezclan datos de dos liquidaciones.
+            setLectura({ tipo: "distintas" });
+            setAviso(sinLaFalla);
+            return;
+          }
           setAviso(sinLaFalla);
           setLectura({ tipo: "ok", cuenta: c?.data ?? null, resumen: r?.data ?? null });
           return;
@@ -123,6 +157,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               }}
               avisar={setAviso}
             />
+          )}
+          {lectura.tipo === "distintas" && (
+            <p className="tarjeta" role="alert">
+              {CAMBIO_AL_LEER}
+            </p>
           )}
           {datos !== null && cabeza === null && <p className="tarjeta">{SIN_LIQUIDACION}</p>}
           {cabeza !== null && (

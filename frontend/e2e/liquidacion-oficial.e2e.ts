@@ -21,6 +21,7 @@ const MI_CUENTA = {
     { periodo: "2026-09-01", confirmada_en: "2026-10-05T15:00:00Z" },
   ],
   liquidacion: {
+    importacion_id: B,
     periodo: "2026-10-01",
     confirmada_en: "2026-11-05T15:00:00Z",
     vencimientos: ["13/11/2026", "23/11/2026"],
@@ -35,6 +36,7 @@ const MI_CUENTA = {
 const RESUMEN = {
   periodos: MI_CUENTA.periodos,
   liquidacion: {
+    importacion_id: B,
     periodo: "2026-10-01",
     confirmada_en: "2026-11-05T15:00:00Z",
     rubros: [

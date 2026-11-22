@@ -1025,6 +1025,7 @@
           "grupo_inexistente",
           "periodo_ya_confirmado",
           "reemplazo_invalido",
+          "unidad_repetida",
           "enlace_no_traido",
           "factura_ya_adjunta",
           "factura_no_vigente",

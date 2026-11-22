@@ -221,11 +221,15 @@ def test_una_unidad_corregida_es_oficial_con_la_unidad_del_valor_corregido(
     la unidad del padrón del valor corregido; lo leído conserva su unidad."""
     e = escena
     i = leida(e, motor_app, motor_migrate)
-    with motor_migrate.connect() as c:
+    # A una unidad sin datos en la liquidación: «PB-A» ya tiene el suyo, y desde `0119` dos datos
+    # del mismo tipo en una unidad no se confirman (`unidad_repetida`).
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into nucleo.unidad (consorcio_id, designacion) values (:c, 'PB-B')"),
+                  {"c": e["cons"]})  # fmt: skip
         padron = dict(c.execute(
             text("select designacion, id from nucleo.unidad where consorcio_id = :c"),
             {"c": e["cons"]}).all())  # fmt: skip
-    cambios = {"unidad:002": {"depto": "PB-A"}, "importe_unidad:002": {"depto": "Z-9"}}
+    cambios = {"unidad:002": {"depto": "PB-B"}, "importe_unidad:002": {"depto": "Z-9"}}
     for c in i["campos"]:
         if c["clave"] in cambios:
             r = decidir(e, i, c["clave"], "corregido", c["valor"] | cambios[c["clave"]])
@@ -242,7 +246,7 @@ def test_una_unidad_corregida_es_oficial_con_la_unidad_del_valor_corregido(
     assert leido["unidad:002"] == leido["importe_unidad:002"] == str(padron["1-A"])
     # Control: lo confirmado sin corregir sigue con la unidad leída.
     assert unidad["saldo_unidad:002"] == padron["1-A"]
-    assert unidad["unidad:002"] == padron["PB-A"]
+    assert unidad["unidad:002"] == padron["PB-B"]
     assert unidad["importe_unidad:002"] is None  # «Z-9» no está en el padrón
 
 

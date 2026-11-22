@@ -162,20 +162,31 @@ create or replace function nucleo.negar_cambio_importacion_liquidacion()
 """
 
 OFICIALES = f"""
+-- La unidad oficial de un campo: la que coincidió al leerlo o, si se corrigió `uf` o `depto` de un
+-- campo de unidad, la del valor corregido (`0115`). Interna: la usan los datos oficiales y la
+-- confirmación, que exige que cada unidad tenga a lo sumo un campo de cada tipo.
+create function nucleo.unidad_oficial_del_campo(c uuid, tipo text, valor_corregido jsonb,
+                                                unidad uuid)
+  returns uuid
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select case when valor_corregido is null then unidad
+                when tipo in ('unidad', 'importe_unidad', 'saldo_unidad') then
+                  nucleo.unidad_de_la_lectura(c, valor_corregido->>'depto',
+                                              valor_corregido->>'uf')
+           end
+  $$;
+
 -- RN30: los datos oficiales de una importación confirmada o reemplazada: los campos confirmados y
--- los corregidos (con el valor corregido). Si se corrigió `uf` o `depto` de un campo de unidad, la
--- unidad oficial sale del valor corregido (`0115`). Interna: la usan las lecturas de abajo.
+-- los corregidos (con el valor corregido y su unidad oficial). Interna: la usan las lecturas.
 create function nucleo.campos_oficiales_de(c uuid, importacion uuid)
   returns table (orden integer, tipo text, clave text, valor jsonb, unidad_id uuid)
   language sql stable
   set search_path = pg_catalog, pg_temp
   as $$
     select p.orden, p.tipo, p.clave, coalesce(p.valor_corregido, p.valor),
-           case when p.valor_corregido is null then p.unidad_id
-                when p.tipo in ('unidad', 'importe_unidad', 'saldo_unidad') then
-                  nucleo.unidad_de_la_lectura(c, p.valor_corregido->>'depto',
-                                              p.valor_corregido->>'uf')
-           end
+           nucleo.unidad_oficial_del_campo(c, p.tipo, p.valor_corregido, p.unidad_id)
       from nucleo.campo_preliminar p
       join nucleo.importacion_liquidacion x
         on x.consorcio_id = p.consorcio_id and x.id = p.importacion_id
@@ -281,6 +292,9 @@ create function nucleo.confirmar_importacion_liquidacion(importacion uuid, reemp
     p date;
     actual uuid;
     restriccion text;
+    repetida_en text;
+    repetido_tipo text;
+    repetidos integer[];
   begin
     perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
     if nucleo.importacion_para_decidir(c, importacion) <> 'para_confirmar' then
@@ -292,6 +306,28 @@ create function nucleo.confirmar_importacion_liquidacion(importacion uuid, reemp
                   and x.estado = 'pendiente') then
       raise exception 'quedan campos pendientes' using errcode = 'P0001',
         hint = 'campos_pendientes';
+    end if;
+    -- Cada unidad oficial, a lo sumo un campo de cada tipo: una corrección de `uf` o `depto` puede
+    -- llevar un campo a una unidad que ya tiene el suyo, y la cuenta de esa unidad no se sabría.
+    select u.designacion, r.tipo, array_agg(r.orden order by r.orden)
+      into repetida_en, repetido_tipo, repetidos
+      from (select p.orden, p.tipo,
+                   nucleo.unidad_oficial_del_campo(c, p.tipo, p.valor_corregido, p.unidad_id)
+                     as unidad_oficial
+              from nucleo.campo_preliminar p
+             where p.consorcio_id = c and p.importacion_id = importacion
+               and p.estado in ('confirmado', 'corregido')
+               and p.tipo in ('unidad', 'importe_unidad', 'saldo_unidad')) r
+      join nucleo.unidad u on u.consorcio_id = c and u.id = r.unidad_oficial
+     group by u.designacion, r.tipo
+    having count(*) > 1
+     order by min(r.orden)
+     limit 1;
+    if found then
+      raise exception 'dos datos del mismo tipo quedan en una unidad' using errcode = 'P0001',
+        hint = 'unidad_repetida',
+        detail = jsonb_build_object('unidad', repetida_en, 'tipo', repetido_tipo,
+                                    'campos', to_jsonb(repetidos))::text;
     end if;
     if (reemplaza is null) <> (motivo_pedido is null)
        or (motivo_pedido is not null
@@ -479,7 +515,8 @@ create function nucleo.periodos_liquidacion_oficial()
 -- diferencias ni unidades. Una fila sin tipo si la liquidación no tiene ninguno de esos datos;
 -- ninguna si el período no tiene liquidación vigente.
 create function nucleo.resumen_liquidacion_oficial(periodo_pedido date)
-  returns table (periodo date, confirmada_en timestamptz, tipo text, valor jsonb)
+  returns table (importacion_id uuid, periodo date, confirmada_en timestamptz, tipo text,
+                 valor jsonb)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -490,7 +527,7 @@ create function nucleo.resumen_liquidacion_oficial(periodo_pedido date)
     perform nucleo.exigir_propietario_confirmado(c, plataforma.persona_actual());
     v := nucleo.liquidacion_vigente(c, periodo_pedido);
     return query
-      select x.periodo, x.decidida_en, f.tipo,
+      select x.id, x.periodo, x.decidida_en, f.tipo,
              case when f.tipo = 'rubro' then
                     jsonb_build_object('numero', f.valor->'numero', 'nombre', f.valor->'nombre',
                                        'total', f.valor->'total')
@@ -511,8 +548,8 @@ create function nucleo.resumen_liquidacion_oficial(periodo_pedido date)
 -- de cada unidad donde es propietario, por la unidad oficial. Una unidad propia que no figura
 -- vuelve con una fila sin tipo. Ninguna fila si el período no tiene liquidación vigente.
 create function nucleo.mi_cuenta_liquidacion_oficial(periodo_pedido date)
-  returns table (periodo date, confirmada_en timestamptz, vencimientos jsonb, unidad_id uuid,
-                 designacion text, tipo text, valor jsonb)
+  returns table (importacion_id uuid, periodo date, confirmada_en timestamptz,
+                 vencimientos jsonb, unidad_id uuid, designacion text, tipo text, valor jsonb)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -525,7 +562,7 @@ create function nucleo.mi_cuenta_liquidacion_oficial(periodo_pedido date)
     v := nucleo.liquidacion_vigente(c, periodo_pedido);
     return query
       with oficiales as (select * from nucleo.campos_oficiales_de(c, v))
-      select x.periodo, x.decidida_en,
+      select x.id, x.periodo, x.decidida_en,
              (select o.valor->'vencimientos' from oficiales o where o.clave = 'total:gastos'),
              u.id, u.designacion, f.tipo, f.valor
         from nucleo.importacion_liquidacion x
@@ -554,6 +591,7 @@ RUTAS = (
     "nucleo.mi_cuenta_liquidacion_oficial(date)",
 )
 INTERNAS = (
+    "nucleo.unidad_oficial_del_campo(uuid, text, jsonb, uuid)",
     "nucleo.campos_oficiales_de(uuid, uuid)",
     "nucleo.exigir_propietario_confirmado(uuid, uuid)",
     "nucleo.liquidacion_vigente(uuid, date)",
