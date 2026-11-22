@@ -61,7 +61,8 @@ def test_toda_subida_de_archivo_tiene_el_tope_de_21_mb():
 
 
 def test_el_control_detecta_una_subida_que_falta():
-    """Con la expresión anterior al arreglo, la prueba nombra las tres rutas que quedaban fuera."""
+    """Con la expresión anterior al arreglo, la prueba nombra las rutas que quedaban fuera y las
+    subidas que se sumaron después (`0124`: los adjuntos de una reparación)."""
     anterior = re.compile(
         r"^/api/v1/consorcios/[^/]+/((documentos/[^/]+|pagos-por-aclarar/[^/]+/comprobante/"
         r"[^/]+)/versiones|pagos/cotejo/(columnas|extracto))$"
@@ -71,5 +72,6 @@ def test_el_control_detecta_una_subida_que_falta():
     assert sorted(o for o in con_archivo if not coincide(anterior, o)) == [
         "POST /api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/factura",
         "POST /api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/documentacion",
+        "POST /api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/adjuntos",
         "POST /api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/adjuntos",
     ]
