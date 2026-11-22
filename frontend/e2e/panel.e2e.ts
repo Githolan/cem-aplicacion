@@ -182,7 +182,7 @@ test.describe("panel en Modo Consejo (app 0120)", () => {
     await expect(porPeriodo.getByText(/^Gastos Comunes y Generales del Edificio: /).first()).toBeVisible();
     const porRubro = page.getByRole("region", { name: "Gasto por rubro" });
     await expect(porRubro.getByLabel("Período")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Lo que no cierra en la liquidación de octubre de 2026: 12 diferencias" })).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "Lo que no cierra en el documento de octubre de 2026: 12 diferencias" })).toHaveAttribute(
       "href",
       "/liquidacion-oficial",
     );

@@ -13,8 +13,9 @@ RN30); una para confirmar, descartada o reemplazada nunca cuenta.
 - `panel_gasto_liquidado_por_rubro(cuantos)`: en la misma ventana, el número, el nombre y el total
   de cada rubro.
 - `panel_diferencias_liquidacion_vigente()`: de la liquidación oficial del último período que la
-  tiene, cuántas diferencias dejó la lectura (lo que no cierra entre lo informado y lo que suma;
-  RN33: la diferencia, sin calificarla).
+  tiene, cuántas diferencias dejó la lectura (lo que no cierra entre lo informado y lo que suma,
+  en el documento tal como llegó, antes de las correcciones; RN33: la diferencia, sin
+  calificarla).
 
 **El resumen del propietario** (`fiscalizacion.ver_resumen`, barrera
 `exigir_propietario_confirmado` de `0119`): `resumen_gasto_por_periodo(cuantos)`, el total del

@@ -197,7 +197,7 @@ describe("Modo Consejo: el gasto según las liquidaciones oficiales (app 0120)",
     // RN33: lo que no cierra, neutro, como el único enlace a las liquidaciones.
     const noCierra = screen.getByRole("link", { name: textoNoCierra("2026-10-01", 2) });
     expect(noCierra.getAttribute("href")).toBe("/liquidacion-oficial");
-    expect(textoNoCierra("2026-10-01", 2)).toBe("Lo que no cierra en la liquidación de octubre de 2026: 2 diferencias");
+    expect(textoNoCierra("2026-10-01", 2)).toBe("Lo que no cierra en el documento de octubre de 2026: 2 diferencias");
     expect(screen.queryByRole("link", { name: VER_LIQUIDACIONES })).toBeNull();
     // Sin órdenes, sus bloques no se dibujan y no se dice que falten (PAN-03).
     expect(screen.queryByRole("region", { name: /Órdenes de pago por estado/ })).toBeNull();

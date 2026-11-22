@@ -182,9 +182,11 @@ export const TITULO_GASTO_POR_PERIODO = "Gasto por período";
 export const TITULO_GASTO_POR_RUBRO = "Gasto por rubro";
 export const SEGUN_LAS_OFICIALES = "Según las liquidaciones oficiales.";
 export const VER_LIQUIDACIONES = "Ver las liquidaciones oficiales";
-/** RN33: lo que no cierra entre lo que informa la liquidación y lo que suma, sin calificarlo. */
+/** RN33: lo que no cierra entre lo que informa la liquidación y lo que suma, sin calificarlo. Se
+ * controló sobre el documento tal como llegó, antes de las correcciones (hallazgo de Codex en #276):
+ * las cifras de los gráficos son las oficiales. */
 export const textoNoCierra = (mes: string, n: number) =>
-  `Lo que no cierra en la liquidación de ${periodo(mes)}: ${n === 1 ? "1 diferencia" : `${n} diferencias`}`;
+  `Lo que no cierra en el documento de ${periodo(mes)}: ${n === 1 ? "1 diferencia" : `${n} diferencias`}`;
 
 function Contenido({ panel, consorcio, veRegistros, subeFacturas, veLiquidaciones, aEntrar, alCambiar }: PropsContenido & { veLiquidaciones: boolean }) {
   const lista = monedas(panel);
