@@ -385,6 +385,12 @@ class CodigoError(StrEnum):
     DESTINATARIO_CON_CUENTA = "destinatario_con_cuenta"
     """La respuesta de un destinatario con cuenta la da él en la aplicación; el Consejo registra
     solo la que llegó por otro medio de un destinatario sin cuenta (P2, `0108`)."""
+    TEXTO_CON_CUENTA = "texto_con_cuenta"
+    """El título o el texto de un comunicado lleva el número de una cuenta (22 dígitos): se
+    rechaza, no se tapa (`0122`)."""
+    SIN_DESTINATARIOS = "sin_destinatarios"
+    """Nadie tiene hoy un vínculo confirmado en el edificio: el comunicado no tendría a quién
+    llegar (`0122`)."""
 
 
 class Error(BaseModel):

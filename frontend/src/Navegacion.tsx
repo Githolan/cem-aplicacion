@@ -1,5 +1,6 @@
 import { Link, matchPath, useLocation } from "react-router";
 
+import { RUTA_COMUNICADOS, TITULO_COMUNICADOS } from "./comunicados/Comunicados";
 import { RUTA_CONTACTOS } from "./Contactos";
 import { RUTA_CUENTA } from "./Cuenta";
 import { RUTA_DOCUMENTOS } from "./Documentos";
@@ -59,6 +60,7 @@ const PRINCIPALES: readonly Destino[] = [
   { ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera", requisito: REQUISITOS.pagos },
   { ruta: RUTA_DOCUMENTOS, texto: "Documentos", icono: "documento", requisito: REQUISITOS.documentos },
   { ruta: RUTA_MIS_EXPENSAS, texto: TITULO_MIS_EXPENSAS, corto: "Expensas", icono: "billetera", requisito: REQUISITOS.misExpensas },
+  { ruta: RUTA_COMUNICADOS, texto: TITULO_COMUNICADOS, icono: "megafono", requisito: REQUISITOS.comunicados },
   { ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", corto: "Emergencias", icono: "telefono", requisito: REQUISITOS.contactos },
   { ruta: RUTA_CUENTA, texto: "Cuenta", icono: "persona" },
 ];

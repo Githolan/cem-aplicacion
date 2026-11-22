@@ -149,7 +149,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos. Y con 0063, cuyos
     comprobantes citan su orden: se les quita antes de borrar las órdenes. Y con 0099, cuya
     constancia de la factura adjunta cita la versión de la orden y el documento: se borra antes. Y
-    con 0100, que se niega a bajar si el equipo habilitó una moneda: se borran las monedas.
+    con 0100, que se niega a bajar si el equipo habilitó una moneda: se borran las monedas. Y con
+    0122, que se niega a bajar si hay comunicados: se borran primero.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -161,6 +162,19 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if;"
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
+                " end if;"
+                # Los comunicados (0122) citan personas, solo se agregan y niegan su downgrade:
+                # van primero, de la última tabla a la primera.
+                " if to_regclass('nucleo.comunicado') is not null then"
+                "   alter table nucleo.comunicado_envio disable trigger user;"
+                "   alter table nucleo.comunicado_destinatario disable trigger user;"
+                "   alter table nucleo.comunicado disable trigger user;"
+                "   delete from nucleo.comunicado_envio;"
+                "   delete from nucleo.comunicado_destinatario;"
+                "   delete from nucleo.comunicado;"
+                "   alter table nucleo.comunicado_envio enable trigger user;"
+                "   alter table nucleo.comunicado_destinatario enable trigger user;"
+                "   alter table nucleo.comunicado enable trigger user;"
                 " end if;"
                 # Las solicitudes formales (0108) citan mandatos, personas, identidades y
                 # documentos, y niegan su downgrade: van primero, de la última tabla a la primera.

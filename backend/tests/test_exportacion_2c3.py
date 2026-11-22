@@ -91,8 +91,11 @@ SOLICITUDES_FORMALES = {
 IMPORTADAS = set(exportar_consorcio.PARTES["liquidaciones_importadas"])
 """PA27 (`0121`): el edificio de estas pruebas no importa liquidaciones; su contenido lo prueba
 `test_exportacion_importadas_0121.py`. Sus claves sí están decididas acá."""
-PARTES_POSTERIORES = ("liquidaciones_importadas",)
-"""Las partes que suman las migraciones posteriores a `0069` (`0121`)."""
+COMUNICADOS = set(exportar_consorcio.PARTES["comunicados"])
+"""RF28 (`0122`): el edificio de estas pruebas no emite comunicados; su contenido lo prueba
+`test_comunicados_0122.py`. Sus claves sí están decididas acá."""
+PARTES_POSTERIORES = ("liquidaciones_importadas", "comunicados")
+"""Las partes que suman las migraciones posteriores a `0069` (`0121`, `0122`)."""
 HASTA_0069 = len(FUNCIONES) - len(PARTES_POSTERIORES)
 """Las funciones de exportación que hay con la base en `0069`."""
 
@@ -235,6 +238,8 @@ CLAVES_POR_ENTIDAD = {
     "correspondencia_grupo": {"id", "clave", "nombre", "grupo", "version",
                               "definida_por_nombre", "definida_en"},
     "enlace_liquidacion": {"importacion_id", "orden", "url", "origen", "pagina"},
+    "comunicado": {"id", "titulo", "texto", "corrige_a", "emitido_por_nombre", "emitido_en"},
+    "comunicado_destinatario": {"comunicado_id", "destinatario_nombre", "estado", "enviado_en"},
 }  # fmt: skip
 
 
@@ -485,6 +490,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         - ENTIDADES_ECONOMICAS
         - SOLICITUDES_FORMALES
         - IMPORTADAS
+        - COMUNICADOS
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}

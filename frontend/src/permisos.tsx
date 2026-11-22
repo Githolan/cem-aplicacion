@@ -284,4 +284,7 @@ export const REQUISITOS = {
    * (la concede ser el destinatario, que decide la base): la pantalla se abre y la lista llega vacía
    * para quien no tiene ninguna. En el menú va solo para quien ve el panel. */
   solicitudes: [["fiscalizacion.ver_panel"], ["solicitud_formal.responder"]],
+  /** Los comunicados oficiales (RF28, app 0122): los leen los vínculos confirmados y quien los
+   * emite, que tiene además «Nuevo comunicado» si la lista dice que puede. */
+  comunicados: [["comunicados.ver"]],
 } as const satisfies Record<string, Requisito>;

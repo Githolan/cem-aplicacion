@@ -34,6 +34,7 @@ import { LiquidacionDelAdministrador, RUTA_LIQUIDACION_ADMINISTRADOR } from "./f
 import { LiquidacionOficial, RUTA_LIQUIDACION_OFICIAL } from "./fiscalizacion/LiquidacionOficial";
 import { MisExpensas, RUTA_MIS_EXPENSAS } from "./fiscalizacion/MisExpensas";
 import { RUTA_SOLICITUDES, Solicitudes } from "./fiscalizacion/Solicitudes";
+import { Comunicados, RUTA_COMUNICADOS } from "./comunicados/Comunicados";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
@@ -145,6 +146,7 @@ export function App() {
             element={<Exige requisito={REQUISITOS.liquidacionOficial}><LiquidacionOficial /></Exige>}
           />
           <Route path={RUTA_SOLICITUDES} element={<Exige requisito={REQUISITOS.solicitudes}><Solicitudes /></Exige>} />
+          <Route path={RUTA_COMUNICADOS} element={<Exige requisito={REQUISITOS.comunicados}><Comunicados /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

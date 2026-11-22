@@ -316,6 +316,11 @@ const MENSAJES: Record<string, string> = {
   fecha_respuesta_invalida: "La fecha en que llegó la respuesta va entre el día del envío y hoy.",
   adjunto_invalido: "El archivo no se pudo usar: hay que subirlo de nuevo desde esta solicitud.",
   destinatario_con_cuenta: "El destinatario tiene cuenta: la respuesta la da en la aplicación.",
+  // Comunicados oficiales (RF28, app 0122).
+  texto_con_cuenta:
+    "Un comunicado no puede llevar el número de una cuenta: hay que sacarlo del título y del texto. Si no es una cuenta, separar los números con una coma.",
+  sin_destinatarios:
+    "Nadie tiene hoy un vínculo confirmado en el edificio: el comunicado no tendría a quién llegar. Los vínculos se confirman en el padrón.",
   idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
   idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
 };

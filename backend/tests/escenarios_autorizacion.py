@@ -168,6 +168,13 @@ ADICIONES_0113 = {
     "administrador": ["liquidacion.importar"],
     "administrador_externo": [],
 }
+# `0122` (RF28, decisión del 22-11-2026): emitir comunicados oficiales, MC y AD.
+CATALOGO |= {"comunicados.emitir": False}
+ADICIONES_0122 = {
+    "miembro_consejo": ["comunicados.emitir"],
+    "administrador": ["comunicados.emitir"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -178,6 +185,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0046[tipo]
     + ADICIONES_0110[tipo]
     + ADICIONES_0113[tipo]
+    + ADICIONES_0122[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

@@ -5,6 +5,7 @@ const NOMBRES: Readonly<Record<string, string>> = {
   "auditoria.ver": "Ver la auditoría del edificio",
   "coeficientes.aprobar": "Aprobar los coeficientes",
   "coeficientes.proponer": "Proponer los coeficientes",
+  "comunicados.emitir": "Emitir comunicados al edificio",
   "contactos.gestionar": "Gestionar los contactos de emergencia",
   "decisiones.registrar": "Registrar decisiones",
   "decisiones.ver": "Ver las decisiones",

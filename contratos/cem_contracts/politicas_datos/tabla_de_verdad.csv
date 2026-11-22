@@ -545,3 +545,21 @@ H5 D3-A,cuenta.ver_propia,AD,C,unidad:3A,vigente,si,,403,sin_concesion,AD sin v�
 H5 D3-A,cuenta.ver_propia,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no la ve
 H5 D3-A,cuenta.ver_propia,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
 H5 D3-A,cuenta.ver_propia,Pc,—,unidad:3A,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+RF28,comunicados.emitir,MC,C,,vigente,si,,200,concedido_por_facultad,MC emite un comunicado en Modo Consejo (decisión del 22-11-2026)
+RF28,comunicados.emitir,AD,AA,,vigente,si,,200,concedido_por_facultad,la administración emite en Administrador Aumentado
+RF28,comunicados.emitir,MC,AG,,vigente,si,,200,concedido_por_facultad,MC emite en Autogestión
+RF28,comunicados.emitir,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin comunicados.emitir
+RF28,comunicados.emitir,Pc,C,,sin_mandato,si,,403,sin_concesion,P confirmado lee pero no emite
+RF28,comunicados.emitir,Ic,C,,sin_mandato,si,,403,sin_concesion,I confirmado lee pero no emite
+RF28,comunicados.emitir,AE,C,,vigente,si,,403,sin_concesion,AE no emite comunicados
+RF28,comunicados.emitir,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF28,comunicados.emitir,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
+RF28,comunicados.ver,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado lee los comunicados del edificio
+RF28,comunicados.ver,Ic,C,,sin_mandato,si,,200,concedido_por_vinculo,I confirmado lee los comunicados del edificio
+RF28,comunicados.ver,Oc,C,,sin_mandato,si,,200,concedido_por_vinculo,O confirmado lee los comunicados del edificio
+RF28,comunicados.ver,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no los lee (la base pide el vínculo confirmado)
+RF28,comunicados.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC sin vínculo ve la historia por comunicados.emitir
+RF28,comunicados.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD sin vínculo ve la historia por comunicados.emitir
+RF28,comunicados.ver,AE,C,,vigente,si,,403,sin_concesion,AE no lee los comunicados
+RF28,comunicados.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF28,comunicados.ver,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
