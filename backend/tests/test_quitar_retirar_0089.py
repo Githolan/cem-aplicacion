@@ -51,6 +51,7 @@ MIGRACION_0099 = RAIZ / "migrations" / "versions" / "0099_factura_adjunta_sin_ve
 MIGRACION_0103 = RAIZ / "migrations" / "versions" / "0103_documentacion_del_proveedor.py"
 MIGRACION_0108 = RAIZ / "migrations" / "versions" / "0108_solicitud_formal.py"
 MIGRACION_0113 = RAIZ / "migrations" / "versions" / "0113_importacion_liquidacion.py"
+MIGRACION_0124 = RAIZ / "migrations" / "versions" / "0124_reparaciones.py"
 MOTIVO = "Póliza vencida: la reemplaza la del período nuevo"
 
 
@@ -345,12 +346,13 @@ def test_cada_tabla_que_cita_documentos_esta_en_la_lista(motor_migrate):
             " where tgname = 'documento_citado_vigente'"
         )).scalars())  # fmt: skip
     # `0099` suma la constancia de la factura adjunta a una orden aprobada, `0103` la de los
-    # seguros y las habilitaciones del proveedor, `0108` el adjunto de una solicitud formal y `0113`
-    # la liquidación importada.
+    # seguros y las habilitaciones del proveedor, `0108` el adjunto de una solicitud formal, `0113`
+    # la liquidación importada y `0124` el adjunto de una reparación.
     citan = {t for t, _ in m.REFERENCIAS + _migracion(MIGRACION_0099).REFERENCIAS_NUEVAS
              + _migracion(MIGRACION_0103).REFERENCIAS_NUEVAS
              + _migracion(MIGRACION_0108).REFERENCIAS_NUEVAS
-             + _migracion(MIGRACION_0113).REFERENCIAS_NUEVAS}  # fmt: skip
+             + _migracion(MIGRACION_0113).REFERENCIAS_NUEVAS
+             + _migracion(MIGRACION_0124).REFERENCIAS_NUEVAS}  # fmt: skip
     # Control: la búsqueda encuentra las dos que se sabe que no citan.
     assert set(m.NO_CITAN) <= en_el_catalogo
     assert en_el_catalogo == citan | set(m.NO_CITAN)

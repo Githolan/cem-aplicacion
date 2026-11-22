@@ -421,6 +421,51 @@ def test_las_fotos_entran_por_el_antivirus_y_solo_se_ven_disponibles(e, motor_mi
 # Estados ------------------------------------------------------------------------------------
 
 
+def test_un_documento_de_una_reparacion_no_se_quita_ni_se_retira(e, motor_migrate):
+    """`0089`: lo que cita un documento lo sostiene (`documento_referenciado`), y no se cita uno
+    retirado (`documento_citado_vigente`). El adjunto de una reparación es una de esas citas."""
+    rep = hasta(e, pedida(e), "en_gestion")
+    adjunto = disponible(e, "ad", rep, "presupuesto")
+    with motor_migrate.connect() as cx:
+        doc = cx.execute(text("select documento_id from nucleo.reparacion_adjunto where id = :a"),
+                         {"a": adjunto}).scalar_one()  # fmt: skip
+    docs = f"/api/v1/consorcios/{e['cons']}/documentos"
+    motivo = {"motivo": "Lo reemplaza otro presupuesto"}
+    with cliente(e["ad"], e["sesion_ad"]) as c:
+        retiro = c.post(f"{docs}/{doc}/retiro", json=motivo, headers=clave_idempotencia())
+        quitado = c.post(f"{docs}/{doc}/quitar", headers=clave_idempotencia())
+        # Control: uno de la misma categoría que nada cita, sí se retira.
+        nuevo = {"categoria": "presupuestos", "titulo": "Presupuesto", "fecha": "2026-11-05"}
+        libre = c.post(docs, headers=clave_idempotencia(), json=nuevo)
+        assert libre.status_code == 201, libre.text
+        libre_id = libre.json()["id"]
+        cabeceras = {"Content-Type": "application/pdf"} | clave_idempotencia()
+        version = c.post(f"{docs}/{libre_id}/versiones", content=pdf(), headers=cabeceras)
+        assert version.status_code == 201, version.text
+        assert analizar(e["motor_app"]) == 1
+        control = c.post(f"{docs}/{libre_id}/retiro", json=motivo, headers=clave_idempotencia())
+    assert codigo(retiro) == (409, "documento_referenciado")
+    # Quitar es de quien prepara órdenes (el archivo de un formulario): acá no llega a mirar la
+    # cita, pero la misma función que consulta (`documento_referenciado`) la ve.
+    assert codigo(quitado) == (403, "sin_permiso")
+    with motor_migrate.connect() as cx:
+        assert cx.execute(text("select estado from nucleo.documento where id = :d"),
+                          {"d": doc}).scalar_one() == "vigente"  # fmt: skip
+        referenciado = "select nucleo.documento_referenciado(:c, :d)"
+        assert cx.execute(text(referenciado), {"c": e["cons"], "d": doc}).scalar_one() is True
+        assert cx.execute(text(referenciado), {"c": e["cons"], "d": libre_id}).scalar_one() is False
+    assert control.status_code == 200, control.text
+    # Y la base no deja que una reparación cite el retirado.
+    with pytest.raises(DBAPIError) as error, motor_migrate.begin() as cx:
+        cx.execute(text(
+            "insert into nucleo.reparacion_adjunto (consorcio_id, reparacion_id, tipo,"
+            " documento_id, version_documento_id, subido_por)"
+            " values (:c, :r, 'presupuesto', :d, :v, :p)"),
+            {"c": e["cons"], "r": rep["id"], "d": libre_id, "v": version.json()["id"],
+             "p": e["ad"]})  # fmt: skip
+    assert hint(error) == "documento_invalido"
+
+
 def test_cada_paso_valido_y_un_paso_fuera_de_orden_se_niega(e, motor_migrate):
     rep = pedida(e)
     claves = gastos(e)
