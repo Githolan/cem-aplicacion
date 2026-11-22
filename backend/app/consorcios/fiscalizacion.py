@@ -21,6 +21,7 @@ la misma transacción un correo sin el contenido de la solicitud (P3).
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
@@ -29,6 +30,7 @@ import anyio
 from cem_contracts.documentos import EstadoVersion, Titulo, VersionCargada
 from cem_contracts.errores import CodigoError
 from cem_contracts.fiscalizacion import (
+    DIAS_AVISO_VENCIMIENTO,
     PLAZO_MAXIMO_DIAS,
     PLAZO_MINIMO_DIAS,
     PLAZO_POR_DEFECTO_DIAS,
@@ -71,6 +73,7 @@ from app.autorizacion.requiere import (
     Permiso,
     requiere,
 )
+from app.consorcios.avisos_consejo import por_vencer
 from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
 from app.consorcios.padron import Discrepancia
 from app.consorcios.reclamos import ATENDER as ATENDER_RECLAMOS
@@ -344,6 +347,7 @@ def _solicitudes(
         for p in (permisos.retirar, permisos.registrar_envio, permisos.registrar_respuesta)
     }
     yo = permisos.responder.ctx.persona_id
+    hoy = permisos.responder.ctx.hoy
     lee = permisos.ver_documentos.decidir(Entidad()).permitido
     return [
         SolicitudFormal(
@@ -365,10 +369,16 @@ def _solicitudes(
             ),
             retiro=RetiroRegistrado(**f["retiro"]) if f["retiro"] else None,
             acciones=_acciones(f, decision, puede),
+            por_vencer=por_vencer(EstadoSolicitudFormal(f["estado"]),
+                                  _vence(f["envio"]), hoy),
             falta_administrador_vigente=_falta_administrador(f, decision),
         )
         for f, decision in zip(filas, firmar, strict=True)
     ]  # fmt: skip
+
+
+def _vence(envio: dict | None) -> date | None:
+    return None if envio is None else date.fromisoformat(envio["vence_el"])
 
 
 def _con_archivo(datos: dict, lee: bool) -> dict:
@@ -416,6 +426,7 @@ def listar_solicitudes(permisos: PermisosDep, motor: MotorDep) -> ListaSolicitud
         plazo_por_defecto_dias=PLAZO_POR_DEFECTO_DIAS,
         plazo_minimo_dias=PLAZO_MINIMO_DIAS,
         plazo_maximo_dias=PLAZO_MAXIMO_DIAS,
+        dias_aviso_vencimiento=DIAS_AVISO_VENCIMIENTO,
     )
 
 

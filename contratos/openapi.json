@@ -9849,6 +9849,11 @@
       "ListaSolicitudesFormales": {
         "description": "`GET …/solicitudes-formales`: el Consejo y la administración (`fiscalizacion.ver_panel`)\nven todas; el destinatario, las dirigidas a su cuenta.",
         "properties": {
+          "dias_aviso_vencimiento": {
+            "description": "Desde cuántos días antes del vencimiento una solicitud está `por_vencer`.",
+            "title": "Dias Aviso Vencimiento",
+            "type": "integer"
+          },
           "elementos": {
             "description": "De la más nueva a la más vieja.",
             "items": {
@@ -9885,7 +9890,8 @@
           "hay_administrador_vigente",
           "plazo_por_defecto_dias",
           "plazo_minimo_dias",
-          "plazo_maximo_dias"
+          "plazo_maximo_dias",
+          "dias_aviso_vencimiento"
         ],
         "title": "ListaSolicitudesFormales",
         "type": "object"
@@ -15626,6 +15632,11 @@
             "title": "Plazo Dias",
             "type": "integer"
           },
+          "por_vencer": {
+            "description": "Enviada, sin responder, y vence dentro de `DIAS_AVISO_VENCIMIENTO` días o menos contando el día del consorcio (RF40, P0 S6). Una vencida ya no está por vencer.",
+            "title": "Por Vencer",
+            "type": "boolean"
+          },
           "preparada_en": {
             "format": "date-time",
             "title": "Preparada En",
@@ -15699,6 +15710,7 @@
           "respuesta",
           "retiro",
           "acciones",
+          "por_vencer",
           "falta_administrador_vigente"
         ],
         "title": "SolicitudFormal",

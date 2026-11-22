@@ -163,6 +163,11 @@ PLAZO_POR_DEFECTO_DIAS = 15
 PLAZO_MINIMO_DIAS = 5
 PLAZO_MAXIMO_DIAS = 60
 """El rango que se puede elegir (P1). La base tiene el mismo control (`0108`)."""
+DIAS_AVISO_VENCIMIENTO = 3
+"""Bandeja y correo del Consejo (RF40, P0 S6): una solicitud enviada está «por vencer» desde
+este número de días antes de su vencimiento, y el correo avisa que venció durante este mismo
+número de días después. Elegido por recomendación (22-11-2026): con el plazo mínimo de 5 días,
+el aviso llega antes de la mitad del plazo."""
 LARGO_REFERENCIA = 200
 LARGO_DOCUMENTACION_PEDIDA = 2000
 LARGO_RESPUESTA = 4000
@@ -426,6 +431,10 @@ class SolicitudFormal(BaseModel):
     respuesta: RespuestaSolicitud | None
     retiro: RetiroRegistrado | None
     acciones: list[AccionSolicitud]
+    por_vencer: bool = Field(
+        description="Enviada, sin responder, y vence dentro de `DIAS_AVISO_VENCIMIENTO` días o"
+        " menos contando el día del consorcio (RF40, P0 S6). Una vencida ya no está por vencer."
+    )
     falta_administrador_vigente: bool = Field(
         description="Si quien lee firmaría este borrador pero la firma emite y el consorcio no"
         " tiene un administrador vigente (A14): `firmar` no se ofrece hasta que lo tenga."
@@ -447,3 +456,6 @@ class ListaSolicitudesFormales(BaseModel):
     plazo_por_defecto_dias: int
     plazo_minimo_dias: int
     plazo_maximo_dias: int
+    dias_aviso_vencimiento: int = Field(
+        description="Desde cuántos días antes del vencimiento una solicitud está `por_vencer`."
+    )

@@ -8,7 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { NADA_PENDIENTE } from "./Inicio";
-import { DETALLE_SIN_LECTURA, PREPARAR_LA_ORDEN, textoPagos, textoSalteoHasta, textoSolicitudes, TITULO_PEDIDO_SALTEO } from "./pendientes";
+import {
+  DETALLE_SIN_LECTURA,
+  PREPARAR_LA_ORDEN,
+  textoImportaciones,
+  textoPagos,
+  textoReparaciones,
+  textoSalteoHasta,
+  textoSolicitudes,
+  TITULO_PEDIDO_SALTEO,
+} from "./pendientes";
 
 // El inicio como única bandeja (decisión 9 del 18-11-2026; FL-PAD-01, FL-AVI-01 a FL-AVI-05,
 // FL-INI-01, FL-SAL-01 parte 1): una fila por cada pendiente que le toca a quien mira y por edificio,
@@ -69,8 +78,8 @@ const bandeja = (pendientes: number, { rechazadas = 0, esperando = 0 } = {}) =>
 
 const vinculo = (confirmable: boolean, confirmado = false) => ({ confirmado, confirmable_por_vos: confirmable });
 
-function solicitud(acciones: string[], estado = "enviada", vence = "2026-11-30") {
-  return { acciones, estado, envio: estado === "borrador" ? null : { vence_el: vence } };
+function solicitud(acciones: string[], estado = "enviada", vence = "2026-11-30", porVencer = false) {
+  return { acciones, estado, envio: estado === "borrador" ? null : { vence_el: vence }, por_vencer: porVencer };
 }
 
 function proveedor(id: string, razon_social: string, estado = "activo") {
@@ -126,6 +135,9 @@ function backend({
     if (camino.endsWith("/mandatos")) return Response.json({ elementos: [] });
     if (camino.endsWith("/contactos/gestion")) return Response.json({ elementos: [] });
     if (camino.endsWith("/pedidos-salteo")) return Response.json({ elementos: [] });
+    if (camino.endsWith("/liquidaciones-importadas")) return Response.json([]);
+    if (camino.endsWith("/reclamos-liquidacion")) return Response.json({ elementos: [] });
+    if (camino.endsWith("/reparaciones")) return Response.json({ elementos: [] });
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
   });
 }
@@ -444,6 +456,97 @@ describe("otros pendientes (FL-AVI-05)", () => {
     );
     abrir();
     expect(await fila("Contactos de emergencia", "2 contactos con un dato señalado como incorrecto")).toBeTruthy();
+  });
+});
+
+// --- Bandeja del Consejo (RF40, P0 S6): lo que necesita al Consejo, cada fila a su pantalla ---------
+
+const CONSEJO = [
+  "fiscalizacion.ver_panel",
+  "solicitud_formal.responder",
+  "liquidacion.importar",
+  "reclamos_liquidacion.atender",
+  "reparaciones.ver",
+  "reparaciones.gestionar",
+  "contactos.ver",
+];
+const importacion = (estado: string) => ({ estado });
+const reparacion = (estado: string) => ({ estado });
+
+describe("Bandeja del Consejo (RF40, P0 S6)", () => {
+  it("cada pendiente del Consejo tiene su fila, que abre su pantalla en el edificio", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        acciones: { [C1]: CONSEJO },
+        otras: {
+          [ruta(C1, "liquidaciones-importadas")]: () =>
+            Response.json([importacion("para_confirmar"), importacion("confirmada"), importacion("leyendo"), importacion("no_reconocida")]),
+          [ruta(C1, "solicitudes-formales")]: () =>
+            Response.json({ elementos: [solicitud([], "enviada", "2026-11-25", true), solicitud([], "enviada", "2026-12-20"), solicitud(["registrar_respuesta"], "vencida", "2026-11-01")] }),
+          [ruta(C1, "reclamos-liquidacion")]: () => Response.json({ elementos: [{ estado: "presentado" }, { estado: "respondido" }] }),
+          [ruta(C1, "reparaciones")]: () =>
+            Response.json({ elementos: ["pedida", "en_gestion", "aprobada", "terminada_gasto_pendiente", "cerrada"].map(reparacion) }),
+        },
+      }),
+    );
+    abrir();
+    const importar = await fila("Liquidación del administrador", "1 liquidación espera confirmación");
+    expect(importar.getAttribute("href")).toBe("/importar-liquidacion");
+    await fila("Solicitudes formales", "1 con la respuesta por registrar · 1 por vencer, vence el 25/11/2026 · 1 vencida");
+    await fila("Reclamos sobre la liquidación", "1 reclamo espera respuesta");
+    await fila("Reparaciones", "1 pedido de reparación espera responsable · 2 reparaciones en curso");
+    expect(screen.queryByText(NADA_PENDIENTE)).toBeNull();
+  });
+
+  it("con todo al día, el Consejo lee «No hay nada pendiente.»", async () => {
+    const simulado = backend({ acciones: { [C1]: CONSEJO } });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(NADA_PENDIENTE)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+    // Control: preguntó por cada cosa.
+    for (const parte of ["liquidaciones-importadas", "solicitudes-formales", "reclamos-liquidacion", "reparaciones"])
+      expect(pedidosA(simulado, ruta(C1, parte))).toBeGreaterThan(0);
+  });
+
+  it("quien no importa no pide la lista de liquidaciones; quien importa, sí", async () => {
+    const sinImportar = backend({ acciones: { [C1]: VECINO } });
+    vi.stubGlobal("fetch", sinImportar);
+    abrir();
+    expect(await screen.findByText(NADA_PENDIENTE)).toBeTruthy();
+    expect(pedidosA(sinImportar, ruta(C1, "liquidaciones-importadas"))).toBe(0);
+    cleanup();
+    const importa = backend({ acciones: { [C1]: ["liquidacion.importar", ...VECINO] } });
+    vi.stubGlobal("fetch", importa);
+    abrir();
+    expect(await screen.findByText(NADA_PENDIENTE)).toBeTruthy();
+    expect(pedidosA(importa, ruta(C1, "liquidaciones-importadas"))).toBeGreaterThan(0);
+  });
+
+  it("si la lista de liquidaciones no se pudo leer, la fila lo dice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({ acciones: { [C1]: ["liquidacion.importar", ...VECINO] }, otras: { [ruta(C1, "liquidaciones-importadas")]: () => new Response(null, { status: 500 }) } }),
+    );
+    abrir();
+    await fila("Liquidación del administrador", DETALLE_SIN_LECTURA);
+    expect(screen.queryByText(NADA_PENDIENTE)).toBeNull();
+  });
+
+  it("las por vencer solo para quien ve el panel; el destinatario ve su vencimiento", () => {
+    const lista = [solicitud(["responder"], "enviada", "2026-11-25", true), solicitud([], "enviada", "2026-11-24", true)];
+    expect(textoSolicitudes(lista, true)).toBe("1 espera respuesta, vence el 25/11/2026 · 2 por vencer, la primera vence el 24/11/2026");
+    expect(textoSolicitudes(lista, false)).toBe("1 espera respuesta, vence el 25/11/2026");
+    expect(textoSolicitudes([solicitud([], "enviada", "2026-12-30")], true)).toBeNull();
+  });
+
+  it("textoImportaciones y textoReparaciones, en singular, plural o nada", () => {
+    expect(textoImportaciones(0)).toBeNull();
+    expect(textoImportaciones(2)).toBe("2 liquidaciones esperan confirmación");
+    expect(textoReparaciones(0, 0)).toBeNull();
+    expect(textoReparaciones(0, 1)).toBe("1 reparación en curso");
+    expect(textoReparaciones(2, 0)).toBe("2 pedidos de reparación esperan responsable");
   });
 });
 
