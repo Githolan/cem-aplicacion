@@ -46,6 +46,10 @@ const R1 = "77777777-7777-4777-8777-777777777777";
 const BASE = `/api/v1/consorcios/${C1}`;
 const RECLAMOS = `${BASE}/reclamos-liquidacion`;
 const TEXTO = "El saldo anterior no coincide con lo que pagué. PRUEBA SINTETICA.";
+/** La persona de la sesión, y otra que usó antes el mismo navegador (copropietaria de la unidad). */
+const YO = "88888888-8888-4888-8888-888888888888";
+const OTRA = "55555555-5555-4555-8555-555555555555";
+const SESION = { persona_id: YO, nombre: "Beto SINTETICO", correo: "beto@ejemplo.com", sesion_id: "s1", vence_en: "2026-12-01T00:00:00Z" };
 
 type MiCuenta = components["schemas"]["MiCuenta"];
 type Reclamo = components["schemas"]["Reclamo"];
@@ -96,6 +100,7 @@ const error = (estado: number, codigo: string) => Response.json({ codigo, mensaj
 function respuestas(extra: Respuestas, cuenta: () => MiCuenta = () => cuentaDe(OFICIAL)): Respuestas {
   return {
     "GET /api/v1/me/consorcios": CONSORCIOS,
+    "GET /api/v1/auth/sesion": () => Response.json(SESION),
     [`GET ${BASE}/mis-acciones`]: PROPIETARIA,
     [`GET ${BASE}/mi-cuenta`]: () => Response.json(cuenta()),
     [`GET ${RECLAMOS}`]: () => Response.json(lista()),
@@ -204,7 +209,7 @@ describe("reclamos en /mis-expensas", () => {
   it("PA16: con el permiso vencido el servidor rechaza el borrador al sincronizar; queda marcado y solo se descarta", async () => {
     // Un borrador que quedó para enviar mientras no había conexión; al abrir, sale y se rechaza.
     const pendiente: Borrador = {
-      id: "b1", consorcio_id: C1, liquidacion_id: OFICIAL, periodo: "2026-10-01", unidad_id: U1, designacion: "1-A",
+      id: "b1", autor: YO, consorcio_id: C1, liquidacion_id: OFICIAL, periodo: "2026-10-01", unidad_id: U1, designacion: "1-A",
       campo: "saldo_unidad", texto: TEXTO, acepta_reemplazada: false, guardado_en: "2026-11-20T10:00:00Z",
       estado: { tipo: "por_enviar", clave: "clave-del-borrador" },
     };  // prettier-ignore
@@ -217,7 +222,7 @@ describe("reclamos en /mis-expensas", () => {
     const filas = screen.getByRole("list", { name: "Borradores sin enviar" });
     expect(within(filas).getByText(NO_SE_ENVIO)).toBeTruthy();
     // Nunca se borra solo.
-    expect(leerBorradores(C1)?.[0]?.estado).toEqual({ tipo: "rechazado", motivo: PERMISO_VENCIDO });
+    expect(leerBorradores(YO, C1)?.[0]?.estado).toEqual({ tipo: "rechazado", motivo: PERMISO_VENCIDO });
     fireEvent.click(within(filas).getByRole("button"));
     const ficha = await screen.findByRole("dialog");
     // Un envío que se sabe que falla no se ofrece: solo descartar (y cerrar).
@@ -230,6 +235,33 @@ describe("reclamos en /mis-expensas", () => {
     expect(borradoresGuardados()).toHaveLength(0);
     // Un solo intento: el rechazado no se vuelve a mandar.
     expect(pedidos(api, "POST", RECLAMOS)).toHaveLength(1);
+  });
+
+  it("los borradores de otra persona en este navegador no se muestran ni se mandan con esta cuenta; uno sin autor se descarta", async () => {
+    const deOtra: Borrador = {
+      id: "de-otra", autor: OTRA, consorcio_id: C1, liquidacion_id: OFICIAL, periodo: "2026-10-01", unidad_id: U1, designacion: "1-A",
+      campo: null, texto: "Reclamo de OTRA persona SINTETICO", acepta_reemplazada: false, guardado_en: "2026-11-20T10:00:00Z",
+      estado: { tipo: "por_enviar", clave: "clave-de-otra" },
+    };  // prettier-ignore
+    expect(guardarBorrador(deOtra)).toBe(true);
+    // El formato anterior, sin autor: nadie puede decir de quién es.
+    const sinAutor: Partial<Borrador> = { ...deOtra, id: "sin-autor", estado: { tipo: "por_enviar", clave: "clave-sin-autor" } };
+    delete sinAutor.autor;
+    localStorage.setItem(`${PREFIJO_BORRADOR}${C1}:sin-autor`, JSON.stringify(sinAutor));
+    const api = backend(respuestas({ [`POST ${RECLAMOS}`]: () => Response.json(RECLAMO, { status: 201 }) }));
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await screen.findByRole("heading", { name: MIS_RECLAMOS });
+    // Los borradores se leen recién al conocer la persona: el sin autor se borra entonces y el de la
+    // otra persona queda (es suyo).
+    await waitFor(() => expect(borradoresGuardados()).toEqual([`${PREFIJO_BORRADOR}${OTRA}:${C1}:de-otra`]));
+    // Dejar correr la sincronización que sigue a esa lectura.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(pedidos(api, "POST", RECLAMOS)).toHaveLength(0);
+    expect(screen.queryByRole("list", { name: "Borradores sin enviar" })).toBeNull();
+    expect(screen.queryByText(/OTRA persona/)).toBeNull();
   });
 
   it("con la liquidación reemplazada desde el borrador, ofrece citar la vigente y lo manda con ella", async () => {

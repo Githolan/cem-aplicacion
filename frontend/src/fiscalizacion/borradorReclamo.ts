@@ -9,6 +9,12 @@
 // servidor revalida todo (el vínculo, la unidad, la liquidación): si lo rechaza, el borrador queda
 // marcado con el motivo para que la persona lo descarte o lo corrija; nunca se borra solo.
 //
+// Cada borrador es de quien lo escribió (`autor`, la persona de la sesión) y la clave lo lleva: en el
+// mismo navegador, otra persona no ve ni manda los borradores de la anterior. Una entrada sin autor
+// (de antes de que existiera) o cuya clave no coincide con su contenido se borra al leer: nunca se
+// adivina de quién es ni sale con otra cuenta. Al entrar otra persona sobre la sesión vencida
+// (sesionEncima.ts) se borran todos los que no son de ella.
+//
 // localStorage puede no existir o lanzar (Safari privado, datos del sitio bloqueados). Entonces
 // guardar devuelve false y leer devuelve null, y la pantalla lo dice: nunca simula un borrador
 // guardado.
@@ -33,6 +39,8 @@ export type EstadoBorrador =
 export type Borrador = {
   /** Local: identifica el borrador en este navegador. */
   id: string;
+  /** La persona de la sesión que lo escribió (`persona_id` de `GET /auth/sesion`). */
+  autor: string;
   consorcio_id: string;
   liquidacion_id: string;
   periodo: string;
@@ -55,7 +63,10 @@ function almacen(): Storage | null {
   }
 }
 
-const claveDe = (b: Pick<Borrador, "consorcio_id" | "id">) => `${PREFIJO_BORRADOR}${b.consorcio_id}:${b.id}`;
+type Ubicacion = Pick<Borrador, "autor" | "consorcio_id" | "id">;
+
+const prefijoDe = (autor: string) => `${PREFIJO_BORRADOR}${autor}:`;
+const claveDe = (b: Ubicacion) => `${prefijoDe(b.autor)}${b.consorcio_id}:${b.id}`;
 
 /** Guarda el borrador; false si este navegador no deja guardarlo (la pantalla lo dice). */
 export function guardarBorrador(b: Borrador): boolean {
@@ -70,7 +81,7 @@ export function guardarBorrador(b: Borrador): boolean {
 }
 
 /** Borra el borrador; false si este navegador no deja tocar lo guardado (la pantalla lo dice). */
-export function borrarBorrador(b: Pick<Borrador, "consorcio_id" | "id">): boolean {
+export function borrarBorrador(b: Ubicacion): boolean {
   const a = almacen();
   if (a === null) return false;
   try {
@@ -110,26 +121,26 @@ function interpretar(crudo: string | null): Borrador | null {
   }
   if (typeof b !== "object" || b === null) return null;
   const x = b as Record<string, unknown>;
-  const textos = ["id", "consorcio_id", "liquidacion_id", "periodo", "unidad_id", "designacion", "texto", "guardado_en"];
+  const textos = ["id", "autor", "consorcio_id", "liquidacion_id", "periodo", "unidad_id", "designacion", "texto", "guardado_en"];
   if (!textos.every((k) => typeof x[k] === "string")) return null;
   if (!esCampo(x.campo) || !esEstado(x.estado) || typeof x.acepta_reemplazada !== "boolean") return null;
   return b as Borrador;
 }
 
-/** Los borradores del consorcio, el más viejo primero; null si este navegador no deja leerlos. Una
- * entrada que no es un borrador válido (otra versión de la aplicación) se borra, no se muestra. */
-export function leerBorradores(consorcioId: string): Borrador[] | null {
+/** Los borradores de `autor` en el consorcio, el más viejo primero; null si este navegador no deja
+ * leerlos. Los de otra persona no se tocan ni se muestran. Una entrada que no es un borrador válido
+ * (otra versión de la aplicación, sin autor) o cuya clave no es la de su contenido se borra. */
+export function leerBorradores(autor: string, consorcioId: string): Borrador[] | null {
   const a = almacen();
   if (a === null) return null;
-  const prefijo = `${PREFIJO_BORRADOR}${consorcioId}:`;
   const borradores: Borrador[] = [];
   try {
     for (let i = a.length - 1; i >= 0; i--) {
       const clave = a.key(i);
-      if (clave === null || !clave.startsWith(prefijo)) continue;
+      if (clave === null || !clave.startsWith(PREFIJO_BORRADOR)) continue;
       const b = interpretar(a.getItem(clave));
-      if (b === null) a.removeItem(clave);
-      else borradores.push(b);
+      if (b === null || claveDe(b) !== clave) a.removeItem(clave);
+      else if (b.autor === autor && b.consorcio_id === consorcioId) borradores.push(b);
     }
   } catch {
     return null;
@@ -139,12 +150,22 @@ export function leerBorradores(consorcioId: string): Borrador[] | null {
 
 /** Al salir de la cuenta: no queda ningún borrador para quien entre después en este navegador. */
 export function borrarBorradores() {
+  borrarLosQue((clave) => clave.startsWith(PREFIJO_BORRADOR));
+}
+
+/** Al entrar otra persona sobre la sesión vencida: se borran todos los borradores que no son suyos
+ * (los de la anterior y los de autor desconocido); los propios quedan. */
+export function borrarBorradoresAjenos(persona: string) {
+  borrarLosQue((clave) => clave.startsWith(PREFIJO_BORRADOR) && !clave.startsWith(prefijoDe(persona)));
+}
+
+function borrarLosQue(borrar: (clave: string) => boolean) {
   const a = almacen();
   if (a === null) return;
   try {
     for (let i = a.length - 1; i >= 0; i--) {
       const clave = a.key(i);
-      if (clave !== null && clave.startsWith(PREFIJO_BORRADOR)) a.removeItem(clave);
+      if (clave !== null && borrar(clave)) a.removeItem(clave);
     }
   } catch {
     // Sin acceso al almacenamiento no pudo haber borradores guardados.

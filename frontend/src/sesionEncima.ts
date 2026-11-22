@@ -5,6 +5,7 @@ import { guardarAdondeIba } from "./adondeIba";
 import { borrarCopias } from "./copiaContactos";
 import { ENCABEZADO_CSRF, encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { borrarBorradoresAjenos } from "./fiscalizacion/borradorReclamo";
 
 // Entrar encima (decisión del propietario del 05-11-2026, §10; rediseño de pagos, §12): si la sesión
 // vence, la entrada se pide sobre la misma pantalla, que sigue montada con lo escrito.
@@ -133,6 +134,8 @@ export function pedirEntrarDeNuevo(): Promise<void> {
 function terminar({ antes, soltar }: Pedido, nueva: Sesion) {
   if (antes?.persona !== nueva.persona) {
     borrarCopias();
+    // Los borradores de reclamos de la anterior (RF38) no quedan para la que entró.
+    borrarBorradoresAjenos(nueva.persona);
     salidas.aInicio();
     return;
   }

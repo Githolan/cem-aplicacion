@@ -4,7 +4,7 @@ import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, mensajeDeError, momento, renovarClave } from "../egresos/comun";
-import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useMiPersona } from "../egresos/useConsorcio";
 import { ErrorDeCampo, type ErroresDeCampo, erroresDe, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { FichaDeRegistro, FilaDeRegistro, type DatoDeFicha, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
@@ -134,7 +134,9 @@ type Props = {
 
 export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPedido, aEntrar, alCambiarLaLiquidacion }: Props) {
   const id = useId();
-  const [borradores, setBorradores] = useState<Borrador[] | null>(() => leerBorradores(consorcio));
+  // Los borradores son de quien los escribió: mientras no se sabe quién es, no se lee ni se manda ninguno.
+  const yo = useMiPersona(true);
+  const [borradores, setBorradores] = useState<Borrador[] | null>([]);
   const [lista, setLista] = useState<Lista | null>(null);
   const [fallaLista, setFallaLista] = useState<string | null>(null);
   const [vuelta, setVuelta] = useState(0);
@@ -144,7 +146,13 @@ export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPe
   const fichas = useFichas<string>();
   const sincronizando = useRef(false);
 
-  const releerBorradores = useCallback(() => setBorradores(leerBorradores(consorcio)), [consorcio]);
+  const releerBorradores = useCallback(() => {
+    if (yo !== null) setBorradores(leerBorradores(yo, consorcio));
+  }, [yo, consorcio]);
+
+  useEffect(() => {
+    releerBorradores();
+  }, [releerBorradores]);
 
   useEffect(() => {
     if (!ve) return;
@@ -171,8 +179,8 @@ export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPe
 
   /** Manda los borradores que quedaron para enviar (al abrir la pantalla y al volver la conexión). */
   const sincronizar = useCallback(async () => {
-    if (sincronizando.current) return;
-    const pendientes = (leerBorradores(consorcio) ?? []).filter((b) => b.estado.tipo === "por_enviar");
+    if (sincronizando.current || yo === null) return;
+    const pendientes = (leerBorradores(yo, consorcio) ?? []).filter((b) => b.estado.tipo === "por_enviar");
     if (pendientes.length === 0) return;
     sincronizando.current = true;
     let salieron = 0;
@@ -194,7 +202,7 @@ export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPe
     releerBorradores();
     if (salieron > 0) setVuelta((v) => v + 1);
     setResultado(aviso ?? (salieron > 0 ? { texto: SALIERON(salieron), ok: true } : null));
-  }, [consorcio, aEntrar, alCambiarLaLiquidacion, releerBorradores]);
+  }, [yo, consorcio, aEntrar, alCambiarLaLiquidacion, releerBorradores]);
 
   useEffect(() => {
     void sincronizar();
@@ -205,18 +213,18 @@ export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPe
 
   // Un pedido de la pantalla abre la ventana con un borrador nuevo, que se guarda al escribir.
   useEffect(() => {
-    if (pedido === null || cuenta === null) return;
+    if (pedido === null || cuenta === null || yo === null) return;
     alTomarPedido();
     setResultado(null);
     setEscribiendo({
       figura: pedido.figura,
       b: {
-        id: crypto.randomUUID(), consorcio_id: consorcio, liquidacion_id: cuenta.importacion_id, periodo: cuenta.periodo,
+        id: crypto.randomUUID(), autor: yo, consorcio_id: consorcio, liquidacion_id: cuenta.importacion_id, periodo: cuenta.periodo,
         unidad_id: pedido.unidad_id, designacion: pedido.designacion, campo: pedido.campo, texto: "", acepta_reemplazada: false,
         guardado_en: ahora(), estado: { tipo: "escribiendo" },
       },
     });  // prettier-ignore
-  }, [pedido, cuenta, consorcio, alTomarPedido]);
+  }, [pedido, cuenta, yo, consorcio, alTomarPedido]);
 
   /** Terminó un envío desde la ventana o desde la ficha del borrador. */
   function alMandar(d: Desenlace): void {
