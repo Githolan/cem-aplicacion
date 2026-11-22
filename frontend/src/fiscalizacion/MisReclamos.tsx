@@ -4,7 +4,7 @@ import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, mensajeDeError, momento, renovarClave } from "../egresos/comun";
-import { exigirSesion, SinSesion, useMiPersona } from "../egresos/useConsorcio";
+import { exigirSesion, type LecturaPersona, SinSesion } from "../egresos/useConsorcio";
 import { ErrorDeCampo, type ErroresDeCampo, erroresDe, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
 import { FichaDeRegistro, FilaDeRegistro, type DatoDeFicha, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
@@ -33,8 +33,10 @@ import {
   SALIO,
   SEGUIR_ESCRIBIENDO,
   SIN_BORRADORES,
+  CARGANDO_BORRADORES,
   SIN_CONEXION_BORRADOR,
   SIN_CONEXION_SIN_CAMBIO,
+  SIN_PERSONA,
   SIN_CONEXION_SIN_GUARDAR,
   SIN_GUARDAR,
   SIN_LA_VIGENTE,
@@ -124,6 +126,8 @@ type Props = {
   cuenta: Cuenta | null;
   presenta: boolean;
   ve: boolean;
+  /** Quién es la persona de la sesión: los borradores son de quien los escribió. */
+  persona: LecturaPersona;
   /** Lo que la persona tocó en una unidad; la pantalla lo vuelve a null al tomarlo. */
   pedido: Pedido | null;
   alTomarPedido: () => void;
@@ -132,10 +136,10 @@ type Props = {
   alCambiarLaLiquidacion: () => void;
 };
 
-export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPedido, aEntrar, alCambiarLaLiquidacion }: Props) {
+export function MisReclamos({ consorcio, cuenta, presenta, ve, persona, pedido, alTomarPedido, aEntrar, alCambiarLaLiquidacion }: Props) {
   const id = useId();
   // Los borradores son de quien los escribió: mientras no se sabe quién es, no se lee ni se manda ninguno.
-  const yo = useMiPersona(true);
+  const yo = persona.tipo === "ok" ? persona.persona : null;
   const [borradores, setBorradores] = useState<Borrador[] | null>([]);
   const [lista, setLista] = useState<Lista | null>(null);
   const [fallaLista, setFallaLista] = useState<string | null>(null);
@@ -255,6 +259,12 @@ export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPe
     <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
       <h2 id={`${id}-titulo`}>{MIS_RECLAMOS}</h2>
       <ResultadoDelActo resultado={resultado} alOtroActo={() => setResultado(null)} />
+      {presenta && persona.tipo === "cargando" && <p role="status">{CARGANDO_BORRADORES}</p>}
+      {persona.tipo === "falla" && (
+        <p role="alert" className="aviso-error">
+          {SIN_PERSONA}
+        </p>
+      )}
       {presenta && borradores === null && (
         <p role="alert" className="aviso-error">
           {SIN_BORRADORES}

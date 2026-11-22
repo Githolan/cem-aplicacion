@@ -13,6 +13,7 @@ import { type Borrador, guardarBorrador, leerBorradores, PREFIJO_BORRADOR } from
 import { RECLAMAR_SALDO, RUTA_MIS_EXPENSAS } from "./MisExpensas";
 import {
   BORRADOR_SIN_ENVIAR,
+  CARGANDO_BORRADORES,
   CITAR_LA_VIGENTE,
   CONFLICTO_REEMPLAZADA,
   DESCARTAR,
@@ -29,6 +30,7 @@ import {
   SIN_CONEXION_BORRADOR,
   SIN_CONEXION_SIN_GUARDAR,
   SIN_GUARDAR,
+  SIN_PERSONA,
   SOBRE_LA_REEMPLAZADA,
   TEXTO_CAMPO,
 } from "./textosReclamos";
@@ -262,6 +264,41 @@ describe("reclamos en /mis-expensas", () => {
     expect(pedidos(api, "POST", RECLAMOS)).toHaveLength(0);
     expect(screen.queryByRole("list", { name: "Borradores sin enviar" })).toBeNull();
     expect(screen.queryByText(/OTRA persona/)).toBeNull();
+  });
+
+  it("si no se puede leer quién es la persona, lo dice y no ofrece reclamar ni muestra borradores", async () => {
+    const propio: Borrador = {
+      id: "propio", autor: YO, consorcio_id: C1, liquidacion_id: OFICIAL, periodo: "2026-10-01", unidad_id: U1, designacion: "1-A",
+      campo: null, texto: TEXTO, acepta_reemplazada: false, guardado_en: "2026-11-20T10:00:00Z", estado: { tipo: "por_enviar", clave: "k" },
+    };  // prettier-ignore
+    expect(guardarBorrador(propio)).toBe(true);
+    const api = backend(respuestas({ "GET /api/v1/auth/sesion": () => error(500, "error_interno") }));
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const seccion = await screen.findByRole("region", { name: MIS_RECLAMOS });
+    expect((await within(seccion).findByRole("alert")).textContent).toBe(SIN_PERSONA);
+    const propia = screen.getByRole("region", { name: "Unidad 1-A" });
+    expect(within(propia).queryByRole("button", { name: HACER_RECLAMO })).toBeNull();
+    expect(within(propia).queryByRole("button", { name: RECLAMAR_SALDO })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Borradores sin enviar" })).toBeNull();
+    expect(screen.queryByText(CARGANDO_BORRADORES)).toBeNull();
+    expect(pedidos(api, "POST", RECLAMOS)).toHaveLength(0);
+  });
+
+  it("mientras se sabe quién es la persona, no hay botón de reclamo: hay una línea de carga", async () => {
+    let soltar: () => void = () => undefined;
+    const espera = new Promise<void>((r) => {
+      soltar = r;
+    });
+    vi.stubGlobal("fetch", backend(respuestas({ "GET /api/v1/auth/sesion": async () => (await espera, Response.json(SESION)) })));
+    abrir();
+    const seccion = await screen.findByRole("region", { name: MIS_RECLAMOS });
+    expect(within(seccion).getByText(CARGANDO_BORRADORES)).toBeTruthy();
+    const propia = screen.getByRole("region", { name: "Unidad 1-A" });
+    expect(within(propia).queryByRole("button", { name: HACER_RECLAMO })).toBeNull();
+    soltar();
+    expect(await within(propia).findByRole("button", { name: HACER_RECLAMO })).toBeTruthy();
+    expect(within(seccion).queryByText(CARGANDO_BORRADORES)).toBeNull();
   });
 
   it("con la liquidación reemplazada desde el borrador, ofrece citar la vigente y lo manda con ella", async () => {

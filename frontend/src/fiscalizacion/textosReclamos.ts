@@ -31,6 +31,9 @@ export const CONFLICTO_REEMPLAZADA =
   "La liquidación que cita el borrador fue reemplazada por otra del mismo período. Se puede citar la vigente o reclamar igual sobre la reemplazada.";
 export const SIN_LA_VIGENTE = "La liquidación vigente de ese período no tiene esta unidad entre las suyas: se puede reclamar sobre la reemplazada o descartar el borrador.";
 export const SIN_GUARDAR = "Este navegador no deja guardar el borrador en el dispositivo: si se cierra la ventana sin enviarlo, lo escrito se pierde.";
+export const CARGANDO_BORRADORES = "Cargando los borradores…";
+export const SIN_PERSONA =
+  "No se pudo confirmar con qué cuenta se entró, así que no se muestran los borradores ni se puede hacer un reclamo. Volver a cargar la página para intentarlo de nuevo.";
 export const SIN_BORRADORES = "Este navegador no deja leer los borradores guardados en el dispositivo.";
 export const SIN_CONEXION_SIN_GUARDAR =
   "Sin conexión, y este navegador no deja guardar el borrador en el dispositivo: no se envió ni se guardó nada. El reclamo sigue en esta ventana; para no perderlo, enviarlo cuando vuelva la conexión sin cerrarla.";

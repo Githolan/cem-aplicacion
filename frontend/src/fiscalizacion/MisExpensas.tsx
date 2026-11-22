@@ -8,7 +8,7 @@ import { type Aviso, ESTADO, mensajeDeError, sinLaFalla, sinPisarLoHecho } from 
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { periodo as mesLargo } from "../egresos/Liquidacion";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useLecturaMiPersona } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { fechaCorta } from "../pagos/textos";
 import { GraficoBarras } from "../panel/GraficoBarras";
@@ -78,6 +78,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   // Los reclamos (app 0123): presentarlos sobre una unidad propia y ver los propios.
   const presenta = acciones !== null && cumple(acciones, [["reclamos_liquidacion.presentar"]]);
   const veReclamos = acciones !== null && cumple(acciones, [["reclamos_liquidacion.ver"]]);
+  // Los borradores son de quien los escribió (RF38): sin saber quién es no se ofrece reclamar.
+  const persona = useLecturaMiPersona(presenta || veReclamos);
+  const reclama = presenta && persona.tipo === "ok";
   const [pedido, setPedido] = useState<Pedido | null>(null);
   const tomarPedido = useCallback(() => setPedido(null), []);
   const releerCuenta = useCallback(() => setVuelta((v) => v + 1), []);
@@ -197,7 +200,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                 <DeLaUnidad
                   key={u.unidad_id}
                   unidad={u}
-                  alReclamar={presenta ? (campo) => setPedido({ unidad_id: u.unidad_id, designacion: u.designacion, figura: u.figura, campo }) : undefined}
+                  alReclamar={reclama ? (campo) => setPedido({ unidad_id: u.unidad_id, designacion: u.designacion, figura: u.figura, campo }) : undefined}
                 />
               ))}
               {(presenta || veReclamos) && (
@@ -206,6 +209,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   cuenta={cuenta}
                   presenta={presenta}
                   ve={veReclamos}
+                  persona={persona}
                   pedido={pedido}
                   alTomarPedido={tomarPedido}
                   aEntrar={aEntrar}
