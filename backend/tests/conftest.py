@@ -391,6 +391,12 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "       delete from plataforma.gasto_ia;"
                 "       alter table plataforma.gasto_ia enable trigger user;"
                 "     end if;"
+                # Los enlaces y QR de cada importación (0118) la citan: van antes.
+                "     if to_regclass('nucleo.enlace_liquidacion') is not null then"
+                "       alter table nucleo.enlace_liquidacion disable trigger user;"
+                "       delete from nucleo.enlace_liquidacion;"
+                "       alter table nucleo.enlace_liquidacion enable trigger user;"
+                "     end if;"
                 "     alter table nucleo.campo_preliminar disable trigger user;"
                 "     delete from nucleo.campo_preliminar;"
                 "     alter table nucleo.campo_preliminar enable trigger user;"

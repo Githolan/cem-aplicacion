@@ -42,7 +42,8 @@ const CAMPOS: Campo[] = [
   campo(2, "gasto", "gasto:1:1", { rubro: 1, concepto: "Luz SINTETICA", importes: {}, total: "1000.00" }),
   campo(3, "unidad", "unidad:002", { uf: "002", depto: "1-A", nombre: "Beto SINTETICO" }, { unidad_id: U1, designacion: "1-A" }),
   campo(4, "saldo_unidad", "saldo_unidad:002", { uf: "002", depto: "1-A", saldo_anterior: "100.00", pagos: "100.00" }, { unidad_id: U1, designacion: "1-A" }),
-  campo(5, "importe_unidad", "importe_unidad:002", { uf: "002", depto: "1-A", total: "1326.00" }, { unidad_id: U1, designacion: "1-A" }),
+  // La UF corregida en un solo dato («2» en vez de «002»): la unidad oficial es la misma (hallazgo de Codex en #276).
+  campo(5, "importe_unidad", "importe_unidad:002", { uf: "2", depto: "1-A", total: "1326.00" }, { unidad_id: U1, designacion: "1-A" }),
   campo(6, "importe_unidad", "importe_unidad:009", { uf: "009", depto: "Z-9", total: "50.00" }),
 ];
 const detalleDe = (o: Oficial, extra: Partial<Detalle> = {}): Detalle => ({
