@@ -11,6 +11,7 @@ import { EntrarEncima } from "./EntrarEncima";
 import { ENCABEZADO_IDEMPOTENCIA } from "./egresos/comun";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "./egresos/useConsorcio";
+import { type Borrador, guardarBorrador, PREFIJO_BORRADOR } from "./fiscalizacion/borradorReclamo";
 import { recordarLlave } from "./llaveAcceso";
 import { recordarMetodo } from "./metodoConfirmar";
 import { activarEntrarEncima, comprobarSesion, faltaConocerSesion, pidiendoEntrar, salidas, useAEntrar } from "./sesionEncima";
@@ -344,13 +345,22 @@ describe("entrar encima", () => {
     expect(await screen.findByText("La pantalla sigue donde estaba.")).toBeTruthy();
   });
 
-  it("si entra otra persona, no ve la pantalla de la anterior: carga el inicio de cero y borra las copias", async () => {
+  it("si entra otra persona, no ve la pantalla de la anterior: carga el inicio de cero y borra las copias y sus borradores", async () => {
+    const OTRA = "11111111-1111-4111-8111-111111111111";
     guardarCopia({ consorcio_id: CONSORCIO, nombre: "Edificio SINTETICO", guardada_en: "2026-11-06T00:00:00Z", lista: LISTA });
     expect(leerCopias()).toHaveLength(1);
+    // RF38: un borrador de reclamo de la anterior, por enviar, y uno de la que entra.
+    const borrador = (autor: string, id: string): Borrador => ({
+      id, autor, consorcio_id: CONSORCIO, liquidacion_id: "l1", periodo: "2026-10-01", unidad_id: "u1", designacion: "1-A",
+      campo: null, texto: "Reclamo SINTETICO", acepta_reemplazada: false, guardado_en: "2026-11-20T10:00:00Z",
+      estado: { tipo: "por_enviar", clave: `clave-${id}` },
+    });  // prettier-ignore
+    expect(guardarBorrador(borrador(PERSONA, "de-la-anterior"))).toBe(true);
+    expect(guardarBorrador(borrador(OTRA, "de-la-que-entra"))).toBe(true);
     const { estado } = backend({
       [`POST ${RUTA}`]: () => error("no_autenticado", 401),
       "POST /api/v1/auth/codigo": () => {
-        estado.sesion = { ...NUEVA, persona_id: "11111111-1111-4111-8111-111111111111" };
+        estado.sesion = { ...NUEVA, persona_id: OTRA };
         return Response.json({});
       },
     });
@@ -363,6 +373,7 @@ describe("entrar encima", () => {
     await waitFor(() => expect(salidas.aInicio).toHaveBeenCalledOnce());
     expect(screen.queryByText("La pantalla sigue donde estaba.")).toBeNull();
     expect(leerCopias()).toEqual([]);
+    expect(Object.keys(localStorage).filter((k) => k.startsWith(PREFIJO_BORRADOR))).toEqual([`${PREFIJO_BORRADOR}${OTRA}:${CONSORCIO}:de-la-que-entra`]);
   });
 
   it("deja salir de la cuenta", async () => {

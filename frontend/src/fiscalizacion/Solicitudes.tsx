@@ -76,6 +76,8 @@ export const SUBIR_OTRO_COMPROBANTE = "Subir otro comprobante";
 export const RESPONDER = "Responder";
 export const REGISTRAR_RESPUESTA = "Registrar la respuesta recibida";
 export const SIN_SOLICITUDES = "Todavía no hay solicitudes formales en este edificio.";
+/** App 0123: la solicitud que se prepara desde un reclamo lo atiende. */
+export const ATIENDE_RECLAMO = "Al guardar el borrador, el reclamo queda atendido por esta solicitud formal.";
 /** Lo legal, para quien prepara: dentro de la ventana de preparar (SOL-01). */
 export const DOS_FIRMAS =
   "Pide documentación o una aclaración con plazo y constancia (art. 2064 inc. b del Código Civil y Comercial). Hacen falta dos firmas de personas distintas; la segunda la emite. Preparar no cuenta como firma.";
@@ -188,18 +190,20 @@ type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; l
 export const DESDE_EL_PANEL = "panel";
 
 /** Un borrador ya redactado que otra pantalla propone (el recálculo de la liquidación importada,
- * H5-4): viaja en `state.propuesta` y abre «Preparar una solicitud» con sus datos, para revisarlos.
- * Vale solo en su edificio. */
-export type Propuesta = { consorcio: string; objeto: Objeto; referencia: string; documentacion: string };
+ * H5-4, o un reclamo sobre la liquidación, app 0123): viaja en `state.propuesta` y abre «Preparar
+ * una solicitud» con sus datos, para revisarlos. Vale solo en su edificio. Con `reclamo`, la
+ * solicitud preparada atiende ese reclamo (la API lo deja `derivado_a_solicitud` en el mismo acto). */
+export type Propuesta = { consorcio: string; objeto: Objeto; referencia: string; documentacion: string; reclamo?: string };
 
 function propuestaDe(estado: unknown): Propuesta | null {
   if (typeof estado !== "object" || estado === null || !("propuesta" in estado)) return null;
   const p = estado.propuesta as Partial<Propuesta> | null;
   if (p === null || typeof p !== "object") return null;
-  const { consorcio, objeto, referencia, documentacion } = p;
+  const { consorcio, objeto, referencia, documentacion, reclamo } = p;
   if (typeof consorcio !== "string" || typeof referencia !== "string" || typeof documentacion !== "string") return null;
   if (objeto === undefined || !(objeto in TEXTO_OBJETO)) return null;
-  return { consorcio, objeto, referencia, documentacion };
+  if (reclamo !== undefined && typeof reclamo !== "string") return null;
+  return { consorcio, objeto, referencia, documentacion, ...(reclamo === undefined ? {} : { reclamo }) };
 }
 
 export function Solicitudes() {
@@ -483,7 +487,7 @@ function VentanaPreparar({ consorcio, lista, inicial, aEntrar, alCerrar, alPrepa
       api.POST("/api/v1/consorcios/{consorcio_id}/solicitudes-formales", {
         headers: encabezadoCsrf(),
         params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-        body: { objeto, referencia: referencia.trim(), documentacion: documentacion.trim(), plazo_dias: dias },
+        body: { objeto, referencia: referencia.trim(), documentacion: documentacion.trim(), plazo_dias: dias, ...(inicial?.reclamo === undefined ? {} : { reclamo_id: inicial.reclamo }) },
       }),
     );
     if (r.tipo === "ok") {
@@ -507,6 +511,7 @@ function VentanaPreparar({ consorcio, lista, inicial, aEntrar, alCerrar, alPrepa
         <ComandoNoDisponible motivo={SIN_ADMINISTRADOR_AL_PREPARAR} resolver={{ texto: IR_A_MANDATOS, a: RUTA_MANDATOS }} />
       )}
       <p>{DOS_FIRMAS}</p>
+      {inicial?.reclamo !== undefined && <p>{ATIENDE_RECLAMO}</p>}
       <label htmlFor={`${id}-objeto`}>Sobre qué</label>
       <select id={`${id}-objeto`} data-foco value={objeto} onChange={(ev) => setObjeto(ev.target.value as Objeto)}>
         {(Object.keys(TEXTO_OBJETO) as Objeto[]).map((o) => (

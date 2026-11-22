@@ -175,6 +175,13 @@ ADICIONES_0122 = {
     "administrador": ["comunicados.emitir"],
     "administrador_externo": [],
 }
+# `0123` (RF34, decisión del 22-11-2026): atender los reclamos sobre la liquidación, MC y AD.
+CATALOGO |= {"reclamos.atender": False}
+ADICIONES_0123 = {
+    "miembro_consejo": ["reclamos.atender"],
+    "administrador": ["reclamos.atender"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -186,6 +193,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0110[tipo]
     + ADICIONES_0113[tipo]
     + ADICIONES_0122[tipo]
+    + ADICIONES_0123[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

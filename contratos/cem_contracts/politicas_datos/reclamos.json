@@ -1,0 +1,46 @@
+{
+  "politicas": [
+    {
+      "accion": "reclamos_liquidacion.presentar",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": true, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF34 (observación vinculada a un cargo, sin alterar el saldo); diseño P0 S7; decisión del 22-11-2026: el propietario confirmado reclama sobre la liquidación oficial de una unidad suya. También retira el suyo mientras está presentado. Inquilinos y ocupantes, en otro corte"
+    },
+    {
+      "accion": "reclamos_liquidacion.ver",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": "reclamos.atender",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF34; diseño P0 S7: el propietario confirmado ve los reclamos que presentó y su estado; quien atiende ve todos los del edificio"
+    },
+    {
+      "accion": "reclamos_liquidacion.atender",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "reclamos.atender",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF34; diseño P0 S7; decisión del 22-11-2026: el Consejo y la administración responden un reclamo o lo pasan a una solicitud formal (RF49)"
+    }
+  ]
+}

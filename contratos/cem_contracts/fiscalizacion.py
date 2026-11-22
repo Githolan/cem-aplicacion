@@ -259,6 +259,12 @@ class SolicitudFormalNueva(BaseModel):
     plazo_dias: PlazoDias = Field(
         default=PLAZO_POR_DEFECTO_DIAS, description="Días corridos desde el envío."
     )
+    reclamo_id: UUID | None = Field(
+        default=None,
+        description="El reclamo sobre la liquidación (RF34, `0123`) que esta solicitud atiende:"
+        " en la misma transacción el reclamo pasa a `derivado_a_solicitud`. Pide además"
+        " `reclamos_liquidacion.atender`.",
+    )
 
 
 class ParaAdjunto(StrEnum):

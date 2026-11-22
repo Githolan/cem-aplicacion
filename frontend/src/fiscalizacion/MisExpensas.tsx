@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
@@ -8,12 +8,15 @@ import { type Aviso, ESTADO, mensajeDeError, sinLaFalla, sinPisarLoHecho } from 
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { periodo as mesLargo } from "../egresos/Liquidacion";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useLecturaMiPersona } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { fechaCorta } from "../pagos/textos";
 import { GraficoBarras } from "../panel/GraficoBarras";
 import { cumple, REQUISITOS, useAcciones } from "../permisos";
+import type { CampoCitado } from "./borradorReclamo";
 import { enPesos } from "./LiquidacionDelAdministrador";
+import { MisReclamos, type Pedido } from "./MisReclamos";
+import { HACER_RECLAMO } from "./textosReclamos";
 
 // Página /mis-expensas (H5 §6, D3-A; app 0119): para cada propietario con el vínculo confirmado, lo
 // que dice la liquidación oficial del período, la que la administración mandó y el Consejo confirmó.
@@ -22,6 +25,9 @@ import { enPesos } from "./LiquidacionDelAdministrador";
 // períodos (app 0120), cada gráfico con su tabla equivalente (documento 08, §13.4). Nunca otra unidad,
 // ni el detalle de los gastos, ni las
 // diferencias (las ve solo el panel completo, RN33). La pantalla solo muestra: lo decide la API.
+// Quien presenta reclamos (app 0123, RF34) tiene en cada unidad «Hacer un reclamo» y, desde el total o
+// el saldo, el reclamo con ese dato citado; debajo, «Mis reclamos» con los borradores sin enviar
+// (RF38) y los presentados (MisReclamos.tsx).
 
 type MiCuenta = components["schemas"]["MiCuenta"];
 type Resumen = components["schemas"]["ResumenLiquidacion"];
@@ -69,6 +75,15 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   // Cada parte se pide solo si la persona la alcanza: nada que se sabe que se niega.
   const veCuenta = acciones !== null && cumple(acciones, [["cuenta.ver_propia"]]);
   const veResumen = acciones !== null && cumple(acciones, [["fiscalizacion.ver_resumen"]]);
+  // Los reclamos (app 0123): presentarlos sobre una unidad propia y ver los propios.
+  const presenta = acciones !== null && cumple(acciones, [["reclamos_liquidacion.presentar"]]);
+  const veReclamos = acciones !== null && cumple(acciones, [["reclamos_liquidacion.ver"]]);
+  // Los borradores son de quien los escribió (RF38): sin saber quién es no se ofrece reclamar.
+  const persona = useLecturaMiPersona(presenta || veReclamos);
+  const reclama = presenta && persona.tipo === "ok";
+  const [pedido, setPedido] = useState<Pedido | null>(null);
+  const tomarPedido = useCallback(() => setPedido(null), []);
+  const releerCuenta = useCallback(() => setVuelta((v) => v + 1), []);
 
   useEffect(() => {
     if (consorcio === "" || acciones === null) return;
@@ -181,7 +196,26 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               )}
               <p>{segunLaLiquidacion(cabeza.periodo, cabeza.confirmada_en)}</p>
               {cuenta !== null && cuenta.vencimientos.length > 0 && <p>Vencimientos: {cuenta.vencimientos.join(", ")}</p>}
-              {cuenta?.unidades.map((u) => <DeLaUnidad key={u.unidad_id} unidad={u} />)}
+              {cuenta?.unidades.map((u) => (
+                <DeLaUnidad
+                  key={u.unidad_id}
+                  unidad={u}
+                  alReclamar={reclama ? (campo) => setPedido({ unidad_id: u.unidad_id, designacion: u.designacion, figura: u.figura, campo }) : undefined}
+                />
+              ))}
+              {(presenta || veReclamos) && (
+                <MisReclamos
+                  consorcio={consorcio}
+                  cuenta={cuenta}
+                  presenta={presenta}
+                  ve={veReclamos}
+                  persona={persona}
+                  pedido={pedido}
+                  alTomarPedido={tomarPedido}
+                  aEntrar={aEntrar}
+                  alCambiarLaLiquidacion={releerCuenta}
+                />
+              )}
               {resumen !== null && (
                 <>
                   <GraficoBarras
@@ -216,7 +250,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   );
 }
 
-function DeLaUnidad({ unidad }: { unidad: Unidad }) {
+export const RECLAMAR_TOTAL = "Reclamar el total";
+export const RECLAMAR_SALDO = "Reclamar el saldo";
+
+/** `alReclamar`: solo para quien presenta reclamos (app 0123); abre la ventana con el dato citado. */
+function DeLaUnidad({ unidad, alReclamar }: { unidad: Unidad; alReclamar?: (campo: CampoCitado | null) => void }) {
   const id = useId();
   return (
     <section className="tarjeta" aria-labelledby={`${id}-unidad`}>
@@ -236,6 +274,24 @@ function DeLaUnidad({ unidad }: { unidad: Unidad }) {
         </dl>
       ) : (
         <p>{NO_FIGURA}</p>
+      )}
+      {alReclamar !== undefined && (
+        <div className="acciones-pantalla">
+          {/* Desde un dato, la ventana lo cita: el total del período o el saldo de la unidad. */}
+          {unidad.figura && (
+            <>
+              <button type="button" className="secundario" onClick={() => alReclamar("importe_unidad")}>
+                {RECLAMAR_TOTAL}
+              </button>
+              <button type="button" className="secundario" onClick={() => alReclamar("saldo_unidad")}>
+                {RECLAMAR_SALDO}
+              </button>
+            </>
+          )}
+          <button type="button" className="secundario" onClick={() => alReclamar(null)}>
+            {HACER_RECLAMO}
+          </button>
+        </div>
       )}
     </section>
   );

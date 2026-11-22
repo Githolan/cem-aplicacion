@@ -150,7 +150,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     comprobantes citan su orden: se les quita antes de borrar las órdenes. Y con 0099, cuya
     constancia de la factura adjunta cita la versión de la orden y el documento: se borra antes. Y
     con 0100, que se niega a bajar si el equipo habilitó una moneda: se borran las monedas. Y con
-    0122, que se niega a bajar si hay comunicados: se borran primero.
+    0122, que se niega a bajar si hay comunicados: se borran primero. Y con 0123, que se niega a
+    bajar si hay reclamos, que citan importaciones y solicitudes formales: se borran antes que todo.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -162,6 +163,16 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if;"
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
+                " end if;"
+                # Los reclamos (0123) citan importaciones, unidades, personas y solicitudes
+                # formales, solo se agregan y niegan su downgrade: van primero, el historial antes.
+                " if to_regclass('nucleo.reclamo_liquidacion') is not null then"
+                "   alter table nucleo.reclamo_liquidacion_estado disable trigger user;"
+                "   alter table nucleo.reclamo_liquidacion disable trigger user;"
+                "   delete from nucleo.reclamo_liquidacion_estado;"
+                "   delete from nucleo.reclamo_liquidacion;"
+                "   alter table nucleo.reclamo_liquidacion_estado enable trigger user;"
+                "   alter table nucleo.reclamo_liquidacion enable trigger user;"
                 " end if;"
                 # Los comunicados (0122) citan personas, solo se agregan y niegan su downgrade:
                 # van primero, de la última tabla a la primera.

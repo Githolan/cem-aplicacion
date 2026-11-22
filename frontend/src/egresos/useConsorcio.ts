@@ -104,6 +104,16 @@ async function personaDeLaSesion(): Promise<string> {
  * mostrar: sin el dato no se oculta nada y decide el servidor. Compara cuentas, no seres humanos, y
  * no queda guardada para quien entre después en este navegador. */
 export function useMiPersona(activa: boolean): string | null {
+  const lectura = useLecturaMiPersona(activa);
+  return lectura.tipo === "ok" ? lectura.persona : null;
+}
+
+/** La lectura de la persona de la sesión. */
+export type LecturaPersona = { tipo: "cargando" } | { tipo: "ok"; persona: string } | { tipo: "falla" };
+
+/** Como `useMiPersona`, pero dice si la lectura falló: para lo que depende de saber quién es (los
+ * borradores de reclamos, que son de quien los escribió), que sin el dato no se ofrece y se avisa. */
+export function useLecturaMiPersona(activa: boolean): LecturaPersona {
   const consulta = useQuery({
     queryKey: ["mi-persona"],
     queryFn: personaDeLaSesion,
@@ -113,7 +123,8 @@ export function useMiPersona(activa: boolean): string | null {
     retryOnMount: false,
     networkMode: "always",
   });
-  return consulta.data ?? null;
+  if (consulta.data !== undefined) return { tipo: "ok", persona: consulta.data };
+  return consulta.isError ? { tipo: "falla" } : { tipo: "cargando" };
 }
 
 /** Si la pantalla sigue montada: una escritura nunca sale de una pantalla descartada. */

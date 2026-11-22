@@ -563,3 +563,31 @@ RF28,comunicados.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD sin víncu
 RF28,comunicados.ver,AE,C,,vigente,si,,403,sin_concesion,AE no lee los comunicados
 RF28,comunicados.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
 RF28,comunicados.ver,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+RF34,reclamos_liquidacion.presentar,Pc,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,P confirmado reclama sobre la liquidación oficial de su unidad
+RF34,reclamos_liquidacion.presentar,Pc,AA,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,también en Administrador Aumentado
+RF34,reclamos_liquidacion.presentar,Pc,AG,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,también en Autogestión
+RF34,reclamos_liquidacion.presentar,Pc,C,unidad:5B,sin_mandato,si,,403,sin_concesion,P de 3-A no reclama por otra unidad
+RF34,reclamos_liquidacion.presentar,P,C,unidad:3A,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no reclama (la base pide el vínculo confirmado)
+RF34,reclamos_liquidacion.presentar,Ic,C,unidad:3A,sin_mandato,si,,403,sin_concesion,I confirmado no reclama en este corte
+RF34,reclamos_liquidacion.presentar,Oc,C,unidad:3A,sin_mandato,si,,403,sin_concesion,O confirmado no reclama en este corte
+RF34,reclamos_liquidacion.presentar,MC,C,unidad:3A,vigente,si,,403,sin_concesion,MC sin vínculo no reclama por una unidad ajena
+RF34,reclamos_liquidacion.presentar,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no reclama
+RF34,reclamos_liquidacion.presentar,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF34,reclamos_liquidacion.presentar,Pc,—,unidad:3A,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+RF34,reclamos_liquidacion.ver,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado ve los reclamos que presentó
+RF34,reclamos_liquidacion.ver,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no los ve
+RF34,reclamos_liquidacion.ver,Ic,C,,sin_mandato,si,,403,sin_concesion,I no ve reclamos en este corte
+RF34,reclamos_liquidacion.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC sin vínculo ve todos por reclamos.atender
+RF34,reclamos_liquidacion.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD sin vínculo ve todos por reclamos.atender
+RF34,reclamos_liquidacion.ver,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin reclamos.atender
+RF34,reclamos_liquidacion.ver,AE,C,,vigente,si,,403,sin_concesion,AE no ve los reclamos
+RF34,reclamos_liquidacion.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF34,reclamos_liquidacion.ver,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+RF34,reclamos_liquidacion.atender,MC,C,,vigente,si,,200,concedido_por_facultad,MC responde o deriva en Modo Consejo (decisión del 22-11-2026)
+RF34,reclamos_liquidacion.atender,AD,AA,,vigente,si,,200,concedido_por_facultad,la administración atiende en Administrador Aumentado
+RF34,reclamos_liquidacion.atender,MC,AG,,vigente,si,,200,concedido_por_facultad,MC atiende en Autogestión
+RF34,reclamos_liquidacion.atender,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin reclamos.atender
+RF34,reclamos_liquidacion.atender,Pc,C,,sin_mandato,si,,403,sin_concesion,P confirmado reclama pero no atiende
+RF34,reclamos_liquidacion.atender,AE,C,,vigente,si,,403,sin_concesion,AE no atiende reclamos
+RF34,reclamos_liquidacion.atender,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF34,reclamos_liquidacion.atender,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo

@@ -391,6 +391,11 @@ class CodigoError(StrEnum):
     SIN_DESTINATARIOS = "sin_destinatarios"
     """Nadie tiene hoy un vínculo confirmado en el edificio: el comunicado no tendría a quién
     llegar (`0122`)."""
+    LIQUIDACION_REEMPLAZADA = "liquidacion_reemplazada"
+    """El reclamo cita una liquidación oficial que fue reemplazada (p. ej. desde que se escribió el
+    borrador): se puede citar la vigente o reclamar sobre la reemplazada a sabiendas (`0123`)."""
+    RECLAMO_CERRADO = "reclamo_cerrado"
+    """El reclamo ya se respondió, se pasó a una solicitud formal o se retiró (`0123`)."""
 
 
 class Error(BaseModel):
