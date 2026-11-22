@@ -139,7 +139,7 @@ CUERPO = f"""
     return query
       select 'campo_preliminar'::text,
              jsonb_build_object('id', p.id, 'importacion_id', p.importacion_id,
-                                'orden', p.orden, 'tipo', p.tipo, 'clave', p.clave,
+                                'orden', p.orden, 'tipo', p.tipo, 'clave', {_texto("p.clave")},
                                 'valor', {_jsonb("p.valor")}, 'confianza', p.confianza,
                                 'origen', p.origen, 'pagina', p.pagina, 'renglon', p.renglon,
                                 'fragmento', {_texto("p.fragmento")},
