@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
+import { autorDeBorradores } from "../ayuda/estadoAyuda";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { ENCABEZADO_IDEMPOTENCIA, mensajeDeActo, mensajeDeError, momento, renovarClave } from "../egresos/comun";
@@ -139,7 +140,8 @@ type Props = {
 export function MisReclamos({ consorcio, cuenta, presenta, ve, persona, pedido, alTomarPedido, aEntrar, alCambiarLaLiquidacion }: Props) {
   const id = useId();
   // Los borradores son de quien los escribió: mientras no se sabe quién es, no se lee ni se manda ninguno.
-  const yo = persona.tipo === "ok" ? persona.persona : null;
+  // Ayudando (RF53), los de quien ayuda para esa autorización: no se mezclan con los propios.
+  const yo = persona.tipo === "ok" ? autorDeBorradores(persona.persona) : null;
   const [borradores, setBorradores] = useState<Borrador[] | null>([]);
   const [lista, setLista] = useState<Lista | null>(null);
   const [fallaLista, setFallaLista] = useState<string | null>(null);

@@ -1,10 +1,12 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.routing import APIRoute
 from redis import Redis
 
-from app import errores, limite, llm, registros
+from app import ayuda, errores, limite, llm, registros
 from app.acceso import crear_verificador
 from app.config import Config, cargar
 from app.consorcios.auditoria import router as auditoria
+from app.consorcios.ayudas import router as ayudas
 from app.consorcios.coeficientes import router as coeficientes
 from app.consorcios.comunicados import router as comunicados
 from app.consorcios.contactos import router as contactos
@@ -20,6 +22,7 @@ from app.consorcios.padron import router as padron
 from app.consorcios.reclamos import router as reclamos
 from app.consorcios.reparaciones import router as reparaciones
 from app.consorcios.router import router as consorcios
+from app.contexto import exigir_ruta_con_ayuda, require_scope
 from app.db import crear_motor
 from app.identidad import sesiones
 from app.identidad.contrasena import router as contrasena
@@ -47,7 +50,12 @@ def crear_app(config: Config | None = None) -> FastAPI:
         validar_origen(config.origen_publico)
     if config.codigo_clave:
         sesiones.clave_codigo(config.codigo_clave)
-    app = FastAPI(title="Consorcio en Mano", version=config.version)
+    # RF53: el encabezado de la ayuda, solo donde se evalúa (`exigir_ruta_con_ayuda`).
+    app = FastAPI(
+        title="Consorcio en Mano",
+        version=config.version,
+        dependencies=[Depends(exigir_ruta_con_ayuda)],
+    )
     app.state.config = config
     app.state.motor = crear_motor(config.database_url) if config.database_url else None
     # `memory://` solo lo usan las pruebas que no miden el límite: ahí no hay Redis que sondear.
@@ -67,6 +75,8 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.add_middleware(
         limite.LimiteDeTasa, limitador=app.state.limitador, exentas=SIN_LIMITE_DE_TASA
     )
+    # RF53: la ayuda pedida en el encabezado, para toda la petición (`app/ayuda.py`).
+    app.add_middleware(ayuda.AyudaDePeticion)
     # El último agregado queda por fuera: registra también los 429 y 503 del límite de tasa.
     app.add_middleware(registros.RegistroDePeticiones)
     app.include_router(plataforma)
@@ -94,5 +104,30 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(comunicados)
     app.include_router(reclamos)
     app.include_router(reparaciones)
+    app.include_router(ayudas)
     app.include_router(soporte)
+    app.state.rutas_con_ayuda = ayuda.rutas_que_admiten(
+        (metodo, r.path, require_scope in _llamadas(r.dependant))
+        for r in _rutas(app.routes)
+        for metodo in r.methods
+    )
     return app
+
+
+def _llamadas(dependant) -> list:
+    out = []
+    for d in dependant.dependencies:
+        out.append(d.call)
+        out.extend(_llamadas(d))
+    return out
+
+
+def _rutas(routes) -> list[APIRoute]:
+    """Las rutas de la app, bajando por los routers incluidos (FastAPI 0.141 los anida)."""
+    out = []
+    for r in routes:
+        if isinstance(r, APIRoute):
+            out.append(r)
+        elif hasattr(r, "original_router"):
+            out.extend(_rutas(r.original_router.routes))
+    return out

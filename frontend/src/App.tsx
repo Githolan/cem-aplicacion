@@ -5,6 +5,8 @@ import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
+import { AvisoAyuda } from "./ayuda/AvisoAyuda";
+import { Ayuda, RUTA_AYUDA } from "./ayuda/Ayuda";
 import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { Exige, REQUISITOS } from "./permisos";
 import { Entrar } from "./Entrar";
@@ -102,6 +104,7 @@ export function App() {
       <main id="contenido">
         <AvisoLlegada />
         <EntrarEncima />
+        <AvisoAyuda />
         <Routes>
           <Route path="/" element={<Inicio barra={barra} />} />
           <Route path={RUTA_INSTALAR} element={<Instalar />} />
@@ -109,6 +112,7 @@ export function App() {
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
           <Route path={RUTA_INVITACION_MANDATO} element={<InvitacionMandato />} />
           <Route path={RUTA_CUENTA} element={<Cuenta />} />
+          <Route path={RUTA_AYUDA} element={<Ayuda />} />
           <Route path={RUTA_INVITACIONES} element={<Exige requisito={REQUISITOS.invitaciones}><Invitar /></Exige>} />
           <Route path={RUTA_MANDATOS} element={<Exige requisito={REQUISITOS.mandatos}><Mandatos /></Exige>} />
           <Route path={RUTA_PADRON} element={<Exige requisito={REQUISITOS.padron}><Padron /></Exige>} />

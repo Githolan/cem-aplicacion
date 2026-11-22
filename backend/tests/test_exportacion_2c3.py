@@ -103,11 +103,14 @@ REPARACIONES = set(exportar_consorcio.PARTES["reparaciones"])
 PERFIL_NORMATIVO = set(exportar_consorcio.PARTES["perfil_normativo"])
 """RF01 y RF47 (`0125`): el edificio de estas pruebas se crea sin perfil vinculado ni importaciones;
 su contenido lo prueba `test_perfil_normativo_0125.py`. Sus claves sí están decididas acá."""
+AYUDAS = set(exportar_consorcio.PARTES["ayudas"])
+"""RF53 (`0127`): el edificio de estas pruebas no tiene autorizaciones de ayuda; su contenido lo
+prueba `test_ayuda_autorizada_0127.py`. Sus claves sí están decididas acá."""
 PARTES_POSTERIORES = (
     "liquidaciones_importadas", "comunicados", "reclamos_liquidacion", "reparaciones",
-    "perfil_normativo",
+    "perfil_normativo", "ayudas",
 )  # fmt: skip
-"""Las partes que suman las migraciones posteriores a `0069` (`0121` a `0125`)."""
+"""Las partes que suman las migraciones posteriores a `0069` (`0121` a `0125` y `0127`)."""
 HASTA_0069 = len(FUNCIONES) - len(PARTES_POSTERIORES)
 """Las funciones de exportación que hay con la base en `0069`."""
 
@@ -266,6 +269,9 @@ CLAVES_POR_ENTIDAD = {
                           "proveedor_nombre", "proveedor_cuit", "aprobado_por", "facultad",
                           "decision_id", "importacion_id", "gasto_clave",
                           "registrado_por_nombre", "registrado_en"},
+    "autorizacion_ayuda": {"id", "otorgante_nombre", "autorizado_nombre", "alcances",
+                           "otorgada_en"},
+    "autorizacion_ayuda_revocacion": {"autorizacion_id", "revocada_por_nombre", "revocada_en"},
 }  # fmt: skip
 
 
@@ -520,6 +526,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         - RECLAMOS
         - REPARACIONES
         - PERFIL_NORMATIVO
+        - AYUDAS
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}

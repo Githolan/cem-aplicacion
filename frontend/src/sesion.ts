@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { olvidarAdondeIba, tomarAdondeIba } from "./adondeIba";
+import { olvidarAyuda } from "./ayuda/estadoAyuda";
 import { api } from "./api/cliente";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
@@ -95,6 +96,8 @@ export async function salirDeLaCuenta(
   borrarCopias();
   // Y los borradores de reclamos (RF38): quien entre después en este navegador no los ve.
   borrarBorradores();
+  // Y la ayuda en curso (RF53): quien entre después no sigue ayudando.
+  olvidarAyuda();
   olvidarAdondeIba();
   return null;
 }

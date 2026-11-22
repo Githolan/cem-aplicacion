@@ -256,7 +256,8 @@ class Ensayo:
         formula = (
             "encode(sha256(convert_to(concat_ws('|', hash_previo, consorcio_id, id, secuencia,"
             " to_char(creado_en at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US'),"
-            " actor_persona_id, origen, {accion}, entidad, entidad_id, antes, despues, motivo, ip),"
+            " actor_persona_id, origen, {accion}, entidad, entidad_id, antes, despues, motivo, ip,"
+            " en_representacion_de, autorizacion_id),"
             " 'UTF8')), 'hex')"
         )
         with self.tx(cons) as conn:

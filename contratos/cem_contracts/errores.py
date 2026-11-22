@@ -412,6 +412,23 @@ class CodigoError(StrEnum):
     """Ese gasto ya cierra otra reparación: un gasto cierra a lo sumo una (PA11, `0124`)."""
     FOTOS_COMPLETAS = "fotos_completas"
     """La reparación ya tiene todas las fotos que admite (`FOTOS_MAXIMO`, `0124`)."""
+    AYUDA_NO_ADMITIDA = "ayuda_no_admitida"
+    """El pedido viene con el encabezado de la ayuda (RF53) a una ruta que no la admite: solo las
+    del edificio que arman el contexto y `/me/consorcios` (`0127`)."""
+    AYUDA_SIN_CUENTA = "ayuda_sin_cuenta"
+    """La dirección de la persona que va a ayudar no tiene una cuenta en Consorcio en Mano: quien
+    ayuda entra con su propia cuenta (RF53, criterio 5; `0127`)."""
+    AYUDA_A_SI_MISMA = "ayuda_a_si_misma"
+    """La dirección es la de la misma cuenta que autoriza (`0127`)."""
+    AYUDA_YA_VIGENTE = "ayuda_ya_vigente"
+    """Esa persona ya tiene una autorización vigente en el edificio: para cambiar el alcance se
+    revoca y se da otra; nada se cambia en el lugar (`0127`)."""
+    AYUDA_YA_REVOCADA = "ayuda_ya_revocada"
+    """La autorización ya estaba revocada (`0127`)."""
+    AYUDA_REVOCADA = "ayuda_revocada"
+    """Quien ayuda pide con una autorización que la persona asistida revocó, o que dejó de valer
+    porque ya no es propietaria confirmada: la pantalla sale sola de la ayuda y lo dice (`0127`).
+    Solo lo recibe quien tenía la autorización; a cualquier otra persona, 404."""
 
 
 class Error(BaseModel):

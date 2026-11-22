@@ -295,4 +295,6 @@ export const REQUISITOS = {
   reparaciones: [["reparaciones.ver"]],
   /** Quien gestiona las reparaciones: el inicio le cuenta los pedidos que esperan responsable. */
   gestionarReparaciones: [["reparaciones.gestionar"]],
+  /** Autorizar a otra persona a ayudar (RF53, app 0127): el propietario con el vínculo confirmado. */
+  ayudas: [["ayuda.ver_otorgadas"]],
 } as const satisfies Record<string, Requisito>;

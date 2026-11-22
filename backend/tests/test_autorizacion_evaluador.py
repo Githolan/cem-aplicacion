@@ -358,8 +358,9 @@ def test_las_acciones_de_la_tabla():
     # `cuenta.ver_propia`, 0119) y las dos de los comunicados oficiales (`comunicados.emitir` y
     # `comunicados.ver`, 0122) y las tres de los reclamos sobre la liquidación
     # (`reclamos_liquidacion.presentar`, `.ver` y `.atender`, 0123) y las tres de las reparaciones
-    # (`reparaciones.pedir`, `.ver` y `.gestionar`, 0124)
-    assert len(POLITICAS) == 69
+    # (`reparaciones.pedir`, `.ver` y `.gestionar`, 0124) y las tres de la ayuda por una persona
+    # autorizada (`ayuda.otorgar`, `.revocar` y `.ver_otorgadas`, 0127)
+    assert len(POLITICAS) == 72
 
 
 def _archivo(tmp_path, nombre, politicas):

@@ -12,6 +12,7 @@ import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { PieDeVersion } from "./EstadoServicio";
 import { EnlaceInstalarEnCuenta } from "./Instalar";
+import { RUTA_AYUDA } from "./ayuda/estadoAyuda";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { Hoja } from "./Hoja";
 import { llaveDisponible } from "./llaveAcceso";
@@ -446,6 +447,12 @@ export function Cuenta() {
             <SeccionPrivacidad contrasena={lista.contrasena.valor.definida} fecha={fecha} sinSesion={aEntrar} />
           )}
 
+          {/* RF53: autorizar a otra persona a ayudar, o ayudar a quien autorizó a esta cuenta. */}
+          <p>
+            <Link to={RUTA_AYUDA} className="enlace-suelto">
+              Ayuda de otra persona
+            </Link>
+          </p>
           <EnlaceInstalarEnCuenta />
           <div className="acciones-pantalla">
             <button type="button" className="secundario" onClick={salir} disabled={enviando}>

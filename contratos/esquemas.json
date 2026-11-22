@@ -1105,7 +1105,13 @@
           "constancia_invalida",
           "gasto_no_oficial",
           "gasto_ya_enlazado",
-          "fotos_completas"
+          "fotos_completas",
+          "ayuda_no_admitida",
+          "ayuda_sin_cuenta",
+          "ayuda_a_si_misma",
+          "ayuda_ya_vigente",
+          "ayuda_ya_revocada",
+          "ayuda_revocada"
         ],
         "title": "CodigoError",
         "type": "string"

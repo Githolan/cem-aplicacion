@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
 
 import { guardarAdondeIba } from "./adondeIba";
+import { olvidarAyuda } from "./ayuda/estadoAyuda";
 import { borrarCopias } from "./copiaContactos";
 import { ENCABEZADO_CSRF, encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
@@ -136,6 +137,8 @@ function terminar({ antes, soltar }: Pedido, nueva: Sesion) {
     borrarCopias();
     // Los borradores de reclamos de la anterior (RF38) no quedan para la que entró.
     borrarBorradoresAjenos(nueva.persona);
+    // Ni la ayuda que estaba en curso (RF53).
+    olvidarAyuda();
     salidas.aInicio();
     return;
   }

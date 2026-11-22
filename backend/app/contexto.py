@@ -10,15 +10,18 @@ prueban la autenticación la reemplazan con `app.dependency_overrides`.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Annotated
+from typing import Annotated, NoReturn
 from uuid import UUID
 
+from cem_contracts.ayuda import AlcanceAyuda
 from cem_contracts.errores import CodigoError
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 from fastapi import Depends, Request, Response
 from sqlalchemy import Engine, text
 
+from app import ayuda as estado_ayuda
 from app.autorizacion.evaluador import ContextoAutorizacion, Facultad, Mandato, Vinculo
+from app.ayuda import AyudaVigente
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.identidad import sesiones
@@ -68,6 +71,9 @@ class Contexto:
     sesion_id: UUID | None = None
     """La sesión de la petición: las funciones económicas de la base la vuelven a comprobar
     (`exigir_acto_economico`). None solo en las pruebas que reemplazan la identidad."""
+    ayuda: AyudaVigente | None = None
+    """RF53: la sesión es de otra persona, que ayuda a `persona_id` (la asistida) con esta
+    autorización. Sin mandatos, facultades ni autorizaciones del Consejo: no se prestan."""
 
     @property
     def autorizacion(self) -> ContextoAutorizacion:
@@ -87,6 +93,7 @@ class Contexto:
             segundo_factor_reciente=self.segundo_factor_reciente,
             roles_configurados=self.roles_configurados,
             autorizaciones=self.autorizaciones,
+            ayuda=None if self.ayuda is None else self.ayuda.alcances | {AlcanceAyuda.ORIENTARSE},
         )
 
 
@@ -116,6 +123,64 @@ def obtener_identidad(request: Request, response: Response, motor: MotorDep) -> 
 IdentidadDep = Annotated[Identidad, Depends(obtener_identidad)]
 
 
+def exigir_ruta_con_ayuda(request: Request) -> None:
+    """Dependencia de toda la app (RF53): el encabezado de la ayuda solo vale en una ruta que arma
+    el contexto del edificio o en el selector (`app.state.rutas_con_ayuda`). En cualquier otra
+    (la cuenta, la privacidad, la entrada, soporte) se rechaza antes de todo: ahí nadie actúa como
+    otra persona, y no se ignora en silencio."""
+    if estado_ayuda.pedida() is None:
+        return
+    ruta = request.scope.get("route")
+    if (request.method, getattr(ruta, "path", None)) not in request.app.state.rutas_con_ayuda:
+        raise ErrorApi(403, CodigoError.AYUDA_NO_ADMITIDA, AYUDA_NO_ADMITIDA)
+
+
+AYUDA_NO_ADMITIDA = "Esto no se puede hacer mientras se ayuda a otra persona."
+
+
+def _ayuda_vigente(motor: Engine, identidad: Identidad, consorcio_id: UUID) -> AyudaVigente:
+    """La autorización del encabezado, vigente, de la persona de la sesión en este consorcio y de
+    una persona asistida que sigue siendo propietaria confirmada (`nucleo.ayuda_vigente`). Si no,
+    `rechazar_ayuda_no_vigente`: `ayuda_revocada` a quien la tenía, 404 a cualquier otra persona."""
+    try:
+        autorizacion = UUID(estado_ayuda.pedida() or "")
+    except ValueError:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No se encontró lo pedido.") from None
+    with transaccion(motor, persona_id=identidad.persona_id, consorcio_id=consorcio_id) as conn:
+        fila = conn.execute(
+            text("select otorgante_id, alcances from nucleo.ayuda_vigente(:a, :s)"),
+            {"a": autorizacion, "s": identidad.sesion_id},
+        ).one_or_none()
+    if fila is None:
+        rechazar_ayuda_no_vigente(motor, identidad, autorizacion)
+    vigente = AyudaVigente(
+        autorizacion_id=autorizacion,
+        consorcio_id=consorcio_id,
+        otorgante_id=fila.otorgante_id,
+        autorizado_id=identidad.persona_id,
+        alcances=frozenset(AlcanceAyuda(a) for a in fila.alcances),
+    )
+    estado_ayuda.fijar(vigente)
+    return vigente
+
+
+AYUDA_REVOCADA = "La persona asistida dejó de autorizar esta ayuda."
+
+
+def rechazar_ayuda_no_vigente(motor: Engine, identidad: Identidad, autorizacion: UUID) -> NoReturn:
+    """La autorización del encabezado no vale. Si es de quien pide y la persona asistida la revocó
+    o dejó de ser propietaria confirmada, 403 `ayuda_revocada`: la pantalla sale sola de la ayuda.
+    Si no, 404, sin decir si existe (`nucleo.ayuda_terminada`)."""
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        terminada = conn.execute(
+            text("select nucleo.ayuda_terminada(:a, :s)"),
+            {"a": autorizacion, "s": identidad.sesion_id},
+        ).scalar_one()
+    if terminada:
+        raise ErrorApi(403, CodigoError.AYUDA_REVOCADA, AYUDA_REVOCADA)
+    raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No se encontró lo pedido.")
+
+
 def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) -> Contexto:
     """Arma el `Contexto` de la persona en el consorcio de la ruta (C3, C5).
 
@@ -123,8 +188,15 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
     la fecha del consorcio (`nucleo.hoy_del_consorcio`), no con la de la base, que corre en GMT.
     Sin ninguno de los dos responde 404, igual que si el consorcio no existiera. Un vínculo
     importado pendiente (RF02, `0024`) no cuenta: no da ámbito ni ninguna concesión por vínculo.
+
+    **Ayuda (RF53).** Con el encabezado de la ayuda, el contexto es el de la persona asistida, solo
+    con sus vínculos: sin mandatos, facultades, configuración, autorizaciones del Consejo, identidad
+    humana ni segundo factor. Quien actúa sigue siendo la sesión (`sesion_id`, `ayuda`).
     """
-    p = identidad.persona_id
+    asistida = (
+        None if estado_ayuda.pedida() is None else _ayuda_vigente(motor, identidad, consorcio_id)
+    )
+    p = identidad.persona_id if asistida is None else asistida.otorgante_id
     with transaccion(motor, persona_id=p, consorcio_id=consorcio_id) as conn:
         hoy = conn.execute(
             text(
@@ -150,23 +222,28 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
                 {"c": consorcio_id, "p": p, "hoy": hoy},
             )
         )
-        mandatos = tuple(
-            Mandato(
-                id=f.id,
-                consorcio_id=f.consorcio_id,
-                vigente_desde=f.vigente_desde,
-                vigente_hasta=f.vigente_hasta,
-                causa_baja=f.causa_baja,
-                tipo=f.tipo,
-            )
-            for f in conn.execute(
-                text(
-                    "select id, consorcio_id, vigente_desde, vigente_hasta,"
-                    " causa_baja::text as causa_baja, tipo::text as tipo from nucleo.mandato"
-                    " where consorcio_id = :c and persona_id = :p"
-                    " and nucleo.mandato_vigente(id, :hoy) order by id"
-                ),
-                {"c": consorcio_id, "p": p, "hoy": hoy},
+        # Ayudando, los mandatos de la asistida no cuentan (RF53): ni para el ámbito.
+        mandatos = (
+            ()
+            if asistida is not None
+            else tuple(
+                Mandato(
+                    id=f.id,
+                    consorcio_id=f.consorcio_id,
+                    vigente_desde=f.vigente_desde,
+                    vigente_hasta=f.vigente_hasta,
+                    causa_baja=f.causa_baja,
+                    tipo=f.tipo,
+                )
+                for f in conn.execute(
+                    text(
+                        "select id, consorcio_id, vigente_desde, vigente_hasta,"
+                        " causa_baja::text as causa_baja, tipo::text as tipo from nucleo.mandato"
+                        " where consorcio_id = :c and persona_id = :p"
+                        " and nucleo.mandato_vigente(id, :hoy) order by id"
+                    ),
+                    {"c": consorcio_id, "p": p, "hoy": hoy},
+                )
             )
         )
         if not vinculos and not mandatos:
@@ -190,17 +267,26 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
             {"c": consorcio_id, "hoy": hoy},
         ).scalar_one()
         # RF50 configurable (0104): qué roles ven lo que la configuración del consorcio decide.
-        roles_configurados = {
-            f.accion: frozenset(f.roles)
-            for f in conn.execute(
-                text("select accion, roles from nucleo.roles_configurados(:c)"), {"c": consorcio_id}
-            )
-        }
+        roles_configurados = (
+            {}
+            if asistida is not None
+            else {
+                f.accion: frozenset(f.roles)
+                for f in conn.execute(
+                    text("select accion, roles from nucleo.roles_configurados(:c)"),
+                    {"c": consorcio_id},
+                )
+            }
+        )
         # 0105: lo que el Consejo le autorizó a esta persona (p. ej. ver los proveedores).
-        autorizaciones = frozenset(
-            conn.execute(
-                text("select a from nucleo.acciones_autorizadas(:c) a"), {"c": consorcio_id}
-            ).scalars()
+        autorizaciones = (
+            frozenset()
+            if asistida is not None
+            else frozenset(
+                conn.execute(
+                    text("select a from nucleo.acciones_autorizadas(:c) a"), {"c": consorcio_id}
+                ).scalars()
+            )
         )
         modo = conn.execute(
             text(
@@ -209,16 +295,20 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
             ),
             {"c": consorcio_id, "hoy": hoy},
         ).scalar_one_or_none()
-        identidad_humana = conn.execute(
-            text(
-                "select identidad_id from nucleo.identidad_persona where consorcio_id = :c"
-                " and persona_id = :p and desvinculada_en is null"
-            ),
-            {"c": consorcio_id, "p": p},
-        ).scalar_one_or_none()
+        identidad_humana = (
+            None
+            if asistida is not None
+            else conn.execute(
+                text(
+                    "select identidad_id from nucleo.identidad_persona where consorcio_id = :c"
+                    " and persona_id = :p and desvinculada_en is null"
+                ),
+                {"c": consorcio_id, "p": p},
+            ).scalar_one_or_none()
+        )
         # R10: sin la sesión de la petición (solo en pruebas) no hay controles económicos.
         controles = None
-        if identidad.sesion_id is not None:
+        if identidad.sesion_id is not None and asistida is None:
             controles = conn.execute(
                 text(
                     "select coalesce(segundo_factor_en > now() - :v, false) as segundo_factor"
@@ -243,6 +333,7 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         roles_configurados=roles_configurados,
         autorizaciones=autorizaciones,
         sesion_id=identidad.sesion_id,
+        ayuda=asistida,
     )
 
 

@@ -1,0 +1,46 @@
+{
+  "politicas": [
+    {
+      "accion": "ayuda.otorgar",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF53; decisiones del propietario del 25-10-2026, §1.7 (la autorización es explícita, revocable, por consorcio, con alcance y auditable); H2b, criterio 5 y tabla autorizacion_ayuda. El propietario con el vínculo confirmado autoriza a otra persona con cuenta. Inquilinos y ocupantes, cuando existan acciones propias suyas que admitan ayuda"
+    },
+    {
+      "accion": "ayuda.revocar",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF53; H2_Paquete_de_Decisiones_2026-10-25 §2.7, punto 4, y H2b §4: revocable por quien la dio. La base exige que sea quien la dio; revocar corre también sin modo registrado"
+    },
+    {
+      "accion": "ayuda.ver_otorgadas",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF53; decisiones del propietario del 25-10-2026, §1.7 (auditable): quien autorizó ve a quién, con qué alcance y desde cuándo, también las revocadas"
+    }
+  ]
+}

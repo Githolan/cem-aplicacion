@@ -12,6 +12,7 @@
       "respaldo": null,
       "economica": false,
       "destinatario_unico": false,
+      "ayuda": "consultar_expensas",
       "fuente_normativa": "Documento 08 §4, Permisos base; tabla de verdad §1.2 (una acción, una vista); H5 D3-A (19-11-2026): el gasto por rubro de la liquidación oficial, con el vínculo confirmado, como la base"
     },
     {
@@ -124,6 +125,7 @@
       "respaldo": null,
       "economica": false,
       "destinatario_unico": false,
+      "ayuda": "consultar_expensas",
       "fuente_normativa": "H5 D3-A (19-11-2026): cada propietario ve lo que la liquidación de la administración dice de su unidad, nunca de otra (RN15); con el vínculo confirmado, como la base"
     }
   ]

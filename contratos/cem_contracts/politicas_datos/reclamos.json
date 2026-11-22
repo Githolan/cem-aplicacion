@@ -12,6 +12,7 @@
       "respaldo": null,
       "economica": false,
       "destinatario_unico": false,
+      "ayuda": "preparar_reclamos",
       "fuente_normativa": "RF34 (observación vinculada a un cargo, sin alterar el saldo); diseño P0 S7; decisión del 22-11-2026: el propietario confirmado reclama sobre la liquidación oficial de una unidad suya. También retira el suyo mientras está presentado. Inquilinos y ocupantes, en otro corte"
     },
     {
@@ -26,6 +27,7 @@
       "respaldo": null,
       "economica": false,
       "destinatario_unico": false,
+      "ayuda": "consultar_expensas",
       "fuente_normativa": "RF34; diseño P0 S7: el propietario confirmado ve los reclamos que presentó y su estado; quien atiende ve todos los del edificio"
     },
     {

@@ -17,6 +17,8 @@ from uuid import UUID
 
 from sqlalchemy import Connection, Engine, create_engine, text
 
+from app import ayuda
+
 ESPERA_CONEXION_S = 3
 """Tope para abrir una conexión: si PostgreSQL no responde, la petición falla en vez de colgarse."""
 
@@ -43,18 +45,23 @@ def fijar_ambito(
     consorcio_id: UUID | None = None,
     consorcios_persona: Iterable[UUID] = (),
 ) -> None:
-    """Fija el ámbito hasta el final de la transacción en curso. Se puede volver a llamar."""
+    """Fija el ámbito hasta el final de la transacción en curso. Se puede volver a llamar.
+
+    En la transacción de la persona asistida, dentro de una petición de ayuda (RF53), fija también
+    `app.ayuda_id`: la base registra con eso a quien ayuda en cada evento de la auditoría."""
     lista = "{" + ",".join(str(c) for c in consorcios_persona) + "}"
     conn.execute(
         text(
             "select set_config('app.persona_id', :persona, true),"
             " set_config('app.consorcio_id', :consorcio, true),"
-            " set_config('app.consorcios_persona', :lista, true)"
+            " set_config('app.consorcios_persona', :lista, true),"
+            " set_config('app.ayuda_id', :ayuda, true)"
         ),
         {
             "persona": str(persona_id) if persona_id else "",
             "consorcio": str(consorcio_id) if consorcio_id else "",
             "lista": lista,
+            "ayuda": str(a) if (a := ayuda.autorizacion_de(persona_id, consorcio_id)) else "",
         },
     )
 

@@ -219,7 +219,8 @@ SIN_INDICES = (
 _FORMULA_CADENA = (
     "encode(sha256(convert_to(concat_ws('|', hash_previo, consorcio_id, id, secuencia,"
     " to_char(creado_en at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US'),"
-    " actor_persona_id, origen, {accion}, entidad, entidad_id, antes, despues, motivo, ip),"
+    " actor_persona_id, origen, {accion}, entidad, entidad_id, antes, despues, motivo, ip,"
+    " en_representacion_de, autorizacion_id),"
     " 'UTF8')), 'hex')"
 )
 CADENA = text(
@@ -231,10 +232,10 @@ CADENA = text(
     f" count(*) filter (where hash <> {_FORMULA_CADENA.format(accion="accion || 'x'")})"
     " from e"
 )
-"""La cadena de `auditoria.encadenar` (migración 0001), consorcio por consorcio, como la
-comprueba el smoke de staging (`pruebas/smoke_staging.py`): total, enlaces rotos, hashes
-distintos y, de control, cuántos hashes distintos da la misma cuenta con la acción alterada
-(tienen que ser todos: si no, la fórmula no está comprobando nada)."""
+"""La cadena de `auditoria.encadenar` (migración 0001, con las dos columnas de la ayuda de 0127),
+consorcio por consorcio, como la comprueba el smoke de staging (`pruebas/smoke_staging.py`): total,
+enlaces rotos, hashes distintos y, de control, cuántos hashes distintos da la misma cuenta con la
+acción alterada (tienen que ser todos: si no, la fórmula no está comprobando nada)."""
 
 
 class ErrorCopiaContinua(copias.ErrorCopia):

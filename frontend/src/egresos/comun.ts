@@ -331,6 +331,13 @@ const MENSAJES: Record<string, string> = {
   constancia_invalida: "La constancia cita una decisión formal de este edificio o un documento firmado, uno de los dos.",
   gasto_no_oficial: "Ese gasto no figura en una liquidación oficial vigente de este edificio.",
   gasto_ya_enlazado: "Ese gasto ya cierra otra reparación: un gasto cierra una sola.",
+  // Ayuda por una persona autorizada (RF53, app 0127).
+  ayuda_sin_cuenta: "Esa dirección no tiene una cuenta en Consorcio en Mano: la persona tiene que crear la suya antes.",
+  ayuda_a_si_misma: "Esa es la dirección de esta misma cuenta.",
+  ayuda_ya_vigente: "Esa persona ya tiene una autorización vigente en este edificio. Para cambiar lo que puede hacer, se revoca y se da otra.",
+  ayuda_ya_revocada: "Esa autorización ya estaba revocada. La lista ya está actualizada.",
+  ayuda_no_admitida: "Esto no se puede hacer mientras se ayuda a otra persona.",
+  ayuda_revocada: "La persona asistida dejó de autorizar la ayuda. Esta pestaña vuelve a la cuenta propia.",
   fotos_completas: "El pedido ya tiene todas las fotos que admite.",
   idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
   idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
