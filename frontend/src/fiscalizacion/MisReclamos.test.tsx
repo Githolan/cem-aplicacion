@@ -27,6 +27,7 @@ import {
   SALIO,
   SEGUIR_ESCRIBIENDO,
   SIN_CONEXION_BORRADOR,
+  SIN_CONEXION_SIN_GUARDAR,
   SIN_GUARDAR,
   SOBRE_LA_REEMPLAZADA,
   TEXTO_CAMPO,
@@ -277,6 +278,56 @@ describe("reclamos en /mis-expensas", () => {
     const v = await escribirDesdeElSaldo();
     expect(within(v).getByRole("alert").textContent).toBe(SIN_GUARDAR);
     expect(within(v).queryByText(new RegExp(`^${BORRADOR_SIN_ENVIAR}`))).toBeNull();
+  });
+
+  it("tras un 5xx, reintentar desde la misma ventana abierta lleva la misma clave", async () => {
+    let envios = 0;
+    const api = backend(
+      respuestas({
+        [`POST ${RECLAMOS}`]: () => {
+          envios += 1;
+          return envios === 1 ? error(503, "no_disponible") : Response.json(RECLAMO, { status: 201 });
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const v = await escribirDesdeElSaldo();
+    fireEvent.click(within(v).getByRole("button", { name: "Enviar el reclamo" }));
+    await waitFor(() => expect(pedidos(api, "POST", RECLAMOS)).toHaveLength(1));
+    // La ventana sigue abierta con lo escrito; se vuelve a tocar «Enviar».
+    const enviar = await within(v).findByRole("button", { name: "Enviar el reclamo" });
+    await waitFor(() => expect((enviar as HTMLButtonElement).disabled).toBe(false));
+    expect((within(v).getByLabelText("Reclamo") as HTMLTextAreaElement).value).toBe(TEXTO);
+    fireEvent.click(enviar);
+    expect(await screen.findByText(SALIO)).toBeTruthy();
+    const [primero, segundo] = pedidos(api, "POST", RECLAMOS);
+    expect(primero?.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(segundo?.headers.get("Idempotency-Key")).toBe(primero?.headers.get("Idempotency-Key"));
+  });
+
+  it("sin conexión y sin poder guardar, la ventana sigue abierta con el texto y dice que no se guardó nada", async () => {
+    const api = backend(
+      respuestas({
+        [`POST ${RECLAMOS}`]: () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await screen.findByRole("region", { name: "Unidad 1-A" });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("lleno", "QuotaExceededError");
+    });
+    const v = await escribirDesdeElSaldo();
+    fireEvent.click(within(v).getByRole("button", { name: "Enviar el reclamo" }));
+    expect(await within(v).findByText(SIN_CONEXION_SIN_GUARDAR)).toBeTruthy();
+    expect(pedidos(api, "POST", RECLAMOS)).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: HACER_RECLAMO })).toBe(v);
+    expect((within(v).getByLabelText("Reclamo") as HTMLTextAreaElement).value).toBe(TEXTO);
+    expect(screen.queryByText(SIN_CONEXION_BORRADOR)).toBeNull();
+    expect(borradoresGuardados()).toHaveLength(0);
   });
 
   it("lista los reclamos propios con su estado y retira uno con el motivo", async () => {

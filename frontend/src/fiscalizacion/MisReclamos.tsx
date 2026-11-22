@@ -34,6 +34,8 @@ import {
   SEGUIR_ESCRIBIENDO,
   SIN_BORRADORES,
   SIN_CONEXION_BORRADOR,
+  SIN_CONEXION_SIN_CAMBIO,
+  SIN_CONEXION_SIN_GUARDAR,
   SIN_GUARDAR,
   SIN_LA_VIGENTE,
   SIN_RECLAMOS,
@@ -58,15 +60,16 @@ type Reclamo = components["schemas"]["Reclamo"];
 /** Lo que pide la pantalla al tocar «Hacer un reclamo» o «Reclamar» en un dato de una unidad. */
 export type Pedido = { unidad_id: string; designacion: string; figura: boolean; campo: CampoCitado | null };
 
-/** Cómo terminó un envío. */
+/** Cómo terminó un envío. `b` es el borrador como quedó (con la clave que corresponde al reintento);
+ * `guardado` dice si quedó guardado en el dispositivo para salir solo. */
 type Desenlace =
   | { tipo: "ok"; r: Reclamo }
-  | { tipo: "sin_conexion" }
+  | { tipo: "sin_conexion"; b: Borrador; guardado: boolean }
   | { tipo: "sin_sesion" }
   | { tipo: "rechazado" }
   | { tipo: "reemplazada" }
-  | { tipo: "corregir"; errores: ErroresDeCampo; texto: string }
-  | { tipo: "falla"; texto: string };
+  | { tipo: "corregir"; b: Borrador; errores: ErroresDeCampo; texto: string }
+  | { tipo: "falla"; b: Borrador; texto: string };
 
 const ahora = () => new Date().toISOString();
 
@@ -75,8 +78,9 @@ const ahora = () => new Date().toISOString();
 async function mandar(b: Borrador): Promise<Desenlace> {
   const clave = b.estado.tipo === "por_enviar" ? b.estado.clave : crypto.randomUUID();
   const enCamino: Borrador = { ...b, estado: { tipo: "por_enviar", clave } };
-  guardarBorrador(enCamino);
+  const guardado = guardarBorrador(enCamino);
   const marcar = (estado: Borrador["estado"]) => guardarBorrador({ ...b, estado });
+  const escribiendo: Borrador = { ...b, estado: { tipo: "escribiendo" } };
   let respuesta;
   try {
     respuesta = await api.POST("/api/v1/consorcios/{consorcio_id}/reclamos-liquidacion", {
@@ -86,7 +90,7 @@ async function mandar(b: Borrador): Promise<Desenlace> {
     });
     exigirSesion(respuesta.response);
   } catch (e: unknown) {
-    return e instanceof SinSesion ? { tipo: "sin_sesion" } : { tipo: "sin_conexion" };
+    return e instanceof SinSesion ? { tipo: "sin_sesion" } : { tipo: "sin_conexion", b: enCamino, guardado };
   }
   const { data, error, response } = respuesta;
   if (data !== undefined) {
@@ -106,11 +110,12 @@ async function mandar(b: Borrador): Promise<Desenlace> {
   if (response.status === 422) {
     marcar({ tipo: "escribiendo" });
     const texto = motivoDe(codigo, mensajeDeError(response.status, codigo));
-    return { tipo: "corregir", errores: erroresDe(error, texto), texto };
+    return { tipo: "corregir", b: escribiendo, errores: erroresDe(error, texto), texto };
   }
   // Lo mismo se reintenta con la misma clave (un 5xx, un pedido igual en curso); lo demás, con otra.
-  if (renovarClave(response.status, codigo)) marcar({ tipo: "escribiendo" });
-  return { tipo: "falla", texto: mensajeDeActo(response.status, error) };
+  const renovar = renovarClave(response.status, codigo);
+  if (renovar) marcar({ tipo: "escribiendo" });
+  return { tipo: "falla", b: renovar ? escribiendo : enCamino, texto: mensajeDeActo(response.status, error) };
 }
 
 type Props = {
@@ -219,7 +224,7 @@ export function MisReclamos({ consorcio, cuenta, presenta, ve, pedido, alTomarPe
     if (d.tipo === "ok") {
       setResultado({ texto: SALIO, ok: true });
       setVuelta((v) => v + 1);
-    } else if (d.tipo === "sin_conexion") setResultado({ texto: SIN_CONEXION_BORRADOR, ok: false });
+    } else if (d.tipo === "sin_conexion") setResultado({ texto: d.guardado ? SIN_CONEXION_BORRADOR : SIN_CONEXION_SIN_CAMBIO, ok: false });
     else if (d.tipo === "rechazado") setResultado({ texto: PERMISO_VENCIDO, ok: false });
     else if (d.tipo === "reemplazada") {
       setResultado({ texto: CONFLICTO_REEMPLAZADA, ok: false });
@@ -444,11 +449,22 @@ function VentanaReclamo({ inicial, figura, largo, alCerrar, alMandar }: PropsVen
       return "seguir";
     }
     const d = await mandar(b);
+    // La ventana sigue con el borrador como quedó: un reintento del mismo pedido lleva la misma clave.
     if (d.tipo === "corregir") {
+      setB(d.b);
       setErrores(d.errores);
       return { rechazo: d.texto };
     }
-    if (d.tipo === "falla") return { rechazo: d.texto };
+    if (d.tipo === "falla") {
+      setB(d.b);
+      return { rechazo: d.texto };
+    }
+    // Sin conexión y sin poder guardarlo, cerrar la ventana perdería lo escrito: sigue abierta con el texto.
+    if (d.tipo === "sin_conexion" && !d.guardado) {
+      setB(d.b);
+      setGuardado(false);
+      return { rechazo: SIN_CONEXION_SIN_GUARDAR };
+    }
     if (d.tipo === "sin_sesion") {
       alMandar(d);
       return "seguir";

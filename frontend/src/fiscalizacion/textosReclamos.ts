@@ -32,6 +32,9 @@ export const CONFLICTO_REEMPLAZADA =
 export const SIN_LA_VIGENTE = "La liquidación vigente de ese período no tiene esta unidad entre las suyas: se puede reclamar sobre la reemplazada o descartar el borrador.";
 export const SIN_GUARDAR = "Este navegador no deja guardar el borrador en el dispositivo: si se cierra la ventana sin enviarlo, lo escrito se pierde.";
 export const SIN_BORRADORES = "Este navegador no deja leer los borradores guardados en el dispositivo.";
+export const SIN_CONEXION_SIN_GUARDAR =
+  "Sin conexión, y este navegador no deja guardar el borrador en el dispositivo: no se envió ni se guardó nada. El reclamo sigue en esta ventana; para no perderlo, enviarlo cuando vuelva la conexión sin cerrarla.";
+export const SIN_CONEXION_SIN_CAMBIO = "Sin conexión, y este navegador no deja guardar el cambio en el dispositivo: no se envió y el borrador sigue como estaba.";
 export const SIN_CONEXION_BORRADOR = "Sin conexión: el reclamo quedó como borrador sin enviar y sale solo cuando vuelva la conexión.";
 export const SALIO = "Listo: el reclamo quedó presentado. El Consejo o la administración lo van a atender.";
 export const SALIERON = (n: number) => (n === 1 ? "Listo: salió el reclamo que estaba sin enviar." : `Listo: salieron ${n} reclamos que estaban sin enviar.`);
