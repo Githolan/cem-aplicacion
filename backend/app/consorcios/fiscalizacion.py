@@ -73,6 +73,8 @@ from app.autorizacion.requiere import (
 )
 from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
 from app.consorcios.padron import Discrepancia
+from app.consorcios.reclamos import ATENDER as ATENDER_RECLAMOS
+from app.consorcios.reclamos import derivar
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, detalle_de_campo, sin_cache
@@ -415,16 +417,20 @@ def listar_solicitudes(permisos: PermisosDep, motor: MotorDep) -> ListaSolicitud
     "/consorcios/{consorcio_id}/solicitudes-formales",
     status_code=201,
     response_model=SolicitudFormal,
-    summary="Preparar una solicitud formal: queda en borrador; preparar no cuenta como firma",
+    summary="Preparar una solicitud formal: queda en borrador; preparar no cuenta como firma. Con"
+    " `reclamo_id`, atiende ese reclamo sobre la liquidación (RF34)",
     responses=RESPUESTAS,
 )
 def preparar_solicitud(
     cuerpo: SolicitudFormalNueva,
     permisos: PermisosDep,
+    atender_reclamos: Annotated[Permiso, Depends(requiere(ATENDER_RECLAMOS))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
     permisos.preparar.verificar()
+    if cuerpo.reclamo_id is not None:
+        atender_reclamos.verificar()
 
     def efecto(conn: Connection) -> tuple[int, SolicitudFormal]:
         nueva = _ejecutar(
@@ -434,6 +440,9 @@ def preparar_solicitud(
             {"objeto": cuerpo.objeto.value, "referencia": cuerpo.referencia,
              "documentacion": cuerpo.documentacion, "plazo": cuerpo.plazo_dias},
         ).scalar_one()  # fmt: skip
+        if cuerpo.reclamo_id is not None:
+            # El reclamo (`0123`) pasa a `derivado_a_solicitud` en la misma transacción.
+            derivar(conn, atender_reclamos, cuerpo.reclamo_id, nueva)
         return 201, _una(conn, permisos, nueva)
 
     return responder_una_vez(motor, permisos.preparar.ctx, idempotencia, efecto)

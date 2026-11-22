@@ -71,12 +71,12 @@ export function simularPermisos(ruta: Route, camino: string, acciones: readonly 
 /**
  * Lo que el inicio lee para armar «Para hacer» (decisión 9 del 18-11-2026, tanda 2 de flujos), sin
  * ningún pendiente: las solicitudes formales, los proveedores, los pedidos de salteo (tanda 9), los
- * mandatos y los contactos señalados.
+ * reclamos sobre la liquidación (app 0123), los mandatos y los contactos señalados.
  * Va después de lo que la prueba simula con datos: solo cubre lo que la prueba no responde.
  */
 export function simularInicioSinPendientes(ruta: Route, camino: string) {
   if (ruta.request().method() !== "GET") return null;
-  if (/^\/api\/v1\/consorcios\/[^/]+\/(solicitudes-formales|mandatos|contactos\/gestion|pedidos-salteo)$/.test(camino))
+  if (/^\/api\/v1\/consorcios\/[^/]+\/(solicitudes-formales|mandatos|contactos\/gestion|pedidos-salteo|reclamos-liquidacion)$/.test(camino))
     return ruta.fulfill({ json: { elementos: [] } });
   if (/^\/api\/v1\/consorcios\/[^/]+\/proveedores$/.test(camino))
     return ruta.fulfill({

@@ -6,6 +6,7 @@ import { api } from "./api/cliente";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
+import { borrarBorradores } from "./fiscalizacion/borradorReclamo";
 import { codigoDe } from "./fallas";
 import { comprobarSesion } from "./sesionEncima";
 
@@ -92,6 +93,8 @@ export async function salirDeLaCuenta(
     return mensaje(0, undefined);
   }
   borrarCopias();
+  // Y los borradores de reclamos (RF38): quien entre después en este navegador no los ve.
+  borrarBorradores();
   olvidarAdondeIba();
   return null;
 }

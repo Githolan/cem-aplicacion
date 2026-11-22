@@ -287,4 +287,7 @@ export const REQUISITOS = {
   /** Los comunicados oficiales (RF28, app 0122): los leen los vínculos confirmados y quien los
    * emite, que tiene además «Nuevo comunicado» si la lista dice que puede. */
   comunicados: [["comunicados.ver"]],
+  /** Los reclamos sobre la liquidación que atienden el Consejo y la administración (RF34, app
+   * 0123). El propietario ve los suyos en «Mis expensas». */
+  reclamos: [["reclamos_liquidacion.atender"]],
 } as const satisfies Record<string, Requisito>;

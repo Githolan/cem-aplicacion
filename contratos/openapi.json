@@ -58,6 +58,16 @@
         "title": "AccionPago",
         "type": "string"
       },
+      "AccionReclamo": {
+        "description": "Lo que la persona puede hacer con el reclamo ahora (la pantalla no ofrece otra cosa).",
+        "enum": [
+          "responder",
+          "pasar_a_solicitud",
+          "retirar"
+        ],
+        "title": "AccionReclamo",
+        "type": "string"
+      },
       "AccionSolicitud": {
         "description": "Lo que la cuenta que pide puede hacer con la solicitud ahora. Solo para mostrar: cada acto\nlo vuelven a decidir la ruta y la base.",
         "enum": [
@@ -656,6 +666,15 @@
         ],
         "title": "CambioEvento",
         "type": "object"
+      },
+      "CampoCitado": {
+        "description": "El dato oficial de la unidad que el reclamo cita (`importacion.campos`).",
+        "enum": [
+          "saldo_unidad",
+          "importe_unidad"
+        ],
+        "title": "CampoCitado",
+        "type": "string"
       },
       "CampoComprobante": {
         "description": "Un dato que se compara entre lo leído y la orden o lo registrado.",
@@ -1384,7 +1403,9 @@
           "adjunto_invalido",
           "destinatario_con_cuenta",
           "texto_con_cuenta",
-          "sin_destinatarios"
+          "sin_destinatarios",
+          "liquidacion_reemplazada",
+          "reclamo_cerrado"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -5101,6 +5122,16 @@
           "baja"
         ],
         "title": "EstadoProveedor",
+        "type": "string"
+      },
+      "EstadoReclamo": {
+        "enum": [
+          "presentado",
+          "respondido",
+          "derivado_a_solicitud",
+          "retirado"
+        ],
+        "title": "EstadoReclamo",
         "type": "string"
       },
       "EstadoSalteo": {
@@ -9251,6 +9282,38 @@
         "title": "ListaProveedoresConsulta",
         "type": "object"
       },
+      "ListaReclamos": {
+        "description": "`GET …/reclamos-liquidacion`: el más nuevo primero. Quien atiende ve todos; el propietario,\nlos que presentó.",
+        "properties": {
+          "atiende": {
+            "title": "Atiende",
+            "type": "boolean"
+          },
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ReclamoResumen"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "largo_motivo": {
+            "title": "Largo Motivo",
+            "type": "integer"
+          },
+          "largo_texto": {
+            "title": "Largo Texto",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "atiende",
+          "largo_texto",
+          "largo_motivo"
+        ],
+        "title": "ListaReclamos",
+        "type": "object"
+      },
       "ListaSesiones": {
         "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
         "properties": {
@@ -11646,6 +11709,69 @@
         "title": "PasoPago",
         "type": "string"
       },
+      "PasoReclamo": {
+        "description": "Un paso de la historia del reclamo.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoReclamo"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por_nombre": {
+            "title": "Registrado Por Nombre",
+            "type": "string"
+          },
+          "solicitud_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La solicitud formal que lo atiende.",
+            "title": "Solicitud Id"
+          },
+          "solicitud_numero": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solicitud Numero"
+          },
+          "texto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La respuesta o el motivo del retiro.",
+            "title": "Texto"
+          }
+        },
+        "required": [
+          "estado",
+          "texto",
+          "solicitud_id",
+          "solicitud_numero",
+          "registrado_por_nombre",
+          "registrado_en"
+        ],
+        "title": "PasoReclamo",
+        "type": "object"
+      },
       "PedidoCopia": {
         "description": "`POST /api/v1/privacidad/casos/{caso_id}/copia`.",
         "properties": {
@@ -12670,6 +12796,229 @@
         "title": "RechazoVisto",
         "type": "object"
       },
+      "Reclamo": {
+        "description": "`GET …/reclamos-liquidacion/{r}` y la respuesta de cada acto.",
+        "properties": {
+          "acciones": {
+            "items": {
+              "$ref": "#/components/schemas/AccionReclamo"
+            },
+            "title": "Acciones",
+            "type": "array"
+          },
+          "campo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampoCitado"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoReclamo"
+          },
+          "historia": {
+            "description": "Del primer paso al último.",
+            "items": {
+              "$ref": "#/components/schemas/PasoReclamo"
+            },
+            "title": "Historia",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "liquidacion_id": {
+            "format": "uuid",
+            "title": "Liquidacion Id",
+            "type": "string"
+          },
+          "liquidacion_vigente": {
+            "description": "Si la liquidación citada sigue siendo la oficial de su período.",
+            "title": "Liquidacion Vigente",
+            "type": "boolean"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "presentado_en": {
+            "format": "date-time",
+            "title": "Presentado En",
+            "type": "string"
+          },
+          "presentado_por_nombre": {
+            "title": "Presentado Por Nombre",
+            "type": "string"
+          },
+          "propio": {
+            "description": "Si lo presentó la persona que lee.",
+            "title": "Propio",
+            "type": "boolean"
+          },
+          "texto": {
+            "title": "Texto",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "liquidacion_id",
+          "periodo",
+          "liquidacion_vigente",
+          "unidad_id",
+          "designacion",
+          "campo",
+          "presentado_por_nombre",
+          "presentado_en",
+          "estado",
+          "propio",
+          "texto",
+          "historia",
+          "acciones"
+        ],
+        "title": "Reclamo",
+        "type": "object"
+      },
+      "ReclamoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/reclamos-liquidacion`: también lo que manda el borrador al volver la conexión.",
+        "properties": {
+          "acepta_reemplazada": {
+            "default": false,
+            "description": "Reclamar sobre la liquidación citada aunque haya sido reemplazada. Sin esto, una reemplazada se niega con `liquidacion_reemplazada`.",
+            "title": "Acepta Reemplazada",
+            "type": "boolean"
+          },
+          "campo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampoCitado"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El dato oficial de la unidad que se cita, si cita uno."
+          },
+          "liquidacion_id": {
+            "description": "La liquidación oficial que se cita.",
+            "format": "uuid",
+            "title": "Liquidacion Id",
+            "type": "string"
+          },
+          "texto": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Texto",
+            "type": "string"
+          },
+          "unidad_id": {
+            "description": "Una unidad donde la persona es propietaria confirmada.",
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "liquidacion_id",
+          "unidad_id",
+          "texto"
+        ],
+        "title": "ReclamoNuevo",
+        "type": "object"
+      },
+      "ReclamoResumen": {
+        "description": "Una fila de la lista.",
+        "properties": {
+          "campo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampoCitado"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoReclamo"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "liquidacion_id": {
+            "format": "uuid",
+            "title": "Liquidacion Id",
+            "type": "string"
+          },
+          "liquidacion_vigente": {
+            "description": "Si la liquidación citada sigue siendo la oficial de su período.",
+            "title": "Liquidacion Vigente",
+            "type": "boolean"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "presentado_en": {
+            "format": "date-time",
+            "title": "Presentado En",
+            "type": "string"
+          },
+          "presentado_por_nombre": {
+            "title": "Presentado Por Nombre",
+            "type": "string"
+          },
+          "propio": {
+            "description": "Si lo presentó la persona que lee.",
+            "title": "Propio",
+            "type": "boolean"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "liquidacion_id",
+          "periodo",
+          "liquidacion_vigente",
+          "unidad_id",
+          "designacion",
+          "campo",
+          "presentado_por_nombre",
+          "presentado_en",
+          "estado",
+          "propio"
+        ],
+        "title": "ReclamoResumen",
+        "type": "object"
+      },
       "ReferenciaComunicado": {
         "description": "Otro comunicado, por su título: el que se corrige o el que corrige.",
         "properties": {
@@ -13084,6 +13433,24 @@
         "title": "RespuestaRecibida",
         "type": "object"
       },
+      "RespuestaReclamo": {
+        "additionalProperties": false,
+        "description": "`POST …/reclamos-liquidacion/{r}/respuesta`: cierra el reclamo.",
+        "properties": {
+          "texto": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Texto",
+            "type": "string"
+          }
+        },
+        "required": [
+          "texto"
+        ],
+        "title": "RespuestaReclamo",
+        "type": "object"
+      },
       "RespuestaSolicitud": {
         "properties": {
           "descargable": {
@@ -13445,6 +13812,24 @@
           "retirada_en"
         ],
         "title": "RetiroOrdenPago",
+        "type": "object"
+      },
+      "RetiroReclamo": {
+        "additionalProperties": false,
+        "description": "`POST …/reclamos-liquidacion/{r}/retiro`: solo quien lo presentó, mientras está\npresentado.",
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "RetiroReclamo",
         "type": "object"
       },
       "RetiroRegistrado": {
@@ -14348,6 +14733,19 @@
             "minimum": 5.0,
             "title": "Plazo Dias",
             "type": "integer"
+          },
+          "reclamo_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El reclamo sobre la liquidación (RF34, `0123`) que esta solicitud atiende: en la misma transacción el reclamo pasa a `derivado_a_solicitud`. Pide además `reclamos_liquidacion.atender`.",
+            "title": "Reclamo Id"
           },
           "referencia": {
             "description": "Qué período, orden, contrato o movimiento, en palabras.",
@@ -26834,6 +27232,344 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/reclamos-liquidacion": {
+      "get": {
+        "operationId": "listar_reclamos_api_v1_consorcios__consorcio_id__reclamos_liquidacion_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaReclamos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado o sin la facultad."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reclamos sobre la liquidación: todos, para quien atiende; los propios, para el propietario",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "presentar_reclamo_api_v1_consorcios__consorcio_id__reclamos_liquidacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReclamoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reclamo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado o sin la facultad."
+          },
+          "404": {
+            "description": "El reclamo no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La liquidación citada fue reemplazada (`liquidacion_reemplazada`)."
+          },
+          "422": {
+            "description": "El texto lleva una cuenta, la liquidación no es oficial o el dato citado no figura para la unidad."
+          }
+        },
+        "summary": "Presentar un reclamo sobre la liquidación oficial de una unidad propia (también lo que manda el borrador sin conexión); avisa por correo a quien atiende",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reclamos-liquidacion/{reclamo_id}": {
+      "get": {
+        "operationId": "ver_reclamo_api_v1_consorcios__consorcio_id__reclamos_liquidacion__reclamo_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reclamo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reclamo Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reclamo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado o sin la facultad."
+          },
+          "404": {
+            "description": "El reclamo no existe en este consorcio, o no es de esta persona."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Un reclamo con su texto, su historia y lo que la persona puede hacer con él",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reclamos-liquidacion/{reclamo_id}/respuesta": {
+      "post": {
+        "operationId": "responder_reclamo_api_v1_consorcios__consorcio_id__reclamos_liquidacion__reclamo_id__respuesta_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reclamo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reclamo Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespuestaReclamo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reclamo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado o sin la facultad."
+          },
+          "404": {
+            "description": "El reclamo no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "El reclamo ya se cerró (`reclamo_cerrado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Responder un reclamo: lo cierra y le avisa por correo a quien lo presentó",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reclamos-liquidacion/{reclamo_id}/retiro": {
+      "post": {
+        "operationId": "retirar_reclamo_api_v1_consorcios__consorcio_id__reclamos_liquidacion__reclamo_id__retiro_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reclamo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reclamo Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetiroReclamo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reclamo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado o sin la facultad."
+          },
+          "404": {
+            "description": "El reclamo no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "El reclamo ya se cerró (`reclamo_cerrado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retirar un reclamo propio mientras está presentado, con el motivo",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/resumen": {
       "get": {
         "operationId": "resumen_api_v1_consorcios__consorcio_id__resumen_get",
@@ -27004,7 +27740,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Preparar una solicitud formal: queda en borrador; preparar no cuenta como firma",
+        "summary": "Preparar una solicitud formal: queda en borrador; preparar no cuenta como firma. Con `reclamo_id`, atiende ese reclamo sobre la liquidación (RF34)",
         "tags": [
           "consorcios"
         ]

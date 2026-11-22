@@ -33,6 +33,7 @@ import { Panel, RUTA_PANEL } from "./panel/Panel";
 import { LiquidacionDelAdministrador, RUTA_LIQUIDACION_ADMINISTRADOR } from "./fiscalizacion/LiquidacionDelAdministrador";
 import { LiquidacionOficial, RUTA_LIQUIDACION_OFICIAL } from "./fiscalizacion/LiquidacionOficial";
 import { MisExpensas, RUTA_MIS_EXPENSAS } from "./fiscalizacion/MisExpensas";
+import { Reclamos, RUTA_RECLAMOS } from "./fiscalizacion/Reclamos";
 import { RUTA_SOLICITUDES, Solicitudes } from "./fiscalizacion/Solicitudes";
 import { Comunicados, RUTA_COMUNICADOS } from "./comunicados/Comunicados";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
@@ -147,6 +148,7 @@ export function App() {
           />
           <Route path={RUTA_SOLICITUDES} element={<Exige requisito={REQUISITOS.solicitudes}><Solicitudes /></Exige>} />
           <Route path={RUTA_COMUNICADOS} element={<Exige requisito={REQUISITOS.comunicados}><Comunicados /></Exige>} />
+          <Route path={RUTA_RECLAMOS} element={<Exige requisito={REQUISITOS.reclamos}><Reclamos /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

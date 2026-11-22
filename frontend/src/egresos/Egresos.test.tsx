@@ -215,6 +215,8 @@ const INICIO: Respuestas = {
   [`GET ${BASE}/solicitudes-formales`]: () => Response.json({ elementos: [] }),
   [`GET ${BASE}/mandatos`]: () => Response.json({ elementos: [] }),
   [`GET ${BASE}/contactos/gestion`]: () => Response.json({ elementos: [] }),
+  // Los reclamos sobre la liquidación que esperan respuesta (app 0123).
+  [`GET ${BASE}/reclamos-liquidacion`]: () => Response.json({ elementos: [] }),
 };
 
 function abrir(ruta: string | { pathname: string; state: unknown }) {

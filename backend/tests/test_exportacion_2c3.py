@@ -94,8 +94,11 @@ IMPORTADAS = set(exportar_consorcio.PARTES["liquidaciones_importadas"])
 COMUNICADOS = set(exportar_consorcio.PARTES["comunicados"])
 """RF28 (`0122`): el edificio de estas pruebas no emite comunicados; su contenido lo prueba
 `test_comunicados_0122.py`. Sus claves sí están decididas acá."""
-PARTES_POSTERIORES = ("liquidaciones_importadas", "comunicados")
-"""Las partes que suman las migraciones posteriores a `0069` (`0121`, `0122`)."""
+RECLAMOS = set(exportar_consorcio.PARTES["reclamos_liquidacion"])
+"""RF34 (`0123`): el edificio de estas pruebas no tiene reclamos; su contenido lo prueba
+`test_reclamos_liquidacion_0123.py`. Sus claves sí están decididas acá."""
+PARTES_POSTERIORES = ("liquidaciones_importadas", "comunicados", "reclamos_liquidacion")
+"""Las partes que suman las migraciones posteriores a `0069` (`0121`, `0122`, `0123`)."""
 HASTA_0069 = len(FUNCIONES) - len(PARTES_POSTERIORES)
 """Las funciones de exportación que hay con la base en `0069`."""
 
@@ -240,6 +243,10 @@ CLAVES_POR_ENTIDAD = {
     "enlace_liquidacion": {"importacion_id", "orden", "url", "origen", "pagina"},
     "comunicado": {"id", "titulo", "texto", "corrige_a", "emitido_por_nombre", "emitido_en"},
     "comunicado_destinatario": {"comunicado_id", "destinatario_nombre", "estado", "enviado_en"},
+    "reclamo_liquidacion": {"id", "importacion_id", "unidad_designacion", "campo", "texto",
+                            "presentado_por_nombre", "presentado_en"},
+    "reclamo_liquidacion_estado": {"reclamo_id", "estado", "texto", "solicitud_id",
+                                   "registrado_por_nombre", "registrado_en"},
 }  # fmt: skip
 
 
@@ -491,6 +498,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         - SOLICITUDES_FORMALES
         - IMPORTADAS
         - COMUNICADOS
+        - RECLAMOS
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}

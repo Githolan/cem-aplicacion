@@ -1097,7 +1097,9 @@
           "adjunto_invalido",
           "destinatario_con_cuenta",
           "texto_con_cuenta",
-          "sin_destinatarios"
+          "sin_destinatarios",
+          "liquidacion_reemplazada",
+          "reclamo_cerrado"
         ],
         "title": "CodigoError",
         "type": "string"

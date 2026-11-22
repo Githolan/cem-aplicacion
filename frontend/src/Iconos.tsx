@@ -81,6 +81,8 @@ const TRAZOS = {
       <path d="m22 7-10 6L2 7" />
     </>
   ),
+  // Reclamos sobre la liquidación (RF34): un globo de diálogo.
+  globo: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
   // Comunicados oficiales (RF28): un megáfono, distinto del sobre de las solicitudes.
   megafono: (
     <>

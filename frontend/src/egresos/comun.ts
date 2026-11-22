@@ -321,6 +321,10 @@ const MENSAJES: Record<string, string> = {
     "Un comunicado no puede llevar el número de una cuenta: hay que sacarlo del título y del texto. Si no es una cuenta, separar los números con una coma.",
   sin_destinatarios:
     "Nadie tiene hoy un vínculo confirmado en el edificio: el comunicado no tendría a quién llegar. Los vínculos se confirman en el padrón.",
+  // Reclamos sobre la liquidación (RF34, app 0123).
+  liquidacion_reemplazada:
+    "La liquidación que cita el reclamo fue reemplazada por otra del mismo período. Se puede citar la vigente o reclamar igual sobre la reemplazada.",
+  reclamo_cerrado: "El reclamo ya se respondió, se pasó a una solicitud formal o se retiró: hay que volver a abrirlo para ver cómo quedó.",
   idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
   idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
 };

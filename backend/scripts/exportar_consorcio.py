@@ -84,6 +84,7 @@ PARTES: dict[str, tuple[str, ...]] = {
     "liquidaciones_importadas": ("importacion_liquidacion", "campo_preliminar",
                                  "correspondencia_grupo", "enlace_liquidacion"),
     "comunicados": ("comunicado", "comunicado_destinatario"),
+    "reclamos_liquidacion": ("reclamo_liquidacion", "reclamo_liquidacion_estado"),
 }  # fmt: skip
 """Cada parte es una función `nucleo.exportar_<parte>` y cada entidad, un archivo del paquete."""
 EXTENSIONES = {TipoArchivo.PDF: "pdf", TipoArchivo.JPEG: "jpg", TipoArchivo.PNG: "png"}

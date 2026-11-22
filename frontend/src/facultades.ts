@@ -28,6 +28,7 @@ const NOMBRES: Readonly<Record<string, string>> = {
   "padron.confirmar_vinculo": "Confirmar vínculos con las unidades",
   "padron.gestionar": "Gestionar el padrón",
   "padron.ver": "Ver el padrón del edificio",
+  "reclamos.atender": "Atender los reclamos sobre la liquidación",
   "solicitud_formal.firmar": "Firmar solicitudes formales",
   "solicitud_formal.preparar": "Preparar solicitudes formales",
 };
