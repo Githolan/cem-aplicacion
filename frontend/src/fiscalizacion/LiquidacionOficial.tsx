@@ -223,13 +223,14 @@ function deTipo(campos: readonly Campo[], tipo: Campo["tipo"]): Campo[] {
 
 type FilaUnidad = { clave: string; nombre: string; saldo?: Record<string, unknown>; importe?: Record<string, unknown> };
 
-/** Las filas de las unidades, una por unidad de la liquidación (su UF y su departamento). */
+/** Las filas de las unidades: una por unidad oficial (`unidad_id`, con las correcciones), y solo las
+ * que no se asociaron con el padrón, por su UF y su departamento escritos. */
 function unidadesDe(campos: readonly Campo[]): FilaUnidad[] {
   const filas = new Map<string, FilaUnidad>();
   for (const c of campos) {
     if (c.tipo !== "unidad" && c.tipo !== "saldo_unidad" && c.tipo !== "importe_unidad") continue;
     const v = c.valor;
-    const clave = `${textoDe(v.uf)}|${textoDe(v.depto)}`;
+    const clave = c.unidad_id !== null ? `unidad:${c.unidad_id}` : `texto:${textoDe(v.uf)}|${textoDe(v.depto)}`;
     const nombre = c.designacion ?? [v.uf ? `UF ${textoDe(v.uf)}` : "", v.depto ? textoDe(v.depto) : ""].filter(Boolean).join(" ");
     const fila = filas.get(clave) ?? { clave, nombre };
     if (c.designacion !== null) fila.nombre = c.designacion;
