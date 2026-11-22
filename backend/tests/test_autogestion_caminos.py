@@ -365,7 +365,7 @@ def test_secuencia_alta_invitar_aceptar_y_camino_a(
     cid = uuid4()
     edificio = {
         "consorcio": {"id": str(cid), "nombre": "Edificio sintético de Autogestión",
-                      "zona_horaria": "America/Argentina/Buenos_Aires"},
+                      "zona_horaria": "America/Argentina/Buenos_Aires", "jurisdiccion": "caba"},
         "unidades": [{"designacion": "PB"}, {"designacion": "1° A"}],
     }  # fmt: skip
     ruta = tmp_path / "edificio.json"
