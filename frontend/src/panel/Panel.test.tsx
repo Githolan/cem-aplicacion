@@ -237,6 +237,12 @@ describe("Modo Consejo: el gasto según las liquidaciones oficiales (app 0120)",
     const sinTotal: Panel = { ...CONSEJO, gasto_liquidado: [{ ...CONSEJO.gasto_liquidado[0]!, total: null }, CONSEJO.gasto_liquidado[1]!] };
     expect(gastoLiquidadoPorPeriodo(sinTotal).map((b) => b.clave)).toEqual(["2026-10-01"]);
     expect(periodosConRubros(CONSEJO)).toEqual(["2026-10-01", "2026-09-01"]);
+    // El período más nuevo con todos sus rubros sin total no se ofrece: escondería el selector.
+    const octubreSinTotales: Panel = {
+      ...CONSEJO,
+      rubros_liquidados: CONSEJO.rubros_liquidados.map((f) => (f.periodo === "2026-10-01" ? { ...f, total: null } : f)),
+    };
+    expect(periodosConRubros(octubreSinTotales)).toEqual(["2026-09-01"]);
     expect(rubrosDelPeriodo(CONSEJO, "2026-09-01").map((b) => [b.etiqueta, b.valor])).toEqual([
       ["Servicios públicos SINTETICOS", 1500.5],
       ["Mantenimiento SINTETICO", 899.99],

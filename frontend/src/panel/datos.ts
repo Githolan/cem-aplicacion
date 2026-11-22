@@ -119,7 +119,9 @@ export function gastoLiquidadoPorPeriodo(panel: Panel): Barra[] {
 
 /** Los períodos que tienen rubros, del más nuevo al más viejo. */
 export function periodosConRubros(panel: Panel): string[] {
-  return [...new Set(panel.rubros_liquidados.map((f) => f.periodo))].sort().reverse();
+  // Solo los períodos con algún rubro que tenga total: uno sin barras escondería el gráfico y su
+  // selector, y no se podría volver a otro período (hallazgo de Codex en #277).
+  return [...new Set(panel.rubros_liquidados.filter((f) => f.total !== null).map((f) => f.periodo))].sort().reverse();
 }
 
 /** Los rubros de un período, en el orden de la liquidación; uno sin total no lleva barra. */
