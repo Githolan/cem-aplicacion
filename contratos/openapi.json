@@ -1382,7 +1382,9 @@
           "fecha_envio_invalida",
           "fecha_respuesta_invalida",
           "adjunto_invalido",
-          "destinatario_con_cuenta"
+          "destinatario_con_cuenta",
+          "texto_con_cuenta",
+          "sin_destinatarios"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -1731,6 +1733,167 @@
           "estado"
         ],
         "title": "ComprobanteSubido",
+        "type": "object"
+      },
+      "Comunicado": {
+        "description": "`GET …/comunicados/{c}` y la respuesta de emitir.",
+        "properties": {
+          "corregido": {
+            "description": "Si algún comunicado posterior lo corrige.",
+            "title": "Corregido",
+            "type": "boolean"
+          },
+          "corregido_por": {
+            "description": "Los comunicados que lo corrigen, del más viejo al más nuevo.",
+            "items": {
+              "$ref": "#/components/schemas/ReferenciaComunicado"
+            },
+            "title": "Corregido Por",
+            "type": "array"
+          },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenciaComunicado"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "emitido_en": {
+            "format": "date-time",
+            "title": "Emitido En",
+            "type": "string"
+          },
+          "emitido_por_nombre": {
+            "title": "Emitido Por Nombre",
+            "type": "string"
+          },
+          "envios": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnviosComunicado"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo para quien emite comunicados en el edificio; null para quien lee."
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "texto": {
+            "title": "Texto",
+            "type": "string"
+          },
+          "titulo": {
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "titulo",
+          "emitido_por_nombre",
+          "emitido_en",
+          "corrige_a",
+          "corregido",
+          "texto",
+          "corregido_por",
+          "envios"
+        ],
+        "title": "Comunicado",
+        "type": "object"
+      },
+      "ComunicadoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/comunicados`: lo reciben todas las personas con un vínculo confirmado en el\nedificio en ese momento.",
+        "properties": {
+          "corrige_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El comunicado que este corrige, del mismo edificio.",
+            "title": "Corrige A"
+          },
+          "texto": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Texto",
+            "type": "string"
+          },
+          "titulo": {
+            "maxLength": 120,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "titulo",
+          "texto"
+        ],
+        "title": "ComunicadoNuevo",
+        "type": "object"
+      },
+      "ComunicadoResumen": {
+        "description": "Una fila de la lista.",
+        "properties": {
+          "corregido": {
+            "description": "Si algún comunicado posterior lo corrige.",
+            "title": "Corregido",
+            "type": "boolean"
+          },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenciaComunicado"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "emitido_en": {
+            "format": "date-time",
+            "title": "Emitido En",
+            "type": "string"
+          },
+          "emitido_por_nombre": {
+            "title": "Emitido Por Nombre",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "titulo": {
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "titulo",
+          "emitido_por_nombre",
+          "emitido_en",
+          "corrige_a",
+          "corregido"
+        ],
+        "title": "ComunicadoResumen",
         "type": "object"
       },
       "ConciliacionPagoManual": {
@@ -4537,6 +4700,29 @@
           "descargable"
         ],
         "title": "EnvioSolicitud",
+        "type": "object"
+      },
+      "EnviosComunicado": {
+        "description": "Cuántas personas lo reciben y en qué quedó cada correo. Solo para quien emite, y nunca la\nlista de personas ni sus correos.",
+        "properties": {
+          "destinatarios": {
+            "description": "Las personas a las que se dirigió.",
+            "minimum": 0.0,
+            "title": "Destinatarios",
+            "type": "integer"
+          },
+          "enviados": {
+            "description": "Los correos que quedaron en la cola de salida (uno por persona).",
+            "minimum": 0.0,
+            "title": "Enviados",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "destinatarios",
+          "enviados"
+        ],
+        "title": "EnviosComunicado",
         "type": "object"
       },
       "Error": {
@@ -8345,6 +8531,51 @@
           "elementos"
         ],
         "title": "ListaCasosPrivacidad",
+        "type": "object"
+      },
+      "ListaComunicados": {
+        "description": "`GET …/comunicados`: del más nuevo al más viejo.",
+        "properties": {
+          "destinatarios_posibles": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuántas personas recibirían un comunicado emitido ahora; null si no emite.",
+            "title": "Destinatarios Posibles"
+          },
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ComunicadoResumen"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "largo_texto": {
+            "title": "Largo Texto",
+            "type": "integer"
+          },
+          "largo_titulo": {
+            "title": "Largo Titulo",
+            "type": "integer"
+          },
+          "puede_emitir": {
+            "title": "Puede Emitir",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "elementos",
+          "puede_emitir",
+          "destinatarios_posibles",
+          "largo_titulo",
+          "largo_texto"
+        ],
+        "title": "ListaComunicados",
         "type": "object"
       },
       "ListaContactos": {
@@ -12437,6 +12668,32 @@
           "orden_id"
         ],
         "title": "RechazoVisto",
+        "type": "object"
+      },
+      "ReferenciaComunicado": {
+        "description": "Otro comunicado, por su título: el que se corrige o el que corrige.",
+        "properties": {
+          "emitido_en": {
+            "format": "date-time",
+            "title": "Emitido En",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "titulo": {
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "titulo",
+          "emitido_en"
+        ],
+        "title": "ReferenciaComunicado",
         "type": "object"
       },
       "RegistroDiferenciaPago": {
@@ -17081,6 +17338,176 @@
         "summary": "Esquemas de coeficientes y reglas de reparto, por grupo y versión",
         "tags": [
           "coeficientes"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/comunicados": {
+      "get": {
+        "operationId": "listar_comunicados_api_v1_consorcios__consorcio_id__comunicados_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaComunicados"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin un vínculo confirmado o sin modo registrado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Comunicados oficiales del edificio, del más nuevo al más viejo",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "emitir_comunicado_api_v1_consorcios__consorcio_id__comunicados_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComunicadoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comunicado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin un vínculo confirmado o sin modo registrado."
+          },
+          "404": {
+            "description": "El comunicado no existe en este consorcio."
+          },
+          "409": {
+            "description": "Nadie tiene un vínculo confirmado (`sin_destinatarios`)."
+          },
+          "422": {
+            "description": "El título o el texto lleva una cuenta (`texto_con_cuenta`)."
+          }
+        },
+        "summary": "Emitir un comunicado a todo el edificio: un correo a cada persona con un vínculo confirmado, con el título y el enlace",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/comunicados/{comunicado_id}": {
+      "get": {
+        "operationId": "ver_comunicado_api_v1_consorcios__consorcio_id__comunicados__comunicado_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "comunicado_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Comunicado Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comunicado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin un vínculo confirmado o sin modo registrado."
+          },
+          "404": {
+            "description": "El comunicado no existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Un comunicado con su texto; para quien emite, cuántos lo recibieron",
+        "tags": [
+          "consorcios"
         ]
       }
     },

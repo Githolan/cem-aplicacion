@@ -1,0 +1,32 @@
+{
+  "politicas": [
+    {
+      "accion": "comunicados.emitir",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "comunicados.emitir",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF28; plan §6.7 (H4a, RF28 sin estados de lectura); diseño P0 S8: el Consejo y la administración emiten comunicados oficiales a todo el edificio, también en Modo Consejo (decisión del 22-11-2026)"
+    },
+    {
+      "accion": "comunicados.ver",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": "comunicados.emitir",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF28; diseño P0 S8: los comunicados van a todo el edificio y los leen los vínculos confirmados (como la base); quien emite ve la historia completa"
+    }
+  ]
+}

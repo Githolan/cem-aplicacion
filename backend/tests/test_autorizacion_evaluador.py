@@ -355,8 +355,9 @@ def test_las_acciones_de_la_tabla():
     # formal (`solicitud_formal.retirar`, `.registrar_envio`, `.registrar_respuesta` y
     # `.responder`, 0108) e importar la liquidación del administrador (`liquidacion.importar`,
     # 0113) y las dos lecturas de la liquidación oficial (`liquidacion.ver_importada` y
-    # `cuenta.ver_propia`, 0119)
-    assert len(POLITICAS) == 61
+    # `cuenta.ver_propia`, 0119) y las dos de los comunicados oficiales (`comunicados.emitir` y
+    # `comunicados.ver`, 0122)
+    assert len(POLITICAS) == 63
 
 
 def _archivo(tmp_path, nombre, politicas):

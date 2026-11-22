@@ -1095,7 +1095,9 @@
           "fecha_envio_invalida",
           "fecha_respuesta_invalida",
           "adjunto_invalido",
-          "destinatario_con_cuenta"
+          "destinatario_con_cuenta",
+          "texto_con_cuenta",
+          "sin_destinatarios"
         ],
         "title": "CodigoError",
         "type": "string"
