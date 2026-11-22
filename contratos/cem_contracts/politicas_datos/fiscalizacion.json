@@ -2,7 +2,7 @@
   "politicas": [
     {
       "accion": "fiscalizacion.ver_resumen",
-      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false},
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false, "solo_confirmados": true},
       "concede_por_ambito": false,
       "facultad": null,
       "modos": ["consejo", "administrador_aumentado", "autogestion"],
@@ -12,7 +12,7 @@
       "respaldo": null,
       "economica": false,
       "destinatario_unico": false,
-      "fuente_normativa": "Documento 08 §4, Permisos base; tabla de verdad §1.2 (una acción, una vista)"
+      "fuente_normativa": "Documento 08 §4, Permisos base; tabla de verdad §1.2 (una acción, una vista); H5 D3-A (19-11-2026): el gasto por rubro de la liquidación oficial, con el vínculo confirmado, como la base"
     },
     {
       "accion": "fiscalizacion.ver_panel",
@@ -111,6 +111,20 @@
       "economica": false,
       "destinatario_unico": false,
       "fuente_normativa": "RF49; CU12; diseño RF49 §3.2: la concede ser la persona del mandato destinatario, que comprueba la base (0108), no una facultad"
+    },
+    {
+      "accion": "cuenta.ver_propia",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": true, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "H5 D3-A (19-11-2026): cada propietario ve lo que la liquidación de la administración dice de su unidad, nunca de otra (RN15); con el vínculo confirmado, como la base"
     }
   ]
 }

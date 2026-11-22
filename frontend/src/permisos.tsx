@@ -272,6 +272,11 @@ export const REQUISITOS = {
   liquidacion: [["liquidacion.preparar"]],
   /** La liquidación del administrador: subirla y confirmar lo leído (H5-3, app 0115; D2-A). */
   importarLiquidacion: [["liquidacion.importar"]],
+  /** Lo que la liquidación oficial dice de las unidades propias y el gasto del período (H5 D3-A, app
+   * 0119): cada propietario con el vínculo confirmado. Cada parte se pide solo si se la alcanza. */
+  misExpensas: [["cuenta.ver_propia"], ["fiscalizacion.ver_resumen"]],
+  /** La liquidación oficial completa, con sus diferencias: el Consejo y la administración (H5 D3-A). */
+  liquidacionOficial: [["liquidacion.ver_importada"]],
   /** El panel completo del Consejo y la administración (RF48). */
   panel: [["fiscalizacion.ver_panel"]],
   /** La pantalla de solicitudes formales (RF49, app 0108): quien ve el panel las ve todas; el

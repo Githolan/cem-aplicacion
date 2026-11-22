@@ -179,6 +179,25 @@ describe("menú", () => {
 });
 
 describe("cabecera", () => {
+  it("«Mis expensas» y «Liquidación oficial» aparecen solo para quien las alcanza (H5 D3-A)", () => {
+    // Una propietaria con el vínculo confirmado: su cuenta y el resumen, no la liquidación completa.
+    consulta.actual = sabido(new Map([["e1", ["cuenta.ver_propia", "fiscalizacion.ver_resumen", "documentos.ver"]]]));
+    let menu = menuEn("/");
+    expect(within(menu).getByRole("link", { name: /Mis expensas/ })).toBeTruthy();
+    expect(within(menu).queryByRole("link", { name: /Liquidación oficial/ })).toBeNull();
+    cleanup();
+    // El Consejo sin vínculo propio: la liquidación completa, no «Mis expensas».
+    consulta.actual = sabido(new Map([["e1", ["liquidacion.ver_importada", "fiscalizacion.ver_panel"]]]));
+    menu = menuEn("/");
+    expect(within(menu).getByRole("link", { name: /Liquidación oficial/ })).toBeTruthy();
+    expect(within(menu).queryByRole("link", { name: /Mis expensas/ })).toBeNull();
+    cleanup();
+    // Una inquilina: ninguna de las dos.
+    consulta.actual = sabido(new Map([["e1", ["documentos.ver", "contactos.ver"]]]));
+    menu = menuEn("/");
+    expect(within(menu).queryByRole("link", { name: /Mis expensas|Liquidación oficial/ })).toBeNull();
+  });
+
   it("el nombre de la persona no es otro camino a la cuenta (MEN-03)", () => {
     const { container } = render(
       <MemoryRouter>

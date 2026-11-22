@@ -219,6 +219,16 @@ class CodigoError(StrEnum):
     """La liquidación importada no está confirmada: sin datos oficiales no se recalcula (`0116`)."""
     GRUPO_INEXISTENTE = "grupo_inexistente"
     """El edificio no tiene ese esquema de coeficientes (`0116`)."""
+    PERIODO_YA_CONFIRMADO = "periodo_ya_confirmado"
+    """El período ya tiene su liquidación oficial: otra solo entra reemplazándola con motivo
+    (`0119`)."""
+    REEMPLAZO_INVALIDO = "reemplazo_invalido"
+    """Lo que se quiso reemplazar no es la liquidación oficial vigente de ese período (`0119`)."""
+    UNIDAD_REPETIDA = "unidad_repetida"
+    """Dos datos del mismo tipo de la liquidación importada quedan en una misma unidad (una
+    corrección la llevó a otra que ya tenía el suyo): no se confirma (`0119`). `detalle.unidad`
+    es la unidad, `detalle.tipo` el tipo de dato y `detalle.campos` sus números en la
+    importación."""
     ENLACE_NO_TRAIDO = "enlace_no_traido"
     """El archivo del enlace de la liquidación no se trajo: el destino, el tamaño o el tipo no
     están admitidos, o el servidor no respondió (H5-5, `0118`)."""

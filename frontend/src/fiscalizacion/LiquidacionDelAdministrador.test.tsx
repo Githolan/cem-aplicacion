@@ -27,8 +27,12 @@ import {
   enPesos,
   FALTA_MOTIVO,
   hojasDe,
+  REEMPLAZAR_OFICIAL,
+  REEMPLAZARLA,
   RUTA_LIQUIDACION_ADMINISTRADOR,
   SUBIR,
+  textoOficial,
+  textoUnidadRepetida,
   ENLACES,
   NO_SE_TRAJO,
   SOLO_HTTPS,
@@ -69,6 +73,7 @@ const IMPORTACION: Importacion = {
   id: I1, documento_id: D1, version_documento_id: V1, subida_por: PERSONA, creada_en: "2026-11-20T12:00:00Z",
   estado: "para_confirmar", formato: "mis_expensas", periodo: "2026-09-01", motivo: null, diferencias: [],
   leida_en: "2026-11-20T12:00:10Z", decidida_por: null, decidida_en: null, motivo_descarte: null,
+  reemplaza_a: null, motivo_reemplazo: null,
   campos: [LUZ, UNIDAD],
   enlaces: [],
 };
@@ -76,6 +81,7 @@ const RESUMEN = {
   id: I1, documento_id: D1, version_documento_id: V1, subida_por: PERSONA, creada_en: "2026-11-20T12:00:00Z",
   estado: "para_confirmar", formato: "mis_expensas", periodo: "2026-09-01", motivo: null, diferencias: 0,
   campos: 2, pendientes: 2, decidida_por: null, decidida_en: null, motivo_descarte: null,
+  reemplaza_a: null, motivo_reemplazo: null,
 };
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
@@ -540,6 +546,117 @@ describe("pantalla /importar-liquidacion", () => {
     expect((await screen.findAllByText("Se está leyendo la liquidación.")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: IMPORTAR_DE_NUEVO })).toBeNull();
   }, 15000);
+
+  it("si el período ya tiene su liquidación oficial, confirmar ofrece reemplazarla con el motivo, o Cancelar", async () => {
+    const I2 = "77777777-7777-4777-8777-777777777777";
+    const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "confirmado" as const }] };
+    const OFICIAL = { ...RESUMEN, id: I2, estado: "confirmada", pendientes: 0, decidida_por: PERSONA, decidida_en: "2026-10-05T15:00:00Z" };
+    const CONFIRMACION = `${BASE}/liquidaciones-importadas/${I1}/confirmacion`;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([RESUMEN, OFICIAL]),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
+      [`POST ${CONFIRMACION}`]: DETALLE({ ...decidida, estado: "confirmada", decidida_por: PERSONA, decidida_en: "2026-11-20T13:00:00Z", reemplaza_a: I2, motivo_reemplazo: "Mandó otra versión" }),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}/recalculo`]: () => Response.json({ importacion_id: I1, periodo: "2026-09-01", sin_grupos: true, grupos: [], esquemas: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09.*Para confirmar/ }));
+    await screen.findByRole("list", { name: "Datos leídos" });
+    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    let ventana = await screen.findByRole("dialog", { name: REEMPLAZAR_OFICIAL });
+    // Dice cuál es la oficial: el período y cuándo se confirmó.
+    expect(within(ventana).getByText(textoOficial("2026-09-01", "2026-10-05T15:00:00Z"))).toBeTruthy();
+    expect(within(ventana).getByText(/septiembre de 2026/)).toBeTruthy();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: REEMPLAZAR_OFICIAL })).toBeNull());
+    expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    ventana = await screen.findByRole("dialog", { name: REEMPLAZAR_OFICIAL });
+    fireEvent.click(within(ventana).getByRole("button", { name: REEMPLAZARLA }));
+    expect(await within(ventana).findByText(FALTA_MOTIVO)).toBeTruthy();
+    expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Motivo del reemplazo"), { target: { value: " Mandó otra versión " } });
+    fireEvent.click(within(ventana).getByRole("button", { name: REEMPLAZARLA }));
+    await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
+    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.json()).toEqual({ reemplaza_a: I2, motivo: "Mandó otra versión" });
+    expect(await screen.findByText(/reemplazó a la anterior, que queda como historia/)).toBeTruthy();
+    expect(screen.getByText(/Motivo: Mandó otra versión/)).toBeTruthy();
+  }, 15000);
+
+  it("sin otra oficial del período, confirmar no abre nada y va sin cuerpo", async () => {
+    const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "confirmado" as const }] };
+    const CONFIRMACION = `${BASE}/liquidaciones-importadas/${I1}/confirmacion`;
+    // Una confirmada de otro período no cuenta.
+    const OTRA = { ...RESUMEN, id: "77777777-7777-4777-8777-777777777777", periodo: "2026-08-01", estado: "confirmada", decidida_en: "2026-09-05T15:00:00Z" };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([RESUMEN, OTRA]),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
+      [`POST ${CONFIRMACION}`]: DETALLE({ ...decidida, estado: "confirmada", decidida_por: PERSONA, decidida_en: "2026-11-20T13:00:00Z" }),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}/recalculo`]: () => Response.json({ importacion_id: I1, periodo: "2026-09-01", sin_grupos: true, grupos: [], esquemas: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09/ }));
+    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
+    expect(screen.queryByRole("dialog", { name: REEMPLAZAR_OFICIAL })).toBeNull();
+    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.text()).toBe("");
+  });
+
+  it("si una corrección deja dos datos del mismo tipo en una unidad, el aviso dice cuál y cuáles, y la importación sigue para corregir", async () => {
+    const leido = campo(F1, 1, { tipo: "importe_unidad", clave: "importe_unidad:001", estado: "confirmado", valor: { uf: "001", depto: "PB-A", total: "750.25" } });
+    const movido = campo(F2, 2, {
+      tipo: "importe_unidad", clave: "importe_unidad:002", estado: "corregido",
+      valor: { uf: "002", depto: "1-A", total: "1326.00" }, valor_corregido: { uf: "002", depto: "PB-A", total: "1326.00" },
+    });  // prettier-ignore
+    const decidida = { ...IMPORTACION, campos: [leido, movido] };
+    const CONFIRMACION = `${BASE}/liquidaciones-importadas/${I1}/confirmacion`;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([{ ...RESUMEN, pendientes: 0 }]),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
+      [`POST ${CONFIRMACION}`]: () => Response.json({
+        codigo: "unidad_repetida", mensaje: "Dos datos del mismo tipo quedan en una misma unidad.",
+        detalle: { unidad: "PB-A", tipo: "importe_unidad", campos: [1, 2] }, id_correlacion: "x",
+      }, { status: 409 }),
+    });  // prettier-ignore
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09/ }));
+    await screen.findByRole("list", { name: "Datos leídos" });
+    const lecturas = pedidos(api, "GET", `${BASE}/liquidaciones-importadas/${I1}`).length;
+    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
+    const aviso = await screen.findByText(textoUnidadRepetida({ unidad: "PB-A", tipo: "importe_unidad", campos: [1, 2] }, decidida.campos));
+    // La unidad y los dos datos, cada uno como se ve en la lista.
+    expect(aviso.textContent).toMatch(/unidad PB-A \(«UF 001 PB-A: .+» y «UF 002 PB-A: .+»\)\. Corrija uno de los dos o descarte/);
+    // No cambió lo visto: no se relee la importación y se sigue pudiendo corregir o descartar.
+    expect(pedidos(api, "GET", `${BASE}/liquidaciones-importadas/${I1}`)).toHaveLength(lecturas);
+    expect(screen.getByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeTruthy();
+    expect(screen.getByRole("button", { name: DESCARTAR_LIQUIDACION })).toBeTruthy();
+  });
+
+  it("una reemplazada queda como historia, con el motivo del reemplazo", async () => {
+    const I2 = "77777777-7777-4777-8777-777777777777";
+    const VIEJA = { ...RESUMEN, estado: "reemplazada", pendientes: 0, decidida_por: PERSONA, decidida_en: "2026-10-05T15:00:00Z" };
+    const NUEVA = { ...RESUMEN, id: I2, estado: "confirmada", pendientes: 0, decidida_por: PERSONA, decidida_en: "2026-10-20T15:00:00Z", reemplaza_a: I1, motivo_reemplazo: "Corrigió el rubro 2" };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([NUEVA, VIEJA]),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, estado: "reemplazada", decidida_por: PERSONA, decidida_en: "2026-10-05T15:00:00Z", campos: [{ ...LUZ, estado: "confirmado" }] }),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}/recalculo`]: () => Response.json({ importacion_id: I1, periodo: "2026-09-01", sin_grupos: true, grupos: [], esquemas: [] }),
+    }));  // prettier-ignore
+    abrir();
+    const fila = await screen.findByRole("button", { name: /Reemplazada/ });
+    expect(fila.textContent).toContain("Motivo del reemplazo: Corrigió el rubro 2");
+    fireEvent.click(fila);
+    expect(await screen.findByText(/Reemplazada por la liquidación confirmada el .*\. Motivo: Corrigió el rubro 2/)).toBeTruthy();
+    // Historia: ni se confirma ni se descarta.
+    expect(screen.queryByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeNull();
+    expect(screen.queryByRole("button", { name: DESCARTAR_LIQUIDACION })).toBeNull();
+  });
 
   it("sin `liquidacion.importar` en ningún edificio, la dirección lleva al inicio", async () => {
     vi.stubGlobal("fetch", backend({
