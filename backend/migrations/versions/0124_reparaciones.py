@@ -121,6 +121,10 @@ TABLAS = (
     "nucleo.reparacion_estado",
 )
 """En el orden en que se crean: cada una después de las que cita."""
+REFERENCIAS_NUEVAS = (("nucleo.reparacion_adjunto", "documento_id"),)
+"""Lo que esta migración suma a `REFERENCIAS` de `0089`: la tabla que cita un documento, con su
+columna. Lleva `documento_citado_vigente` (no cita uno quitado o retirado) y entra en
+`documento_referenciado` (lo que cita no se quita ni se retira)."""
 EXPORTAR = "exportar_reparaciones"
 
 
@@ -156,6 +160,12 @@ def _estado_para(columna: str) -> str:
     casos = " ".join(f"when '{t}' then '{e}'" for t, e in ESTADO_DEL_ADJUNTO.items())
     return f"case {columna} {casos} end"
 
+
+CITAN_DOCUMENTO = "".join(
+    f"create trigger documento_citado_vigente before insert or update of {columna} on {tabla}\n"
+    f"  for each row execute function nucleo.documento_citado_vigente('{columna}');\n"
+    for tabla, columna in REFERENCIAS_NUEVAS
+)
 
 TABLAS_SQL = f"""
 create function nucleo.negar_cambio_reparacion()
@@ -228,9 +238,7 @@ create index reparacion_adjunto_reparacion
   on nucleo.reparacion_adjunto (consorcio_id, reparacion_id);
 create index reparacion_adjunto_documento
   on nucleo.reparacion_adjunto (consorcio_id, documento_id);
-create trigger documento_citado_vigente before insert or update of documento_id
-  on nucleo.reparacion_adjunto
-  for each row execute function nucleo.documento_citado_vigente('documento_id');
+{CITAN_DOCUMENTO}
 
 create table nucleo.reparacion_gestion (
   consorcio_id        uuid not null,
