@@ -17,15 +17,19 @@ import { FilaDeLectura, FilaEnlace } from "../pagos/FilaEnlace";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
 import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
 import { useAncho } from "../pagos/useAncho";
+import { RUTA_LIQUIDACION_OFICIAL } from "../fiscalizacion/LiquidacionOficial";
 import {
   estaVacio,
   type Faltante,
+  gastoLiquidadoPorPeriodo,
   gastoPorMes,
   gastoPorRubro,
   mesesConPagos,
   monedas,
   ordenesPorEstado,
   type Panel as DatosPanel,
+  periodosConRubros,
+  rubrosDelPeriodo,
 } from "./datos";
 import { GraficoBarras } from "./GraficoBarras";
 
@@ -36,6 +40,8 @@ import { GraficoBarras } from "./GraficoBarras";
 // (regla de fricción del 05-11-2026; informe de fricción, AC-44). En «Facturas faltantes», quien puede
 // cargar la factura al preparar la sube desde la fila (decisión del propietario del 13-11-2026, app
 // 0099): queda adjunta sin versión nueva y la orden sale de la lista cuando el antivirus la acepta.
+// En Modo Consejo no hay órdenes: el gasto sale de las liquidaciones oficiales (app 0120), por período y
+// por rubro, con lo que no cierra en la vigente (RN33: la diferencia, sin calificarla).
 
 export const RUTA_PANEL = "/panel";
 /** El mismo nombre en el inicio, la barra, la cabecera y la facultad (informe de fricción, AC-42):
@@ -58,6 +64,7 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
   const veRegistros = acciones !== null && cumple(acciones, REQUISITOS.pagos);
   // null mientras no se sabe: ni el botón ni «La sube la administración».
   const subeFacturas = acciones === null ? null : cumple(acciones, REQUISITOS.subirFactura);
+  const veLiquidaciones = acciones !== null && cumple(acciones, REQUISITOS.liquidacionOficial);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -121,10 +128,10 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
           )}
           {lectura.tipo === "ok" &&
             (estaVacio(lectura.panel) ? (
-              <p className="tarjeta">Todavía no hay órdenes de pago en este edificio. El resumen se arma con ellas.</p>
+              <p className="tarjeta">{SIN_DATOS}</p>
             ) : (
               <Contenido panel={lectura.panel} consorcio={consorcio} veRegistros={veRegistros} subeFacturas={subeFacturas}
-                aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
+                veLiquidaciones={veLiquidaciones} aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
             ))}
         </>
       )}
@@ -168,11 +175,25 @@ type PropsContenido = {
   alCambiar: () => void;
 };
 
-function Contenido({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCambiar }: PropsContenido) {
+/** Sin órdenes ni liquidaciones oficiales: de qué se arma el resumen. */
+export const SIN_DATOS =
+  "Todavía no hay datos para el resumen. Se arma con las órdenes de pago o con las liquidaciones de la administración que confirma el Consejo.";
+export const TITULO_GASTO_POR_PERIODO = "Gasto por período";
+export const TITULO_GASTO_POR_RUBRO = "Gasto por rubro";
+export const SEGUN_LAS_OFICIALES = "Según las liquidaciones oficiales.";
+export const VER_LIQUIDACIONES = "Ver las liquidaciones oficiales";
+/** RN33: lo que no cierra entre lo que informa la liquidación y lo que suma, sin calificarlo. Se
+ * controló sobre el documento tal como llegó, antes de las correcciones (hallazgo de Codex en #276):
+ * las cifras de los gráficos son las oficiales. */
+export const textoNoCierra = (mes: string, n: number) =>
+  `Lo que no cierra en el documento de ${periodo(mes)}: ${n === 1 ? "1 diferencia" : `${n} diferencias`}`;
+
+function Contenido({ panel, consorcio, veRegistros, subeFacturas, veLiquidaciones, aEntrar, alCambiar }: PropsContenido & { veLiquidaciones: boolean }) {
   const lista = monedas(panel);
   return (
     <div className="panel-consejo">
       {veRegistros && <EnlacePagos consorcio={consorcio} />}
+      {panel.gasto_liquidado.length > 0 && <Liquidadas panel={panel} consorcio={consorcio} veLiquidaciones={veLiquidaciones} />}
       {lista.map((moneda) => (
         <PorMoneda key={moneda} panel={panel} moneda={moneda} conMoneda={lista.length > 1} />
       ))}
@@ -235,6 +256,65 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
         barras={gastoPorMes(panel, moneda, true)}
         columna="Mes"
         valor="Pagado con el fondo"
+      />
+    </>
+  );
+}
+
+type PropsLiquidadas = { panel: DatosPanel; consorcio: string; veLiquidaciones: boolean };
+
+/** Modo Consejo (app 0120): el gasto según las liquidaciones oficiales, por período y por rubro, cada
+ * gráfico con su tabla equivalente. Un solo enlace lleva a las liquidaciones, si la persona las puede
+ * abrir: el de lo que no cierra, si hay diferencias; si no, el general. */
+function Liquidadas({ panel, consorcio, veLiquidaciones }: PropsLiquidadas) {
+  const id = useId();
+  const periodos = periodosConRubros(panel);
+  const [elegido, setElegido] = useState("");
+  const mes = periodos.includes(elegido) ? elegido : (periodos[0] ?? "");
+  const vigente = panel.liquidacion_vigente;
+  const noCierra = vigente !== null && vigente.diferencias > 0 ? textoNoCierra(vigente.periodo, vigente.diferencias) : null;
+  const enlace = (texto: string) => (
+    <p>
+      <Link to={RUTA_LIQUIDACION_OFICIAL} state={{ consorcio }} className="enlace-suelto">
+        {texto}
+      </Link>
+    </p>
+  );
+  return (
+    <>
+      {noCierra !== null && (veLiquidaciones ? enlace(noCierra) : <p>{noCierra}</p>)}
+      {noCierra === null && veLiquidaciones && enlace(VER_LIQUIDACIONES)}
+      <GraficoBarras
+        titulo={TITULO_GASTO_POR_PERIODO}
+        aviso={SEGUN_LAS_OFICIALES}
+        base="El total del gasto que informa la liquidación de cada período, la que la administración mandó y el Consejo confirmó, con los totales por grupo. Los últimos períodos que tienen una."
+        barras={gastoLiquidadoPorPeriodo(panel)}
+        columna="Período"
+        valor="Gasto"
+        detalle="Por grupo"
+      />
+      {/* Con un solo período no hay nada que elegir: el período va en el título (PAN-07). */}
+      <GraficoBarras
+        titulo={`${TITULO_GASTO_POR_RUBRO}${periodos.length === 1 ? `, ${periodo(mes)}` : ""}`}
+        aviso={SEGUN_LAS_OFICIALES}
+        base="Lo que la liquidación del período elegido informa para cada rubro, tal como la confirmó el Consejo."
+        control={
+          periodos.length > 1 && (
+            <div className="formulario">
+              <label htmlFor={`${id}-periodo`}>Período</label>
+              <select id={`${id}-periodo`} value={mes} onChange={(e) => setElegido(e.target.value)}>
+                {periodos.map((m) => (
+                  <option key={m} value={m}>
+                    {periodo(m)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )
+        }
+        barras={rubrosDelPeriodo(panel, mes)}
+        columna="Rubro"
+        valor="Gasto"
       />
     </>
   );

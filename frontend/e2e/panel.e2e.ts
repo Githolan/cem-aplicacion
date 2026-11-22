@@ -35,8 +35,34 @@ const PANEL = {
     },
   ],
   solicitudes_abiertas: 1,
+  gasto_liquidado: [],
+  rubros_liquidados: [],
+  liquidacion_vigente: null,
 };
-const D1 = "55555555-5555-4555-8555-555555555555";
+// Modo Consejo (app 0120): sin órdenes, el gasto de las liquidaciones oficiales. Los textos y los
+// importes, de los más largos. SINTETICO.
+const GRUPOS_LARGOS = [
+  { nombre: "Gastos Comunes y Generales del Edificio", total: "123456789012.34" },
+  { nombre: "Agua y Servicios Sanitarios (AySA)", total: "98765432.10" },
+];
+const RUBRO_LARGO = "Mantenimiento de ascensores, montacargas y escaleras mecánicas del edificio";
+const PANEL_CONSEJO = {
+  ordenes_por_estado: [],
+  gasto_pagado: [],
+  comprobantes_faltantes: [],
+  solicitudes_abiertas: 0,
+  gasto_liquidado: [
+    { periodo: "2026-09-01", confirmada_en: "2026-10-05T15:00:00Z", total: "123555554444.44", grupos: GRUPOS_LARGOS },
+    { periodo: "2026-10-01", confirmada_en: "2026-11-05T15:00:00Z", total: "123555554444.44", grupos: GRUPOS_LARGOS },
+  ],
+  rubros_liquidados: [
+    { periodo: "2026-09-01", numero: 1, nombre: "Servicios públicos", total: "1500.50" },
+    { periodo: "2026-10-01", numero: 1, nombre: "Servicios públicos", total: "1500.50" },
+    { periodo: "2026-10-01", numero: 2, nombre: RUBRO_LARGO, total: "123456789012.34" },
+  ],
+  liquidacion_vigente: { id: "77777777-7777-4777-8777-777777777777", periodo: "2026-10-01", diferencias: 12 },
+};
+const D1 ="55555555-5555-4555-8555-555555555555";
 const V1 = "66666666-6666-4666-8666-666666666666";
 
 function vigilarErrores(pagina: Page): string[] {
@@ -51,7 +77,7 @@ function vigilarErrores(pagina: Page): string[] {
   return errores;
 }
 
-async function simularApi(pagina: Page, subidas: string[] = []): Promise<string[]> {
+async function simularApi(pagina: Page, subidas: string[] = [], panel: object = PANEL): Promise<string[]> {
   const imprevistos: string[] = [];
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
@@ -72,7 +98,7 @@ async function simularApi(pagina: Page, subidas: string[] = []): Promise<string[
       return ruta.fulfill({ json: { estado: "disponible", motivo_rechazo: null } });
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }] });
-      if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: PANEL });
+      if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: panel });
       // El inicio de quien confirma vínculos los cuenta (G-26).
       if (camino === `/api/v1/consorcios/${C1}/padron`) return ruta.fulfill({ json: { elementos: [] } });
       if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });
@@ -137,6 +163,40 @@ test.describe("panel", () => {
     await sinFaltasDeAccesibilidad(page);
     // Las barras son SVG en línea: la CSP no tiene que frenar nada.
     expect(await page.locator("svg.grafico__dibujo").count()).toBeGreaterThan(0);
+    expect(errores).toEqual([]);
+    expect(imprevistos).toEqual([]);
+  });
+});
+
+test.describe("panel en Modo Consejo (app 0120)", () => {
+  test("en un teléfono de 360 px el gasto de las liquidaciones oficiales y su base entran sin desplazar la página", async ({ page }) => {
+    const errores = vigilarErrores(page);
+    await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
+    const imprevistos = await simularApi(page, [], PANEL_CONSEJO);
+    await simularSesion(page, "con_sesion");
+    await page.goto("/panel");
+
+    const porPeriodo = page.getByRole("region", { name: "Gasto por período" });
+    await expect(porPeriodo).toBeVisible();
+    await expect(porPeriodo.getByText("Según las liquidaciones oficiales.")).toBeVisible();
+    await expect(porPeriodo.getByText(/^Gastos Comunes y Generales del Edificio: /).first()).toBeVisible();
+    const porRubro = page.getByRole("region", { name: "Gasto por rubro" });
+    await expect(porRubro.getByLabel("Período")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Lo que no cierra en el documento de octubre de 2026: 12 diferencias" })).toHaveAttribute(
+      "href",
+      "/liquidacion-oficial",
+    );
+    // Sin órdenes, sus bloques no se dibujan.
+    await expect(page.getByRole("region", { name: "Órdenes de pago por estado" })).toHaveCount(0);
+    expect(await sinDesplazamiento(page)).toBe(true);
+    await sinFaltasDeAccesibilidad(page);
+    for (const resumen of await page.getByText("Cómo se calcula").all()) await resumen.click();
+    await porRubro.getByLabel("Período").selectOption("2026-09-01");
+    await expect(porRubro.getByText(RUBRO_LARGO)).toHaveCount(0);
+    expect(await sinDesplazamiento(page)).toBe(true);
+    await sinFaltasDeAccesibilidad(page);
+    // Dos períodos y un rubro de septiembre: SVG en línea, sin violaciones de la CSP.
+    expect(await page.locator("svg.grafico__dibujo").count()).toBe(3);
     expect(errores).toEqual([]);
     expect(imprevistos).toEqual([]);
   });

@@ -427,7 +427,8 @@ def test_la_propietaria_ve_el_resumen_de_la_vigente_sin_gastos_ni_diferencias_ni
 ):
     e = escena
     r = get(e, "prop", "resumen")
-    assert r.status_code == 200 and r.json() == {"periodos": [], "liquidacion": None}, r.text
+    assert r.status_code == 200 and r.json() == {
+        "periodos": [], "liquidacion": None, "gasto_por_periodo": []}, r.text  # fmt: skip
     a = confirmada(e, motor_app)
     b = importar(e, motor_app, corregir={"rubro:2": {"total": "999.99"}})
     assert confirmar(e, b, {"reemplaza_a": a, "motivo": "Corrigió el rubro 2"}).status_code == 200

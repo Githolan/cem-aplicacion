@@ -4,9 +4,12 @@ Diseño: `doc/diseno/H4a_1_Panel_del_Consejo.md` del repositorio CEM.
 
 - **Una acción, una vista** (tabla de verdad, §1.2): `GET …/panel` es `fiscalizacion.ver_panel`,
   el panel completo del Consejo y la administración. El resumen del propietario
-  (`fiscalizacion.ver_resumen`) no está en este corte.
+  (`fiscalizacion.ver_resumen`) es `GET …/resumen` (`0119`, `0120`), sin diferencias ni
+  comprobantes faltantes.
 - **Señales con su base de cálculo, no conclusiones** (RN33): cada fila dice de dónde sale.
-- Todo sale de las órdenes de pago. Sin cuenta, CUIT, contacto, personas ni motivos.
+- Las órdenes de pago (los modos con administración) y, desde `0120`, las liquidaciones oficiales
+  (Modo Consejo: la que la administración mandó y el Consejo confirmó). Sin cuenta, CUIT,
+  contacto, personas ni motivos.
 
 **Solicitud formal de documentación (RF49, CU12, PA36; `0108`).** Diseño:
 `doc/diseno/RF49_Solicitud_Formal.md` del repositorio CEM. El Consejo prepara una solicitud, dos
@@ -16,6 +19,7 @@ si no, lo registra el Consejo con el comprobante del medio externo. Tono informa
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
@@ -24,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from cem_contracts.documentos import EstadoVersion, VersionCargada
 from cem_contracts.egresos import EstadoOrdenPago, Version
+from cem_contracts.importacion_liquidacion import TotalDelGrupo
 
 
 class OrdenesPorEstado(BaseModel):
@@ -80,8 +85,44 @@ class ComprobanteFaltante(BaseModel):
     )
 
 
+class GastoLiquidado(BaseModel):
+    """El gasto de un período según su liquidación oficial (la confirmada, `0119`; Modo Consejo):
+    el total y los totales por grupo, como los informa la liquidación (`0120`). Vacíos si la
+    liquidación no tiene ese dato oficial."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    confirmada_en: datetime
+    total: Decimal | None
+    grupos: list[TotalDelGrupo]
+
+
+class RubroLiquidado(BaseModel):
+    """El gasto de un rubro en un período según su liquidación oficial (`0120`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    numero: int | None
+    nombre: str | None
+    total: Decimal | None
+
+
+class LiquidacionVigente(BaseModel):
+    """La liquidación oficial del último período que la tiene y cuántas diferencias dejó su lectura:
+    lo que no cierra entre lo que informa y lo que suma (RN33: la diferencia, sin calificarla)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID = Field(description="La liquidación oficial (`GET …/liquidacion-oficial/{id}`).")
+    periodo: date
+    diferencias: int = Field(ge=0)
+
+
 class PanelFiscalizacion(BaseModel):
-    """`GET …/panel`: las tres lecturas, de una misma foto de la base."""
+    """`GET …/panel`: las lecturas de las órdenes de pago y de las liquidaciones oficiales, de una
+    misma foto de la base."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -96,6 +137,17 @@ class PanelFiscalizacion(BaseModel):
         ge=0,
         description="Solicitudes formales en borrador, con el envío pendiente, enviadas o"
         " vencidas: las que no se respondieron ni se retiraron (RF49).",
+    )
+    gasto_liquidado: list[GastoLiquidado] = Field(
+        description="De los últimos `PERIODOS_DE_GASTO` períodos con liquidación oficial, del más"
+        " viejo al más nuevo (`0120`)."
+    )
+    rubros_liquidados: list[RubroLiquidado] = Field(
+        description="Los rubros de esos mismos períodos, por período y en el orden de la"
+        " liquidación (`0120`)."
+    )
+    liquidacion_vigente: LiquidacionVigente | None = Field(
+        description="Nula si todavía no hay ninguna liquidación oficial (`0120`)."
     )
 
 

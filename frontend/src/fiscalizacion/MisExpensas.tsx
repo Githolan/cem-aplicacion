@@ -18,8 +18,9 @@ import { enPesos } from "./LiquidacionDelAdministrador";
 // Página /mis-expensas (H5 §6, D3-A; app 0119): para cada propietario con el vínculo confirmado, lo
 // que dice la liquidación oficial del período, la que la administración mandó y el Consejo confirmó.
 // De cada unidad propia (`cuenta.ver_propia`), el total, el saldo anterior, los pagos, la deuda y el
-// interés; del edificio (`fiscalizacion.ver_resumen`), el gasto por rubro en un gráfico que lleva su
-// tabla equivalente (documento 08, §13.4). Nunca otra unidad, ni el detalle de los gastos, ni las
+// interés; del edificio (`fiscalizacion.ver_resumen`), el gasto por rubro y el total de los últimos
+// períodos (app 0120), cada gráfico con su tabla equivalente (documento 08, §13.4). Nunca otra unidad,
+// ni el detalle de los gastos, ni las
 // diferencias (las ve solo el panel completo, RN33). La pantalla solo muestra: lo decide la API.
 
 type MiCuenta = components["schemas"]["MiCuenta"];
@@ -31,6 +32,7 @@ export const TITULO_MIS_EXPENSAS = "Mis expensas";
 export const SIN_LIQUIDACION = "Todavía no hay una liquidación de la administración confirmada en este edificio.";
 export const NO_FIGURA = "Esta unidad no figura en la liquidación de la administración.";
 export const GASTO_DEL_PERIODO = "Gasto del período por rubro";
+export const GASTO_POR_PERIODO = "Gasto por período";
 export const segunLaLiquidacion = (periodo: string, confirmada: string) =>
   `Período ${mesLargo(periodo)}, según la liquidación de la administración, confirmada el ${fechaCorta(confirmada)}.`;
 
@@ -132,6 +134,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const periodos = datos?.cuenta?.periodos ?? datos?.resumen?.periodos ?? [];
   const cuenta = datos?.cuenta?.liquidacion ?? null;
   const resumen = datos?.resumen?.liquidacion ?? null;
+  const serie = datos?.resumen?.gasto_por_periodo ?? [];
   const cabeza = cuenta ?? resumen;
 
   return (
@@ -194,6 +197,15 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   />
                   {resumen.total !== null && <p>Total del gasto del período: {enPesos(resumen.total)}</p>}
                   {cuenta === null && resumen.vencimientos.length > 0 && <p>Vencimientos: {resumen.vencimientos.join(", ")}</p>}
+                  <GraficoBarras
+                    titulo={GASTO_POR_PERIODO}
+                    base="El total del gasto que informa la liquidación de la administración de cada período, tal como la confirmó el Consejo. Los últimos períodos que tienen una."
+                    barras={serie.flatMap((p) =>
+                      p.total === null ? [] : [{ clave: p.periodo, etiqueta: mesLargo(p.periodo), valor: Number(p.total), texto: enPesos(p.total) }],
+                    )}
+                    columna="Período"
+                    valor="Gasto"
+                  />
                 </>
               )}
             </>

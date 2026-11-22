@@ -21,11 +21,13 @@ type Props = {
   barras: readonly Barra[];
   columna: string;
   valor: string;
+  /** El encabezado de la columna del `detalle` de cada barra, si alguna lo tiene (los grupos). */
+  detalle?: string;
   /** Algo para elegir antes del gráfico (el mes del gasto por rubro). */
   control?: ReactNode;
 };
 
-export function GraficoBarras({ titulo, base, aviso, barras, columna, valor, control }: Props) {
+export function GraficoBarras({ titulo, base, aviso, barras, columna, valor, detalle, control }: Props) {
   const id = useId();
   const maximo = Math.max(...barras.map((b) => b.valor), 0);
   if (barras.length === 0) return null;
@@ -54,6 +56,7 @@ export function GraficoBarras({ titulo, base, aviso, barras, columna, valor, con
               />
             </svg>
             <span className="grafico__valor">{b.texto}</span>
+            {b.detalle !== undefined && <span className="grafico__detalle">{b.detalle}</span>}
           </li>
         ))}
       </ul>
@@ -65,6 +68,7 @@ export function GraficoBarras({ titulo, base, aviso, barras, columna, valor, con
             <tr>
               <th scope="col">{columna}</th>
               <th scope="col">{valor}</th>
+              {detalle !== undefined && <th scope="col">{detalle}</th>}
             </tr>
           </thead>
           <tbody>
@@ -72,6 +76,7 @@ export function GraficoBarras({ titulo, base, aviso, barras, columna, valor, con
               <tr key={b.clave}>
                 <th scope="row">{b.etiqueta}</th>
                 <td>{b.texto}</td>
+                {detalle !== undefined && <td>{b.detalle ?? "—"}</td>}
               </tr>
             ))}
           </tbody>
