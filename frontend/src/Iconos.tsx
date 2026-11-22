@@ -90,6 +90,10 @@ const TRAZOS = {
       <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
     </>
   ),
+  // Reparaciones a cargo del consorcio (RF19): una llave inglesa.
+  herramienta: (
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z" />
+  ),
   flecha: <path d="m9 18 6-6-6-6" />,
   volver: <path d="m15 18-6-6 6-6" />,
 } satisfies Record<string, ReactNode>;

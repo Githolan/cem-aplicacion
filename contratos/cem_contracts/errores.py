@@ -396,6 +396,22 @@ class CodigoError(StrEnum):
     borrador): se puede citar la vigente o reclamar sobre la reemplazada a sabiendas (`0123`)."""
     RECLAMO_CERRADO = "reclamo_cerrado"
     """El reclamo ya se respondió, se pasó a una solicitud formal o se retiró (`0123`)."""
+    REPARACION_NO_ADMITE = "reparacion_no_admite"
+    """La reparación no admite ese paso en su estado: otra persona la movió, o ya terminó
+    (`0124`)."""
+    RESPONSABLE_INVALIDO = "responsable_invalido"
+    """El responsable de una reparación no tiene hoy `reparaciones.gestionar` en el edificio
+    (`0124`)."""
+    CONSTANCIA_INVALIDA = "constancia_invalida"
+    """La constancia de aprobación cita una decisión formal de este edificio o un documento, uno de
+    los dos (`0124`)."""
+    GASTO_NO_OFICIAL = "gasto_no_oficial"
+    """El gasto no figura en una liquidación oficial vigente (confirmada) de este edificio
+    (`0124`)."""
+    GASTO_YA_ENLAZADO = "gasto_ya_enlazado"
+    """Ese gasto ya cierra otra reparación: un gasto cierra a lo sumo una (PA11, `0124`)."""
+    FOTOS_COMPLETAS = "fotos_completas"
+    """La reparación ya tiene todas las fotos que admite (`FOTOS_MAXIMO`, `0124`)."""
 
 
 class Error(BaseModel):

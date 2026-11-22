@@ -5,6 +5,7 @@ import { RUTA_CONTACTOS } from "../Contactos";
 import { ESTADO, fechaLegible, importe, momento, RUTA_CONSULTA_PROVEEDORES, RUTA_PROVEEDORES } from "../egresos/comun";
 import { codigoDe, mensajeDeFalla } from "../fallas";
 import { RUTA_RECLAMOS, TITULO_RECLAMOS } from "../fiscalizacion/Reclamos";
+import { RUTA_REPARACIONES, TITULO_REPARACIONES } from "../reparaciones/textos";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "../fiscalizacion/Solicitudes";
 import type { NombreIcono } from "../Iconos";
 import { RUTA_MANDATOS } from "../Mandatos";
@@ -260,6 +261,30 @@ export function usePendientesReclamos({ porEdificio, edificios }: Comunes): Fuen
       return detalle === null ? [] : [fila({ ...base, detalle }, TITULO_RECLAMOS, edificio, varios)];
     },
     siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_RECLAMOS, edificio, varios),
+  });
+}
+
+// --- Pedidos de reparación que esperan responsable (RF19, app 0124), para quien gestiona
+
+export function textoReparaciones(pedidas: number): string | null {
+  return pedidas === 0 ? null : plural(pedidas, "pedido de reparación espera responsable", "pedidos de reparación esperan responsable");
+}
+
+export function usePendientesReparaciones({ porEdificio, edificios }: Comunes): Fuente {
+  const varios = edificios.length > 1;
+  const base = { ruta: RUTA_REPARACIONES, icono: "herramienta" } as const;
+  return usePorEdificio({
+    clave: "reparaciones",
+    porEdificio,
+    edificios,
+    requisito: REQUISITOS.gestionarReparaciones,
+    leer: async (consorcio) =>
+      exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/reparaciones", { params: { path: { consorcio_id: consorcio } } })).elementos,
+    filas: (reparaciones, edificio) => {
+      const detalle = textoReparaciones(reparaciones.filter((r) => r.estado === "pedida").length);
+      return detalle === null ? [] : [fila({ ...base, detalle }, TITULO_REPARACIONES, edificio, varios)];
+    },
+    siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_REPARACIONES, edificio, varios),
   });
 }
 

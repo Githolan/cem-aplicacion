@@ -290,4 +290,9 @@ export const REQUISITOS = {
   /** Los reclamos sobre la liquidación que atienden el Consejo y la administración (RF34, app
    * 0123). El propietario ve los suyos en «Mis expensas». */
   reclamos: [["reclamos_liquidacion.atender"]],
+  /** Las reparaciones a cargo del consorcio (RF19, app 0124): quien pidió ve las suyas y pide otra;
+   * quien gestiona, todas. */
+  reparaciones: [["reparaciones.ver"]],
+  /** Quien gestiona las reparaciones: el inicio le cuenta los pedidos que esperan responsable. */
+  gestionarReparaciones: [["reparaciones.gestionar"]],
 } as const satisfies Record<string, Requisito>;

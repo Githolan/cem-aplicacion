@@ -152,6 +152,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     con 0100, que se niega a bajar si el equipo habilitó una moneda: se borran las monedas. Y con
     0122, que se niega a bajar si hay comunicados: se borran primero. Y con 0123, que se niega a
     bajar si hay reclamos, que citan importaciones y solicitudes formales: se borran antes que todo.
+    Y con 0124, que se niega a bajar si hay reparaciones, que citan importaciones, documentos y
+    decisiones: se borran también antes que todo.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -163,6 +165,23 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if;"
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
+                " end if;"
+                # Las reparaciones (0124) citan importaciones, documentos, decisiones, unidades y
+                # personas, solo se agregan y niegan su downgrade: van primero, de la última tabla
+                # a la primera.
+                " if to_regclass('nucleo.reparacion') is not null then"
+                "   alter table nucleo.reparacion_estado disable trigger user;"
+                "   alter table nucleo.reparacion_gestion disable trigger user;"
+                "   alter table nucleo.reparacion_adjunto disable trigger user;"
+                "   alter table nucleo.reparacion disable trigger user;"
+                "   delete from nucleo.reparacion_estado;"
+                "   delete from nucleo.reparacion_gestion;"
+                "   delete from nucleo.reparacion_adjunto;"
+                "   delete from nucleo.reparacion;"
+                "   alter table nucleo.reparacion_estado enable trigger user;"
+                "   alter table nucleo.reparacion_gestion enable trigger user;"
+                "   alter table nucleo.reparacion_adjunto enable trigger user;"
+                "   alter table nucleo.reparacion enable trigger user;"
                 " end if;"
                 # Los reclamos (0123) citan importaciones, unidades, personas y solicitudes
                 # formales, solo se agregan y niegan su downgrade: van primero, el historial antes.

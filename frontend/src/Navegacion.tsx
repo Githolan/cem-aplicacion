@@ -18,6 +18,7 @@ import { RUTA_LIQUIDACION_ADMINISTRADOR, TITULO_LIQUIDACION_ADMINISTRADOR } from
 import { RUTA_LIQUIDACION_OFICIAL, TITULO_LIQUIDACION_OFICIAL } from "./fiscalizacion/LiquidacionOficial";
 import { RUTA_MIS_EXPENSAS, TITULO_MIS_EXPENSAS } from "./fiscalizacion/MisExpensas";
 import { RUTA_RECLAMOS, TITULO_RECLAMOS } from "./fiscalizacion/Reclamos";
+import { RUTA_REPARACIONES, TITULO_REPARACIONES } from "./reparaciones/textos";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
 import { useSolicitudesDirigidas } from "./fiscalizacion/solicitudesDirigidas";
 import { cumpleEnAlguno, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
@@ -86,6 +87,9 @@ export const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_PANEL, texto: TITULO_PANEL, icono: "grafico", requisito: REQUISITOS.panel },
   { ruta: RUTA_SOLICITUDES, texto: TITULO_SOLICITUDES, icono: "sobre", requisito: REQUISITOS.panel },
   { ruta: RUTA_RECLAMOS, texto: TITULO_RECLAMOS, icono: "globo", requisito: REQUISITOS.reclamos },
+  // Las reparaciones (RF19, app 0124): también para quien pide (propietario, inquilino u ocupante);
+  // en el teléfono se llega desde el inicio, sin una pestaña más.
+  { ruta: RUTA_REPARACIONES, texto: TITULO_REPARACIONES, icono: "herramienta", requisito: REQUISITOS.reparaciones },
   { ruta: RUTA_LIQUIDACION_ADMINISTRADOR, texto: TITULO_LIQUIDACION_ADMINISTRADOR, icono: "documento", requisito: REQUISITOS.importarLiquidacion },
   { ruta: RUTA_LIQUIDACION_OFICIAL, texto: TITULO_LIQUIDACION_OFICIAL, icono: "calculadora", requisito: REQUISITOS.liquidacionOficial },
 ];

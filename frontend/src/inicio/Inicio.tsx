@@ -27,6 +27,7 @@ import {
   usePendientesPedidosSalteo,
   usePendientesProveedores,
   usePendientesReclamos,
+  usePendientesReparaciones,
   usePendientesSolicitudes,
 } from "./pendientes";
 
@@ -105,6 +106,7 @@ export function Inicio({ barra }: { barra: HTMLElement | null }) {
     usePendientesPedidosSalteo(comunes),
     usePendientesSolicitudes(comunes),
     usePendientesReclamos(comunes),
+    usePendientesReparaciones(comunes),
     usePendientesPadron(comunes),
     usePendientesMandatos(comunes),
     usePendientesContactos(comunes),
