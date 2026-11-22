@@ -100,10 +100,14 @@ RECLAMOS = set(exportar_consorcio.PARTES["reclamos_liquidacion"])
 REPARACIONES = set(exportar_consorcio.PARTES["reparaciones"])
 """RF19 (`0124`): el edificio de estas pruebas no tiene reparaciones; su contenido lo prueba
 `test_reparaciones_0124.py`. Sus claves sí están decididas acá."""
+PERFIL_NORMATIVO = set(exportar_consorcio.PARTES["perfil_normativo"])
+"""RF01 y RF47 (`0125`): el edificio de estas pruebas se crea sin perfil vinculado ni importaciones;
+su contenido lo prueba `test_perfil_normativo_0125.py`. Sus claves sí están decididas acá."""
 PARTES_POSTERIORES = (
     "liquidaciones_importadas", "comunicados", "reclamos_liquidacion", "reparaciones",
+    "perfil_normativo",
 )  # fmt: skip
-"""Las partes que suman las migraciones posteriores a `0069` (`0121`, `0122`, `0123`, `0124`)."""
+"""Las partes que suman las migraciones posteriores a `0069` (`0121` a `0125`)."""
 HASTA_0069 = len(FUNCIONES) - len(PARTES_POSTERIORES)
 """Las funciones de exportación que hay con la base en `0069`."""
 
@@ -515,6 +519,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         - COMUNICADOS
         - RECLAMOS
         - REPARACIONES
+        - PERFIL_NORMATIVO
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}

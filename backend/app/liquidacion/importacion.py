@@ -284,7 +284,8 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         except imagenes.ImagenIlegible:
             _guardar(conn, importacion, None, None, IMAGEN_ILEGIBLE, [], [])
             return {"leida": False, "motivo": "imagen_ilegible"}
-        _anotar_enlaces(conn, importacion, enlaces.de_imagenes(foto.imagenes))
+        # De una foto solo salen sus QR: una dirección escrita no se lee (búsqueda incompleta).
+        _anotar_enlaces(conn, importacion, enlaces.de_imagenes(foto.imagenes), completa=False)
         return _leer_con_ia(conn, trabajo, importacion, lambda: foto, SIN_TEXTO_FOTO)
     try:
         paginas = palabras_pdf.paginas(contenido)
@@ -297,7 +298,10 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         dibujadas: list[bytes] | None = imagenes.de_pdf(contenido)
     except (imagenes.DemasiadasPaginas, imagenes.ImagenIlegible):
         dibujadas = None
-    _anotar_enlaces(conn, importacion, enlaces.de_pdf(contenido, paginas, dibujadas or []))
+    # En todo el documento solo si tiene texto y se dibujaron sus páginas (los QR) (`0125`).
+    completa = dibujadas is not None and any(p.palabras for p in paginas)
+    _anotar_enlaces(conn, importacion, enlaces.de_pdf(contenido, paginas, dibujadas or []),
+                    completa=completa)  # fmt: skip
     try:
         lq = mis_expensas.leer(paginas)
     except mis_expensas.FormatoNoReconocido as e:
@@ -329,8 +333,13 @@ def _de_pdf(contenido: bytes, dibujadas: list[bytes] | None) -> lectura_ia.Docum
         raise _NoSeManda("imagen_ilegible") from None
 
 
-def _anotar_enlaces(conn: Connection, importacion: UUID, hallados: list[enlaces.Enlace]) -> None:
-    """Los enlaces del documento, sin seguirlos (`0118`); una lectura repetida no los duplica."""
+def _anotar_enlaces(
+    conn: Connection, importacion: UUID, hallados: list[enlaces.Enlace], *, completa: bool
+) -> None:
+    """Los enlaces del documento, sin seguirlos (`0118`); una lectura repetida no los duplica. Haya
+    o no, queda que se buscaron y si fue en todo el documento (`0125`, la señal de RF47)."""
+    conn.execute(text("select nucleo.registrar_busqueda_enlaces(:i, :c)"),
+                 {"i": importacion, "c": completa})  # fmt: skip
     if hallados:
         conn.execute(
             text("select nucleo.guardar_enlaces_liquidacion(:i, cast(:e as jsonb))"),

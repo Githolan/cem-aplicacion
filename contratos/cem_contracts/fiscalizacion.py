@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from cem_contracts.documentos import EstadoVersion, VersionCargada
 from cem_contracts.egresos import EstadoOrdenPago, Version
 from cem_contracts.importacion_liquidacion import TotalDelGrupo
+from cem_contracts.perfil_normativo import EnlaceDocumentacion
 
 
 class OrdenesPorEstado(BaseModel):
@@ -118,6 +119,10 @@ class LiquidacionVigente(BaseModel):
     id: UUID = Field(description="La liquidación oficial (`GET …/liquidacion-oficial/{id}`).")
     periodo: date
     diferencias: int = Field(ge=0)
+    enlace_documentacion: EnlaceDocumentacion | None = Field(
+        description="Lo que pide el perfil normativo del consorcio sobre el enlace a la"
+        " documentación y lo que encontró la lectura (RF47, `0125`); nulo si no lo exige."
+    )
 
 
 class PanelFiscalizacion(BaseModel):

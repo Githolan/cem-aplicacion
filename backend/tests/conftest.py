@@ -153,7 +153,9 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     0122, que se niega a bajar si hay comunicados: se borran primero. Y con 0123, que se niega a
     bajar si hay reclamos, que citan importaciones y solicitudes formales: se borran antes que todo.
     Y con 0124, que se niega a bajar si hay reparaciones, que citan importaciones, documentos y
-    decisiones: se borran también antes que todo.
+    decisiones: se borran también antes que todo. Y con 0125, que se niega a bajar si hay un
+    consorcio con perfil normativo o una búsqueda de enlaces, que citan consorcios e importaciones:
+    se borran también antes que todo (el perfil, que es de la jurisdicción, lo borra su downgrade).
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -165,6 +167,16 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if;"
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
+                " end if;"
+                # El perfil vinculado y las búsquedas de enlaces (0125) citan consorcios e
+                # importaciones, solo se agregan y niegan su downgrade: van primero.
+                " if to_regclass('nucleo.consorcio_perfil_normativo') is not null then"
+                "   alter table nucleo.busqueda_enlaces_liquidacion disable trigger user;"
+                "   alter table nucleo.consorcio_perfil_normativo disable trigger user;"
+                "   delete from nucleo.busqueda_enlaces_liquidacion;"
+                "   delete from nucleo.consorcio_perfil_normativo;"
+                "   alter table nucleo.busqueda_enlaces_liquidacion enable trigger user;"
+                "   alter table nucleo.consorcio_perfil_normativo enable trigger user;"
                 " end if;"
                 # Las reparaciones (0124) citan importaciones, documentos, decisiones, unidades y
                 # personas, solo se agregan y niegan su downgrade: van primero, de la última tabla

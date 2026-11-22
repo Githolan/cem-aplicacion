@@ -84,7 +84,7 @@ const CONSEJO: Panel = {
     { periodo: "2026-10-01", numero: 1, nombre: "Servicios públicos SINTETICOS", total: "1500.50" },
     { periodo: "2026-10-01", numero: 2, nombre: "Mantenimiento SINTETICO", total: "1000.00" },
   ],
-  liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 2 },
+  liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 2, enlace_documentacion: null },
 };  // prettier-ignore
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
@@ -207,7 +207,7 @@ describe("Modo Consejo: el gasto según las liquidaciones oficiales (app 0120)",
   });
 
   it("sin diferencias ofrece las liquidaciones; quien no las abre no recibe enlace", async () => {
-    const sinDiferencias: Panel = { ...CONSEJO, liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 0 } };
+    const sinDiferencias: Panel = { ...CONSEJO, liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 0, enlace_documentacion: null } };
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(sinDiferencias) }));
     abrir();
     expect((await screen.findByRole("link", { name: VER_LIQUIDACIONES })).getAttribute("href")).toBe("/liquidacion-oficial");
@@ -219,6 +219,30 @@ describe("Modo Consejo: el gasto según las liquidaciones oficiales (app 0120)",
     expect(await screen.findByText(textoNoCierra("2026-10-01", 2))).toBeTruthy();
     expect(screen.queryByRole("link", { name: textoNoCierra("2026-10-01", 2) })).toBeNull();
     expect(screen.queryByRole("link", { name: VER_LIQUIDACIONES })).toBeNull();
+  });
+
+  it("RF47: la vigente sin el enlace a la documentación lo avisa sobre los gráficos, sin botones; con el enlace, nada", async () => {
+    const enlace = { jurisdiccion: "caba" as const, version: 1, norma: "Disposición 1146/DGDYPC/24", fuente: "https://boletinoficial.buenosaires.gob.ar/normativaba/norma/714586" };
+    const sinEnlace: Panel = { ...CONSEJO, liquidacion_vigente: { ...CONSEJO.liquidacion_vigente!, enlace_documentacion: { ...enlace, estado: "no_encontrado" } } };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(sinEnlace) }));
+    const { container } = abrir();
+    const aviso = await screen.findByRole("note");
+    expect(aviso.textContent).toContain("La liquidación oficial de octubre de 2026 no trae el enlace ni el QR a la documentación del período");
+    expect(aviso.textContent).toContain("En Modo Consejo CEM no publica la liquidación");
+    expect(within(aviso).queryByRole("button")).toBeNull();
+    // Arriba de los gráficos, y el único enlace a las liquidaciones sigue siendo el de lo que no cierra.
+    const porPeriodo = screen.getByRole("region", { name: TITULO_GASTO_POR_PERIODO });
+    expect(aviso.compareDocumentPosition(porPeriodo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const internos = within(container.querySelector<HTMLElement>(".panel-consejo")!).getAllByRole("link").filter((a) => a.getAttribute("href") === "/liquidacion-oficial");
+    expect(internos.map((a) => a.textContent)).toEqual([textoNoCierra("2026-10-01", 2)]);
+    await sinViolaciones(container);
+    cleanup();
+
+    const conEnlace: Panel = { ...CONSEJO, liquidacion_vigente: { ...CONSEJO.liquidacion_vigente!, enlace_documentacion: { ...enlace, estado: "encontrado" } } };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(conEnlace) }));
+    abrir();
+    expect(await screen.findByRole("region", { name: TITULO_GASTO_POR_PERIODO })).toBeTruthy();
+    expect(screen.queryByRole("note")).toBeNull();
   });
 
   it("con un solo período no hay desplegable y el período va en el título (PAN-07)", async () => {

@@ -13,13 +13,16 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { FilaDeRegistro } from "../FichaDeRegistro";
 import { fechaCorta } from "../pagos/textos";
 import { REQUISITOS } from "../permisos";
+import { AvisoEnlaceDocumentacion, resumenAvisoEnlace } from "./AvisoEnlaceDocumentacion";
 import { enPesos } from "./LiquidacionDelAdministrador";
 
 // Página /liquidacion-oficial (H5 §6, D3-A; app 0119), en solo lectura: para el Consejo y la
 // administración (`liquidacion.ver_importada`, la facultad del panel), la liquidación oficial de cada
 // período —la que la administración mandó y el Consejo confirmó— con sus rubros, sus gastos, las
 // unidades y lo que no cierra (RN33: dice la diferencia, no la califica). Las reemplazadas quedan
-// como historia, con el motivo del reemplazo. Nunca una importación sin confirmar (RN30).
+// como historia, con el motivo del reemplazo. Nunca una importación sin confirmar (RN30). La vigente
+// avisa si no trae el enlace a la documentación que pide el perfil normativo del edificio (RF47,
+// app 0125): en la fila, en pocas palabras, y en la ficha, con la norma.
 
 type Oficial = components["schemas"]["LiquidacionOficialResumen"];
 type Detalle = components["schemas"]["LiquidacionOficial"];
@@ -170,7 +173,13 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   <li key={o.id}>
                     <FilaDeRegistro
                       titulo={`Período ${mesLargo(o.periodo)}`}
-                      resumen={`Confirmada el ${fechaCorta(o.decidida_en)}${o.diferencias > 0 ? ` · ${o.diferencias} sin cerrar en el documento` : ""}`}
+                      resumen={[
+                        `Confirmada el ${fechaCorta(o.decidida_en)}`,
+                        o.diferencias > 0 ? `${o.diferencias} sin cerrar en el documento` : null,
+                        resumenAvisoEnlace(o.enlace_documentacion),
+                      ]
+                        .filter((x) => x !== null)
+                        .join(" · ")}
                       estado={o.vigente ? VIGENTE : REEMPLAZADA}
                       alAbrir={() => {
                         setAbierta({ tipo: "cargando" });
@@ -254,6 +263,7 @@ function DeUnPeriodo({ detalle, oficiales, idTitulo }: { detalle: Detalle; ofici
       <p>
         {detalle.vigente ? VIGENTE : REEMPLAZADA} · Confirmada el {fechaCorta(detalle.decidida_en)}
       </p>
+      <AvisoEnlaceDocumentacion periodo={detalle.periodo} enlace={detalle.enlace_documentacion} />
       {historiaDe(detalle, oficiales).map((linea) => (
         <p key={linea} className="tarjeta">
           {linea}

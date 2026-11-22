@@ -17,6 +17,7 @@ import { FilaDeLectura, FilaEnlace } from "../pagos/FilaEnlace";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
 import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
 import { useAncho } from "../pagos/useAncho";
+import { AvisoEnlaceDocumentacion } from "../fiscalizacion/AvisoEnlaceDocumentacion";
 import { RUTA_LIQUIDACION_OFICIAL } from "../fiscalizacion/LiquidacionOficial";
 import {
   estaVacio,
@@ -41,7 +42,8 @@ import { GraficoBarras } from "./GraficoBarras";
 // cargar la factura al preparar la sube desde la fila (decisión del propietario del 13-11-2026, app
 // 0099): queda adjunta sin versión nueva y la orden sale de la lista cuando el antivirus la acepta.
 // En Modo Consejo no hay órdenes: el gasto sale de las liquidaciones oficiales (app 0120), por período y
-// por rubro, con lo que no cierra en la vigente (RN33: la diferencia, sin calificarla).
+// por rubro, con lo que no cierra en la vigente (RN33: la diferencia, sin calificarla) y el aviso de la
+// vigente sin el enlace a la documentación que pide el perfil normativo (RF47, app 0125).
 
 export const RUTA_PANEL = "/panel";
 /** El mismo nombre en el inicio, la barra, la cabecera y la facultad (informe de fricción, AC-42):
@@ -282,6 +284,7 @@ function Liquidadas({ panel, consorcio, veLiquidaciones }: PropsLiquidadas) {
   );
   return (
     <>
+      {vigente !== null && <AvisoEnlaceDocumentacion periodo={vigente.periodo} enlace={vigente.enlace_documentacion} />}
       {noCierra !== null && (veLiquidaciones ? enlace(noCierra) : <p>{noCierra}</p>)}
       {noCierra === null && veLiquidaciones && enlace(VER_LIQUIDACIONES)}
       <GraficoBarras
