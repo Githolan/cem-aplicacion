@@ -27,6 +27,7 @@ from app.identidad.router import router as identidad
 from app.identidad.router import validar_origen
 from app.identidad.segundo_factor import router as segundo_factor
 from app.liquidacion.importacion import router as importacion_liquidacion
+from app.liquidacion.oficial import router as liquidacion_oficial
 from app.plataforma.router import SIN_LIMITE_DE_TASA, CacheDependencias
 from app.plataforma.router import router as plataforma
 from app.soporte.router import router as soporte
@@ -85,6 +86,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(egresos)
     app.include_router(liquidaciones)
     app.include_router(importacion_liquidacion)
+    app.include_router(liquidacion_oficial)
     app.include_router(fiscalizacion)
     app.include_router(soporte)
     return app

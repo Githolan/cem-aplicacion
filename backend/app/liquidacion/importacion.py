@@ -16,7 +16,8 @@
 - **Confirmación (H5-3, `0115`)**, con la misma facultad (D2-A): la decisión sobre cada campo
   (`…/campos/{campo}/decision`: confirmar, corregir o descartar), la confirmación de la importación
   entera sin campos pendientes (`…/confirmacion`) y su descarte con motivo (`…/descarte`). Cada una
-  devuelve la importación como queda.
+  devuelve la importación como queda. Una sola oficial por período (`0119`): si el período ya
+  tiene una, la confirmación la reemplaza con motivo (`reemplaza_a`), o se niega.
 - **Enlaces (H5-5, `0118`)**: la lectura anota los enlaces del documento (anotados, escritos o en
   un QR) sin seguirlos, y la importación los muestra. `POST …/{id}/enlaces/{n}/descarga`
   (`liquidacion.importar` y la carga de la categoría) trae el archivo de uno con la descarga
@@ -43,6 +44,7 @@ from cem_contracts.documentos import CategoriaDocumento
 from cem_contracts.errores import CodigoError
 from cem_contracts.importacion_liquidacion import (
     CampoPreliminar,
+    ConfirmacionImportacion,
     CorrespondenciaNueva,
     DecisionCampo,
     DecisionSobreCampo,
@@ -58,7 +60,7 @@ from cem_contracts.importacion_liquidacion import (
     ImportacionResumen,
     RecalculoLiquidacion,
 )
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Body, Depends, Response
 from pdfplumber.utils.exceptions import PdfminerException
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
@@ -133,6 +135,15 @@ ERRORES = {
     "nombre_invalido": (422, CodigoError.PETICION_INVALIDA, "Falta el nombre del grupo."),
     "grupo_inexistente": (
         422, CodigoError.GRUPO_INEXISTENTE, "El edificio no tiene ese esquema de coeficientes.",
+    ),
+    "periodo_ya_confirmado": (
+        409, CodigoError.PERIODO_YA_CONFIRMADO,
+        "El período ya tiene su liquidación oficial: esta entra solo reemplazándola, con el"
+        " motivo.",
+    ),
+    "reemplazo_invalido": (
+        409, CodigoError.REEMPLAZO_INVALIDO,
+        "Lo que se quiso reemplazar ya no es la liquidación oficial de ese período.",
     ),
 }  # fmt: skip
 
@@ -548,6 +559,9 @@ def forma_igual(leido: Any, corregido: Any, clave: str = "", de: str = "") -> bo
     )
 
 
+SIN_REEMPLAZO = ConfirmacionImportacion()
+"""La confirmación sin cuerpo: no reemplaza nada."""
+
 _ACTOS: dict[int | str, dict[str, Any]] = {
     403: {"description": "Sin `liquidacion.importar` en el consorcio."},
     404: {"description": "La importación o el dato no existen en este consorcio."},
@@ -602,22 +616,32 @@ def decidir_campo(
     response_model=ImportacionLiquidacion,
     summary="Confirmar la liquidación importada: desde ahí sus datos decididos son oficiales",
     responses=_ACTOS
-    | {409: {"description": "Ya decidida, o quedan datos sin decidir (`campos_pendientes`)."}},
+    | {
+        409: {
+            "description": "Ya decidida, quedan datos sin decidir (`campos_pendientes`), el período"
+            " ya tiene su liquidación oficial (`periodo_ya_confirmado`) o lo que se reemplaza no es"
+            " la oficial (`reemplazo_invalido`)."
+        },
+        422: {"description": "El reemplazo va con su motivo (`peticion_invalida`)."},
+    },
 )
 def confirmar_importacion(
     importacion_id: UUID,
     permiso: Annotated[Permiso, Depends(requiere(ACCION, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
+    confirmacion: Annotated[ConfirmacionImportacion, Body()] = SIN_REEMPLAZO,
 ) -> Response:
+    """Sin cuerpo, no reemplaza nada. Con `reemplaza_a` y `motivo`, reemplaza la oficial del
+    período, que pasa a `reemplazada` en la misma transacción."""
     ctx = permiso.ctx
     permiso.verificar(Entidad())
 
     def efecto(conn: Connection) -> tuple[int, ImportacionLiquidacion]:
         _ejecutar(
             conn, permiso,
-            "select nucleo.confirmar_importacion_liquidacion(:i, :actor, 'api', :sesion)",
-            {"i": importacion_id},
+            "select nucleo.confirmar_importacion_liquidacion(:i, :r, :m, :actor, 'api', :sesion)",
+            {"i": importacion_id, "r": confirmacion.reemplaza_a, "m": confirmacion.motivo},
         )  # fmt: skip
         return 200, _importacion(conn, permiso, importacion_id)
 
@@ -656,7 +680,9 @@ def descartar_importacion(
 
 def _recalculo(conn: Connection, permiso: Permiso, i: UUID) -> RecalculoLiquidacion:
     importacion = _importacion(conn, permiso, i)
-    if importacion.estado != EstadoImportacion.CONFIRMADA or importacion.periodo is None:
+    # Una reemplazada (`0119`) también se recalcula: sus datos oficiales quedan como historia.
+    oficial = importacion.estado in (EstadoImportacion.CONFIRMADA, EstadoImportacion.REEMPLAZADA)
+    if not oficial or importacion.periodo is None:
         raise ErrorApi(
             409, CodigoError.IMPORTACION_SIN_CONFIRMAR,
             "La liquidación importada no está confirmada: todavía no tiene datos oficiales.",

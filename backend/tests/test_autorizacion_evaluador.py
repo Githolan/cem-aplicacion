@@ -246,8 +246,10 @@ def test_solo_unidades_listar_los_eventos_propios_y_los_contactos_conceden_por_a
 
 
 def test_p_ve_el_resumen_y_no_el_panel_completo():
-    ctx = contexto(vinculos=(P(),))
+    # H5 D3-A: el resumen pide el vínculo confirmado, como la base (`0119`).
+    ctx = contexto(vinculos=(Vinculo(TipoVinculo.PROPIETARIO, U3A, confirmado=True),))
     assert evaluar("fiscalizacion.ver_resumen", ctx, TODO_PASA).permitido
+    assert not evaluar("fiscalizacion.ver_resumen", contexto(vinculos=(P(),)), TODO_PASA).permitido
     assert not evaluar("fiscalizacion.ver_panel", ctx, TODO_PASA).permitido
     # Control: con la facultad del panel, lo ve.
     mc = contexto(facultades=("fiscalizacion.ver_panel",))
@@ -352,8 +354,9 @@ def test_las_acciones_de_la_tabla():
     # legal (`egresos.saltear_documentacion`, 0106) y los cuatro actos nuevos de la solicitud
     # formal (`solicitud_formal.retirar`, `.registrar_envio`, `.registrar_respuesta` y
     # `.responder`, 0108) e importar la liquidación del administrador (`liquidacion.importar`,
-    # 0113)
-    assert len(POLITICAS) == 59
+    # 0113) y las dos lecturas de la liquidación oficial (`liquidacion.ver_importada` y
+    # `cuenta.ver_propia`, 0119)
+    assert len(POLITICAS) == 61
 
 
 def _archivo(tmp_path, nombre, politicas):

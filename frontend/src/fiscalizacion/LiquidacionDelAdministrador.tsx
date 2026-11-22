@@ -76,6 +76,11 @@ export const SIN_CAMBIOS = "El valor corregido es igual al leído: para dejarlo 
 export const NUMERO_MAL = "Va un número entero, por ejemplo 2.";
 export const IMPORTE_MAL = "Un importe va con dos decimales, por ejemplo 1.234,50.";
 export const LARGO_MOTIVO = 500;
+/** Una sola liquidación oficial por período (app 0119): confirmar otra la reemplaza, con motivo. */
+export const REEMPLAZAR_OFICIAL = "Reemplazar la liquidación oficial";
+export const REEMPLAZARLA = "Reemplazarla";
+export const textoOficial = (periodo: string, confirmada: string) =>
+  `La liquidación oficial del período ${mesDe(periodo)} es la confirmada el ${fechaCorta(confirmada)}. Para que cuente esta, hay que reemplazarla: la otra queda como historia.`;
 const ESPERA_LECTURA_MS = 3000;
 
 export const TEXTO_ESTADO: Record<Estado, string> = {
@@ -84,6 +89,7 @@ export const TEXTO_ESTADO: Record<Estado, string> = {
   no_reconocida: "No se pudo leer",
   confirmada: "Confirmada",
   descartada: "Descartada",
+  reemplazada: "Reemplazada",
   falla_de_lectura: "Falló la lectura",
 };
 const TEXTO_TIPO: Record<Campo["tipo"], string> = {
@@ -225,10 +231,20 @@ function conHoja(valor: Record<string, unknown>, camino: string[], nuevo: unknow
   return { ...valor, [primera]: resto.length === 0 ? nuevo : conHoja(valor[primera] as Record<string, unknown>, resto, nuevo) };
 }
 
+/** La línea de cada importación en la lista: lo que falta decidir, o el reemplazo con su motivo. */
+function resumenDeLaFila(r: Resumen, todas: readonly Resumen[]): string {
+  if (r.estado === "para_confirmar") return `${r.pendientes} de ${r.campos} datos sin decidir`;
+  if (r.estado === "reemplazada") {
+    const por = todas.find((x) => x.reemplaza_a === r.id);
+    return por?.motivo_reemplazo ? `Motivo del reemplazo: ${por.motivo_reemplazo}` : `Subida el ${fechaCorta(r.creada_en)}`;
+  }
+  return `Subida el ${fechaCorta(r.creada_en)}`;
+}
+
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Resumen[] };
 type Detalle = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; importacion: Importacion };
 type Subida = { consorcio: string; documento: string; version: string };
-type Ventana = { tipo: "subir" } | { tipo: "corregir"; campo: Campo } | { tipo: "descartar" };
+type Ventana = { tipo: "subir" } | { tipo: "corregir"; campo: Campo } | { tipo: "descartar" } | { tipo: "reemplazar"; oficial: Resumen };
 
 export function LiquidacionDelAdministrador() {
   const elegido = useConsorcio(REQUISITOS.importarLiquidacion);
@@ -480,6 +496,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           setVentana(null);
           fichas.cerrar();
           setVueltaDetalle((v) => v + 1);
+          // Otra persona pudo confirmar la oficial del período: la lista que decide el reemplazo se relee.
+          setVuelta((v) => v + 1);
           return "cerrar";
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
@@ -487,6 +505,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       }
       clave.current = null;
       setDetalle({ tipo: "ok", importacion: data });
+      setVuelta((v) => v + 1);
       setAviso({ texto: hecho, ok: true });
       setVentana(null);
       fichas.cerrar();
@@ -605,8 +624,30 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       "Se confirmó la liquidación: sus datos confirmados y corregidos ya cuentan.",
     ), (texto) => setAviso({ texto, ok: false }));
 
+  /** Reemplaza la oficial del período con esta, con el motivo. */
+  async function reemplazar(oficial: Resumen): Promise<FinDeEnvio> {
+    const faltan = faltaCompletar({ motivo: [motivo, FALTA_MOTIVO] });
+    if (hayErrores(faltan)) {
+      setErrores(faltan);
+      return "seguir";
+    }
+    return actuar(
+      (k) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion", {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, importacion_id: elegida ?? "" }, header: { [ENCABEZADO_IDEMPOTENCIA]: k } },
+          body: { reemplaza_a: oficial.id, motivo: motivo.trim() },
+        }),
+      "Se confirmó la liquidación: reemplazó a la anterior, que queda como historia.",
+    );
+  }
+
   const elementos = lectura.tipo === "ok" ? lectura.elementos : [];
   const importacion = detalle.tipo === "ok" && elegida !== null ? detalle.importacion : null;
+  // La oficial vigente del mismo período, si ya hay una: confirmar esta la reemplaza (app 0119).
+  const oficialDelPeriodo = importacion === null ? undefined : elementos.find((r) => r.estado === "confirmada" && r.periodo === importacion.periodo && r.id !== importacion.id);
+  const reemplazadaPor = importacion === null ? undefined : elementos.find((r) => r.reemplaza_a === importacion.id);
+  const reemplazo = importacion?.reemplaza_a === null || importacion === null ? undefined : elementos.find((r) => r.id === importacion.reemplaza_a);
   const enFicha = importacion?.campos.find((c) => c.id === fichas.abierta);
   const pendientes = importacion?.campos.filter((c) => c.estado === "pendiente").length ?? 0;
   const seConfirma = importacion?.estado === "para_confirmar";
@@ -658,7 +699,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   <li key={r.id}>
                     <FilaDeRegistro
                       titulo={r.periodo ? `Período ${r.periodo.slice(0, 7)}` : `Subida el ${fechaCorta(r.creada_en)}`}
-                      resumen={r.estado === "para_confirmar" ? `${r.pendientes} de ${r.campos} datos sin decidir` : `Subida el ${fechaCorta(r.creada_en)}`}
+                      resumen={resumenDeLaFila(r, elementos)}
                       estado={TEXTO_ESTADO[r.estado]}
                       alAbrir={() => abrir(r.id)}
                       deshabilitada={enviando}
@@ -698,6 +739,19 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               {importacion.estado === "leyendo" && <p role="status">{LEYENDO}</p>}
               {importacion.motivo && <p className="tarjeta">{importacion.motivo}</p>}
               {importacion.motivo_descarte && <p className="tarjeta">Motivo del descarte: {importacion.motivo_descarte}</p>}
+              {importacion.estado === "reemplazada" && (
+                <p className="tarjeta">
+                  {reemplazadaPor?.decidida_en
+                    ? `Reemplazada por la liquidación confirmada el ${fechaCorta(reemplazadaPor.decidida_en)}. Motivo: ${reemplazadaPor.motivo_reemplazo ?? ""}`
+                    : "Reemplazada por otra liquidación del mismo período."}
+                </p>
+              )}
+              {importacion.motivo_reemplazo !== null && (
+                <p className="tarjeta">
+                  {reemplazo?.decidida_en ? `Reemplazó a la liquidación confirmada el ${fechaCorta(reemplazo.decidida_en)}. ` : "Reemplazó a otra liquidación del mismo período. "}
+                  Motivo: {importacion.motivo_reemplazo}
+                </p>
+              )}
               {importacion.diferencias.length > 0 && (
                 <>
                   <h3>Lo que no cierra</h3>
@@ -739,7 +793,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               {seConfirma && (
                 <p className="ficha-registro__acciones">
                   {pendientes === 0 && (
-                    <button type="button" onClick={confirmar}>
+                    <button type="button" onClick={oficialDelPeriodo === undefined ? confirmar : () => abrirVentana({ tipo: "reemplazar", oficial: oficialDelPeriodo })}>
                       {CONFIRMAR_LIQUIDACION}
                     </button>
                   )}
@@ -756,7 +810,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                 </p>
               )}
               {seConfirma && pendientes > 0 && <p>{`Quedan ${pendientes} datos sin decidir.`}</p>}
-              {importacion.estado === "confirmada" && <RecalculoDeLaLiquidacion key={importacion.id} consorcio={consorcio} importacion={importacion.id} aEntrar={aEntrar} />}
+              {(importacion.estado === "confirmada" || importacion.estado === "reemplazada") && <RecalculoDeLaLiquidacion key={importacion.id} consorcio={consorcio} importacion={importacion.id} aEntrar={aEntrar} />}
               {importacion.campos.length > 0 && (
                 <ul className="filas-registro" aria-label="Datos leídos">
                   {importacion.campos.map((c) => (
@@ -840,6 +894,26 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
             }}
           />
           <ErrorDeCampo idCampo={`${id}-archivo`} mensaje={errores.archivo} />
+        </VentanaDeFormulario>
+      )}
+
+      {ventana?.tipo === "reemplazar" && importacion !== null && (
+        <VentanaDeFormulario titulo={REEMPLAZAR_OFICIAL} textoEnviar={REEMPLAZARLA} alEnviar={() => reemplazar(ventana.oficial)} alCerrar={() => setVentana(null)}>
+          <p>{textoOficial(ventana.oficial.periodo ?? "", ventana.oficial.decidida_en ?? "")}</p>
+          <label htmlFor={`${id}-motivo-reemplazo`}>Motivo del reemplazo</label>
+          <textarea
+            id={`${id}-motivo-reemplazo`}
+            data-foco
+            value={motivo}
+            maxLength={LARGO_MOTIVO}
+            {...marcaDe(`${id}-motivo-reemplazo`, errores.motivo)}
+            onChange={(ev) => {
+              clave.current = null;
+              setErrores((actuales) => sinElDe(actuales, "motivo"));
+              setMotivo(ev.target.value);
+            }}
+          />
+          <ErrorDeCampo idCampo={`${id}-motivo-reemplazo`} mensaje={errores.motivo} />
         </VentanaDeFormulario>
       )}
 

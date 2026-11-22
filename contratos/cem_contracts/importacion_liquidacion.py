@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ImportacionNueva(BaseModel):
@@ -44,6 +44,9 @@ class EstadoImportacion(StrEnum):
     NO_RECONOCIDA = "no_reconocida"
     CONFIRMADA = "confirmada"
     DESCARTADA = "descartada"
+    REEMPLAZADA = "reemplazada"
+    """Fue la liquidación oficial de su período hasta que otra confirmada la reemplazó con motivo
+    (`0119`): queda como historia."""
     FALLA_DE_LECTURA = "falla_de_lectura"
     """No se guarda: la lectura agotó sus intentos. Se reintenta subiendo una versión nueva del
     documento."""
@@ -165,6 +168,10 @@ class ImportacionLiquidacion(BaseModel):
     decidida_por: UUID | None = Field(description="Quién la confirmó o la descartó.")
     decidida_en: datetime | None
     motivo_descarte: str | None
+    reemplaza_a: UUID | None = Field(
+        description="La liquidación oficial del período que esta reemplazó al confirmarse (`0119`)."
+    )
+    motivo_reemplazo: str | None
     campos: list[CampoPreliminar]
     enlaces: list[EnlaceLeido] = Field(
         description="Los enlaces del documento, sin seguir (H5-5); se trae uno a pedido."
@@ -192,6 +199,8 @@ class ImportacionResumen(BaseModel):
     decidida_por: UUID | None
     decidida_en: datetime | None
     motivo_descarte: str | None
+    reemplaza_a: UUID | None
+    motivo_reemplazo: str | None
 
 
 class DecisionCampo(StrEnum):
@@ -208,6 +217,27 @@ class DecisionSobreCampo(BaseModel):
 
     decision: DecisionCampo
     valor_corregido: dict[str, Any] | None = None
+
+
+class ConfirmacionImportacion(BaseModel):
+    """Confirmar la importación (`0119`): una sola liquidación oficial por período. Sin cuerpo (o
+    vacío), no reemplaza nada y se niega si el período ya tiene su liquidación oficial
+    (`periodo_ya_confirmado`). Con `reemplaza_a` (la importación confirmada que hoy es la oficial)
+    y `motivo`, la reemplaza: la anterior pasa a `reemplazada` y queda como historia. Van los dos o
+    ninguno."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reemplaza_a: UUID | None = None
+    motivo: str | None = Field(
+        default=None, min_length=1, max_length=500, description="Por qué se la reemplaza."
+    )
+
+    @model_validator(mode="after")
+    def _juntos(self) -> "ConfirmacionImportacion":
+        if (self.reemplaza_a is None) != (self.motivo is None):
+            raise ValueError("el reemplazo va con su motivo")
+        return self
 
 
 class DescarteImportacion(BaseModel):
@@ -301,3 +331,158 @@ class RecalculoLiquidacion(BaseModel):
     esquemas: list[EsquemaDelPeriodo] = Field(
         description="Los esquemas de coeficientes vigentes en el período, para elegir."
     )
+
+
+# --- La liquidación oficial y quién la lee (`0119`; diseño H5 §6, D3-A) -----------------------
+
+
+class LiquidacionOficialResumen(BaseModel):
+    """Una liquidación oficial en la lista del Consejo y la administración
+    (`liquidacion.ver_importada`): la vigente de su período o una reemplazada (historia)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    periodo: date
+    formato: str | None
+    decidida_por: UUID = Field(description="Quién la confirmó.")
+    decidida_en: datetime = Field(description="Cuándo se confirmó.")
+    vigente: bool = Field(description="Es la oficial de su período; si no, fue reemplazada.")
+    reemplaza_a: UUID | None = Field(description="La oficial anterior del período, si reemplazó.")
+    motivo_reemplazo: str | None
+    reemplazada_por: UUID | None = Field(description="La que la reemplazó, si ya no es vigente.")
+    diferencias: int = Field(ge=0)
+
+
+class CampoOficial(BaseModel):
+    """Un dato oficial: confirmado o corregido (con el valor corregido), RN30. `unidad_id` es la
+    unidad oficial (la del valor corregido, si se corrigió) y `designacion`, la del padrón."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden: int
+    tipo: TipoCampo
+    clave: str
+    valor: dict[str, Any]
+    unidad_id: UUID | None
+    designacion: str | None
+
+
+class LiquidacionOficial(BaseModel):
+    """Una liquidación oficial con sus datos oficiales y sus diferencias (las diferencias, solo
+    para quien ve el panel completo, RN33)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    periodo: date
+    formato: str | None
+    decidida_por: UUID
+    decidida_en: datetime
+    vigente: bool
+    reemplaza_a: UUID | None
+    motivo_reemplazo: str | None
+    reemplazada_por: UUID | None
+    diferencias: list[DiferenciaLeida]
+    campos: list[CampoOficial]
+
+
+class PeriodoOficial(BaseModel):
+    """Un período con liquidación oficial vigente, y cuándo se confirmó."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    confirmada_en: datetime
+
+
+class RubroDelPeriodo(BaseModel):
+    """El gasto de un rubro según la liquidación de la administración. Vacío lo que no informa."""
+
+    model_config = ConfigDict(frozen=True)
+
+    numero: int | None
+    nombre: str | None
+    total: Decimal | None
+
+
+class TotalDelGrupo(BaseModel):
+    """El gasto de un grupo («Gastos Comunes», «AySA»…) según la liquidación."""
+
+    model_config = ConfigDict(frozen=True)
+
+    nombre: str
+    total: Decimal | None
+
+
+class ResumenDelPeriodo(BaseModel):
+    """El resumen de la liquidación vigente de un período para el propietario
+    (`fiscalizacion.ver_resumen`): el gasto por rubro y los totales. Sin el detalle de los gastos,
+    sin diferencias y sin unidades."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    confirmada_en: datetime
+    rubros: list[RubroDelPeriodo]
+    grupos: list[TotalDelGrupo]
+    total: Decimal | None
+    vencimientos: list[str]
+
+
+class ResumenLiquidacion(BaseModel):
+    """Los períodos con liquidación vigente y el resumen del pedido (sin período, el último).
+    `liquidacion` vacío: todavía no hay ninguna confirmada."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodos: list[PeriodoOficial]
+    liquidacion: ResumenDelPeriodo | None
+
+
+class GrupoDeLaUnidad(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    nombre: str
+    porcentaje: Decimal | None
+    monto: Decimal | None
+
+
+class UnidadEnLaLiquidacion(BaseModel):
+    """Lo que la liquidación vigente dice de una unidad donde la persona es propietaria
+    (`cuenta.ver_propia`). `figura` falso: la unidad no está en la liquidación (o no se pudo
+    asociar al padrón) y los importes van vacíos."""
+
+    model_config = ConfigDict(frozen=True)
+
+    unidad_id: UUID
+    designacion: str
+    figura: bool
+    saldo_anterior: Decimal | None
+    pagos: Decimal | None
+    deuda: Decimal | None
+    interes: Decimal | None
+    disponible: Decimal | None
+    grupos: list[GrupoDeLaUnidad]
+    otros_gastos: Decimal | None
+    redondeo: Decimal | None
+    total: Decimal | None = Field(description="Lo que la unidad paga en el período.")
+
+
+class CuentaDelPeriodo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    confirmada_en: datetime
+    vencimientos: list[str]
+    unidades: list[UnidadEnLaLiquidacion]
+
+
+class MiCuenta(BaseModel):
+    """Las unidades propias en la liquidación vigente de un período (sin período, el último).
+    `liquidacion` vacío: todavía no hay ninguna confirmada."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodos: list[PeriodoOficial]
+    liquidacion: CuentaDelPeriodo | None

@@ -55,6 +55,20 @@
       "economica": false,
       "destinatario_unico": false,
       "fuente_normativa": "H5 D2-A (19-11-2026): sube la liquidación del administrador y confirma lo leído; RF42"
+    },
+    {
+      "accion": "liquidacion.ver_importada",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "fiscalizacion.ver_panel",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "H5 D3-A (19-11-2026): todo el Consejo y la administración ven la liquidación importada oficial, con sus diferencias (RN33); la facultad del panel completo"
     }
   ]
 }

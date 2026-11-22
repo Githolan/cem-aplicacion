@@ -669,6 +669,60 @@
         "title": "CampoComprobante",
         "type": "string"
       },
+      "CampoOficial": {
+        "description": "Un dato oficial: confirmado o corregido (con el valor corregido), RN30. `unidad_id` es la\nunidad oficial (la del valor corregido, si se corrigió) y `designacion`, la del padrón.",
+        "properties": {
+          "clave": {
+            "title": "Clave",
+            "type": "string"
+          },
+          "designacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Designacion"
+          },
+          "orden": {
+            "title": "Orden",
+            "type": "integer"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoCampo"
+          },
+          "unidad_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad Id"
+          },
+          "valor": {
+            "additionalProperties": true,
+            "title": "Valor",
+            "type": "object"
+          }
+        },
+        "required": [
+          "orden",
+          "tipo",
+          "clave",
+          "valor",
+          "unidad_id",
+          "designacion"
+        ],
+        "title": "CampoOficial",
+        "type": "object"
+      },
       "CampoPreliminar": {
         "description": "Un dato leído. `clave` es estable dentro de la importación (`gasto:3:2`, `unidad:001`).",
         "properties": {
@@ -1256,6 +1310,8 @@
           "correccion_invalida",
           "importacion_sin_confirmar",
           "grupo_inexistente",
+          "periodo_ya_confirmado",
+          "reemplazo_invalido",
           "enlace_no_traido",
           "factura_ya_adjunta",
           "factura_no_vigente",
@@ -1799,6 +1855,40 @@
           "codigo"
         ],
         "title": "ConfirmacionCaso",
+        "type": "object"
+      },
+      "ConfirmacionImportacion": {
+        "additionalProperties": false,
+        "description": "Confirmar la importación (`0119`): una sola liquidación oficial por período. Sin cuerpo (o\nvacío), no reemplaza nada y se niega si el período ya tiene su liquidación oficial\n(`periodo_ya_confirmado`). Con `reemplaza_a` (la importación confirmada que hoy es la oficial)\ny `motivo`, la reemplaza: la anterior pasa a `reemplazada` y queda como historia. Van los dos o\nninguno.",
+        "properties": {
+          "motivo": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por qué se la reemplaza.",
+            "title": "Motivo"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reemplaza A"
+          }
+        },
+        "title": "ConfirmacionImportacion",
         "type": "object"
       },
       "ConfirmacionVinculo": {
@@ -2787,6 +2877,42 @@
           "pago_id"
         ],
         "title": "CotejoAnulado",
+        "type": "object"
+      },
+      "CuentaDelPeriodo": {
+        "properties": {
+          "confirmada_en": {
+            "format": "date-time",
+            "title": "Confirmada En",
+            "type": "string"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "unidades": {
+            "items": {
+              "$ref": "#/components/schemas/UnidadEnLaLiquidacion"
+            },
+            "title": "Unidades",
+            "type": "array"
+          },
+          "vencimientos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Vencimientos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periodo",
+          "confirmada_en",
+          "vencimientos",
+          "unidades"
+        ],
+        "title": "CuentaDelPeriodo",
         "type": "object"
       },
       "CuentaParaPagoManual": {
@@ -4687,6 +4813,7 @@
           "no_reconocida",
           "confirmada",
           "descartada",
+          "reemplazada",
           "falla_de_lectura"
         ],
         "title": "EstadoImportacion",
@@ -6069,6 +6196,45 @@
         "title": "GastoPagado",
         "type": "object"
       },
+      "GrupoDeLaUnidad": {
+        "properties": {
+          "monto": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monto"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "porcentaje": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Porcentaje"
+          }
+        },
+        "required": [
+          "nombre",
+          "porcentaje",
+          "monto"
+        ],
+        "title": "GrupoDeLaUnidad",
+        "type": "object"
+      },
       "GrupoLiquidable": {
         "description": "Un grupo con su esquema vigente el último día del período.",
         "properties": {
@@ -6453,6 +6619,17 @@
             ],
             "title": "Motivo Descarte"
           },
+          "motivo_reemplazo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Reemplazo"
+          },
           "periodo": {
             "anyOf": [
               {
@@ -6464,6 +6641,19 @@
               }
             ],
             "title": "Periodo"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La liquidación oficial del período que esta reemplazó al confirmarse (`0119`).",
+            "title": "Reemplaza A"
           },
           "subida_por": {
             "format": "uuid",
@@ -6491,6 +6681,8 @@
           "decidida_por",
           "decidida_en",
           "motivo_descarte",
+          "reemplaza_a",
+          "motivo_reemplazo",
           "campos",
           "enlaces"
         ],
@@ -6607,6 +6799,17 @@
             ],
             "title": "Motivo Descarte"
           },
+          "motivo_reemplazo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Reemplazo"
+          },
           "pendientes": {
             "minimum": 0.0,
             "title": "Pendientes",
@@ -6623,6 +6826,18 @@
               }
             ],
             "title": "Periodo"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reemplaza A"
           },
           "subida_por": {
             "format": "uuid",
@@ -6650,7 +6865,9 @@
           "pendientes",
           "decidida_por",
           "decidida_en",
-          "motivo_descarte"
+          "motivo_descarte",
+          "reemplaza_a",
+          "motivo_reemplazo"
         ],
         "title": "ImportacionResumen",
         "type": "object"
@@ -7781,6 +7998,209 @@
           "periodo"
         ],
         "title": "LiquidacionNueva",
+        "type": "object"
+      },
+      "LiquidacionOficial": {
+        "description": "Una liquidación oficial con sus datos oficiales y sus diferencias (las diferencias, solo\npara quien ve el panel completo, RN33).",
+        "properties": {
+          "campos": {
+            "items": {
+              "$ref": "#/components/schemas/CampoOficial"
+            },
+            "title": "Campos",
+            "type": "array"
+          },
+          "decidida_en": {
+            "format": "date-time",
+            "title": "Decidida En",
+            "type": "string"
+          },
+          "decidida_por": {
+            "format": "uuid",
+            "title": "Decidida Por",
+            "type": "string"
+          },
+          "diferencias": {
+            "items": {
+              "$ref": "#/components/schemas/DiferenciaLeida"
+            },
+            "title": "Diferencias",
+            "type": "array"
+          },
+          "formato": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo_reemplazo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Reemplazo"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reemplaza A"
+          },
+          "reemplazada_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reemplazada Por"
+          },
+          "vigente": {
+            "title": "Vigente",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "periodo",
+          "formato",
+          "decidida_por",
+          "decidida_en",
+          "vigente",
+          "reemplaza_a",
+          "motivo_reemplazo",
+          "reemplazada_por",
+          "diferencias",
+          "campos"
+        ],
+        "title": "LiquidacionOficial",
+        "type": "object"
+      },
+      "LiquidacionOficialResumen": {
+        "description": "Una liquidación oficial en la lista del Consejo y la administración\n(`liquidacion.ver_importada`): la vigente de su período o una reemplazada (historia).",
+        "properties": {
+          "decidida_en": {
+            "description": "Cuándo se confirmó.",
+            "format": "date-time",
+            "title": "Decidida En",
+            "type": "string"
+          },
+          "decidida_por": {
+            "description": "Quién la confirmó.",
+            "format": "uuid",
+            "title": "Decidida Por",
+            "type": "string"
+          },
+          "diferencias": {
+            "minimum": 0.0,
+            "title": "Diferencias",
+            "type": "integer"
+          },
+          "formato": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo_reemplazo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Reemplazo"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La oficial anterior del período, si reemplazó.",
+            "title": "Reemplaza A"
+          },
+          "reemplazada_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La que la reemplazó, si ya no es vigente.",
+            "title": "Reemplazada Por"
+          },
+          "vigente": {
+            "description": "Es la oficial de su período; si no, fue reemplazada.",
+            "title": "Vigente",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "periodo",
+          "formato",
+          "decidida_por",
+          "decidida_en",
+          "vigente",
+          "reemplaza_a",
+          "motivo_reemplazo",
+          "reemplazada_por",
+          "diferencias"
+        ],
+        "title": "LiquidacionOficialResumen",
         "type": "object"
       },
       "ListaAutorizacionesVerProveedores": {
@@ -9313,6 +9733,34 @@
         ],
         "title": "MetodoReparto",
         "type": "string"
+      },
+      "MiCuenta": {
+        "description": "Las unidades propias en la liquidación vigente de un período (sin período, el último).\n`liquidacion` vacío: todavía no hay ninguna confirmada.",
+        "properties": {
+          "liquidacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CuentaDelPeriodo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "periodos": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodoOficial"
+            },
+            "title": "Periodos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periodos",
+          "liquidacion"
+        ],
+        "title": "MiCuenta",
+        "type": "object"
       },
       "MisAcciones": {
         "description": "Lo que la interfaz le muestra a la persona en el consorcio (documento 13, §10.5).\n\nSolo sirve para mostrar: no concede nada. Cada ruta sigue decidiendo por su cuenta, así que\nuna acción de la lista todavía puede negarse por la entidad concreta o pedir el gesto.",
@@ -11051,6 +11499,27 @@
         "title": "PeriodoModo",
         "type": "object"
       },
+      "PeriodoOficial": {
+        "description": "Un período con liquidación oficial vigente, y cuándo se confirmó.",
+        "properties": {
+          "confirmada_en": {
+            "format": "date-time",
+            "title": "Confirmada En",
+            "type": "string"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodo",
+          "confirmada_en"
+        ],
+        "title": "PeriodoOficial",
+        "type": "object"
+      },
       "PlanillaPadron": {
         "description": "El cuerpo de los dos pasos: la planilla CSV como texto UTF-8.",
         "properties": {
@@ -12451,6 +12920,92 @@
         "title": "ResultadoCotejo",
         "type": "object"
       },
+      "ResumenDelPeriodo": {
+        "description": "El resumen de la liquidación vigente de un período para el propietario\n(`fiscalizacion.ver_resumen`): el gasto por rubro y los totales. Sin el detalle de los gastos,\nsin diferencias y sin unidades.",
+        "properties": {
+          "confirmada_en": {
+            "format": "date-time",
+            "title": "Confirmada En",
+            "type": "string"
+          },
+          "grupos": {
+            "items": {
+              "$ref": "#/components/schemas/TotalDelGrupo"
+            },
+            "title": "Grupos",
+            "type": "array"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "rubros": {
+            "items": {
+              "$ref": "#/components/schemas/RubroDelPeriodo"
+            },
+            "title": "Rubros",
+            "type": "array"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "vencimientos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Vencimientos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periodo",
+          "confirmada_en",
+          "rubros",
+          "grupos",
+          "total",
+          "vencimientos"
+        ],
+        "title": "ResumenDelPeriodo",
+        "type": "object"
+      },
+      "ResumenLiquidacion": {
+        "description": "Los períodos con liquidación vigente y el resumen del pedido (sin período, el último).\n`liquidacion` vacío: todavía no hay ninguna confirmada.",
+        "properties": {
+          "liquidacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumenDelPeriodo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "periodos": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodoOficial"
+            },
+            "title": "Periodos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periodos",
+          "liquidacion"
+        ],
+        "title": "ResumenLiquidacion",
+        "type": "object"
+      },
       "Retiro": {
         "additionalProperties": false,
         "description": "Retirar una orden que nadie aprobó (`0093`): la versión que se vio, por si cambió.",
@@ -12647,6 +13202,52 @@
           "eficaz_desde"
         ],
         "title": "RevisionMandato",
+        "type": "object"
+      },
+      "RubroDelPeriodo": {
+        "description": "El gasto de un rubro según la liquidación de la administración. Vacío lo que no informa.",
+        "properties": {
+          "nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nombre"
+          },
+          "numero": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "numero",
+          "nombre",
+          "total"
+        ],
+        "title": "RubroDelPeriodo",
         "type": "object"
       },
       "RubrosLegalesProveedor": {
@@ -13537,6 +14138,33 @@
         "title": "TomaVigente",
         "type": "object"
       },
+      "TotalDelGrupo": {
+        "description": "El gasto de un grupo («Gastos Comunes», «AySA»…) según la liquidación.",
+        "properties": {
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "nombre",
+          "total"
+        ],
+        "title": "TotalDelGrupo",
+        "type": "object"
+      },
       "TratamientoCentavos": {
         "description": "`nucleo.tratamiento_centavos` (0021): restos mayores, con desempate por unidad.",
         "enum": [
@@ -13572,6 +14200,144 @@
           "invitable"
         ],
         "title": "Unidad",
+        "type": "object"
+      },
+      "UnidadEnLaLiquidacion": {
+        "description": "Lo que la liquidación vigente dice de una unidad donde la persona es propietaria\n(`cuenta.ver_propia`). `figura` falso: la unidad no está en la liquidación (o no se pudo\nasociar al padrón) y los importes van vacíos.",
+        "properties": {
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "deuda": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deuda"
+          },
+          "disponible": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disponible"
+          },
+          "figura": {
+            "title": "Figura",
+            "type": "boolean"
+          },
+          "grupos": {
+            "items": {
+              "$ref": "#/components/schemas/GrupoDeLaUnidad"
+            },
+            "title": "Grupos",
+            "type": "array"
+          },
+          "interes": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interes"
+          },
+          "otros_gastos": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Otros Gastos"
+          },
+          "pagos": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pagos"
+          },
+          "redondeo": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redondeo"
+          },
+          "saldo_anterior": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saldo Anterior"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que la unidad paga en el período.",
+            "title": "Total"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "designacion",
+          "figura",
+          "saldo_anterior",
+          "pagos",
+          "deuda",
+          "interes",
+          "disponible",
+          "grupos",
+          "otros_gastos",
+          "redondeo",
+          "total"
+        ],
+        "title": "UnidadEnLaLiquidacion",
         "type": "object"
       },
       "UnidadRecalculada": {
@@ -18401,6 +19167,115 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/liquidacion-oficial": {
+      "get": {
+        "operationId": "liquidaciones_oficiales_api_v1_consorcios__consorcio_id__liquidacion_oficial_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LiquidacionOficialResumen"
+                  },
+                  "title": "Response Liquidaciones Oficiales Api V1 Consorcios  Consorcio Id  Liquidacion Oficial Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `fiscalizacion.ver_panel` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Las liquidaciones oficiales de cada período: la vigente y las reemplazadas",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidacion-oficial/{importacion_id}": {
+      "get": {
+        "operationId": "liquidacion_oficial_api_v1_consorcios__consorcio_id__liquidacion_oficial__importacion_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiquidacionOficial"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `fiscalizacion.ver_panel` en el consorcio."
+          },
+          "404": {
+            "description": "No es una liquidación oficial de este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Una liquidación oficial: sus datos oficiales y sus diferencias",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/liquidaciones": {
       "get": {
         "operationId": "listar_liquidaciones_api_v1_consorcios__consorcio_id__liquidaciones_get",
@@ -18780,6 +19655,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion": {
       "post": {
+        "description": "Sin cuerpo, no reemplaza nada. Con `reemplaza_a` y `motivo`, reemplaza la oficial del\nperíodo, que pasa a `reemplazada` en la misma transacción.",
         "operationId": "confirmar_importacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__confirmacion_post",
         "parameters": [
           {
@@ -18815,6 +19691,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmacionImportacion",
+                "default": {}
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -18833,17 +19719,10 @@
             "description": "La importación o el dato no existen en este consorcio."
           },
           "409": {
-            "description": "Ya decidida, o quedan datos sin decidir (`campos_pendientes`)."
+            "description": "Ya decidida, quedan datos sin decidir (`campos_pendientes`), el período ya tiene su liquidación oficial (`periodo_ya_confirmado`) o lo que se reemplaza no es la oficial (`reemplazo_invalido`)."
           },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "El reemplazo va con su motivo (`peticion_invalida`)."
           }
         },
         "summary": "Confirmar la liquidación importada: desde ahí sus datos decididos son oficiales",
@@ -20155,6 +21034,67 @@
         "summary": "Revisar un mandato del Consejo pendiente de revisión: vuelve a operar desde una fecha",
         "tags": [
           "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/mi-cuenta": {
+      "get": {
+        "operationId": "mi_cuenta_api_v1_consorcios__consorcio_id__mi_cuenta_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El primer día del mes (`AAAA-MM-01`); sin él, el último con liquidación.",
+            "in": "query",
+            "name": "periodo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "El primer día del mes (`AAAA-MM-01`); sin él, el último con liquidación.",
+              "title": "Periodo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MiCuenta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado en el consorcio."
+          },
+          "404": {
+            "description": "Ese período no tiene liquidación oficial."
+          },
+          "422": {
+            "description": "El período no es el primer día de un mes."
+          }
+        },
+        "summary": "Lo que la liquidación oficial dice de cada unidad propia: saldo, pagos y total",
+        "tags": [
+          "liquidaciones"
         ]
       }
     },
@@ -25260,6 +26200,67 @@
         "summary": "Cambiar los datos de un proveedor: crea una versión nueva, nunca en silencio",
         "tags": [
           "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/resumen": {
+      "get": {
+        "operationId": "resumen_api_v1_consorcios__consorcio_id__resumen_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El primer día del mes (`AAAA-MM-01`); sin él, el último con liquidación.",
+            "in": "query",
+            "name": "periodo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "El primer día del mes (`AAAA-MM-01`); sin él, el último con liquidación.",
+              "title": "Periodo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumenLiquidacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado en el consorcio."
+          },
+          "404": {
+            "description": "Ese período no tiene liquidación oficial."
+          },
+          "422": {
+            "description": "El período no es el primer día de un mes."
+          }
+        },
+        "summary": "El gasto del período por rubro según la liquidación oficial, para cada propietario",
+        "tags": [
+          "liquidaciones"
         ]
       }
     },

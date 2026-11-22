@@ -23,7 +23,7 @@ caso,accion,figura,modo,recurso,mandato,hay_administrador,entidad,esperado,motiv
 §2.3,padron.ver,AD,C,unidad:3A,vigente,si,,200,concedido_por_facultad,AD ve el padrón mínimo
 §2.3,padron.ver,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no ve el padrón
 §2.3,padron.ver,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
-§2.3,fiscalizacion.ver_resumen,P,C,,sin_mandato,si,,200,concedido_por_vinculo,P ve el resumen
+§2.3,fiscalizacion.ver_resumen,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P con el vínculo confirmado ve el resumen (H5 D3-A)
 §2.3,fiscalizacion.ver_resumen,I,C,,sin_mandato,si,,403,sin_concesion,I no ve el resumen
 §2.3,fiscalizacion.ver_resumen,MC,C,,vigente,si,,403,sin_concesion,MC sin vínculo no ve el resumen
 §2.3,fiscalizacion.ver_resumen,AD,C,,vigente,si,,403,sin_concesion,AD sin vínculo no ve el resumen
@@ -240,7 +240,7 @@ R12,solicitud_formal.firmar,MC,C,,vigente,si,firmas=otro,200,concedido_por_facul
 R12,solicitud_formal.firmar,MC,C,,vigente,no,firmas=otro,403,sin_administrador_vigente,sin mandato de administración: queda en borrador
 R12,solicitud_formal.firmar,MC,AA,,vigente,no,firmas=otro,403,sin_administrador_vigente,también en Administrador Aumentado
 caso 1,invitaciones.crear,P+MC,C,unidad:5B,vigente,si,,200,concedido_por_facultad,P de 3-A y MC: invita a 5-B por la facultad
-caso 1,fiscalizacion.ver_resumen,P+MC,C,,vigente,si,,200,concedido_por_vinculo,P y MC: ve el resumen por su vínculo
+caso 1,fiscalizacion.ver_resumen,Pc+MC,C,,vigente,si,,200,concedido_por_vinculo,P confirmado y MC: ve el resumen por su vínculo
 caso 1,fiscalizacion.ver_panel,P+MC,C,,vigente,si,,200,concedido_por_facultad,P y MC: ve el panel por su facultad
 caso 4,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,rango_vacio,si,,404,fuera_de_ambito,baja el mismo día del alta: nunca valió
 caso 5,liquidacion.revisar,AD+MC,AA,,vigente,si,preparo=yo,403,no_es_quien_preparo,AD y MC: no revisa lo que preparó con el otro mandato
@@ -254,7 +254,7 @@ caso 7,mandatos.alta,MC,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,
 caso 7,mandatos.baja,AD,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.baja corre
 caso 7,mandatos.resolver_revision,AD,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.resolver_revision corre
 caso 7,padron.gestionar,AD,—,unidad:3A,vigente,no,,403,sin_modo_registrado,sin modo: padron.gestionar no corre
-caso 7,fiscalizacion.ver_resumen,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: el resumen no corre
+caso 7,fiscalizacion.ver_resumen,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: el resumen no corre
 caso 7,documentos.ver,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: los documentos no corren
 caso 7,documentos.cargar,AE,—,,vigente,no,,403,sin_modo_registrado,sin modo: la carga no corre
 caso 8,invitaciones.crear,Fac(invitaciones.crear@unidad:3A)+Fac(invitaciones.crear@unidad:5B),C,unidad:5B,vigente,si,,200,concedido_por_facultad,facultad duplicada: alcanza 5-B
@@ -528,3 +528,20 @@ H5-1,liquidacion.importar,AD,AA,,vigente,si,,200,concedido_por_facultad,la admin
 H5-1,liquidacion.importar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
 H5-1,liquidacion.importar,P,C,,sin_mandato,si,,403,sin_concesion,P no importa: ve lo de su unidad (H5 D3)
 H5-1,liquidacion.importar,AE,C,,vigente,si,,403,sin_concesion,el administrador externo no importa
+H5 D3-A,fiscalizacion.ver_resumen,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no ve el resumen (la base pide el vínculo confirmado)
+H5 D3-A,liquidacion.ver_importada,MC,C,,vigente,si,,200,concedido_por_facultad,MC ve la liquidación oficial y sus diferencias
+H5 D3-A,liquidacion.ver_importada,AD,C,,vigente,si,,200,concedido_por_facultad,AD ve la liquidación oficial y sus diferencias
+H5 D3-A,liquidacion.ver_importada,Pc,C,,sin_mandato,si,,403,sin_concesion,P ve el resumen y su unidad: no la liquidación completa
+H5 D3-A,liquidacion.ver_importada,I,C,,sin_mandato,si,,403,sin_concesion,I no ve la liquidación
+H5 D3-A,liquidacion.ver_importada,AE,C,,vigente,si,,403,sin_concesion,AE no ve la liquidación
+H5 D3-A,liquidacion.ver_importada,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+H5 D3-A,liquidacion.ver_importada,MC,—,,vigente,si,,403,sin_modo_registrado,sin modo: no corre
+H5 D3-A,cuenta.ver_propia,Pc,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,P confirmado ve su unidad en la liquidación oficial
+H5 D3-A,cuenta.ver_propia,Pc,C,unidad:5B,sin_mandato,si,,403,sin_concesion,P de 3-A nunca ve otra unidad (RN15)
+H5 D3-A,cuenta.ver_propia,P,C,unidad:3A,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no la ve (la base pide el vínculo confirmado)
+H5 D3-A,cuenta.ver_propia,Ic,C,unidad:3A,sin_mandato,si,,403,sin_concesion,I no ve la cuenta de la unidad en este corte
+H5 D3-A,cuenta.ver_propia,MC,C,unidad:3A,vigente,si,,403,sin_concesion,MC sin vínculo no ve la cuenta de una unidad por esta vía
+H5 D3-A,cuenta.ver_propia,AD,C,unidad:3A,vigente,si,,403,sin_concesion,AD sin vínculo no ve la cuenta de una unidad por esta vía
+H5 D3-A,cuenta.ver_propia,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no la ve
+H5 D3-A,cuenta.ver_propia,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+H5 D3-A,cuenta.ver_propia,Pc,—,unidad:3A,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
