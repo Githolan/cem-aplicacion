@@ -46,6 +46,10 @@ const GRUPOS_LARGOS = [
   { nombre: "Agua y Servicios Sanitarios (AySA)", total: "98765432.10" },
 ];
 const RUBRO_LARGO = "Mantenimiento de ascensores, montacargas y escaleras mecánicas del edificio";
+const SIN_ENLACE = {
+  estado: "no_encontrado", jurisdiccion: "caba", version: 1, norma: "Disposición 1146/DGDYPC/24",
+  fuente: "https://boletinoficial.buenosaires.gob.ar/normativaba/norma/714586",
+};  // prettier-ignore
 const PANEL_CONSEJO = {
   ordenes_por_estado: [],
   gasto_pagado: [],
@@ -60,7 +64,8 @@ const PANEL_CONSEJO = {
     { periodo: "2026-10-01", numero: 1, nombre: "Servicios públicos", total: "1500.50" },
     { periodo: "2026-10-01", numero: 2, nombre: RUBRO_LARGO, total: "123456789012.34" },
   ],
-  liquidacion_vigente: { id: "77777777-7777-4777-8777-777777777777", periodo: "2026-10-01", diferencias: 12 },
+  // RF47 (app 0125): la vigente sin el enlace a la documentación.
+  liquidacion_vigente: { id: "77777777-7777-4777-8777-777777777777", periodo: "2026-10-01", diferencias: 12, enlace_documentacion: SIN_ENLACE },
 };
 const D1 ="55555555-5555-4555-8555-555555555555";
 const V1 = "66666666-6666-4666-8666-666666666666";
@@ -186,6 +191,11 @@ test.describe("panel en Modo Consejo (app 0120)", () => {
       "href",
       "/liquidacion-oficial",
     );
+    // RF47: el aviso del enlace, con la norma y sin botones.
+    const aviso = page.getByRole("note");
+    await expect(aviso).toContainText("La liquidación oficial de octubre de 2026 no trae el enlace ni el QR a la documentación del período");
+    await expect(aviso.getByRole("link", { name: "Ver la norma" })).toHaveAttribute("href", SIN_ENLACE.fuente);
+    await expect(aviso.getByRole("button")).toHaveCount(0);
     // Sin órdenes, sus bloques no se dibujan.
     await expect(page.getByRole("region", { name: "Órdenes de pago por estado" })).toHaveCount(0);
     expect(await sinDesplazamiento(page)).toBe(true);

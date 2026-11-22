@@ -7,7 +7,9 @@ como historia. Cada lectura evalúa su política y la base repite la barrera en 
 - **`GET …/liquidacion-oficial`** y **`GET …/liquidacion-oficial/{id}`**
   (`liquidacion.ver_importada`, el Consejo y la administración, con la facultad del panel): las
   oficiales de cada período, la vigente y las reemplazadas, y una con sus datos oficiales y sus
-  diferencias. Nunca una importación sin confirmar (RN30).
+  diferencias. Nunca una importación sin confirmar (RN30). La vigente de cada período lleva lo que
+  pide el perfil normativo del consorcio sobre el enlace a la documentación y lo que encontró la
+  lectura (RF47, `0125`): en Modo Consejo es una señal, no un bloqueo.
 - **`GET …/resumen`** (`fiscalizacion.ver_resumen`, cada propietario con el vínculo confirmado):
   de la liquidación vigente de un período, el gasto por rubro, los totales por grupo, el total y
   los vencimientos; y el total del gasto de cada uno de los últimos `PERIODOS_DE_GASTO` períodos
@@ -47,6 +49,7 @@ from cem_contracts.importacion_liquidacion import (
     TotalDelPeriodo,
     UnidadEnLaLiquidacion,
 )
+from cem_contracts.perfil_normativo import EnlaceDocumentacion
 from fastapi import APIRouter, Depends, Query
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
@@ -95,6 +98,19 @@ def _periodo(periodo: date | None) -> None:
         raise ErrorApi(422, CodigoError.PETICION_INVALIDA, PERIODO_INVALIDO)
 
 
+def enlaces_documentacion(c: Connection) -> dict[UUID, EnlaceDocumentacion]:
+    """Por liquidación oficial vigente, lo que pide el perfil normativo sobre el enlace a la
+    documentación y lo que encontró la lectura (`0125`); falta la que no lo exige."""
+    filas = c.execute(text("select * from nucleo.enlace_documentacion_liquidaciones()")).mappings()
+    return {
+        f["importacion_id"]: EnlaceDocumentacion(
+            estado=f["estado"], jurisdiccion=f["jurisdiccion"], version=f["version"],
+            norma=f["norma"], fuente=f["fuente"],
+        )
+        for f in filas
+    }  # fmt: skip
+
+
 def _periodos(c: Connection) -> list[PeriodoOficial]:
     filas = c.execute(text("select * from nucleo.periodos_liquidacion_oficial()")).mappings()
     return [PeriodoOficial(**f) for f in filas]
@@ -114,8 +130,15 @@ def liquidaciones_oficiales(
     motor: MotorDep,
 ) -> list[LiquidacionOficialResumen]:
     consulta = text("select * from nucleo.liquidaciones_oficiales_lectura()")
-    filas = _leer(permiso, motor, lambda c: c.execute(consulta).mappings().all())
-    return [LiquidacionOficialResumen(**f) for f in filas]
+
+    def leer(c: Connection) -> list[LiquidacionOficialResumen]:
+        senales = enlaces_documentacion(c)
+        return [
+            LiquidacionOficialResumen(**f, enlace_documentacion=senales.get(f["id"]))
+            for f in c.execute(consulta).mappings()
+        ]
+
+    return _leer(permiso, motor, leer)
 
 
 @router.get(
@@ -141,7 +164,9 @@ def liquidacion_oficial(
                            {"i": importacion_id}).mappings()  # fmt: skip
         datos = dict(cabeza)
         datos["diferencias"] = [DiferenciaLeida(**d) for d in datos["diferencias"]]
-        return LiquidacionOficial(**datos, campos=[CampoOficial(**f) for f in campos])
+        senal = enlaces_documentacion(c).get(importacion_id)
+        return LiquidacionOficial(**datos, campos=[CampoOficial(**f) for f in campos],
+                                  enlace_documentacion=senal)  # fmt: skip
 
     return _leer(permiso, motor, leer)
 

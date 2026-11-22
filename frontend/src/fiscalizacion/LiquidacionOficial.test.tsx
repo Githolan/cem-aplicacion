@@ -9,6 +9,7 @@ import type { components } from "../api/tipos";
 import { alcanza } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
+import { VER_LA_NORMA } from "./AvisoEnlaceDocumentacion";
 import { CONTROLES_DEL_DOCUMENTO, DOCUMENTO_CIERRA, REEMPLAZADA, RUTA_LIQUIDACION_OFICIAL, SIN_OFICIALES, VIGENTE } from "./LiquidacionOficial";
 
 // Liquidación oficial, para el Consejo y la administración (H5 D3-A, app 0119). Datos SINTETICOS.
@@ -27,8 +28,11 @@ type Campo = components["schemas"]["CampoOficial"];
 
 const VIEJA: Oficial = {
   id: A, periodo: "2026-09-01", formato: "mis_expensas", decidida_por: PERSONA, decidida_en: "2026-10-05T15:00:00Z",
-  vigente: false, reemplaza_a: null, motivo_reemplazo: null, reemplazada_por: B, diferencias: 1,
+  vigente: false, reemplaza_a: null, motivo_reemplazo: null, reemplazada_por: B, diferencias: 1, enlace_documentacion: null,
 };  // prettier-ignore
+type Enlace = components["schemas"]["EnlaceDocumentacion"];
+const FUENTE = "https://boletinoficial.buenosaires.gob.ar/normativaba/norma/714586";
+const enlace = (estado: Enlace["estado"]): Enlace => ({ estado, jurisdiccion: "caba", version: 1, norma: "Disposición 1146/DGDYPC/24", fuente: FUENTE });
 const NUEVA: Oficial = {
   ...VIEJA, id: B, decidida_en: "2026-10-20T15:00:00Z", vigente: true, reemplaza_a: A,
   motivo_reemplazo: "Corrigió el rubro 2", reemplazada_por: null, diferencias: 0,
@@ -142,6 +146,53 @@ describe("pantalla /liquidacion-oficial", () => {
     expect(within(difs).getByText(/total de gastos \(página 1\): suma \$ 1\.500,50, dice \$ 1\.500,55/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
     expect(await screen.findByRole("list", { name: "Liquidaciones oficiales" })).toBeTruthy();
+  });
+
+  it("RF47: la vigente sin el enlace a la documentación lo avisa en la fila y en la ficha, con la norma y sin botones", async () => {
+    const sinEnlace = { ...NUEVA, enlace_documentacion: enlace("no_encontrado") };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: CONSEJO,
+      [`GET ${BASE}/liquidacion-oficial`]: () => Response.json([sinEnlace, VIEJA]),
+      [`GET ${BASE}/liquidacion-oficial/${B}`]: () => Response.json(detalleDe(sinEnlace)),
+    }));  // prettier-ignore
+    const { container } = abrir();
+    const lista = await screen.findByRole("list", { name: "Liquidaciones oficiales" });
+    expect(within(lista).getByRole("button", { name: new RegExp(VIGENTE) }).textContent).toContain("Sin el enlace a la documentación");
+    expect(within(lista).getByRole("button", { name: new RegExp(REEMPLAZADA) }).textContent).not.toContain("enlace");
+    fireEvent.click(within(lista).getByRole("button", { name: new RegExp(VIGENTE) }));
+    const aviso = await screen.findByRole("note");
+    expect(aviso.textContent).toContain("La liquidación oficial de septiembre de 2026 no trae el enlace ni el QR a la documentación del período");
+    expect(aviso.textContent).toContain("Lo pide la Disposición 1146/DGDYPC/24 (perfil normativo de la Ciudad de Buenos Aires, versión 1)");
+    expect(within(aviso).getByRole("link", { name: VER_LA_NORMA }).getAttribute("href")).toBe(FUENTE);
+    expect(within(aviso).queryByRole("button")).toBeNull();
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+
+  it("RF47: si no se pudo buscar en todo el documento, no afirma que falta; con el enlace, no avisa", async () => {
+    const sinBuscar = { ...NUEVA, enlace_documentacion: enlace("sin_buscar") };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: CONSEJO,
+      [`GET ${BASE}/liquidacion-oficial`]: () => Response.json([sinBuscar, { ...VIEJA, vigente: true, id: A, enlace_documentacion: enlace("encontrado") }]),
+      [`GET ${BASE}/liquidacion-oficial/${B}`]: () => Response.json(detalleDe(sinBuscar)),
+      [`GET ${BASE}/liquidacion-oficial/${A}`]: () => Response.json(detalleDe({ ...VIEJA, enlace_documentacion: enlace("encontrado") })),
+    }));  // prettier-ignore
+    abrir();
+    const lista = await screen.findByRole("list", { name: "Liquidaciones oficiales" });
+    const [primera, segunda] = within(lista).getAllByRole("button") as [HTMLElement, HTMLElement];
+    expect(primera.textContent).toContain("Sin saber si trae el enlace a la documentación");
+    expect(segunda.textContent).not.toContain("enlace");
+    fireEvent.click(primera);
+    const aviso = await screen.findByRole("note");
+    expect(aviso.textContent).toContain("No se sabe si la liquidación oficial de septiembre de 2026 trae el enlace o el QR");
+    expect(aviso.textContent).not.toContain("no trae el enlace");
+    fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
+    fireEvent.click(within(await screen.findByRole("list", { name: "Liquidaciones oficiales" })).getAllByRole("button")[1]!);
+    expect(await screen.findByRole("heading", { name: "Período septiembre de 2026" })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Cargando la liquidación…")).toBeNull());
+    expect(screen.queryByRole("note")).toBeNull();
   });
 
   it("sin ninguna oficial lo dice", async () => {

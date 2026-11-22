@@ -53,12 +53,17 @@ const RESUMEN = {
     { periodo: "2026-10-01", total: "98766932.60" },
   ],
 };
+const SIN_ENLACE = {
+  estado: "no_encontrado", jurisdiccion: "caba", version: 1, norma: "Disposición 1146/DGDYPC/24",
+  fuente: "https://boletinoficial.buenosaires.gob.ar/normativaba/norma/714586",
+};  // prettier-ignore
 const VIEJA = {
   id: A, periodo: "2026-10-01", formato: "mis_expensas", decidida_por: PERSONA, decidida_en: "2026-11-01T15:00:00Z", vigente: false,
-  reemplaza_a: null, motivo_reemplazo: null, reemplazada_por: B, diferencias: 1,
+  reemplaza_a: null, motivo_reemplazo: null, reemplazada_por: B, diferencias: 1, enlace_documentacion: null,
 };  // prettier-ignore
 const NUEVA = {
   ...VIEJA, id: B, decidida_en: "2026-11-05T15:00:00Z", vigente: true, reemplaza_a: A, reemplazada_por: null, diferencias: 0,
+  enlace_documentacion: SIN_ENLACE,
   motivo_reemplazo: "La administración mandó otra versión con el rubro de ascensores corregido después del reclamo del Consejo",
 };  // prettier-ignore
 const DETALLE = {
@@ -146,12 +151,15 @@ test.describe("liquidación oficial (app 0119)", () => {
 
     const lista = page.getByRole("list", { name: "Liquidaciones oficiales" });
     await expect(lista.getByRole("button", { name: /Reemplazada/ })).toBeVisible();
+    await expect(lista.getByRole("button", { name: /Vigente/ })).toContainText("Sin el enlace a la documentación");
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
     await lista.getByRole("button", { name: /Vigente/ }).click();
     await expect(page.getByRole("table", { name: "Unidades" })).toBeVisible();
     await expect(page.getByText(/Reemplazó a la liquidación confirmada el .*Motivo: La administración mandó otra versión/)).toBeVisible();
     await expect(page.getByRole("list", { name: "Lo que no cierra" })).toBeVisible();
+    // RF47 (app 0125): el aviso del enlace en la ficha, con la norma, sin desplazar la página.
+    await expect(page.getByRole("note")).toContainText("Lo pide la Disposición 1146/DGDYPC/24 (perfil normativo de la Ciudad de Buenos Aires, versión 1)");
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);

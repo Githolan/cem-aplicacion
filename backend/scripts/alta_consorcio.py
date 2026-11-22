@@ -14,7 +14,8 @@ El archivo es JSON y no admite campos que la base todavía no guarda:
         "id": "<uuid>",
         "nombre": "Edificio Alvear 100",
         "cuit": "30712345678",
-        "zona_horaria": "America/Argentina/Buenos_Aires"
+        "zona_horaria": "America/Argentina/Buenos_Aires",
+        "jurisdiccion": "caba"
       },
       "unidades": [{"designacion": "PB"}, {"designacion": "1° A"}]
     }
@@ -22,6 +23,10 @@ El archivo es JSON y no admite campos que la base todavía no guarda:
 `id` es obligatorio: con la RLS, `cem_app` solo ve el consorcio del ámbito, así que la única
 forma de saber si ya existe es buscarlo por su identificador. Si falta, el script no escribe
 nada y propone uno nuevo (uuid v7 de la base) para pegar en el archivo. `cuit` es opcional.
+
+`jurisdiccion` vincula el consorcio a la versión del perfil normativo de esa jurisdicción vigente
+hoy (RF01, `0125`: `nucleo.vincular_perfil_normativo`). En un consorcio que ya existe se compara
+con la jurisdicción del perfil vinculado: otra, o ninguno, es una diferencia.
 
 Todo va en una sola transacción, con el consorcio en el ámbito. No escribe eventos de auditoría:
 lo opera soporte de plataforma y, desde la decisión del propietario del 28-10-2026 (S2b, `0043`),
@@ -41,6 +46,7 @@ from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from cem_contracts.perfil_normativo import Jurisdiccion
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import Connection, text
 
@@ -63,6 +69,7 @@ class ConsorcioArchivo(_Estricto):
     nombre: str = Field(min_length=1)
     cuit: str | None = Field(default=None, pattern=r"^[0-9]{11}$")
     zona_horaria: str
+    jurisdiccion: Jurisdiccion
 
     @field_validator("zona_horaria")
     @classmethod
@@ -143,6 +150,14 @@ def comparar(conn: Connection, archivo: Archivo, consorcio_id: UUID) -> dict[str
         )
         if fila[campo] != valor
     ]
+    perfil = conn.execute(
+        text("select jurisdiccion from nucleo.perfil_normativo_del_consorcio()")
+    ).scalar_one_or_none()
+    if perfil != c.jurisdiccion:
+        diferencias.append(
+            f"consorcio.jurisdiccion: en la base {perfil!r} (perfil normativo vinculado),"
+            f" en el archivo {c.jurisdiccion.value!r}"
+        )
     if fila["eliminado_en"] is not None:
         diferencias.append(f"consorcio dado de baja el {fila['eliminado_en']}")
     existentes = {
@@ -177,6 +192,9 @@ def crear(conn: Connection, archivo: Archivo, consorcio_id: UUID) -> dict[str, U
             " values (:id, :n, :cuit, :z)"
         ),
         {"id": consorcio_id, "n": c.nombre, "cuit": c.cuit, "z": c.zona_horaria},
+    )
+    conn.execute(
+        text("select * from nucleo.vincular_perfil_normativo(:j)"), {"j": c.jurisdiccion.value}
     )
     unidades: dict[str, UUID] = {}
     for u in archivo.unidades:

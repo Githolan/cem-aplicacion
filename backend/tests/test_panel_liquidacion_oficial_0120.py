@@ -110,7 +110,9 @@ def test_el_panel_suma_solo_las_oficiales_vigentes_con_sus_valores_exactos(
             (OCTUBRE, 1, Decimal("1500.50")), (OCTUBRE, 2, Decimal("1000.00")),
         ]  # fmt: skip
         assert [f["nombre"] for f in d["rubros_liquidados"]] == [nombres[1], nombres[2]] * 2
-        assert d["liquidacion_vigente"] == {"id": octubre, "periodo": OCTUBRE, "diferencias": 0}
+        # Sin perfil normativo vinculado (`0125`), nada que señalar del enlace.
+        assert d["liquidacion_vigente"] == {"id": octubre, "periodo": OCTUBRE, "diferencias": 0,
+                                            "enlace_documentacion": None}  # fmt: skip
         # En la liquidación inventada, la suma de los rubros es el total que informa.
         assert sum(t for p, _, t in rubros(d) if p == OCTUBRE) == TOTAL
         # Las secciones de las órdenes siguen ahí, vacías en Modo Consejo.
@@ -123,11 +125,13 @@ def test_lo_que_no_cierra_es_lo_de_la_vigente(escena, bucket, motor_app, motor_m
     # Septiembre con un gasto que no suma: dos diferencias en la lectura (`0113`).
     septiembre = confirmada(e, motor_app, liquidacion(gasto_luz=("1.000,00", "0,00", "1.000,05")))
     assert panel(e, "mc")["liquidacion_vigente"] == {
-        "id": septiembre, "periodo": SEPTIEMBRE, "diferencias": 2}  # fmt: skip
+        "id": septiembre, "periodo": SEPTIEMBRE, "diferencias": 2,
+        "enlace_documentacion": None}  # fmt: skip
     # Octubre, sin diferencias, pasa a ser la vigente: lo de septiembre ya no se cuenta.
     octubre = confirmada(e, motor_app, de_octubre())
     assert panel(e, "mc")["liquidacion_vigente"] == {
-        "id": octubre, "periodo": OCTUBRE, "diferencias": 0}  # fmt: skip
+        "id": octubre, "periodo": OCTUBRE, "diferencias": 0,
+        "enlace_documentacion": None}  # fmt: skip
 
 
 def test_la_ventana_son_los_ultimos_doce_periodos_con_liquidacion(

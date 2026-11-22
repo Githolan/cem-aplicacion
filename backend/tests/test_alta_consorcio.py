@@ -31,6 +31,7 @@ def contenido(consorcio_id: UUID | None, **cambios) -> dict:
         "nombre": "Edificio Prueba de Alta",
         "cuit": "30712345678",
         "zona_horaria": "America/Argentina/Buenos_Aires",
+        "jurisdiccion": "caba",
     }
     if consorcio_id is not None:
         consorcio["id"] = str(consorcio_id)
@@ -54,14 +55,15 @@ def correr(tmp_path, monkeypatch, capsys):
     return _correr
 
 
-def totales(motor_migrate) -> tuple[int, int, int]:
-    """Filas de consorcios, unidades y eventos de auditoría en toda la base."""
+def totales(motor_migrate) -> tuple[int, int, int, int]:
+    """Filas de consorcios, unidades, eventos de auditoría y perfiles vinculados en toda la base."""
     with motor_migrate.connect() as conn:
         return conn.execute(
             text(
                 "select (select count(*) from nucleo.consorcio),"
                 " (select count(*) from nucleo.unidad),"
-                " (select count(*) from auditoria.eventos)"
+                " (select count(*) from auditoria.eventos),"
+                " (select count(*) from nucleo.consorcio_perfil_normativo)"
             )
         ).one()
 
@@ -90,6 +92,35 @@ def test_crea_el_consorcio_y_sus_unidades_e_imprime_los_ids(correr, motor_migrat
         )
     assert tuple(c) == ("Edificio Prueba de Alta", "30712345678", "America/Argentina/Buenos_Aires")
     assert en_base == impresas
+    assert perfiles(motor_migrate, cid) == [(1, "caba", 1)]
+
+
+def perfiles(motor_migrate, cid) -> list[tuple]:
+    """Los vínculos del consorcio con el perfil normativo: (orden, jurisdicción, versión)."""
+    with motor_migrate.connect() as conn:
+        return [tuple(f) for f in conn.execute(text(
+            "select b.orden, p.jurisdiccion, p.version from nucleo.consorcio_perfil_normativo b"
+            " join nucleo.perfil_normativo p on p.id = b.perfil_id where b.consorcio_id = :c"
+            " order by b.orden"), {"c": cid})]  # fmt: skip
+
+
+def test_un_consorcio_sin_perfil_vinculado_es_una_diferencia(correr, motor_migrate):
+    """RF01 (`0125`): un consorcio que existe sin perfil normativo no coincide con el archivo, y el
+    script no lo vincula por su cuenta. Control: con el perfil vinculado, el archivo coincide."""
+    cid = uuid4()
+    assert correr(contenido(cid))[0] == 0
+    with motor_migrate.begin() as conn:
+        conn.execute(text("alter table nucleo.consorcio_perfil_normativo disable trigger user"))
+        conn.execute(text("delete from nucleo.consorcio_perfil_normativo where consorcio_id = :c"),
+                     {"c": cid})  # fmt: skip
+        conn.execute(text("alter table nucleo.consorcio_perfil_normativo enable trigger user"))
+    codigo, _, errores = correr(contenido(cid))
+    assert codigo == 1
+    assert "consorcio.jurisdiccion: en la base None (perfil normativo vinculado)" in errores
+    assert perfiles(motor_migrate, cid) == []
+    otro = uuid4()
+    assert correr(contenido(otro))[0] == 0
+    assert correr(contenido(otro))[0] == 0  # control
 
 
 def test_el_alta_no_deja_eventos_y_las_filas_no_se_reescriben(correr, motor_migrate, motor_app):
@@ -212,6 +243,7 @@ def test_sin_id_no_escribe_y_propone_uno(correr, motor_migrate):
         ),
         (lambda c: {**c, "consorcio": {**c["consorcio"], "cuit": "30-71234567-8"}}, "cuit"),
         (lambda c: {**c, "unidades": []}, "unidades"),
+        (lambda c: {**c, "consorcio": {**c["consorcio"], "jurisdiccion": "pba"}}, "jurisdiccion"),
     ],
 )
 def test_archivos_invalidos_no_llegan_a_la_base(correr, motor_migrate, datos, esperado):

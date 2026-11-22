@@ -4617,6 +4617,43 @@
         "title": "Emision",
         "type": "object"
       },
+      "EnlaceDocumentacion": {
+        "description": "Lo que el perfil normativo del consorcio exige de la liquidación oficial de un período sobre\nel enlace a la documentación, y lo que encontró la lectura. Solo para la vigente de su\nperíodo, y solo si la versión del perfil lo exige desde antes de ese período.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoEnlaceDocumentacion"
+          },
+          "fuente": {
+            "description": "La publicación oficial de la norma.",
+            "title": "Fuente",
+            "type": "string"
+          },
+          "jurisdiccion": {
+            "$ref": "#/components/schemas/Jurisdiccion"
+          },
+          "norma": {
+            "description": "La norma que lo exige.",
+            "maxLength": 200,
+            "title": "Norma",
+            "type": "string"
+          },
+          "version": {
+            "description": "La versión del perfil a la que está vinculado.",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "estado",
+          "jurisdiccion",
+          "version",
+          "norma",
+          "fuente"
+        ],
+        "title": "EnlaceDocumentacion",
+        "type": "object"
+      },
       "EnlaceLeido": {
         "description": "Un enlace que trae la liquidación (Disposición 1146/24: comprobantes y estado de pagos),\nanotado al leerla y sin seguirlo (H5-5, `0118`).",
         "properties": {
@@ -5172,6 +5209,15 @@
           "vigente"
         ],
         "title": "EstadoDocumentacionProveedor",
+        "type": "string"
+      },
+      "EstadoEnlaceDocumentacion": {
+        "enum": [
+          "encontrado",
+          "no_encontrado",
+          "sin_buscar"
+        ],
+        "title": "EstadoEnlaceDocumentacion",
         "type": "string"
       },
       "EstadoGrupoRecalculado": {
@@ -8136,6 +8182,13 @@
         "title": "InvitacionRecibida",
         "type": "object"
       },
+      "Jurisdiccion": {
+        "enum": [
+          "caba"
+        ],
+        "title": "Jurisdiccion",
+        "type": "string"
+      },
       "LeTocaA": {
         "description": "A quién le toca el próximo paso, por su lugar en el circuito: no nombra personas.",
         "enum": [
@@ -8616,6 +8669,17 @@
             "title": "Diferencias",
             "type": "array"
           },
+          "enlace_documentacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnlaceDocumentacion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que pide el perfil normativo del consorcio sobre el enlace a la documentación y lo que encontró la lectura (RF47, `0125`). Nulo si no es la vigente de su período o si la versión del perfil no lo exige para ese período."
+          },
           "formato": {
             "anyOf": [
               {
@@ -8688,7 +8752,8 @@
           "motivo_reemplazo",
           "reemplazada_por",
           "diferencias",
-          "campos"
+          "campos",
+          "enlace_documentacion"
         ],
         "title": "LiquidacionOficial",
         "type": "object"
@@ -8712,6 +8777,17 @@
             "minimum": 0.0,
             "title": "Diferencias",
             "type": "integer"
+          },
+          "enlace_documentacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnlaceDocumentacion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que pide el perfil normativo del consorcio sobre el enlace a la documentación y lo que encontró la lectura (RF47, `0125`). Nulo si no es la vigente de su período o si la versión del perfil no lo exige para ese período."
           },
           "formato": {
             "anyOf": [
@@ -8787,7 +8863,8 @@
           "reemplaza_a",
           "motivo_reemplazo",
           "reemplazada_por",
-          "diferencias"
+          "diferencias",
+          "enlace_documentacion"
         ],
         "title": "LiquidacionOficialResumen",
         "type": "object"
@@ -8799,6 +8876,17 @@
             "minimum": 0.0,
             "title": "Diferencias",
             "type": "integer"
+          },
+          "enlace_documentacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnlaceDocumentacion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que pide el perfil normativo del consorcio sobre el enlace a la documentación y lo que encontró la lectura (RF47, `0125`); nulo si no lo exige."
           },
           "id": {
             "description": "La liquidación oficial (`GET …/liquidacion-oficial/{id}`).",
@@ -8815,7 +8903,8 @@
         "required": [
           "id",
           "periodo",
-          "diferencias"
+          "diferencias",
+          "enlace_documentacion"
         ],
         "title": "LiquidacionVigente",
         "type": "object"

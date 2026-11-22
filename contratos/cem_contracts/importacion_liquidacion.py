@@ -21,6 +21,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from cem_contracts.perfil_normativo import EnlaceDocumentacion
+
 
 class ImportacionNueva(BaseModel):
     """La versión del documento que se importa: un PDF, JPEG o PNG `disponible` de la categoría
@@ -356,6 +358,11 @@ class LiquidacionOficialResumen(BaseModel):
     motivo_reemplazo: str | None
     reemplazada_por: UUID | None = Field(description="La que la reemplazó, si ya no es vigente.")
     diferencias: int = Field(ge=0)
+    enlace_documentacion: EnlaceDocumentacion | None = Field(
+        description="Lo que pide el perfil normativo del consorcio sobre el enlace a la"
+        " documentación y lo que encontró la lectura (RF47, `0125`). Nulo si no es la vigente de"
+        " su período o si la versión del perfil no lo exige para ese período."
+    )
 
 
 class CampoOficial(BaseModel):
@@ -389,6 +396,11 @@ class LiquidacionOficial(BaseModel):
     reemplazada_por: UUID | None
     diferencias: list[DiferenciaLeida]
     campos: list[CampoOficial]
+    enlace_documentacion: EnlaceDocumentacion | None = Field(
+        description="Lo que pide el perfil normativo del consorcio sobre el enlace a la"
+        " documentación y lo que encontró la lectura (RF47, `0125`). Nulo si no es la vigente de"
+        " su período o si la versión del perfil no lo exige para ese período."
+    )
 
 
 class PeriodoOficial(BaseModel):

@@ -175,6 +175,24 @@ h3 {
   color: var(--pending-text);
 }
 
+/* RF47 (app 0125): el aviso del enlace a la documentación, con quién lo pide debajo. */
+.aviso-enlace {
+  margin: var(--space-4) 0;
+}
+
+.aviso-enlace p {
+  margin: 0;
+}
+
+.aviso-enlace p + p {
+  margin-top: var(--space-2);
+  font-weight: 400;
+}
+
+.aviso-enlace a {
+  color: inherit;
+}
+
 .detalles {
   display: grid;
   grid-template-columns: max-content 1fr;

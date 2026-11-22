@@ -79,6 +79,7 @@ from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, detalle_de_campo, sin_cache
 from app.identidad.invitaciones import origen_publico
+from app.liquidacion.oficial import enlaces_documentacion
 from app.plataforma import correo
 from app.plataforma.idempotencia import (
     ClaveIdempotenciaDep,
@@ -128,6 +129,7 @@ def ver_panel(
             liquidado = de_la_ventana("panel_gasto_liquidado_por_periodo")
             rubros = de_la_ventana("panel_gasto_liquidado_por_rubro")
             vigente = leer("panel_diferencias_liquidacion_vigente")
+            senales = enlaces_documentacion(c)
     except DBAPIError as e:
         if isinstance(e.orig, InsufficientPrivilege):
             raise Discrepancia(f"la base niega {VER_PANEL} y el evaluador lo concede") from e
@@ -150,7 +152,11 @@ def ver_panel(
             for f in liquidado
         ],  # fmt: skip
         rubros_liquidados=[RubroLiquidado(**f) for f in rubros],
-        liquidacion_vigente=LiquidacionVigente(**vigente[0]) if vigente else None,
+        liquidacion_vigente=LiquidacionVigente(
+            **vigente[0], enlace_documentacion=senales.get(vigente[0]["id"])
+        )
+        if vigente
+        else None,  # fmt: skip
     )
 
 
