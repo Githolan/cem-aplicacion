@@ -8,6 +8,7 @@ con IA queda apagada: ninguna prueba manda nada a un modelo. Datos SINTETICOS / 
 """
 
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
@@ -229,6 +230,26 @@ def test_la_lectura_deja_la_busqueda_y_si_no_fue_en_todo_el_documento_no_afirma_
     cambiar_busqueda(motor_migrate, e["cons"], sin, None)  # leída antes de 0125
     assert en_la_lista(e) == {sin: senal("sin_buscar")}
     assert del_panel(e)["enlace_documentacion"] == senal("sin_buscar")
+
+
+def test_un_pdf_con_una_pagina_sin_texto_no_es_una_busqueda_completa(
+    escena, bucket, motor_app, motor_migrate, lectura_apagada
+):
+    """Codex en #282: una página escaneada puede llevar la dirección impresa, que no se lee. Un PDF
+    con una página de texto y otra sin texto, sin ningún enlace: la búsqueda no es completa y la
+    señal no afirma que falte. Control: el mismo PDF sin la página vacía sí es completo."""
+    e = escena
+    vincular(motor_app, e["cons"])
+    texto = liquidacion()
+    mixto = pdf_de([*texto, replace(texto[0], palabras=())])
+    i = oficial(e, motor_app, mixto)
+    assert busquedas(motor_migrate, e["cons"]) == {i: False}
+    assert en_la_lista(e) == {i: senal("sin_buscar")}
+    assert del_panel(e)["enlace_documentacion"] == senal("sin_buscar")
+    reemplazo = {"reemplaza_a": i, "motivo": "La administración mandó otra versión"}
+    solo_texto = oficial(e, motor_app, pdf_de(texto), reemplazo)
+    assert busquedas(motor_migrate, e["cons"])[solo_texto] is True
+    assert en_la_lista(e)[solo_texto] == senal("no_encontrado")
 
 
 def test_lo_ven_solo_quienes_ven_el_panel_y_otro_consorcio_no_ve_nada(

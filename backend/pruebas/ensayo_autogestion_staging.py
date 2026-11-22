@@ -366,6 +366,7 @@ class Ensayo:
                 "id": str(cons),
                 "nombre": c["nombre"],
                 "zona_horaria": self.datos["zona_horaria"],
+                "jurisdiccion": self.datos["jurisdiccion"],
             },
             "unidades": [{"designacion": u} for u in self.datos["unidades"]],
         }

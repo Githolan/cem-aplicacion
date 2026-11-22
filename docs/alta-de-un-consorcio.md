@@ -18,7 +18,8 @@ Un JSON en UTF-8, por ejemplo `edificio.json`:
   "consorcio": {
     "nombre": "Edificio Ejemplo 1234",
     "cuit": "30712345678",
-    "zona_horaria": "America/Argentina/Buenos_Aires"
+    "zona_horaria": "America/Argentina/Buenos_Aires",
+    "jurisdiccion": "caba"
   },
   "unidades": [
     {"designacion": "PB"},
@@ -30,6 +31,9 @@ Un JSON en UTF-8, por ejemplo `edificio.json`:
 
 - `nombre` es el que verán las personas en la app y en el correo de invitación.
 - `cuit`: 11 dígitos sin guiones; si no lo tenés a mano, sacá la línea (queda vacío).
+- `jurisdiccion`: obligatoria; hoy solo `caba`. Vincula el consorcio a la versión vigente del
+  perfil normativo de esa jurisdicción (RF01, migración `0125`). En un consorcio que ya existe se
+  compara con el perfil vinculado: otra jurisdicción, o ninguna, es una diferencia.
 - `designacion`: como la escriben las liquidaciones (`PB`, `1° A`, `Cochera 3`…), una por
   unidad funcional, sin repetir.
 - No agregues otros campos (domicilio, coeficientes, modo): este script no los acepta y

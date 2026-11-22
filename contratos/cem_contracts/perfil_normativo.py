@@ -35,8 +35,8 @@ class EstadoEnlaceDocumentacion(StrEnum):
     ninguno."""
     SIN_BUSCAR = "sin_buscar"
     """La lectura no pudo buscar en todo el documento y no encontró ninguno: una foto (sin texto
-    que leer), un PDF sin texto o con más páginas de las que se dibujan (sin QR), o una
-    liquidación leída antes de `0125`."""
+    que leer), un PDF con alguna página sin texto (una escaneada) o con más páginas de las que se
+    dibujan (sin QR), o una liquidación leída antes de `0125`."""
 
 
 LARGO_NORMA = 200

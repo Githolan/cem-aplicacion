@@ -298,8 +298,13 @@ def leer_importacion(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         dibujadas: list[bytes] | None = imagenes.de_pdf(contenido)
     except (imagenes.DemasiadasPaginas, imagenes.ImagenIlegible):
         dibujadas = None
-    # En todo el documento solo si tiene texto y se dibujaron sus páginas (los QR) (`0125`).
-    completa = dibujadas is not None and any(p.palabras for p in paginas)
+    # En todo el documento solo si cada página tiene texto y todas se dibujaron (los QR) (`0125`):
+    # una dirección impresa en una página escaneada no se lee (Codex, #282).
+    completa = (
+        dibujadas is not None
+        and len(dibujadas) == len(paginas)
+        and all(p.palabras for p in paginas)
+    )
     _anotar_enlaces(conn, importacion, enlaces.de_pdf(contenido, paginas, dibujadas or []),
                     completa=completa)  # fmt: skip
     try:
