@@ -28,6 +28,11 @@ type Campo = components["schemas"]["CampoOficial"];
 export const RUTA_LIQUIDACION_OFICIAL = "/liquidacion-oficial";
 export const TITULO_LIQUIDACION_OFICIAL = "Liquidación oficial";
 export const SIN_OFICIALES = "Todavía no hay ninguna liquidación de la administración confirmada.";
+// Las diferencias se calcularon al leer el documento tal como llegó: no cuentan las correcciones
+// de quien lo confirmó (hallazgo de Codex en #276). Las cifras de arriba son las oficiales.
+export const CONTROLES_DEL_DOCUMENTO =
+  "Estas sumas se controlaron sobre el documento tal como llegó, antes de las correcciones de quien lo confirmó.";
+export const DOCUMENTO_CIERRA = "Las sumas del documento original cierran.";
 export const VIGENTE = "Vigente";
 export const REEMPLAZADA = "Reemplazada";
 const VOLVER = "Volver a la lista";
@@ -165,7 +170,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   <li key={o.id}>
                     <FilaDeRegistro
                       titulo={`Período ${mesLargo(o.periodo)}`}
-                      resumen={`Confirmada el ${fechaCorta(o.decidida_en)}${o.diferencias > 0 ? ` · ${o.diferencias} sin cerrar` : ""}`}
+                      resumen={`Confirmada el ${fechaCorta(o.decidida_en)}${o.diferencias > 0 ? ` · ${o.diferencias} sin cerrar en el documento` : ""}`}
                       estado={o.vigente ? VIGENTE : REEMPLAZADA}
                       alAbrir={() => {
                         setAbierta({ tipo: "cargando" });
@@ -328,9 +333,10 @@ function DeUnPeriodo({ detalle, oficiales, idTitulo }: { detalle: Detalle; ofici
         </div>
       )}
 
-      <h3>Lo que no cierra</h3>
+      <h3>Lo que no cierra en el documento</h3>
+      <p>{CONTROLES_DEL_DOCUMENTO}</p>
       {detalle.diferencias.length === 0 ? (
-        <p>Las cuentas de la liquidación cierran.</p>
+        <p>{DOCUMENTO_CIERRA}</p>
       ) : (
         <ul aria-label="Lo que no cierra">
           {detalle.diferencias.map((d, i) => {

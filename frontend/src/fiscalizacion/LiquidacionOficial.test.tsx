@@ -9,7 +9,7 @@ import type { components } from "../api/tipos";
 import { alcanza } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
-import { REEMPLAZADA, RUTA_LIQUIDACION_OFICIAL, SIN_OFICIALES, VIGENTE } from "./LiquidacionOficial";
+import { CONTROLES_DEL_DOCUMENTO, DOCUMENTO_CIERRA, REEMPLAZADA, RUTA_LIQUIDACION_OFICIAL, SIN_OFICIALES, VIGENTE } from "./LiquidacionOficial";
 
 // Liquidación oficial, para el Consejo y la administración (H5 D3-A, app 0119). Datos SINTETICOS.
 
@@ -116,7 +116,9 @@ describe("pantalla /liquidacion-oficial", () => {
     expect(within(unidades).getByRole("rowheader", { name: "1-A" })).toBeTruthy();
     expect(within(unidades).getByRole("rowheader", { name: "UF 009 Z-9" })).toBeTruthy();
     expect(within(unidades).getByText("$ 1.326,00")).toBeTruthy();
-    expect(screen.getByText("Las cuentas de la liquidación cierran.")).toBeTruthy();
+    expect(screen.getByText(DOCUMENTO_CIERRA)).toBeTruthy();
+    expect(screen.getByText(CONTROLES_DEL_DOCUMENTO)).toBeTruthy();
+    expect(screen.queryByText("Las cuentas de la liquidación cierran.")).toBeNull();
     expect(screen.getByText("Total del gasto: $ 2.500,49")).toBeTruthy();
     // Solo lectura: no ofrece ningún acto sobre la liquidación.
     expect(screen.queryByRole("button", { name: /Confirmar|Reemplazar|Descartar/ })).toBeNull();
