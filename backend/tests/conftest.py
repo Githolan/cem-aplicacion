@@ -397,6 +397,12 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "       delete from nucleo.enlace_liquidacion;"
                 "       alter table nucleo.enlace_liquidacion enable trigger user;"
                 "     end if;"
+                # Las correspondencias del recálculo (0116): con alguna guardada, 0116 no baja.
+                "     if to_regclass('nucleo.correspondencia_grupo_liquidacion') is not null then"
+                "       alter table nucleo.correspondencia_grupo_liquidacion disable trigger user;"
+                "       delete from nucleo.correspondencia_grupo_liquidacion;"
+                "       alter table nucleo.correspondencia_grupo_liquidacion enable trigger user;"
+                "     end if;"
                 "     alter table nucleo.campo_preliminar disable trigger user;"
                 "     delete from nucleo.campo_preliminar;"
                 "     alter table nucleo.campo_preliminar enable trigger user;"

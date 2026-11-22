@@ -82,6 +82,10 @@ def confirmar_vinculo(motor_migrate, vinculo) -> None:
 
 @pytest.fixture
 def escena(motor_migrate, motor_app):
+    return armar_escena(motor_migrate, motor_app)
+
+
+def armar_escena(motor_migrate, motor_app) -> dict:
     """Como la de `0113` (Modo Consejo, un miembro del Consejo, el padrón de la liquidación), más
     la administración (sin vínculo), la propietaria de «1° A» y «1-A» con los vínculos
     confirmados, una propietaria sin confirmar de «1-A» y una inquilina confirmada de «PB-A»."""
@@ -94,7 +98,8 @@ def escena(motor_migrate, motor_app):
         for designacion in ("PB-A", "1-A"):
             c.execute(text("insert into nucleo.unidad (consorcio_id, designacion) values (:c, :d)"),
                       {"c": cons, "d": designacion})  # fmt: skip
-    e = {"cons": cons, "prop": prop, "mc": mc, "sesion": nueva_sesion(motor_migrate, mc)}
+    e = {"cons": cons, "prop": prop, "mc": mc, "acta": acta,
+         "sesion": nueva_sesion(motor_migrate, mc)}  # fmt: skip
     con_1b(motor_migrate, e)
     with motor_migrate.begin() as c:
         e["u"] = dict(c.execute(text(
