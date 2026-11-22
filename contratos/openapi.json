@@ -68,6 +68,21 @@
         "title": "AccionReclamo",
         "type": "string"
       },
+      "AccionReparacion": {
+        "description": "Lo que la persona puede hacer con la reparación ahora (la pantalla no ofrece otra cosa).",
+        "enum": [
+          "gestionar",
+          "presupuestar",
+          "aprobar",
+          "terminar",
+          "enlazar_gasto",
+          "no_realizada",
+          "retirar",
+          "agregar_foto"
+        ],
+        "title": "AccionReparacion",
+        "type": "string"
+      },
       "AccionSolicitud": {
         "description": "Lo que la cuenta que pide puede hacer con la solicitud ahora. Solo para mostrar: cada acto\nlo vuelven a decidir la ruta y la base.",
         "enum": [
@@ -194,6 +209,75 @@
           "nombre"
         ],
         "title": "ActorEvento",
+        "type": "object"
+      },
+      "AdjuntoReparacion": {
+        "description": "Un archivo de la reparación: los disponibles y, de los otros, los que subió quien lee.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVersion"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "propio": {
+            "title": "Propio",
+            "type": "boolean"
+          },
+          "subido_en": {
+            "format": "date-time",
+            "title": "Subido En",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoAdjunto"
+          },
+          "tipo_archivo": {
+            "$ref": "#/components/schemas/TipoArchivo"
+          },
+          "usado": {
+            "description": "Si ya lo cita un paso de la historia.",
+            "title": "Usado",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "tipo",
+          "estado",
+          "tipo_archivo",
+          "subido_en",
+          "propio",
+          "usado"
+        ],
+        "title": "AdjuntoReparacion",
+        "type": "object"
+      },
+      "AdjuntoReparacionSubido": {
+        "description": "`POST …/reparaciones/{r}/adjuntos`: el archivo, en cuarentena hasta que el antivirus lo\nacepta. Un acto lo cita por `adjunto_id` recién cuando está disponible.",
+        "properties": {
+          "adjunto_id": {
+            "format": "uuid",
+            "title": "Adjunto Id",
+            "type": "string"
+          },
+          "archivo": {
+            "$ref": "#/components/schemas/VersionCargada"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adjunto_id",
+          "documento_id",
+          "archivo"
+        ],
+        "title": "AdjuntoReparacionSubido",
         "type": "object"
       },
       "AdjuntoSubido": {
@@ -330,6 +414,50 @@
           "version"
         ],
         "title": "AprobacionRegistrada",
+        "type": "object"
+      },
+      "AprobacionReparacion": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones/{r}/aprobacion`: la constancia de quién aprobó el presupuesto, con una\ndecisión formal del edificio o un documento firmado (uno de los dos). En Modo Consejo la\nadministración ejecuta fuera de la plataforma: es una constancia, no una aprobación de pago.",
+        "properties": {
+          "adjunto_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El documento firmado subido y disponible (`tipo=aprobacion`).",
+            "title": "Adjunto Id"
+          },
+          "aprobado_por": {
+            "description": "Quién aprobó (p. ej. «Asamblea del 3/11»).",
+            "maxLength": 120,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Aprobado Por",
+            "type": "string"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          }
+        },
+        "required": [
+          "aprobado_por"
+        ],
+        "title": "AprobacionReparacion",
         "type": "object"
       },
       "AutorizacionVerProveedores": {
@@ -1405,7 +1533,13 @@
           "texto_con_cuenta",
           "sin_destinatarios",
           "liquidacion_reemplazada",
-          "reclamo_cerrado"
+          "reclamo_cerrado",
+          "reparacion_no_admite",
+          "responsable_invalido",
+          "constancia_invalida",
+          "gasto_no_oficial",
+          "gasto_ya_enlazado",
+          "fotos_completas"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -3284,6 +3418,36 @@
         "title": "DecisionCampo",
         "type": "string"
       },
+      "DecisionCitable": {
+        "properties": {
+          "descripcion": {
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "tipo": {
+            "title": "Tipo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tipo",
+          "fecha",
+          "descripcion"
+        ],
+        "title": "DecisionCitable",
+        "type": "object"
+      },
       "DecisionDetalle": {
         "description": "El detalle autorizado. Quién la registró no sale: solo si fue quien lee (A15: no puede\nusarla para dar de alta ni para remover) o el equipo.",
         "properties": {
@@ -5134,6 +5298,20 @@
         "title": "EstadoReclamo",
         "type": "string"
       },
+      "EstadoReparacion": {
+        "enum": [
+          "pedida",
+          "en_gestion",
+          "presupuestada",
+          "aprobada",
+          "terminada_gasto_pendiente",
+          "cerrada",
+          "no_realizada",
+          "retirada"
+        ],
+        "title": "EstadoReparacion",
+        "type": "string"
+      },
       "EstadoSalteo": {
         "description": "El salteo del bloqueo por documentación legal (`0106`): espera su orden, ya la tuvo, o\npasaron las horas sin que nadie preparara una.",
         "enum": [
@@ -6411,6 +6589,57 @@
         "title": "GastoNuevo",
         "type": "object"
       },
+      "GastoOficial": {
+        "description": "Un gasto de una liquidación oficial, tal como figura (la reparación no guarda importes).",
+        "properties": {
+          "clave": {
+            "title": "Clave",
+            "type": "string"
+          },
+          "concepto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concepto"
+          },
+          "liquidacion_id": {
+            "format": "uuid",
+            "title": "Liquidacion Id",
+            "type": "string"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "liquidacion_id",
+          "periodo",
+          "clave",
+          "concepto",
+          "total"
+        ],
+        "title": "GastoOficial",
+        "type": "object"
+      },
       "GastoPagado": {
         "description": "Lo pagado en un mes, con un rubro, con o sin el fondo de reserva, en una moneda.\n\nImporte y fecha son los que usa la liquidación: lo real si el Consejo lo dio por pagado, y la\nfecha de la operación conciliada o el día del consorcio en que se pagó.",
         "properties": {
@@ -6461,6 +6690,99 @@
           "importe_centavos"
         ],
         "title": "GastoPagado",
+        "type": "object"
+      },
+      "GastoReparacion": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones/{r}/gasto`: el cierre.",
+        "properties": {
+          "clave": {
+            "description": "La clave del gasto en esa liquidación.",
+            "pattern": "^gasto:[^:]+:[0-9]+$",
+            "title": "Clave",
+            "type": "string"
+          },
+          "liquidacion_id": {
+            "description": "Una liquidación oficial vigente (confirmada).",
+            "format": "uuid",
+            "title": "Liquidacion Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "liquidacion_id",
+          "clave"
+        ],
+        "title": "GastoReparacion",
+        "type": "object"
+      },
+      "GestionReparacion": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones/{r}/gestion`: la primera vez la reparación pasa a `en_gestion`.",
+        "properties": {
+          "fecha_comprometida": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fecha Comprometida"
+          },
+          "prioridad": {
+            "$ref": "#/components/schemas/Prioridad"
+          },
+          "responsable_id": {
+            "description": "Una persona con `reparaciones.gestionar`.",
+            "format": "uuid",
+            "title": "Responsable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "responsable_id",
+          "prioridad"
+        ],
+        "title": "GestionReparacion",
+        "type": "object"
+      },
+      "GestionVigente": {
+        "properties": {
+          "fecha_comprometida": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fecha Comprometida"
+          },
+          "prioridad": {
+            "$ref": "#/components/schemas/Prioridad"
+          },
+          "responsable_id": {
+            "format": "uuid",
+            "title": "Responsable Id",
+            "type": "string"
+          },
+          "responsable_nombre": {
+            "title": "Responsable Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "responsable_id",
+          "responsable_nombre",
+          "prioridad",
+          "fecha_comprometida"
+        ],
+        "title": "GestionVigente",
         "type": "object"
       },
       "GrupoDeLaUnidad": {
@@ -9314,6 +9636,73 @@
         "title": "ListaReclamos",
         "type": "object"
       },
+      "ListaReparaciones": {
+        "description": "`GET …/reparaciones`: la más nueva primero. Quien gestiona ve todas; quien pidió, las\nsuyas.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ReparacionResumen"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "fotos_maximo": {
+            "title": "Fotos Maximo",
+            "type": "integer"
+          },
+          "gestiona": {
+            "title": "Gestiona",
+            "type": "boolean"
+          },
+          "largo_aprobado_por": {
+            "title": "Largo Aprobado Por",
+            "type": "integer"
+          },
+          "largo_descripcion": {
+            "title": "Largo Descripcion",
+            "type": "integer"
+          },
+          "largo_lugar": {
+            "title": "Largo Lugar",
+            "type": "integer"
+          },
+          "largo_motivo": {
+            "title": "Largo Motivo",
+            "type": "integer"
+          },
+          "largo_proveedor": {
+            "title": "Largo Proveedor",
+            "type": "integer"
+          },
+          "pide": {
+            "description": "Si la persona puede pedir una reparación ahora.",
+            "title": "Pide",
+            "type": "boolean"
+          },
+          "unidades": {
+            "description": "Las unidades por las que puede pedir.",
+            "items": {
+              "$ref": "#/components/schemas/UnidadParaPedir"
+            },
+            "title": "Unidades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos",
+          "gestiona",
+          "pide",
+          "unidades",
+          "largo_descripcion",
+          "largo_lugar",
+          "largo_motivo",
+          "largo_proveedor",
+          "largo_aprobado_por",
+          "fotos_maximo"
+        ],
+        "title": "ListaReparaciones",
+        "type": "object"
+      },
       "ListaSesiones": {
         "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
         "properties": {
@@ -10187,6 +10576,24 @@
         ],
         "title": "MotivoRechazo",
         "type": "string"
+      },
+      "MotivoReparacion": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones/{r}/no-realizada` y `…/retiro`.",
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "MotivoReparacion",
+        "type": "object"
       },
       "MotivoSinActo": {
         "description": "Por qué no se ofrece el acto del paso (pregunta 17 del propietario, 18-11-2026).",
@@ -11772,6 +12179,153 @@
         "title": "PasoReclamo",
         "type": "object"
       },
+      "PasoReparacion": {
+        "description": "Un paso de la historia, con lo que registró.",
+        "properties": {
+          "adjunto_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjunto Id"
+          },
+          "aprobado_por": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aprobado Por"
+          },
+          "decision_descripcion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Descripcion"
+          },
+          "decision_fecha": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Fecha"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoReparacion"
+          },
+          "facultad": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Con qué facultad se registró la aprobación.",
+            "title": "Facultad"
+          },
+          "gasto": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GastoOficial"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo"
+          },
+          "proveedor_cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proveedor Cuit"
+          },
+          "proveedor_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proveedor Nombre"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por_nombre": {
+            "title": "Registrado Por Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "estado",
+          "motivo",
+          "adjunto_id",
+          "proveedor_nombre",
+          "proveedor_cuit",
+          "aprobado_por",
+          "facultad",
+          "decision_id",
+          "decision_descripcion",
+          "decision_fecha",
+          "gasto",
+          "registrado_por_nombre",
+          "registrado_en"
+        ],
+        "title": "PasoReparacion",
+        "type": "object"
+      },
       "PedidoCopia": {
         "description": "`POST /api/v1/privacidad/casos/{caso_id}/copia`.",
         "properties": {
@@ -11985,6 +12539,25 @@
         "title": "PeriodoOficial",
         "type": "object"
       },
+      "Persona": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "nombre"
+        ],
+        "title": "Persona",
+        "type": "object"
+      },
       "PlanillaPadron": {
         "description": "El cuerpo de los dos pasos: la planilla CSV como texto UTF-8.",
         "properties": {
@@ -12000,6 +12573,54 @@
         ],
         "title": "PlanillaPadron",
         "type": "object"
+      },
+      "PresupuestoReparacion": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones/{r}/presupuesto`.",
+        "properties": {
+          "adjunto_id": {
+            "description": "El presupuesto subido y disponible (`tipo=presupuesto`).",
+            "format": "uuid",
+            "title": "Adjunto Id",
+            "type": "string"
+          },
+          "proveedor_cuit": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{11}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optativo; la base comprueba el dígito verificador (`cuit_invalido`).",
+            "title": "Proveedor Cuit"
+          },
+          "proveedor_nombre": {
+            "maxLength": 120,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Proveedor Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adjunto_id",
+          "proveedor_nombre"
+        ],
+        "title": "PresupuestoReparacion",
+        "type": "object"
+      },
+      "Prioridad": {
+        "description": "Los niveles de atención del documento 08, §10, que aplican a una reparación («Consulta» no\nes una reparación). «Emergencia» es solo la clasificación: el flujo de emergencias (RF26)\nsigue en H4b.",
+        "enum": [
+          "emergencia",
+          "urgente",
+          "normal"
+        ],
+        "title": "Prioridad",
+        "type": "string"
       },
       "Problema": {
         "properties": {
@@ -13245,6 +13866,289 @@
           "version_esperada"
         ],
         "title": "Renovacion",
+        "type": "object"
+      },
+      "Reparacion": {
+        "description": "`GET …/reparaciones/{r}` y la respuesta de cada acto. Para quien gestiona, lo que puede\nelegir en el paso que se le ofrece.",
+        "properties": {
+          "acciones": {
+            "items": {
+              "$ref": "#/components/schemas/AccionReparacion"
+            },
+            "title": "Acciones",
+            "type": "array"
+          },
+          "adjuntos": {
+            "items": {
+              "$ref": "#/components/schemas/AdjuntoReparacion"
+            },
+            "title": "Adjuntos",
+            "type": "array"
+          },
+          "decisiones_citables": {
+            "description": "Con `aprobar`: las decisiones formales del edificio.",
+            "items": {
+              "$ref": "#/components/schemas/DecisionCitable"
+            },
+            "title": "Decisiones Citables",
+            "type": "array"
+          },
+          "descripcion": {
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "designacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La unidad; nulo en un espacio común.",
+            "title": "Designacion"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoReparacion"
+          },
+          "gastos_enlazables": {
+            "description": "Con `enlazar_gasto`: los gastos de las liquidaciones oficiales vigentes que todavía no cierran ninguna reparación.",
+            "items": {
+              "$ref": "#/components/schemas/GastoOficial"
+            },
+            "title": "Gastos Enlazables",
+            "type": "array"
+          },
+          "gestion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GestionVigente"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "historia": {
+            "description": "Del primer paso al último.",
+            "items": {
+              "$ref": "#/components/schemas/PasoReparacion"
+            },
+            "title": "Historia",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lugar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lugar"
+          },
+          "numero": {
+            "title": "Numero",
+            "type": "integer"
+          },
+          "pedida_en": {
+            "format": "date-time",
+            "title": "Pedida En",
+            "type": "string"
+          },
+          "pedida_por_nombre": {
+            "title": "Pedida Por Nombre",
+            "type": "string"
+          },
+          "propia": {
+            "description": "Si la pidió la persona que lee.",
+            "title": "Propia",
+            "type": "boolean"
+          },
+          "responsables_posibles": {
+            "description": "Con `gestionar`: las personas con `reparaciones.gestionar`.",
+            "items": {
+              "$ref": "#/components/schemas/Persona"
+            },
+            "title": "Responsables Posibles",
+            "type": "array"
+          },
+          "unidad_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad Id"
+          }
+        },
+        "required": [
+          "id",
+          "numero",
+          "estado",
+          "unidad_id",
+          "designacion",
+          "lugar",
+          "gestion",
+          "pedida_por_nombre",
+          "pedida_en",
+          "propia",
+          "descripcion",
+          "historia",
+          "adjuntos",
+          "acciones",
+          "responsables_posibles",
+          "decisiones_citables",
+          "gastos_enlazables"
+        ],
+        "title": "Reparacion",
+        "type": "object"
+      },
+      "ReparacionNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones`: la descripción y el lugar. Las fotos se suben después, una por una\n(`POST …/reparaciones/{r}/adjuntos?tipo=foto`).",
+        "properties": {
+          "descripcion": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "lugar": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dónde, en pocas palabras (obligatorio en un espacio común).",
+            "title": "Lugar"
+          },
+          "unidad_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Una unidad de quien pide (quien gestiona, cualquiera). Sin unidad, es un espacio común y `lugar` es obligatorio.",
+            "title": "Unidad Id"
+          }
+        },
+        "required": [
+          "descripcion"
+        ],
+        "title": "ReparacionNueva",
+        "type": "object"
+      },
+      "ReparacionResumen": {
+        "description": "Una fila de la lista.",
+        "properties": {
+          "designacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La unidad; nulo en un espacio común.",
+            "title": "Designacion"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoReparacion"
+          },
+          "gestion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GestionVigente"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lugar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lugar"
+          },
+          "numero": {
+            "title": "Numero",
+            "type": "integer"
+          },
+          "pedida_en": {
+            "format": "date-time",
+            "title": "Pedida En",
+            "type": "string"
+          },
+          "pedida_por_nombre": {
+            "title": "Pedida Por Nombre",
+            "type": "string"
+          },
+          "propia": {
+            "description": "Si la pidió la persona que lee.",
+            "title": "Propia",
+            "type": "boolean"
+          },
+          "unidad_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad Id"
+          }
+        },
+        "required": [
+          "id",
+          "numero",
+          "estado",
+          "unidad_id",
+          "designacion",
+          "lugar",
+          "gestion",
+          "pedida_por_nombre",
+          "pedida_en",
+          "propia"
+        ],
+        "title": "ReparacionResumen",
         "type": "object"
       },
       "RequisitoFaltante": {
@@ -14764,6 +15668,23 @@
         "title": "SolicitudFormalNueva",
         "type": "object"
       },
+      "TerminacionReparacion": {
+        "additionalProperties": false,
+        "description": "`POST …/reparaciones/{r}/terminacion`: hecha, con la factura. Queda\n`terminada_gasto_pendiente` hasta que se enlaza el gasto.",
+        "properties": {
+          "adjunto_id": {
+            "description": "La factura subida y disponible (`tipo=factura`).",
+            "format": "uuid",
+            "title": "Adjunto Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adjunto_id"
+        ],
+        "title": "TerminacionReparacion",
+        "type": "object"
+      },
       "TipoAccion": {
         "description": "Cómo se dibuja una acción ofrecida: una sola principal por pantalla (§4.2).",
         "enum": [
@@ -14782,6 +15703,16 @@
           "sistema"
         ],
         "title": "TipoActor",
+        "type": "string"
+      },
+      "TipoAdjunto": {
+        "enum": [
+          "foto",
+          "presupuesto",
+          "aprobacion",
+          "factura"
+        ],
+        "title": "TipoAdjunto",
         "type": "string"
       },
       "TipoArchivo": {
@@ -15197,6 +16128,25 @@
           "total"
         ],
         "title": "UnidadEnLaLiquidacion",
+        "type": "object"
+      },
+      "UnidadParaPedir": {
+        "properties": {
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "designacion"
+        ],
+        "title": "UnidadParaPedir",
         "type": "object"
       },
       "UnidadRecalculada": {
@@ -27565,6 +28515,913 @@
           }
         },
         "summary": "Retirar un reclamo propio mientras está presentado, con el motivo",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones": {
+      "get": {
+        "operationId": "listar_reparaciones_api_v1_consorcios__consorcio_id__reparaciones_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaReparaciones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reparaciones a cargo del consorcio: todas, para quien gestiona; las propias, para quien las pidió",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "pedir_reparacion_api_v1_consorcios__consorcio_id__reparaciones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReparacionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "422": {
+            "description": "La descripción o el lugar llevan una cuenta."
+          }
+        },
+        "summary": "Pedir una reparación a cargo del consorcio; avisa por correo a quien gestiona",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}": {
+      "get": {
+        "operationId": "ver_reparacion_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Una reparación con su historia, sus archivos y lo que la persona puede hacer ahora",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/adjuntos": {
+      "post": {
+        "description": "Una foto la sube quien pidió la reparación mientras está abierta; lo demás, quien gestiona,\nen el estado del acto que lo va a citar. El acto lo cita recién cuando está disponible.",
+        "operationId": "subir_adjunto_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__adjuntos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Qué es el archivo.",
+            "in": "query",
+            "name": "tipo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TipoAdjunto",
+              "description": "Qué es el archivo."
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjuntoReparacionSubido"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "El documento no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
+          }
+        },
+        "summary": "Subir una foto del pedido, o el presupuesto, la constancia de aprobación o la factura: entra en cuarentena hasta que el antivirus lo acepta",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/adjuntos/{adjunto_id}/contenido": {
+      "get": {
+        "operationId": "contenido_de_adjunto_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__adjuntos__adjunto_id__contenido_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "adjunto_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Adjunto Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "El archivo, con `inline`, `nosniff` y una CSP que no deja ejecutar nada."
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "Lo subió quien pregunta y todavía se revisa o fue rechazado."
+          },
+          "410": {
+            "description": "El archivo ya no está en el almacén (staging, a los 30 días)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ver un archivo de la reparación: por el mismo origen, si el antivirus lo aceptó",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/aprobacion": {
+      "post": {
+        "operationId": "aprobar_reparacion_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__aprobacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AprobacionReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Registrar la constancia de aprobación del presupuesto: quién aprobó y qué la respalda (no es una aprobación de pago)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/gasto": {
+      "post": {
+        "operationId": "enlazar_gasto_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__gasto_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GastoReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no espera el gasto (`reparacion_no_admite`) o ese gasto ya cierra otra (`gasto_ya_enlazado`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Enlazar el gasto de una liquidación oficial vigente: cierra la reparación (RF19)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/gestion": {
+      "post": {
+        "operationId": "gestionar_reparacion_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__gestion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GestionReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Registrar el responsable, la prioridad y la fecha comprometida: la primera vez la reparación pasa a «En gestión»",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/no-realizada": {
+      "post": {
+        "operationId": "no_realizada_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__no_realizada_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotivoReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Terminarla sin evidencia, con el motivo de la imposibilidad (RF20)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/presupuesto": {
+      "post": {
+        "operationId": "presupuestar_reparacion_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__presupuesto_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresupuestoReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Registrar el presupuesto con el proveedor",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/retiro": {
+      "post": {
+        "operationId": "retirar_reparacion_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__retiro_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotivoReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Retirar una reparación propia mientras está pedida, con el motivo",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/terminacion": {
+      "post": {
+        "operationId": "terminar_reparacion_api_v1_consorcios__consorcio_id__reparaciones__reparacion_id__terminacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reparacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reparacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminacionReparacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reparacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado que cuente o sin la facultad."
+          },
+          "404": {
+            "description": "La reparación no existe en este consorcio, o no es de esta persona."
+          },
+          "409": {
+            "description": "La reparación no admite ese paso en su estado (`reparacion_no_admite`)."
+          },
+          "422": {
+            "description": "Un dato no sirve (el archivo, el responsable, la constancia, el CUIT)."
+          }
+        },
+        "summary": "Registrar que se hizo, con la factura: queda esperando el gasto de la liquidación",
         "tags": [
           "consorcios"
         ]

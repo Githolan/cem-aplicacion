@@ -97,8 +97,13 @@ COMUNICADOS = set(exportar_consorcio.PARTES["comunicados"])
 RECLAMOS = set(exportar_consorcio.PARTES["reclamos_liquidacion"])
 """RF34 (`0123`): el edificio de estas pruebas no tiene reclamos; su contenido lo prueba
 `test_reclamos_liquidacion_0123.py`. Sus claves sí están decididas acá."""
-PARTES_POSTERIORES = ("liquidaciones_importadas", "comunicados", "reclamos_liquidacion")
-"""Las partes que suman las migraciones posteriores a `0069` (`0121`, `0122`, `0123`)."""
+REPARACIONES = set(exportar_consorcio.PARTES["reparaciones"])
+"""RF19 (`0124`): el edificio de estas pruebas no tiene reparaciones; su contenido lo prueba
+`test_reparaciones_0124.py`. Sus claves sí están decididas acá."""
+PARTES_POSTERIORES = (
+    "liquidaciones_importadas", "comunicados", "reclamos_liquidacion", "reparaciones",
+)  # fmt: skip
+"""Las partes que suman las migraciones posteriores a `0069` (`0121`, `0122`, `0123`, `0124`)."""
 HASTA_0069 = len(FUNCIONES) - len(PARTES_POSTERIORES)
 """Las funciones de exportación que hay con la base en `0069`."""
 
@@ -247,6 +252,16 @@ CLAVES_POR_ENTIDAD = {
                             "presentado_por_nombre", "presentado_en"},
     "reclamo_liquidacion_estado": {"reclamo_id", "estado", "texto", "solicitud_id",
                                    "registrado_por_nombre", "registrado_en"},
+    "reparacion": {"id", "numero", "descripcion", "unidad_designacion", "lugar",
+                   "pedida_por_nombre", "pedida_en"},
+    "reparacion_gestion": {"reparacion_id", "responsable_nombre", "prioridad",
+                           "fecha_comprometida", "registrado_por_nombre", "registrado_en"},
+    "reparacion_adjunto": {"id", "reparacion_id", "tipo", "documento_id", "version_documento_id",
+                           "subido_por_nombre", "subido_en"},
+    "reparacion_estado": {"reparacion_id", "estado", "anterior", "motivo", "adjunto_id",
+                          "proveedor_nombre", "proveedor_cuit", "aprobado_por", "facultad",
+                          "decision_id", "importacion_id", "gasto_clave",
+                          "registrado_por_nombre", "registrado_en"},
 }  # fmt: skip
 
 
@@ -499,6 +514,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         - IMPORTADAS
         - COMUNICADOS
         - RECLAMOS
+        - REPARACIONES
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}

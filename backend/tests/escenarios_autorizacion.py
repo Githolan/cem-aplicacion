@@ -182,6 +182,13 @@ ADICIONES_0123 = {
     "administrador": ["reclamos.atender"],
     "administrador_externo": [],
 }
+# `0124` (RF19, decisión del 22-11-2026): gestionar las reparaciones a cargo del consorcio, MC y AD.
+CATALOGO |= {"reparaciones.gestionar": False}
+ADICIONES_0124 = {
+    "miembro_consejo": ["reparaciones.gestionar"],
+    "administrador": ["reparaciones.gestionar"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -194,6 +201,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0113[tipo]
     + ADICIONES_0122[tipo]
     + ADICIONES_0123[tipo]
+    + ADICIONES_0124[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

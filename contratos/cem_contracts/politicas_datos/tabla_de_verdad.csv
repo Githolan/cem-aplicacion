@@ -591,3 +591,35 @@ RF34,reclamos_liquidacion.atender,Pc,C,,sin_mandato,si,,403,sin_concesion,P conf
 RF34,reclamos_liquidacion.atender,AE,C,,vigente,si,,403,sin_concesion,AE no atiende reclamos
 RF34,reclamos_liquidacion.atender,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
 RF34,reclamos_liquidacion.atender,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
+RF19,reparaciones.pedir,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado pide una reparación (la base controla que la unidad sea suya)
+RF19,reparaciones.pedir,Ic,C,,sin_mandato,si,,200,concedido_por_vinculo,I confirmado pide una reparación (documento 08: Sí para el ocupante)
+RF19,reparaciones.pedir,Oc,C,,sin_mandato,si,,200,concedido_por_vinculo,O confirmado pide una reparación
+RF19,reparaciones.pedir,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no pide
+RF19,reparaciones.pedir,I,C,,sin_mandato,si,,403,sin_concesion,I con el vínculo sin confirmar no pide
+RF19,reparaciones.pedir,MC,C,,vigente,si,,200,concedido_por_facultad,MC sin vínculo pide por reparaciones.gestionar
+RF19,reparaciones.pedir,AD,C,,vigente,si,,200,concedido_por_facultad,la administración pide por reparaciones.gestionar
+RF19,reparaciones.pedir,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin reparaciones.gestionar
+RF19,reparaciones.pedir,AE,C,,vigente,si,,403,sin_concesion,AE no pide reparaciones
+RF19,reparaciones.pedir,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF19,reparaciones.pedir,Pc,AA,,sin_mandato,si,,403,modo_no_admitido,solo Modo Consejo en este corte (el cierre con la orden de pago queda pendiente)
+RF19,reparaciones.pedir,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+RF19,reparaciones.ver,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado ve las que pidió
+RF19,reparaciones.ver,Oc,C,,sin_mandato,si,,200,concedido_por_vinculo,O confirmado ve las que pidió
+RF19,reparaciones.ver,Pc,AG,,sin_mandato,si,,200,concedido_por_vinculo,la historia se lee en cualquier modo
+RF19,reparaciones.ver,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no las ve
+RF19,reparaciones.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC ve todas por reparaciones.gestionar
+RF19,reparaciones.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD ve todas también fuera del Modo Consejo
+RF19,reparaciones.ver,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin reparaciones.gestionar
+RF19,reparaciones.ver,AE,C,,vigente,si,,403,sin_concesion,AE no ve las reparaciones
+RF19,reparaciones.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF19,reparaciones.ver,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+RF19,reparaciones.gestionar,MC,C,,vigente,si,,200,concedido_por_facultad,MC gestiona en Modo Consejo (decisión del 22-11-2026)
+RF19,reparaciones.gestionar,AD,C,,vigente,si,,200,concedido_por_facultad,la administración gestiona en Modo Consejo
+RF19,reparaciones.gestionar,MC,AA,,vigente,si,,403,modo_no_admitido,solo Modo Consejo en este corte
+RF19,reparaciones.gestionar,AD,AG,,vigente,si,,403,modo_no_admitido,solo Modo Consejo en este corte
+RF19,reparaciones.gestionar,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin reparaciones.gestionar
+RF19,reparaciones.gestionar,Pc,C,,sin_mandato,si,,403,sin_concesion,P confirmado pide pero no gestiona
+RF19,reparaciones.gestionar,Ic,C,,sin_mandato,si,,403,sin_concesion,I confirmado pide pero no gestiona
+RF19,reparaciones.gestionar,AE,C,,vigente,si,,403,sin_concesion,AE no gestiona reparaciones
+RF19,reparaciones.gestionar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF19,reparaciones.gestionar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo

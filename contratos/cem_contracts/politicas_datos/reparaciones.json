@@ -1,0 +1,46 @@
+{
+  "politicas": [
+    {
+      "accion": "reparaciones.pedir",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": "reparaciones.gestionar",
+      "modos": ["consejo"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF19; documento 08, §4 («Presentar reclamo»: Sí para propietario, ocupante, administrador y Consejo); plan §5.2; decisión del 22-11-2026: pide quien tiene un vínculo de propietario, inquilino u ocupante confirmado (por una unidad suya o un espacio común, lo controla la base) o quien gestiona. También retira la suya mientras está pedida y le suma fotos. Solo Modo Consejo en este corte: el cierre con la orden de pago de Administrador Aumentado y Autogestión queda pendiente"
+    },
+    {
+      "accion": "reparaciones.ver",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": "reparaciones.gestionar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF19; decisión del 22-11-2026: quien pidió ve las suyas y su estado (la base filtra); quien gestiona ve todas. En los tres modos, para que un cambio de modo no esconda la historia. El seguimiento público para los demás propietarios queda pendiente"
+    },
+    {
+      "accion": "reparaciones.gestionar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "reparaciones.gestionar",
+      "modos": ["consejo"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF19 y RF20 (cierre con evidencia o motivo de imposibilidad); plan §5.2 y §6.8; decisión del 22-11-2026: el Consejo y la administración registran el responsable, el presupuesto con el proveedor, la constancia de aprobación, la factura y el cierre con el gasto importado"
+    }
+  ]
+}

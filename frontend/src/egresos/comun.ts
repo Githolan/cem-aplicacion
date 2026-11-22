@@ -325,6 +325,13 @@ const MENSAJES: Record<string, string> = {
   liquidacion_reemplazada:
     "La liquidación que cita el reclamo fue reemplazada por otra del mismo período. Se puede citar la vigente o reclamar igual sobre la reemplazada.",
   reclamo_cerrado: "El reclamo ya se respondió, se pasó a una solicitud formal o se retiró: hay que volver a abrirlo para ver cómo quedó.",
+  // Reparaciones a cargo del consorcio (RF19, app 0124).
+  reparacion_no_admite: "La reparación ya no admite ese paso: otra persona la movió o ya terminó. Hay que volver a abrirla para ver cómo quedó.",
+  responsable_invalido: "Esa persona no puede ser responsable: no gestiona reparaciones en este edificio.",
+  constancia_invalida: "La constancia cita una decisión formal de este edificio o un documento firmado, uno de los dos.",
+  gasto_no_oficial: "Ese gasto no figura en una liquidación oficial vigente de este edificio.",
+  gasto_ya_enlazado: "Ese gasto ya cierra otra reparación: un gasto cierra una sola.",
+  fotos_completas: "El pedido ya tiene todas las fotos que admite.",
   idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
   idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
 };

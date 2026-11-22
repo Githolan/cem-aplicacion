@@ -1099,7 +1099,13 @@
           "texto_con_cuenta",
           "sin_destinatarios",
           "liquidacion_reemplazada",
-          "reclamo_cerrado"
+          "reclamo_cerrado",
+          "reparacion_no_admite",
+          "responsable_invalido",
+          "constancia_invalida",
+          "gasto_no_oficial",
+          "gasto_ya_enlazado",
+          "fotos_completas"
         ],
         "title": "CodigoError",
         "type": "string"
