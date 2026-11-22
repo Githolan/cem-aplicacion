@@ -178,7 +178,8 @@ def resumen(
             for f in filas if f["tipo"] == "rubro"
         ]  # fmt: skip
         return ResumenLiquidacion(periodos=periodos, liquidacion=ResumenDelPeriodo(
-            periodo=filas[0]["periodo"], confirmada_en=filas[0]["confirmada_en"], rubros=rubros,
+            importacion_id=filas[0]["importacion_id"], periodo=filas[0]["periodo"],
+            confirmada_en=filas[0]["confirmada_en"], rubros=rubros,
             grupos=[TotalDelGrupo(nombre=n, total=_importe(t))
                     for n, t in (total.get("grupos") or {}).items()],
             total=_importe(total.get("total")), vencimientos=total.get("vencimientos") or [],
@@ -255,7 +256,8 @@ def mi_cuenta(
                 raise RuntimeError(f"la liquidación oficial tiene dos {f['tipo']} de una unidad")
             de_la_unidad[f["tipo"]] = f["valor"]
         return MiCuenta(periodos=periodos, liquidacion=CuentaDelPeriodo(
-            periodo=filas[0]["periodo"], confirmada_en=filas[0]["confirmada_en"],
+            importacion_id=filas[0]["importacion_id"], periodo=filas[0]["periodo"],
+            confirmada_en=filas[0]["confirmada_en"],
             vencimientos=filas[0]["vencimientos"] or [],
             unidades=[_unidad(u, designaciones[u], datos[u]) for u in designaciones],
         ))  # fmt: skip

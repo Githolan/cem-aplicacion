@@ -145,7 +145,14 @@ ERRORES = {
         409, CodigoError.REEMPLAZO_INVALIDO,
         "Lo que se quiso reemplazar ya no es la liquidación oficial de ese período.",
     ),
+    "unidad_repetida": (
+        409, CodigoError.UNIDAD_REPETIDA,
+        "Dos datos del mismo tipo quedan en una misma unidad: corrija uno o descarte la"
+        " importación.",
+    ),
 }  # fmt: skip
+# Los motivos que la base explica en su detalle (qué unidad y qué datos): van a `detalle`.
+CON_DETALLE = frozenset({"unidad_repetida"})
 
 
 # --- Lo leído como campos ----------------------------------------------------------------------
@@ -421,7 +428,8 @@ def _ejecutar(conn: Connection, permiso: Permiso, sql: str, parametros: dict):
             raise Discrepancia(f"la base niega {permiso.accion} y el evaluador lo concede") from e
         motivo = e.orig.diag.message_hint
         if motivo in ERRORES:
-            raise ErrorApi(*ERRORES[motivo]) from e
+            detalle = json.loads(e.orig.diag.message_detail) if motivo in CON_DETALLE else None
+            raise ErrorApi(*ERRORES[motivo], detalle=detalle) from e
         raise
 
 
@@ -620,7 +628,8 @@ def decidir_campo(
         409: {
             "description": "Ya decidida, quedan datos sin decidir (`campos_pendientes`), el período"
             " ya tiene su liquidación oficial (`periodo_ya_confirmado`) o lo que se reemplaza no es"
-            " la oficial (`reemplazo_invalido`)."
+            " la oficial (`reemplazo_invalido`), o dos datos del mismo tipo quedan en una misma"
+            " unidad (`unidad_repetida`, con la unidad, el tipo y sus números en `detalle`)."
         },
         422: {"description": "El reemplazo va con su motivo (`peticion_invalida`)."},
     },

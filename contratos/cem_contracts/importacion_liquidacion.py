@@ -422,6 +422,10 @@ class ResumenDelPeriodo(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    importacion_id: UUID = Field(
+        description="La importación oficial de la que sale: con la de `mi-cuenta`, dice si las dos"
+        " respuestas describen la misma liquidación."
+    )
     periodo: date
     confirmada_en: datetime
     rubros: list[RubroDelPeriodo]
@@ -472,6 +476,10 @@ class UnidadEnLaLiquidacion(BaseModel):
 class CuentaDelPeriodo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    importacion_id: UUID = Field(
+        description="La importación oficial de la que sale: con la del `resumen`, dice si las dos"
+        " respuestas describen la misma liquidación."
+    )
     periodo: date
     confirmada_en: datetime
     vencimientos: list[str]

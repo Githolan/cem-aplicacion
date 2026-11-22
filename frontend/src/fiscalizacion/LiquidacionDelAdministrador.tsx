@@ -172,6 +172,16 @@ export function resumenDe(c: Campo): string {
   }
 }
 
+/** El `detalle` de `unidad_repetida` (app 0119): la unidad, el tipo de dato y sus números. */
+type UnidadRepetida = { unidad: string; tipo: Campo["tipo"]; campos: number[] };
+
+/** `unidad_repetida`: una corrección dejó dos datos del mismo tipo en una unidad. Dice cuál y
+ * cuáles, para que la persona corrija uno o descarte la importación. */
+export function textoUnidadRepetida(detalle: UnidadRepetida, campos: readonly Campo[]): string {
+  const cuales = campos.filter((c) => detalle.campos.includes(c.orden)).map((c) => `«${resumenDe(c)}»`);
+  return `No se confirmó: dos datos «${TEXTO_TIPO[detalle.tipo]}» quedan en la unidad ${detalle.unidad} (${cuales.join(" y ")}). Corrija uno de los dos o descarte la importación.`;
+}
+
 // Como `forma_igual` del backend: un importe se reconoce por su clave (o lo que va dentro de
 // `importes` y `grupos`), aunque lo leído esté vacío, o porque lo leído tiene forma de importe.
 const CLAVES_DE_IMPORTE = new Set(["total", "saldo_anterior", "pagos", "deuda", "interes", "disponible", "otros_gastos", "redondeo", "porcentaje", "monto"]);
@@ -491,6 +501,13 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       exigirSesion(response);
       if (data === undefined) {
         const codigo = codigoDe(error);
+        if (codigo === "unidad_repetida" && detalle.tipo === "ok") {
+          // No cambió lo visto: hay que corregir un dato. El aviso queda a la vista, con los datos.
+          clave.current = null;
+          setAviso({ texto: textoUnidadRepetida((error as { detalle: UnidadRepetida }).detalle, detalle.importacion.campos), ok: false });
+          setVentana(null);
+          return "cerrar";
+        }
         if (cambioLoVisto(response.status, codigo)) {
           setAviso({ texto: mensajeDeActo(response.status, error), ok: false });
           setVentana(null);

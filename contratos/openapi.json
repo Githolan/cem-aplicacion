@@ -1312,6 +1312,7 @@
           "grupo_inexistente",
           "periodo_ya_confirmado",
           "reemplazo_invalido",
+          "unidad_repetida",
           "enlace_no_traido",
           "factura_ya_adjunta",
           "factura_no_vigente",
@@ -2886,6 +2887,12 @@
             "title": "Confirmada En",
             "type": "string"
           },
+          "importacion_id": {
+            "description": "La importación oficial de la que sale: con la del `resumen`, dice si las dos respuestas describen la misma liquidación.",
+            "format": "uuid",
+            "title": "Importacion Id",
+            "type": "string"
+          },
           "periodo": {
             "format": "date",
             "title": "Periodo",
@@ -2907,6 +2914,7 @@
           }
         },
         "required": [
+          "importacion_id",
           "periodo",
           "confirmada_en",
           "vencimientos",
@@ -12935,6 +12943,12 @@
             "title": "Grupos",
             "type": "array"
           },
+          "importacion_id": {
+            "description": "La importación oficial de la que sale: con la de `mi-cuenta`, dice si las dos respuestas describen la misma liquidación.",
+            "format": "uuid",
+            "title": "Importacion Id",
+            "type": "string"
+          },
           "periodo": {
             "format": "date",
             "title": "Periodo",
@@ -12968,6 +12982,7 @@
           }
         },
         "required": [
+          "importacion_id",
           "periodo",
           "confirmada_en",
           "rubros",
@@ -19719,7 +19734,7 @@
             "description": "La importación o el dato no existen en este consorcio."
           },
           "409": {
-            "description": "Ya decidida, quedan datos sin decidir (`campos_pendientes`), el período ya tiene su liquidación oficial (`periodo_ya_confirmado`) o lo que se reemplaza no es la oficial (`reemplazo_invalido`)."
+            "description": "Ya decidida, quedan datos sin decidir (`campos_pendientes`), el período ya tiene su liquidación oficial (`periodo_ya_confirmado`) o lo que se reemplaza no es la oficial (`reemplazo_invalido`), o dos datos del mismo tipo quedan en una misma unidad (`unidad_repetida`, con la unidad, el tipo y sus números en `detalle`)."
           },
           "422": {
             "description": "El reemplazo va con su motivo (`peticion_invalida`)."

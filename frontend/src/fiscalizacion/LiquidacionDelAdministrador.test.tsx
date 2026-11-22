@@ -32,6 +32,7 @@ import {
   RUTA_LIQUIDACION_ADMINISTRADOR,
   SUBIR,
   textoOficial,
+  textoUnidadRepetida,
   ENLACES,
   NO_SE_TRAJO,
   SOLO_HTTPS,
@@ -602,6 +603,39 @@ describe("pantalla /importar-liquidacion", () => {
     await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
     expect(screen.queryByRole("dialog", { name: REEMPLAZAR_OFICIAL })).toBeNull();
     expect(await pedidos(api, "POST", CONFIRMACION)[0]?.text()).toBe("");
+  });
+
+  it("si una corrección deja dos datos del mismo tipo en una unidad, el aviso dice cuál y cuáles, y la importación sigue para corregir", async () => {
+    const leido = campo(F1, 1, { tipo: "importe_unidad", clave: "importe_unidad:001", estado: "confirmado", valor: { uf: "001", depto: "PB-A", total: "750.25" } });
+    const movido = campo(F2, 2, {
+      tipo: "importe_unidad", clave: "importe_unidad:002", estado: "corregido",
+      valor: { uf: "002", depto: "1-A", total: "1326.00" }, valor_corregido: { uf: "002", depto: "PB-A", total: "1326.00" },
+    });  // prettier-ignore
+    const decidida = { ...IMPORTACION, campos: [leido, movido] };
+    const CONFIRMACION = `${BASE}/liquidaciones-importadas/${I1}/confirmacion`;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([{ ...RESUMEN, pendientes: 0 }]),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
+      [`POST ${CONFIRMACION}`]: () => Response.json({
+        codigo: "unidad_repetida", mensaje: "Dos datos del mismo tipo quedan en una misma unidad.",
+        detalle: { unidad: "PB-A", tipo: "importe_unidad", campos: [1, 2] }, id_correlacion: "x",
+      }, { status: 409 }),
+    });  // prettier-ignore
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09/ }));
+    await screen.findByRole("list", { name: "Datos leídos" });
+    const lecturas = pedidos(api, "GET", `${BASE}/liquidaciones-importadas/${I1}`).length;
+    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
+    const aviso = await screen.findByText(textoUnidadRepetida({ unidad: "PB-A", tipo: "importe_unidad", campos: [1, 2] }, decidida.campos));
+    // La unidad y los dos datos, cada uno como se ve en la lista.
+    expect(aviso.textContent).toMatch(/unidad PB-A \(«UF 001 PB-A: .+» y «UF 002 PB-A: .+»\)\. Corrija uno de los dos o descarte/);
+    // No cambió lo visto: no se relee la importación y se sigue pudiendo corregir o descartar.
+    expect(pedidos(api, "GET", `${BASE}/liquidaciones-importadas/${I1}`)).toHaveLength(lecturas);
+    expect(screen.getByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeTruthy();
+    expect(screen.getByRole("button", { name: DESCARTAR_LIQUIDACION })).toBeTruthy();
   });
 
   it("una reemplazada queda como historia, con el motivo del reemplazo", async () => {
