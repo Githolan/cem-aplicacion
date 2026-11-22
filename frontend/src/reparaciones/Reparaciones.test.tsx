@@ -10,7 +10,7 @@ import { alcanza } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { LISTO } from "./FichaReparacion";
-import { pedidoListo } from "./NuevaGestion";
+import { fotosSinCargar, pedidoListo } from "./NuevaGestion";
 import {
   CERRADAS,
   ENLAZAR_GASTO,
@@ -178,6 +178,35 @@ describe("pantalla /reparaciones", () => {
     const fotos = pedidos(api, "POST", `${REPARACIONES}/${R1}/adjuntos`);
     expect(fotos).toHaveLength(1);
     expect(new URL(fotos[0]?.url ?? "").searchParams.get("tipo")).toBe("foto");
+  });
+
+  it("si la subida de una foto se queda sin conexión, el pedido creado no se repite y se dice qué foto falta", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: VECINA,
+      [`GET ${REPARACIONES}`]: () => Response.json(LISTA),
+      [`POST ${REPARACIONES}`]: () => Response.json(PEDIDA, { status: 201 }),
+      [`POST ${REPARACIONES}/${R1}/adjuntos`]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: NUEVA_GESTION }));
+    const ventana = within(await screen.findByRole("dialog", { name: NUEVA_GESTION }));
+    fireEvent.change(ventana.getByLabelText("Dónde"), { target: { value: U1 } });
+    fireEvent.change(ventana.getByLabelText("Qué hay que reparar"), { target: { value: DESCRIPCION } });
+    fireEvent.change(ventana.getByLabelText("Archivo de la foto", { selector: "input" }), {
+      target: { files: [new File(["\x89PNG"], "canilla.png", { type: "image/png" })] },
+    });
+    fireEvent.click(ventana.getByRole("button", { name: "Enviar el pedido" }));
+    // Termina con el pedido hecho y la foto que falta, por nombre, para agregarla desde el expediente.
+    expect(await screen.findByText(pedidoListo(7) + fotosSinCargar(["canilla.png"]))).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: NUEVA_GESTION })).toBeNull();
+    expect(pedidos(api, "POST", `${REPARACIONES}/${R1}/adjuntos`)).toHaveLength(1);
+    // No queda un «Enviar el pedido» que cree otra reparación: un solo POST del pedido.
+    expect(screen.queryByRole("button", { name: "Enviar el pedido" })).toBeNull();
+    expect(pedidos(api, "POST", REPARACIONES)).toHaveLength(1);
   });
 
   it("quien gestiona asigna el responsable desde la ficha de una pedida", async () => {

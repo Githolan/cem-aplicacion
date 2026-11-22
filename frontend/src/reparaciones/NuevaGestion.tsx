@@ -11,13 +11,13 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { SubirArchivo } from "../SubirArchivo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { subirArchivo } from "./archivoDelActo";
-import { ESPACIO_COMUN, motivoDe, NUEVA_GESTION, TEXTO_CON_CUENTA } from "./textos";
+import { AGREGAR_FOTO, ESPACIO_COMUN, motivoDe, NUEVA_GESTION, TEXTO_CON_CUENTA } from "./textos";
 
 // «Nueva gestión» (documento 08, §13.1; RF19, app 0124): quien vive o tiene una unidad pide una
 // reparación a cargo del consorcio. Lugar (una unidad suya o un espacio común), texto y hasta
 // `fotos_maximo` fotos. El pedido sale primero; las fotos se suben después, cada una por el
-// antivirus. Si alguna no se carga, el pedido queda igual y se dice que se puede agregar desde el
-// expediente.
+// antivirus. Si alguna no se carga (también si la subida no tiene conexión), el pedido queda igual,
+// la ventana se cierra con el pedido hecho y dice cuáles faltan, para agregarlas desde el expediente.
 
 type Lista = components["schemas"]["ListaReparaciones"];
 type Reparacion = components["schemas"]["Reparacion"];
@@ -26,8 +26,12 @@ export const TIPOS_DE_FOTO = [JPEG, PNG] as const;
 const COMUN = "";
 
 export const pedidoListo = (numero: number) => `Listo: el pedido N.º ${numero} quedó registrado y se avisó a quien gestiona las reparaciones.`;
-export const fotosSinCargar = (n: number) =>
-  n === 1 ? " Una foto no se cargó: se puede agregar desde el expediente." : ` ${n} fotos no se cargaron: se pueden agregar desde el expediente.`;
+/** Las fotos que no subieron, por nombre: quien pidió las agrega desde el expediente («Agregar una
+ * foto» se ofrece mientras la reparación está abierta y le faltan fotos, como recién pedida). */
+export const fotosSinCargar = (nombres: readonly string[]) =>
+  nombres.length === 1
+    ? ` La foto ${nombres[0] ?? ""} no se cargó: se puede agregar desde el expediente con «${AGREGAR_FOTO}».`
+    : ` Las fotos ${nombres.join(", ")} no se cargaron: se pueden agregar desde el expediente con «${AGREGAR_FOTO}».`;
 
 type Props = {
   consorcio: string;
@@ -36,6 +40,22 @@ type Props = {
   alCerrar: () => void;
   alTerminar: (texto: string, reparacion: Reparacion) => void;
 };
+
+/** Sube las fotos de un pedido ya creado y devuelve los nombres de las que no subieron. Sin conexión
+ * o con la sesión vencida, esa y las que siguen quedan sin subir: no se intentan más. */
+async function subirFotos(consorcio: string, reparacion: string, fotos: readonly File[]): Promise<string[]> {
+  const sinCargar: string[] = [];
+  for (const [i, foto] of fotos.entries()) {
+    try {
+      const subida = await subirArchivo(consorcio, reparacion, "foto", foto, crypto.randomUUID());
+      if ("falla" in subida) sinCargar.push(foto.name);
+    } catch {
+      sinCargar.push(...fotos.slice(i).map((f) => f.name));
+      break;
+    }
+  }
+  return sinCargar;
+}
 
 export function NuevaGestion({ consorcio, lista, aEntrar, alCerrar, alTerminar }: Props) {
   const id = useId();
@@ -70,12 +90,10 @@ export function NuevaGestion({ consorcio, lista, aEntrar, alCerrar, alTerminar }
         return { rechazo: motivoDe(codigo, mensajeDeActo(response.status, error)) };
       }
       clave.current = null;
-      let sinCargar = 0;
-      for (const foto of fotos) {
-        const subida = await subirArchivo(consorcio, data.id, "foto", foto, crypto.randomUUID());
-        if ("falla" in subida) sinCargar += 1;
-      }
-      alTerminar(pedidoListo(data.numero) + (sinCargar === 0 ? "" : fotosSinCargar(sinCargar)), data);
+      // El pedido ya existe: desde acá nada vuelve a enviarlo. Una foto que falla, aun sin conexión
+      // o con la sesión vencida, es una falla parcial que se dice al terminar.
+      const sinCargar = await subirFotos(consorcio, data.id, fotos);
+      alTerminar(pedidoListo(data.numero) + (sinCargar.length === 0 ? "" : fotosSinCargar(sinCargar)), data);
       return "cerrar";
     } catch (e: unknown) {
       if (!(e instanceof SinSesion)) return { rechazo: SIN_CONEXION };
