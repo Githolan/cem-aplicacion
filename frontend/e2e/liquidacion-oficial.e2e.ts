@@ -45,6 +45,11 @@ const RESUMEN = {
     total: "98766932.60",
     vencimientos: ["13/11/2026", "23/11/2026"],
   },
+  // App 0120: el total de cada período, con importes de los más largos.
+  gasto_por_periodo: [
+    { periodo: "2026-09-01", total: "123456789012.34" },
+    { periodo: "2026-10-01", total: "98766932.60" },
+  ],
 };
 const VIEJA = {
   id: A, periodo: "2026-10-01", formato: "mis_expensas", decidida_por: PERSONA, decidida_en: "2026-11-01T15:00:00Z", vigente: false,
@@ -116,13 +121,14 @@ test.describe("liquidación oficial (app 0119)", () => {
     await expect(page.getByRole("region", { name: "Unidad Piso 12 Departamento B (con cochera 4)" })).toBeVisible();
     await expect(page.getByText("Esta unidad no figura en la liquidación de la administración.")).toBeVisible();
     await expect(page.getByRole("region", { name: "Gasto del período por rubro" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Gasto por período" })).toBeVisible();
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
-    await page.getByText("Cómo se calcula").click();
+    for (const resumen of await page.getByText("Cómo se calcula").all()) await resumen.click();
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);
-    // Las barras son SVG en línea: la CSP no tiene que frenar nada.
-    expect(await page.locator("svg.grafico__dibujo").count()).toBe(2);
+    // Las barras son SVG en línea: la CSP no tiene que frenar nada. Dos rubros y dos períodos.
+    expect(await page.locator("svg.grafico__dibujo").count()).toBe(4);
     expect(errores).toEqual([]);
     expect(imprevistos).toEqual([]);
   });

@@ -1850,6 +1850,14 @@ button.fila-registro:disabled {
   height: 0.75rem;
 }
 
+/* Lo que desglosa la barra (los grupos de un período, app 0120), debajo del dibujo. */
+.grafico__detalle {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
 .grafico__fondo {
   fill: var(--surface-sunken);
 }

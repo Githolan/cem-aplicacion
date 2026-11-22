@@ -335,6 +335,10 @@ class RecalculoLiquidacion(BaseModel):
 
 # --- La liquidación oficial y quién la lee (`0119`; diseño H5 §6, D3-A) -----------------------
 
+PERIODOS_DE_GASTO = 12
+"""Cuántos períodos con liquidación oficial muestran el gasto por período del panel y del resumen
+(`0120`): los últimos que la tienen."""
+
 
 class LiquidacionOficialResumen(BaseModel):
     """Una liquidación oficial en la lista del Consejo y la administración
@@ -430,6 +434,16 @@ class ResumenDelPeriodo(BaseModel):
     vencimientos: list[str]
 
 
+class TotalDelPeriodo(BaseModel):
+    """El total del gasto de un período según su liquidación oficial (`0120`). Vacío si la
+    liquidación no tiene ese dato oficial."""
+
+    model_config = ConfigDict(frozen=True)
+
+    periodo: date
+    total: Decimal | None
+
+
 class ResumenLiquidacion(BaseModel):
     """Los períodos con liquidación vigente y el resumen del pedido (sin período, el último).
     `liquidacion` vacío: todavía no hay ninguna confirmada."""
@@ -438,6 +452,10 @@ class ResumenLiquidacion(BaseModel):
 
     periodos: list[PeriodoOficial]
     liquidacion: ResumenDelPeriodo | None
+    gasto_por_periodo: list[TotalDelPeriodo] = Field(
+        description="El total del gasto de cada uno de los últimos `PERIODOS_DE_GASTO` períodos"
+        " con liquidación oficial, del más viejo al más nuevo (`0120`)."
+    )
 
 
 class GrupoDeLaUnidad(BaseModel):

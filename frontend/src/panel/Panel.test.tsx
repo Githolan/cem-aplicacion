@@ -11,8 +11,27 @@ import { ContextoVersion } from "../version";
 import { nombreDeFacultad } from "../facultades";
 import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTO_RECHAZADA } from "../pagos/SubirFactura";
-import { gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
-import { TEXTO_LA_SUBE_LA_ADMINISTRACION, textoSolicitudesAbiertas } from "./Panel";
+import {
+  gastoLiquidadoPorPeriodo,
+  gastoPorMes,
+  gastoPorRubro,
+  mesesConPagos,
+  ordenesPorEstado,
+  type Panel,
+  periodosConRubros,
+  rubrosDelPeriodo,
+  SIN_RUBRO,
+} from "./datos";
+import {
+  SEGUN_LAS_OFICIALES,
+  SIN_DATOS,
+  TEXTO_LA_SUBE_LA_ADMINISTRACION,
+  textoNoCierra,
+  textoSolicitudesAbiertas,
+  TITULO_GASTO_POR_PERIODO,
+  TITULO_GASTO_POR_RUBRO,
+  VER_LIQUIDACIONES,
+} from "./Panel";
 
 // Resumen de pagos del edificio (app 0094; antes «Panel del Consejo»). Datos ficticios: ningún
 // proveedor ni importe real.
@@ -41,8 +60,32 @@ const DATOS: Panel = {
       importe_centavos: 80000, moneda: "ARS", actualizada_en: "2026-11-05T12:00:00Z", version: 2, factura_subida: null },
   ],
   solicitudes_abiertas: 2,
+  gasto_liquidado: [],
+  rubros_liquidados: [],
+  liquidacion_vigente: null,
 };
-const VACIO: Panel = { ordenes_por_estado: [], gasto_pagado: [], comprobantes_faltantes: [], solicitudes_abiertas: 0 };
+const VACIO: Panel = {
+  ordenes_por_estado: [], gasto_pagado: [], comprobantes_faltantes: [], solicitudes_abiertas: 0, gasto_liquidado: [], rubros_liquidados: [],
+  liquidacion_vigente: null,
+};  // prettier-ignore
+
+/** Modo Consejo (app 0120): sin órdenes, dos liquidaciones oficiales. SINTETICO. */
+const L1 = "55555555-5555-4555-8555-555555555555";
+const GRUPOS = [{ nombre: "Gastos Comunes", total: "2000.00" }, { nombre: "AySA", total: "500.50" }];
+const CONSEJO: Panel = {
+  ...VACIO,
+  gasto_liquidado: [
+    { periodo: "2026-09-01", confirmada_en: "2026-10-05T15:00:00Z", total: "2400.49", grupos: GRUPOS },
+    { periodo: "2026-10-01", confirmada_en: "2026-11-05T15:00:00Z", total: "2500.50", grupos: GRUPOS },
+  ],
+  rubros_liquidados: [
+    { periodo: "2026-09-01", numero: 1, nombre: "Servicios públicos SINTETICOS", total: "1500.50" },
+    { periodo: "2026-09-01", numero: 2, nombre: "Mantenimiento SINTETICO", total: "899.99" },
+    { periodo: "2026-10-01", numero: 1, nombre: "Servicios públicos SINTETICOS", total: "1500.50" },
+    { periodo: "2026-10-01", numero: 2, nombre: "Mantenimiento SINTETICO", total: "1000.00" },
+  ],
+  liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 2 },
+};  // prettier-ignore
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
@@ -127,6 +170,77 @@ describe("datos del panel", () => {
     expect(mesesConPagos(DATOS, "ARS")).toEqual(["2026-11-01", "2026-10-01"]);
     // El de mayor importe es el que no tiene rubro, y aun así va último.
     expect(gastoPorRubro(DATOS, "ARS", "2026-11-01").map((b) => b.etiqueta)).toEqual(["Limpieza", SIN_RUBRO]);
+  });
+});
+
+describe("Modo Consejo: el gasto según las liquidaciones oficiales (app 0120)", () => {
+  it("dibuja el gasto por período y por rubro, cada uno con su tabla, y lo que no cierra lleva a las liquidaciones", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(CONSEJO) }));
+    const { container } = abrir();
+    const porPeriodo = await screen.findByRole("region", { name: TITULO_GASTO_POR_PERIODO });
+    expect(within(porPeriodo).getByText(SEGUN_LAS_OFICIALES)).toBeTruthy();
+    // La tabla equivalente: un período por fila, del más viejo al más nuevo, con el total y los grupos.
+    const tabla = within(porPeriodo).getByRole("table", { name: TITULO_GASTO_POR_PERIODO });
+    expect(within(tabla).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Período", "Gasto", "Por grupo"]);
+    expect(within(tabla).getAllByRole("row").slice(1).map((f) => f.textContent)).toEqual([
+      expect.stringMatching(/^septiembre de 2026\$\s?2\.400,49Gastos Comunes: \$\s?2\.000,00 · AySA: \$\s?500,50$/),
+      expect.stringMatching(/^octubre de 2026\$\s?2\.500,50Gastos Comunes/),
+    ]);
+    // Por rubro: el último período primero; el desplegable cambia de período.
+    const porRubro = screen.getByRole("region", { name: TITULO_GASTO_POR_RUBRO });
+    expect(within(porRubro).getAllByRole("row").slice(1).map((f) => f.textContent)).toEqual([
+      expect.stringMatching(/^Servicios públicos SINTETICOS\$\s?1\.500,50$/),
+      expect.stringMatching(/^Mantenimiento SINTETICO\$\s?1\.000,00$/),
+    ]);
+    fireEvent.change(within(porRubro).getByLabelText("Período"), { target: { value: "2026-09-01" } });
+    expect(within(porRubro).getByRole("row", { name: /Mantenimiento SINTETICO/ }).textContent).toMatch(/899,99$/);
+    // RN33: lo que no cierra, neutro, como el único enlace a las liquidaciones.
+    const noCierra = screen.getByRole("link", { name: textoNoCierra("2026-10-01", 2) });
+    expect(noCierra.getAttribute("href")).toBe("/liquidacion-oficial");
+    expect(textoNoCierra("2026-10-01", 2)).toBe("Lo que no cierra en la liquidación de octubre de 2026: 2 diferencias");
+    expect(screen.queryByRole("link", { name: VER_LIQUIDACIONES })).toBeNull();
+    // Sin órdenes, sus bloques no se dibujan y no se dice que falten (PAN-03).
+    expect(screen.queryByRole("region", { name: /Órdenes de pago por estado/ })).toBeNull();
+    expect(screen.queryByText(SIN_DATOS)).toBeNull();
+    for (const detalle of container.querySelectorAll("details")) detalle.open = true;
+    await sinViolaciones(container);
+  });
+
+  it("sin diferencias ofrece las liquidaciones; quien no las abre no recibe enlace", async () => {
+    const sinDiferencias: Panel = { ...CONSEJO, liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 0 } };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(sinDiferencias) }));
+    abrir();
+    expect((await screen.findByRole("link", { name: VER_LIQUIDACIONES })).getAttribute("href")).toBe("/liquidacion-oficial");
+    expect(screen.queryByText(/Lo que no cierra/)).toBeNull();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(CONSEJO), [ACCIONES]: alcanza("fiscalizacion.ver_panel") }));
+    abrir();
+    expect(await screen.findByText(textoNoCierra("2026-10-01", 2))).toBeTruthy();
+    expect(screen.queryByRole("link", { name: textoNoCierra("2026-10-01", 2) })).toBeNull();
+    expect(screen.queryByRole("link", { name: VER_LIQUIDACIONES })).toBeNull();
+  });
+
+  it("con un solo período no hay desplegable y el período va en el título (PAN-07)", async () => {
+    const unPeriodo: Panel = {
+      ...CONSEJO,
+      gasto_liquidado: CONSEJO.gasto_liquidado.slice(1),
+      rubros_liquidados: CONSEJO.rubros_liquidados.filter((r) => r.periodo === "2026-10-01"),
+    };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(unPeriodo) }));
+    abrir();
+    const porRubro = await screen.findByRole("region", { name: `${TITULO_GASTO_POR_RUBRO}, octubre de 2026` });
+    expect(within(porRubro).queryByLabelText("Período")).toBeNull();
+  });
+
+  it("los datos: un período sin total no lleva barra y los rubros siguen el orden de la liquidación", () => {
+    const sinTotal: Panel = { ...CONSEJO, gasto_liquidado: [{ ...CONSEJO.gasto_liquidado[0]!, total: null }, CONSEJO.gasto_liquidado[1]!] };
+    expect(gastoLiquidadoPorPeriodo(sinTotal).map((b) => b.clave)).toEqual(["2026-10-01"]);
+    expect(periodosConRubros(CONSEJO)).toEqual(["2026-10-01", "2026-09-01"]);
+    expect(rubrosDelPeriodo(CONSEJO, "2026-09-01").map((b) => [b.etiqueta, b.valor])).toEqual([
+      ["Servicios públicos SINTETICOS", 1500.5],
+      ["Mantenimiento SINTETICO", 899.99],
+    ]);
   });
 });
 
@@ -222,11 +336,12 @@ describe("resumen de pagos del edificio", () => {
     expect(screen.queryByRole("link", { name: "Consultar los pagos" })).toBeNull();
   });
 
-  it("sin órdenes lo dice y no dibuja nada", async () => {
+  it("sin órdenes ni liquidaciones oficiales lo dice y no dibuja nada", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(VACIO) }));
     const { container } = abrir();
-    expect(await screen.findByText(/Todavía no hay órdenes de pago en este edificio/)).toBeTruthy();
+    expect(await screen.findByText(SIN_DATOS)).toBeTruthy();
     expect(container.querySelector("svg.grafico__dibujo")).toBeNull();
+    expect(screen.queryByRole("region", { name: TITULO_GASTO_POR_PERIODO })).toBeNull();
     await sinViolaciones(container);
   });
 

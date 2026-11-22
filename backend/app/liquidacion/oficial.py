@@ -10,7 +10,8 @@ como historia. Cada lectura evalúa su política y la base repite la barrera en 
   diferencias. Nunca una importación sin confirmar (RN30).
 - **`GET …/resumen`** (`fiscalizacion.ver_resumen`, cada propietario con el vínculo confirmado):
   de la liquidación vigente de un período, el gasto por rubro, los totales por grupo, el total y
-  los vencimientos. Sin gastos, diferencias ni unidades.
+  los vencimientos; y el total del gasto de cada uno de los últimos `PERIODOS_DE_GASTO` períodos
+  con liquidación oficial (`0120`). Sin gastos, diferencias ni unidades.
 - **`GET …/mi-cuenta`** (`cuenta.ver_propia`): lo que la liquidación vigente dice de cada unidad
   donde la persona es propietaria con el vínculo confirmado. La política pide la misma unidad
   (`misma_unidad`): la ruta la evalúa por cada unidad de sus vínculos y exige que la base devuelva
@@ -30,6 +31,7 @@ from uuid import UUID
 from cem_contracts.errores import CodigoError
 from cem_contracts.estados import TipoVinculo
 from cem_contracts.importacion_liquidacion import (
+    PERIODOS_DE_GASTO,
     CampoOficial,
     CuentaDelPeriodo,
     DiferenciaLeida,
@@ -42,6 +44,7 @@ from cem_contracts.importacion_liquidacion import (
     ResumenLiquidacion,
     RubroDelPeriodo,
     TotalDelGrupo,
+    TotalDelPeriodo,
     UnidadEnLaLiquidacion,
 )
 from fastapi import APIRouter, Depends, Query
@@ -149,7 +152,8 @@ def liquidacion_oficial(
 @router.get(
     "/consorcios/{consorcio_id}/resumen",
     response_model=ResumenLiquidacion,
-    summary="El gasto del período por rubro según la liquidación oficial, para cada propietario",
+    summary="El gasto del período por rubro y el total de los últimos períodos según las"
+    " liquidaciones oficiales, para cada propietario",
     responses={
         403: {"description": "Sin un vínculo de propietario confirmado en el consorcio."},
         404: {"description": "Ese período no tiene liquidación oficial."},
@@ -170,7 +174,10 @@ def resumen(
         if not filas:
             if periodo is not None:
                 raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-            return ResumenLiquidacion(periodos=periodos, liquidacion=None)
+            return ResumenLiquidacion(periodos=periodos, liquidacion=None, gasto_por_periodo=[])
+        serie = c.execute(text("select * from nucleo.resumen_gasto_por_periodo(:n)"),
+                          {"n": PERIODOS_DE_GASTO}).mappings()  # fmt: skip
+        gasto_por_periodo = [TotalDelPeriodo(**f) for f in serie]
         total = next((f["valor"] for f in filas if f["tipo"] == "total"), {})
         rubros = [
             RubroDelPeriodo(numero=f["valor"]["numero"], nombre=f["valor"]["nombre"],
@@ -182,7 +189,7 @@ def resumen(
             grupos=[TotalDelGrupo(nombre=n, total=_importe(t))
                     for n, t in (total.get("grupos") or {}).items()],
             total=_importe(total.get("total")), vencimientos=total.get("vencimientos") or [],
-        ))  # fmt: skip
+        ), gasto_por_periodo=gasto_por_periodo)  # fmt: skip
 
     return _leer(permiso, motor, leer)
 

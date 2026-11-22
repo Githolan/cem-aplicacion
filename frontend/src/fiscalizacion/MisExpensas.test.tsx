@@ -9,7 +9,7 @@ import type { components } from "../api/tipos";
 import { alcanza } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
-import { GASTO_DEL_PERIODO, NO_FIGURA, RUTA_MIS_EXPENSAS, SIN_LIQUIDACION, segunLaLiquidacion } from "./MisExpensas";
+import { GASTO_DEL_PERIODO, GASTO_POR_PERIODO, NO_FIGURA, RUTA_MIS_EXPENSAS, SIN_LIQUIDACION, segunLaLiquidacion } from "./MisExpensas";
 
 // Mis expensas (H5 D3-A, app 0119). Datos SINTETICOS: ningún edificio, unidad ni importe real.
 
@@ -44,6 +44,8 @@ const resumenDe = (periodo: string): Resumen => ({
     rubros: [{ numero: 1, nombre: "Servicios públicos SINTETICOS", total: "1500.50" }, { numero: 2, nombre: "Mantenimiento SINTETICO", total: "999.99" }],
     grupos: [{ nombre: "Gastos Comunes", total: "2000.00" }], total: "2500.49", vencimientos: ["13/10/2026", "23/10/2026"],
   },
+  // La serie no depende del período elegido (app 0120).
+  gasto_por_periodo: [{ periodo: "2026-09-01", total: "2300.00" }, { periodo: "2026-10-01", total: "2500.49" }],
 });  // prettier-ignore
 
 type Respuestas = Record<string, (pedido: Request) => Response | Promise<Response>>;
@@ -116,6 +118,15 @@ describe("pantalla /mis-expensas", () => {
     expect(within(tabla).getByRole("rowheader", { name: "Mantenimiento SINTETICO" })).toBeTruthy();
     expect(within(tabla).getByText("$ 999,99")).toBeTruthy();
     expect(screen.getByText("Total del gasto del período: $ 2.500,49")).toBeTruthy();
+    // El gasto por período (app 0120), con su tabla equivalente: del más viejo al más nuevo.
+    const serie = screen.getByRole("region", { name: GASTO_POR_PERIODO });
+    const tablaSerie = within(serie).getByRole("table", { name: GASTO_POR_PERIODO });
+    expect(within(tablaSerie).getAllByRole("row").slice(1).map((f) => f.textContent)).toEqual([
+      "septiembre de 2026$ 2.300,00",
+      "octubre de 2026$ 2.500,49",
+    ]);
+    // Sin diferencias ni facturas faltantes (RN33): eso es del panel completo.
+    expect(screen.queryByText(/no cierra|diferencia|faltante/i)).toBeNull();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
     // Otro período: se pide con el período elegido.
@@ -130,12 +141,13 @@ describe("pantalla /mis-expensas", () => {
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/mis-acciones`]: PROPIETARIA,
       [`GET ${BASE}/mi-cuenta`]: () => Response.json({ periodos: [], liquidacion: null }),
-      [`GET ${BASE}/resumen`]: () => Response.json({ periodos: [], liquidacion: null }),
+      [`GET ${BASE}/resumen`]: () => Response.json({ periodos: [], liquidacion: null, gasto_por_periodo: [] }),
     }));  // prettier-ignore
     abrir();
     expect(await screen.findByText(SIN_LIQUIDACION)).toBeTruthy();
     expect(screen.queryByLabelText("Período")).toBeNull();
     expect(screen.queryByRole("region", { name: GASTO_DEL_PERIODO })).toBeNull();
+    expect(screen.queryByRole("region", { name: GASTO_POR_PERIODO })).toBeNull();
   });
 
   it("con solo el resumen, no pide la cuenta de ninguna unidad", async () => {

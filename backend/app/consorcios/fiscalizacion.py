@@ -6,6 +6,11 @@ repositorio CEM. La política (`fiscalizacion.ver_panel`) decide al entrar; la b
 barrera en cada lectura (`0094`). Las lecturas del panel van en una sola transacción `REPEATABLE
 READ`: un pago confirmado en el medio no puede dejar el gráfico de un momento y la tabla de otro.
 
+**Modo Consejo (`0120`).** Sin órdenes de pago, el gasto sale de las liquidaciones oficiales (la
+confirmada de cada período, `0119`): el total y los grupos por período, los rubros por período
+(los últimos `PERIODOS_DE_GASTO` períodos que la tienen) y cuántas diferencias dejó la lectura de
+la vigente. Las secciones de las órdenes siguen igual para los otros modos.
+
 **Solicitudes formales.** Cada ruta evalúa su política con la solicitud a la vista (las firmas
 que ya tiene, para PA36 y A14) y la base vuelve a exigir todo: la facultad, el modo, la sesión, la
 identidad humana y el estado. Si la base niega lo que el evaluador concedió, es una discrepancia
@@ -16,6 +21,7 @@ la misma transacción un correo sin el contenido de la solicitud (P3).
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -34,7 +40,9 @@ from cem_contracts.fiscalizacion import (
     EnvioSolicitud,
     EstadoSolicitudFormal,
     FirmaSolicitud,
+    GastoLiquidado,
     GastoPagado,
+    LiquidacionVigente,
     ListaSolicitudesFormales,
     OrdenesPorEstado,
     PanelFiscalizacion,
@@ -44,9 +52,11 @@ from cem_contracts.fiscalizacion import (
     RespuestaSolicitud,
     RetiroRegistrado,
     RetiroSolicitud,
+    RubroLiquidado,
     SolicitudFormal,
     SolicitudFormalNueva,
 )
+from cem_contracts.importacion_liquidacion import PERIODOS_DE_GASTO, TotalDelGrupo
 from fastapi import APIRouter, Depends, Query, Request, Response
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
@@ -90,8 +100,8 @@ RUTA_SOLICITUDES = "/solicitudes"
 @router.get(
     "/consorcios/{consorcio_id}/panel",
     response_model=PanelFiscalizacion,
-    summary="Panel del Consejo: órdenes por estado, gasto pagado, comprobantes faltantes y"
-    " solicitudes formales abiertas",
+    summary="Panel del Consejo: órdenes por estado, gasto pagado, comprobantes faltantes,"
+    " solicitudes formales abiertas y el gasto según las liquidaciones oficiales",
     responses={403: {"description": "Sin `fiscalizacion.ver_panel` en el consorcio."}},
 )
 def ver_panel(
@@ -105,10 +115,17 @@ def ver_panel(
             def leer(funcion: str) -> list:
                 return list(c.execute(text(f"select * from nucleo.{funcion}()")).mappings())
 
+            def de_la_ventana(funcion: str) -> list:
+                consulta = text(f"select * from nucleo.{funcion}(:n)")
+                return list(c.execute(consulta, {"n": PERIODOS_DE_GASTO}).mappings())
+
             estados = leer("panel_ordenes_por_estado")
             gasto = leer("panel_gasto_pagado")
             faltantes = leer("panel_comprobantes_faltantes")
             abiertas = c.execute(text("select nucleo.panel_solicitudes_abiertas()")).scalar_one()
+            liquidado = de_la_ventana("panel_gasto_liquidado_por_periodo")
+            rubros = de_la_ventana("panel_gasto_liquidado_por_rubro")
+            vigente = leer("panel_diferencias_liquidacion_vigente")
     except DBAPIError as e:
         if isinstance(e.orig, InsufficientPrivilege):
             raise Discrepancia(f"la base niega {VER_PANEL} y el evaluador lo concede") from e
@@ -118,6 +135,20 @@ def ver_panel(
         gasto_pagado=[GastoPagado(**f) for f in gasto],
         comprobantes_faltantes=[ComprobanteFaltante(**f) for f in faltantes],
         solicitudes_abiertas=abiertas,
+        gasto_liquidado=[
+            GastoLiquidado(
+                periodo=f["periodo"],
+                confirmada_en=f["confirmada_en"],
+                total=f["total"],
+                grupos=[
+                    TotalDelGrupo(nombre=n, total=None if t is None else Decimal(t))
+                    for n, t in (f["grupos"] or {}).items()
+                ],
+            )
+            for f in liquidado
+        ],  # fmt: skip
+        rubros_liquidados=[RubroLiquidado(**f) for f in rubros],
+        liquidacion_vigente=LiquidacionVigente(**vigente[0]) if vigente else None,
     )
 
 

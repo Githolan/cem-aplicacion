@@ -6119,6 +6119,48 @@
         "title": "GastoLiquidacion",
         "type": "object"
       },
+      "GastoLiquidado": {
+        "description": "El gasto de un período según su liquidación oficial (la confirmada, `0119`; Modo Consejo):\nel total y los totales por grupo, como los informa la liquidación (`0120`). Vacíos si la\nliquidación no tiene ese dato oficial.",
+        "properties": {
+          "confirmada_en": {
+            "format": "date-time",
+            "title": "Confirmada En",
+            "type": "string"
+          },
+          "grupos": {
+            "items": {
+              "$ref": "#/components/schemas/TotalDelGrupo"
+            },
+            "title": "Grupos",
+            "type": "array"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "periodo",
+          "confirmada_en",
+          "total",
+          "grupos"
+        ],
+        "title": "GastoLiquidado",
+        "type": "object"
+      },
       "GastoNuevo": {
         "additionalProperties": false,
         "description": "`POST …/liquidaciones/{id}/gastos`: una orden pagada y el grupo de gasto que la reparte.",
@@ -8201,6 +8243,34 @@
           "diferencias"
         ],
         "title": "LiquidacionOficialResumen",
+        "type": "object"
+      },
+      "LiquidacionVigente": {
+        "description": "La liquidación oficial del último período que la tiene y cuántas diferencias dejó su lectura:\nlo que no cierra entre lo que informa y lo que suma (RN33: la diferencia, sin calificarla).",
+        "properties": {
+          "diferencias": {
+            "minimum": 0.0,
+            "title": "Diferencias",
+            "type": "integer"
+          },
+          "id": {
+            "description": "La liquidación oficial (`GET …/liquidacion-oficial/{id}`).",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "periodo",
+          "diferencias"
+        ],
+        "title": "LiquidacionVigente",
         "type": "object"
       },
       "ListaAutorizacionesVerProveedores": {
@@ -11180,7 +11250,7 @@
         "type": "object"
       },
       "PanelFiscalizacion": {
-        "description": "`GET …/panel`: las tres lecturas, de una misma foto de la base.",
+        "description": "`GET …/panel`: las lecturas de las órdenes de pago y de las liquidaciones oficiales, de una\nmisma foto de la base.",
         "properties": {
           "comprobantes_faltantes": {
             "description": "De lo último que cambió a lo más viejo.",
@@ -11188,6 +11258,14 @@
               "$ref": "#/components/schemas/ComprobanteFaltante"
             },
             "title": "Comprobantes Faltantes",
+            "type": "array"
+          },
+          "gasto_liquidado": {
+            "description": "De los últimos `PERIODOS_DE_GASTO` períodos con liquidación oficial, del más viejo al más nuevo (`0120`).",
+            "items": {
+              "$ref": "#/components/schemas/GastoLiquidado"
+            },
+            "title": "Gasto Liquidado",
             "type": "array"
           },
           "gasto_pagado": {
@@ -11198,11 +11276,30 @@
             "title": "Gasto Pagado",
             "type": "array"
           },
+          "liquidacion_vigente": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LiquidacionVigente"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nula si todavía no hay ninguna liquidación oficial (`0120`)."
+          },
           "ordenes_por_estado": {
             "items": {
               "$ref": "#/components/schemas/OrdenesPorEstado"
             },
             "title": "Ordenes Por Estado",
+            "type": "array"
+          },
+          "rubros_liquidados": {
+            "description": "Los rubros de esos mismos períodos, por período y en el orden de la liquidación (`0120`).",
+            "items": {
+              "$ref": "#/components/schemas/RubroLiquidado"
+            },
+            "title": "Rubros Liquidados",
             "type": "array"
           },
           "solicitudes_abiertas": {
@@ -11216,7 +11313,10 @@
           "ordenes_por_estado",
           "gasto_pagado",
           "comprobantes_faltantes",
-          "solicitudes_abiertas"
+          "solicitudes_abiertas",
+          "gasto_liquidado",
+          "rubros_liquidados",
+          "liquidacion_vigente"
         ],
         "title": "PanelFiscalizacion",
         "type": "object"
@@ -12981,6 +13081,14 @@
       "ResumenLiquidacion": {
         "description": "Los períodos con liquidación vigente y el resumen del pedido (sin período, el último).\n`liquidacion` vacío: todavía no hay ninguna confirmada.",
         "properties": {
+          "gasto_por_periodo": {
+            "description": "El total del gasto de cada uno de los últimos `PERIODOS_DE_GASTO` períodos con liquidación oficial, del más viejo al más nuevo (`0120`).",
+            "items": {
+              "$ref": "#/components/schemas/TotalDelPeriodo"
+            },
+            "title": "Gasto Por Periodo",
+            "type": "array"
+          },
           "liquidacion": {
             "anyOf": [
               {
@@ -13001,7 +13109,8 @@
         },
         "required": [
           "periodos",
-          "liquidacion"
+          "liquidacion",
+          "gasto_por_periodo"
         ],
         "title": "ResumenLiquidacion",
         "type": "object"
@@ -13248,6 +13357,58 @@
           "total"
         ],
         "title": "RubroDelPeriodo",
+        "type": "object"
+      },
+      "RubroLiquidado": {
+        "description": "El gasto de un rubro en un período según su liquidación oficial (`0120`).",
+        "properties": {
+          "nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nombre"
+          },
+          "numero": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "periodo",
+          "numero",
+          "nombre",
+          "total"
+        ],
+        "title": "RubroLiquidado",
         "type": "object"
       },
       "RubrosLegalesProveedor": {
@@ -14163,6 +14324,34 @@
           "total"
         ],
         "title": "TotalDelGrupo",
+        "type": "object"
+      },
+      "TotalDelPeriodo": {
+        "description": "El total del gasto de un período según su liquidación oficial (`0120`). Vacío si la\nliquidación no tiene ese dato oficial.",
+        "properties": {
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "periodo",
+          "total"
+        ],
+        "title": "TotalDelPeriodo",
         "type": "object"
       },
       "TratamientoCentavos": {
@@ -25280,7 +25469,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Panel del Consejo: órdenes por estado, gasto pagado, comprobantes faltantes y solicitudes formales abiertas",
+        "summary": "Panel del Consejo: órdenes por estado, gasto pagado, comprobantes faltantes, solicitudes formales abiertas y el gasto según las liquidaciones oficiales",
         "tags": [
           "consorcios"
         ]
@@ -26258,7 +26447,7 @@
             "description": "El período no es el primer día de un mes."
           }
         },
-        "summary": "El gasto del período por rubro según la liquidación oficial, para cada propietario",
+        "summary": "El gasto del período por rubro y el total de los últimos períodos según las liquidaciones oficiales, para cada propietario",
         "tags": [
           "liquidaciones"
         ]

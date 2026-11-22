@@ -1,16 +1,18 @@
 import type { components } from "../api/tipos";
 import { importe, TEXTO_ESTADO_ORDEN } from "../egresos/comun";
 import { periodo } from "../egresos/Liquidacion";
+import { enPesos } from "../fiscalizacion/LiquidacionDelAdministrador";
 
-// Lo que el resumen de pagos del edificio hace con la respuesta de `GET …/panel` (app 0094): solo agrupa y
+// Lo que el resumen de pagos del edificio hace con la respuesta de `GET …/panel` (app 0094 y 0120): solo agrupa y
 // ordena lo que ya vino calculado de la base, para cada gráfico. Las tablas son para el lector de pantalla. No decide nada.
 
 export type Panel = components["schemas"]["PanelFiscalizacion"];
 export type Faltante = components["schemas"]["ComprobanteFaltante"];
 type Gasto = Panel["gasto_pagado"][number];
 
-/** Una barra del gráfico: lo que mide (`valor`) y lo que dice escrito (`texto`). */
-export type Barra = { clave: string; etiqueta: string; valor: number; texto: string };
+/** Una barra del gráfico: lo que mide (`valor`) y lo que dice escrito (`texto`); `detalle`, lo que la
+ * desglosa (los grupos de un período), escrito debajo. */
+export type Barra = { clave: string; etiqueta: string; valor: number; texto: string; detalle?: string };
 
 export const SIN_RUBRO = "Sin rubro";
 
@@ -91,5 +93,45 @@ export function gastoPorRubro(panel: Panel, moneda: string, mes: string): Barra[
     .map(([rubro, t]) => barraDeImporte(rubro === "" ? "sin-rubro" : rubro, rubro === "" ? SIN_RUBRO : rubro, t, moneda));
 }
 
-export const estaVacio = (panel: Panel) =>
+// --- Modo Consejo: las liquidaciones oficiales (app 0120) -------------------------------------------
+
+/** Los grupos de un período, escritos debajo de su barra y en la tabla. */
+const textoDeGrupos = (grupos: Panel["gasto_liquidado"][number]["grupos"]) =>
+  grupos.map((g) => `${g.nombre}: ${g.total === null ? "—" : enPesos(g.total)}`).join(" · ");
+
+/** El gasto de cada período según su liquidación oficial, del más viejo al más nuevo, con los totales
+ * por grupo. Un período cuya liquidación no tiene el total no lleva barra. */
+export function gastoLiquidadoPorPeriodo(panel: Panel): Barra[] {
+  return panel.gasto_liquidado.flatMap((f) =>
+    f.total === null
+      ? []
+      : [
+          {
+            clave: f.periodo,
+            etiqueta: periodo(f.periodo),
+            valor: Number(f.total),
+            texto: enPesos(f.total),
+            ...(f.grupos.length === 0 ? {} : { detalle: textoDeGrupos(f.grupos) }),
+          },
+        ],
+  );
+}
+
+/** Los períodos que tienen rubros, del más nuevo al más viejo. */
+export function periodosConRubros(panel: Panel): string[] {
+  return [...new Set(panel.rubros_liquidados.map((f) => f.periodo))].sort().reverse();
+}
+
+/** Los rubros de un período, en el orden de la liquidación; uno sin total no lleva barra. */
+export function rubrosDelPeriodo(panel: Panel, mes: string): Barra[] {
+  return panel.rubros_liquidados.flatMap((f, i) =>
+    f.periodo !== mes || f.total === null
+      ? []
+      : [{ clave: `${f.numero ?? `fila-${i}`}`, etiqueta: f.nombre ?? `Rubro ${f.numero ?? ""}`.trim(), valor: Number(f.total), texto: enPesos(f.total) }],
+  );
+}
+
+const sinOrdenes = (panel: Panel) =>
   panel.ordenes_por_estado.length === 0 && panel.gasto_pagado.length === 0 && panel.comprobantes_faltantes.length === 0;
+
+export const estaVacio = (panel: Panel) => sinOrdenes(panel) && panel.gasto_liquidado.length === 0;
