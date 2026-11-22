@@ -88,6 +88,13 @@ SOLICITUDES_FORMALES = {
 }
 """RF49 (`0108`): el edificio de estas pruebas no tiene solicitudes; su contenido lo prueba
 `test_solicitud_formal_0108.py`. Sus claves sí están decididas acá."""
+IMPORTADAS = set(exportar_consorcio.PARTES["liquidaciones_importadas"])
+"""PA27 (`0121`): el edificio de estas pruebas no importa liquidaciones; su contenido lo prueba
+`test_exportacion_importadas_0121.py`. Sus claves sí están decididas acá."""
+PARTES_POSTERIORES = ("liquidaciones_importadas",)
+"""Las partes que suman las migraciones posteriores a `0069` (`0121`)."""
+HASTA_0069 = len(FUNCIONES) - len(PARTES_POSTERIORES)
+"""Las funciones de exportación que hay con la base en `0069`."""
 
 # Las claves de cada fila del paquete, una por una. Una clave que no está acá es un dato que
 # alguien agregó sin decidir que va (H2c §5, «Nunca van»).
@@ -217,6 +224,17 @@ CLAVES_POR_ENTIDAD = {
     "gasto": {"id", "liquidacion_id", "orden_id", "ejecucion_id", "importe_centavos", "moneda",
               "esquema_id", "agregado_por_nombre", "agregado_en"},
     "gasto_quitado": {"gasto_id", "quitado_por_nombre", "quitado_en"},
+    "importacion_liquidacion": {"id", "documento_id", "version_documento_id",
+                                "subida_por_nombre", "creada_en", "estado", "formato", "periodo",
+                                "motivo", "diferencias", "leida_en", "decidida_por_nombre",
+                                "decidida_en", "motivo_descarte", "reemplaza_a",
+                                "motivo_reemplazo"},
+    "campo_preliminar": {"id", "importacion_id", "orden", "tipo", "clave", "valor", "confianza",
+                         "origen", "pagina", "renglon", "fragmento", "unidad_id", "estado",
+                         "valor_corregido", "confirmado_por_nombre", "confirmado_en"},
+    "correspondencia_grupo": {"id", "clave", "nombre", "grupo", "version",
+                              "definida_por_nombre", "definida_en"},
+    "enlace_liquidacion": {"importacion_id", "orden", "url", "origen", "pagina"},
 }  # fmt: skip
 
 
@@ -462,7 +480,11 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         for fila in filas:
             assert set(fila) == CLAVES_POR_ENTIDAD[entidad], entidad
     assert {k for k, v in datos.items() if v} == (
-        set(CLAVES_POR_ENTIDAD) - {"revision"} - ENTIDADES_ECONOMICAS - SOLICITUDES_FORMALES
+        set(CLAVES_POR_ENTIDAD)
+        - {"revision"}
+        - ENTIDADES_ECONOMICAS
+        - SOLICITUDES_FORMALES
+        - IMPORTADAS
     )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}
@@ -1158,7 +1180,7 @@ def test_0038_ida_y_vuelta_y_se_niega_con_una_exportacion(base_aparte):  # noqa:
                      " and p.proname like 'exportar\\_%'"),
             ).scalar_one()  # fmt: skip
 
-    assert funciones() == len(FUNCIONES) - len(PARTES_ECONOMICAS)
+    assert funciones() == HASTA_0069 - len(PARTES_ECONOMICAS)
     command.downgrade(cfg, "0037")
     assert funciones() == 0
     command.upgrade(cfg, "0038")  # control: vuelve a subir limpio
@@ -1890,11 +1912,11 @@ def test_0069_ida_y_vuelta(base_aparte):  # noqa: F811
                                      "text)"))  # fmt: skip
             return exportar_parte, auxiliares, marca in capacidad, marca in registro
 
-    assert estado_de_la_base() == (len(FUNCIONES), 3, True, True)
+    assert estado_de_la_base() == (HASTA_0069, 3, True, True)
     command.downgrade(cfg, "0068")
-    assert estado_de_la_base() == (len(FUNCIONES) - len(PARTES_ECONOMICAS), 0, False, False)
+    assert estado_de_la_base() == (HASTA_0069 - len(PARTES_ECONOMICAS), 0, False, False)
     command.upgrade(cfg, "0069")  # control: vuelve a subir limpio
-    assert estado_de_la_base() == (len(FUNCIONES), 3, True, True)
+    assert estado_de_la_base() == (HASTA_0069, 3, True, True)
 
 
 def test_las_monedas_del_edificio_van_en_el_paquete(economico, edificio, con_url, claves,

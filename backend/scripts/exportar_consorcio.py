@@ -18,8 +18,8 @@ contexto (`0038`). Los binarios los lee con la clave de análisis de documentos
   un recurso o el mandato es de otro tipo (un administrador externo), se niega sin escribir nada.
   Las funciones de exportación solo responden para esa constancia, todavía sin armar.
 - **Arma el paquete en tramos directo a `age`:** un ZIP con un JSON por entidad (de las funciones
-  de exportación de `0038` y `0069`), los binarios `disponible` y un `manifiesto.json` con el
-  SHA-256 de cada archivo, cifrado para la clave pública del destinatario. Nunca hay una copia en
+  de exportación de `0038`, `0069` y `0121`), los binarios `disponible` y un `manifiesto.json` con
+  el SHA-256 de cada archivo, cifrado para la clave pública del destinatario. Nunca hay una copia en
   claro en el disco. De la cuenta de un proveedor, los JSON llevan solo los últimos dígitos.
 - **No escribe eventos de auditoría** (decisión del propietario del 26-10-2026): la constancia es
   la fila de `plataforma.exportacion` (con la fecha de armado y, después, la de entrega) y lo que
@@ -81,6 +81,8 @@ PARTES: dict[str, tuple[str, ...]] = {
               "movimiento_extracto", "movimiento_no_es_pago", "columnas_extracto",
               "lectura_comprobante"),
     "liquidaciones": ("liquidacion", "gasto", "gasto_quitado"),
+    "liquidaciones_importadas": ("importacion_liquidacion", "campo_preliminar",
+                                 "correspondencia_grupo", "enlace_liquidacion"),
 }  # fmt: skip
 """Cada parte es una función `nucleo.exportar_<parte>` y cada entidad, un archivo del paquete."""
 EXTENSIONES = {TipoArchivo.PDF: "pdf", TipoArchivo.JPEG: "jpg", TipoArchivo.PNG: "png"}
