@@ -4,6 +4,7 @@ import { api } from "../api/cliente";
 import { RUTA_CONTACTOS } from "../Contactos";
 import { ESTADO, fechaLegible, importe, momento, RUTA_CONSULTA_PROVEEDORES, RUTA_PROVEEDORES } from "../egresos/comun";
 import { codigoDe, mensajeDeFalla } from "../fallas";
+import { RUTA_LIQUIDACION_ADMINISTRADOR, TITULO_LIQUIDACION_ADMINISTRADOR } from "../fiscalizacion/LiquidacionDelAdministrador";
 import { RUTA_RECLAMOS, TITULO_RECLAMOS } from "../fiscalizacion/Reclamos";
 import { RUTA_REPARACIONES, TITULO_REPARACIONES } from "../reparaciones/textos";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "../fiscalizacion/Solicitudes";
@@ -194,20 +195,35 @@ export function usePendientesPadron({ porEdificio, edificios }: Comunes): Fuente
 
 // --- Solicitudes formales: lo que la lista ofrece hacer a quien mira (FL-AVI-01, FL-AVI-02) ----------
 
-type Solicitud = { acciones: readonly string[]; estado: string; envio: { vence_el: string } | null };
+type Solicitud = { acciones: readonly string[]; estado: string; envio: { vence_el: string } | null; por_vencer: boolean };
 
-/** Lo que le toca a quien mira, según las `acciones` que la API ofrece en cada solicitud; las
- * vencidas, para quien ve el panel (el Consejo). `null` si no hay nada. */
-export function textoSolicitudes(solicitudes: readonly Solicitud[], vePanel: boolean): string | null {
-  const con = (accion: string) => solicitudes.filter((s) => s.acciones.includes(accion));
-  const porResponder = con("responder");
-  const vence = porResponder
+/** El primer vencimiento de las solicitudes, si alguna lo tiene. */
+const primerVencimiento = (solicitudes: readonly Solicitud[]) =>
+  solicitudes
     .map((s) => s.envio?.vence_el)
     .filter((v): v is string => v !== undefined)
     .sort()[0];
+
+/** Las enviadas que la API marca `por_vencer` (RF40, P0 S6), con el primer vencimiento. */
+export function textoPorVencer(solicitudes: readonly Solicitud[]): string | null {
+  const porVencer = solicitudes.filter((s) => s.por_vencer);
+  const vence = primerVencimiento(porVencer);
+  if (porVencer.length === 0 || vence === undefined) return null;
+  const cuando = porVencer.length === 1 ? `vence el ${fechaLegible(vence)}` : `la primera vence el ${fechaLegible(vence)}`;
+  return `${porVencer.length} por vencer, ${cuando}`;
+}
+
+/** Lo que le toca a quien mira, según las `acciones` que la API ofrece en cada solicitud; las
+ * por vencer y las vencidas, para quien ve el panel (el Consejo; RF40, P0 S6). `null` si no hay
+ * nada. */
+export function textoSolicitudes(solicitudes: readonly Solicitud[], vePanel: boolean): string | null {
+  const con = (accion: string) => solicitudes.filter((s) => s.acciones.includes(accion));
+  const porResponder = con("responder");
+  const vence = primerVencimiento(porResponder);
   const firmar = con("firmar").length;
   const envio = con("registrar_envio").length;
   const respuesta = con("registrar_respuesta").length;
+  const porVencer = vePanel ? textoPorVencer(solicitudes) : null;
   const vencidas = vePanel ? solicitudes.filter((s) => s.estado === "vencida").length : 0;
   const partes = [
     ...(porResponder.length > 0
@@ -216,6 +232,7 @@ export function textoSolicitudes(solicitudes: readonly Solicitud[], vePanel: boo
     ...(firmar > 0 ? [plural(firmar, "espera la firma", "esperan la firma")] : []),
     ...(envio > 0 ? [plural(envio, "con el envío sin registrar", "con el envío sin registrar")] : []),
     ...(respuesta > 0 ? [plural(respuesta, "con la respuesta por registrar", "con la respuesta por registrar")] : []),
+    ...(porVencer === null ? [] : [porVencer]),
     ...(vencidas > 0 ? [plural(vencidas, "vencida", "vencidas")] : []),
   ];
   return partes.length === 0 ? null : partes.join(" · ");
@@ -237,6 +254,33 @@ export function usePendientesSolicitudes({ porEdificio, edificios }: Comunes): F
       return detalle === null ? [] : [fila({ ...base, detalle }, TITULO_SOLICITUDES, edificio, varios)];
     },
     siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_SOLICITUDES, edificio, varios),
+  });
+}
+
+// --- Liquidaciones del administrador que esperan confirmación (H5, app 0113; RF40, P0 S6), para quien
+// las importa y confirma
+
+export function textoImportaciones(paraConfirmar: number): string | null {
+  return paraConfirmar === 0 ? null : plural(paraConfirmar, "liquidación espera confirmación", "liquidaciones esperan confirmación");
+}
+
+export function usePendientesImportaciones({ porEdificio, edificios }: Comunes): Fuente {
+  const varios = edificios.length > 1;
+  const base = { ruta: RUTA_LIQUIDACION_ADMINISTRADOR, icono: "documento" } as const;
+  return usePorEdificio({
+    clave: "importaciones",
+    porEdificio,
+    edificios,
+    requisito: REQUISITOS.importarLiquidacion,
+    leer: async (consorcio) =>
+      exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas", { params: { path: { consorcio_id: consorcio } } })).filter(
+        (i) => i.estado === "para_confirmar",
+      ).length,
+    filas: (cantidad, edificio) => {
+      const detalle = textoImportaciones(cantidad);
+      return detalle === null ? [] : [fila({ ...base, detalle }, TITULO_LIQUIDACION_ADMINISTRADOR, edificio, varios)];
+    },
+    siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_LIQUIDACION_ADMINISTRADOR, edificio, varios),
   });
 }
 
@@ -264,10 +308,19 @@ export function usePendientesReclamos({ porEdificio, edificios }: Comunes): Fuen
   });
 }
 
-// --- Pedidos de reparación que esperan responsable (RF19, app 0124), para quien gestiona
+// --- Reparaciones abiertas (RF19, app 0124; RF40, P0 S6), para quien gestiona: los pedidos que esperan
+// responsable y las que están en curso. La terminada que espera el gasto de la próxima liquidación no
+// cuenta: no hay nada que hacer con ella hasta entonces.
 
-export function textoReparaciones(pedidas: number): string | null {
-  return pedidas === 0 ? null : plural(pedidas, "pedido de reparación espera responsable", "pedidos de reparación esperan responsable");
+/** Con responsable y sin terminar (`EstadoReparacion` del contrato). */
+export const REPARACION_EN_CURSO: readonly string[] = ["en_gestion", "presupuestada", "aprobada"];
+
+export function textoReparaciones(pedidas: number, enCurso: number): string | null {
+  const partes = [
+    ...(pedidas > 0 ? [plural(pedidas, "pedido de reparación espera responsable", "pedidos de reparación esperan responsable")] : []),
+    ...(enCurso > 0 ? [plural(enCurso, "reparación en curso", "reparaciones en curso")] : []),
+  ];
+  return partes.length === 0 ? null : partes.join(" · ");
 }
 
 export function usePendientesReparaciones({ porEdificio, edificios }: Comunes): Fuente {
@@ -281,7 +334,10 @@ export function usePendientesReparaciones({ porEdificio, edificios }: Comunes): 
     leer: async (consorcio) =>
       exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/reparaciones", { params: { path: { consorcio_id: consorcio } } })).elementos,
     filas: (reparaciones, edificio) => {
-      const detalle = textoReparaciones(reparaciones.filter((r) => r.estado === "pedida").length);
+      const detalle = textoReparaciones(
+        reparaciones.filter((r) => r.estado === "pedida").length,
+        reparaciones.filter((r) => REPARACION_EN_CURSO.includes(r.estado)).length,
+      );
       return detalle === null ? [] : [fila({ ...base, detalle }, TITULO_REPARACIONES, edificio, varios)];
     },
     siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_REPARACIONES, edificio, varios),

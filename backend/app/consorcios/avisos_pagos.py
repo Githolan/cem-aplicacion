@@ -26,6 +26,13 @@ un correo de más por esto.
 reales: ni mover la hora ni dos corridas atrasadas que salen juntas mandan de más. Con 0 no se
 programa ninguna corrida.
 
+**Lo del Consejo** (RF40, P0 S6; `avisos_consejo`, `0126`) va en el mismo correo y con el
+mismo tope, un renglón por edificio: liquidaciones del administrador por confirmar, solicitudes
+formales por vencer o recién vencidas, reclamos que esperan respuesta y pedidos de reparación que
+esperan responsable. Solo cuántos: nunca un texto, una unidad ni una persona. Con algo del Consejo
+el enlace es el inicio (la bandeja, decisión 9 del 18-11-2026), que lista también los pagos; sin
+nada del Consejo sigue siendo la bandeja de pagos.
+
 El correo sale por el camino de siempre (`correo.solicitar`, outbox, `notificar.correo`), en la
 misma transacción que registra el aviso: o quedan los dos o ninguno.
 """
@@ -41,7 +48,7 @@ from cem_contracts.egresos import EstadoOrdenPago
 from sqlalchemy import Connection, text
 
 from app.config import Config, cargar
-from app.consorcios import circuito_pagos, extracto
+from app.consorcios import avisos_consejo, circuito_pagos, extracto
 from app.plataforma import cola, correo
 from app.plataforma.planificador import periodica
 
@@ -95,6 +102,8 @@ class Aviso:
     """Edificio (por su id) → qué hay que hacer → cuántas órdenes."""
     sin_explicar: dict[UUID, int] = field(default_factory=dict)
     """Edificio (por su id) → cuántos movimientos del extracto no explica ningún pago."""
+    consejo: dict[UUID, dict[str, int]] = field(default_factory=dict)
+    """Edificio (por su id) → lo del Consejo para hacer (`avisos_consejo.QUE_HACER`) → cuántas."""
     nombres: dict[UUID, str] = field(default_factory=dict)
     """Edificio → su nombre, para el renglón. Dos edificios pueden llamarse igual (Codex en
     #253): cada uno tiene su renglón y su cuenta."""
@@ -146,6 +155,14 @@ def sumar_sin_explicar(avisos: dict[UUID, Aviso], filas: list[dict[str, Any]]) -
             aviso.nombres[fila["consorcio_id"]] = _edificio(fila["consorcio"])
 
 
+def sumar_consejo(avisos: dict[UUID, Aviso], filas: list[dict[str, Any]]) -> None:
+    """Suma a cada persona lo del Consejo que tiene para hacer en cada edificio (`0126`)."""
+    for fila in filas:
+        aviso = avisos.setdefault(fila["persona_id"], Aviso(fila["correo"]))
+        aviso.consejo[fila["consorcio_id"]] = fila["cuentas"]
+        aviso.nombres[fila["consorcio_id"]] = _edificio(fila["consorcio"])
+
+
 def _cuantas(que: str, n: int) -> str:
     una, varias = QUE_HACER[que]
     return una if n == 1 else varias.format(n=n)
@@ -170,15 +187,25 @@ def _renglones(aviso: Aviso, consorcio: UUID) -> list[str]:
         renglones.append(f"- {nombre}: {_enumerar(partes)}.")
     if consorcio in aviso.sin_explicar:
         renglones.append(f"- {nombre}: {_sin_explicar(aviso.sin_explicar[consorcio])}.")
+    consejo = avisos_consejo.partes(aviso.consejo.get(consorcio, {}))
+    if consejo:
+        renglones.append(f"- {nombre}: {_enumerar(consejo)}.")
     return renglones
 
 
 def texto(aviso: Aviso, enlace: str, tope: int) -> str:
-    edificios = sorted(set(aviso.pendientes) | set(aviso.sin_explicar),
+    edificios = sorted(set(aviso.pendientes) | set(aviso.sin_explicar) | set(aviso.consejo),
                        key=lambda c: (aviso.nombres[c], c))  # fmt: skip
     renglones = "\n".join(r for edificio in edificios for r in _renglones(aviso, edificio))
     veces = "una vez" if tope == 1 else f"{tope} veces"
     return TEXTO.format(renglones=renglones, enlace=enlace, veces=veces)
+
+
+def enlace(config: Config, aviso: Aviso) -> str:
+    """Con algo del Consejo, el inicio (la bandeja, que lista también los pagos); si no, la
+    bandeja de pagos."""
+    ruta = avisos_consejo.RUTA_INICIO if aviso.consejo else RUTA_BANDEJA
+    return f"{config.origen_publico}{ruta}"
 
 
 def periodo(tope: int) -> timedelta:
@@ -204,7 +231,7 @@ def avisar(conn: Connection, ventana: datetime, config: Config) -> dict[str, int
         text("select * from nucleo.extracto_sin_explicar_para_avisar()")
     ).mappings().all()  # fmt: skip
     sumar_sin_explicar(avisos, [dict(f) for f in extractos])
-    enlace = f"{config.origen_publico}{RUTA_BANDEJA}"
+    sumar_consejo(avisos, avisos_consejo.leer(conn))
     margen = min(MARGEN, periodo(config.avisos_tope_diario) / 2)
     enviados = 0
     for persona, aviso in avisos.items():
@@ -216,7 +243,7 @@ def avisar(conn: Connection, ventana: datetime, config: Config) -> dict[str, int
             continue
         correo.solicitar(
             conn, para=aviso.correo, asunto=ASUNTO,
-            texto=texto(aviso, enlace, config.avisos_tope_diario),
+            texto=texto(aviso, enlace(config, aviso), config.avisos_tope_diario),
         )  # fmt: skip
         enviados += 1
     return {"personas_con_pendientes": len(avisos), "avisos": enviados,

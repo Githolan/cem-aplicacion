@@ -68,6 +68,7 @@ const BORRADOR: Solicitud = {
   respuesta: null,
   retiro: null,
   acciones: ["firmar", "retirar"],
+  por_vencer: false,
   falta_administrador_vigente: false,
 };
 const PENDIENTE: Solicitud = {
@@ -136,6 +137,7 @@ const LLENA: Lista = {
   plazo_por_defecto_dias: 15,
   plazo_minimo_dias: 5,
   plazo_maximo_dias: 60,
+  dias_aviso_vencimiento: 3,
   hay_administrador_vigente: true,
 };
 
