@@ -264,7 +264,8 @@ def test_un_comunicado_no_se_cambia_ni_se_borra(e, motor_migrate):
             " from pg_class c where c.oid = any(cast(:t as regclass[])) order by 1"),
             {"t": list(TABLAS)}).all()  # fmt: skip
         assert [tuple(f) for f in rls] == [
-            (t, True, True, "(consorcio_id = plataforma.consorcio_actual())") for t in sorted(TABLAS)
+            (t, True, True, "(consorcio_id = plataforma.consorcio_actual())")
+            for t in sorted(TABLAS)
         ]
         for tabla in TABLAS:
             assert not cx.execute(
