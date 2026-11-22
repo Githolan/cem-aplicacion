@@ -60,6 +60,8 @@ CONCEPTO_CON_CUENTA = f"SINTETICO: transferir a {CUENTA[:8]} {CUENTA[8:]}"
 CONCEPTO_SIN_CUENTA = "SINTETICO: transferir a [cuenta omitida]"
 MOTIVO_REEMPLAZO = f"Corrigió el rubro 2; cuenta {CUENTA}"
 MOTIVO_DESCARTE = f"Es de otro edificio; cuenta {CUENTA}"
+# Un nombre de correspondencia también es texto libre (hallazgo de Codex en #278).
+NOMBRE_CON_CUENTA = f"Proveedor SINTETICO {CUENTA}"
 TIPOS_DE_UNIDAD = ("unidad", "importe_unidad", "saldo_unidad")
 TABLAS = {
     "importacion_liquidacion": "nucleo.importacion_liquidacion",
@@ -116,6 +118,10 @@ def importadas(e, motor_app, motor_migrate) -> dict:
     for grupo in ("agua", "expensas_comunes"):
         r = post(e, ruta_importadas(e, b, "correspondencias"), {"nombre": "AySA", "grupo": grupo})
         assert r.status_code == 200, r.text
+    r = post(
+        e, ruta_importadas(e, b, "correspondencias"), {"nombre": NOMBRE_CON_CUENTA, "grupo": "agua"}
+    )
+    assert r.status_code == 200, r.text
     d = importada(e, motor_app, pdf_de(de_octubre()))["id"]
     r = post(e, ruta_importadas(e, d, "descarte"), {"motivo": MOTIVO_DESCARTE})
     assert r.status_code == 200, r.text
@@ -205,7 +211,7 @@ def test_pa27_con_el_paquete_solo_se_rehace_la_liquidacion_oficial_del_periodo(
             for x, t in TABLAS.items()
         }  # fmt: skip
     assert set(TABLAS) == set(ENTIDADES)
-    assert en_la_base["importacion_liquidacion"] == 3 and en_la_base["correspondencia_grupo"] == 2
+    assert en_la_base["importacion_liquidacion"] == 3 and en_la_base["correspondencia_grupo"] == 3
     assert en_la_base["campo_preliminar"] > 3 * 10 and en_la_base["enlace_liquidacion"] == 1
     assert {x: len(datos[x]) for x in ENTIDADES} == en_la_base
     [constancia] = constancias(motor_migrate, e["cons"])
@@ -244,8 +250,12 @@ def test_pa27_con_el_paquete_solo_se_rehace_la_liquidacion_oficial_del_periodo(
         for n in datos["enlace_liquidacion"]
     ] == [(i["oficial"], 1, URL, "anotacion", 1)]
     assert [(k["clave"], k["nombre"], k["grupo"], k["version"])
-            for k in datos["correspondencia_grupo"]] == [
+            for k in datos["correspondencia_grupo"]][:2] == [
         ("aysa", "AySA", "agua", 1), ("aysa", "AySA", "expensas_comunes", 2)]  # fmt: skip
+    [con_cuenta] = datos["correspondencia_grupo"][2:]
+    assert (con_cuenta["grupo"], con_cuenta["version"]) == ("agua", 1)
+    assert CUENTA not in con_cuenta["nombre"] and CUENTA not in con_cuenta["clave"]
+    assert con_cuenta["nombre"].startswith("Proveedor SINTETICO")
     assert None not in {k["definida_por_nombre"] for k in datos["correspondencia_grupo"]}
     # Cada dato, con su renglón y la decisión.
     campos = {(p["importacion_id"], p["clave"]): p for p in datos["campo_preliminar"]}
@@ -294,6 +304,10 @@ def test_pa27_lo_que_nunca_va_tampoco_va_en_las_importadas(
         en_motivos = c.execute(text(
             "select count(*) from nucleo.importacion_liquidacion x where x.consorcio_id = :c"
             " and x::text like :k"), {"c": e["cons"], "k": f"%{CUENTA}%"}).scalar_one()  # fmt: skip
+        en_correspondencias = c.execute(text(
+            "select count(*) from nucleo.correspondencia_grupo_liquidacion k"
+            " where k.consorcio_id = :c and k.nombre like :k and k.clave like :k"),
+            {"c": e["cons"], "k": f"%{CUENTA}%"}).scalar_one()  # fmt: skip
     personas = {str(f.p) for f in filas}
     assert str(e["mc"]) in personas  # la búsqueda tiene qué buscar
     assert {p for p in personas if p in todo} == set()
@@ -304,8 +318,9 @@ def test_pa27_lo_que_nunca_va_tampoco_va_en_las_importadas(
     tira = re.compile(r"(?<!\d)\d{22}(?!\d)")
     nuevos = [f"{PARTE}/{x}.json" for x in ENTIDADES]
     assert [n for n in nuevos if tira.search(paquete.read(n).decode())] == []
-    # Control: en la base está, en el concepto corregido y en los dos motivos.
-    assert (en_campos, en_motivos) == (1, 2)
+    # Control: en la base está, en el concepto corregido, en los dos motivos y en el nombre y la
+    # clave de una correspondencia.
+    assert (en_campos, en_motivos, en_correspondencias) == (1, 2, 1)
     # Va el texto sin la cuenta, en el valor corregido de la reemplazada.
     datos = entidades(paquete)
     [gasto] = [p for p in datos["campo_preliminar"]
@@ -351,19 +366,24 @@ def test_0121_ida_y_vuelta(base_aparte):
                                {"f": firma}).scalar_one()  # fmt: skip
             auxiliar = c.execute(text("select to_regprocedure('nucleo.jsonb_sin_cuenta(jsonb)')"
                                       " is not null")).scalar_one()  # fmt: skip
+            # La auditoría enmascara las cuentas desde 0121 y vuelve a la de 0038 al bajar.
+            auditoria = c.execute(text(
+                "select prosrc like '%jsonb_sin_cuenta%' from pg_proc"
+                " where oid = to_regprocedure('nucleo.exportar_auditoria(uuid,uuid)')"),
+            ).scalar_one()  # fmt: skip
             if not existe:
-                return existe, auxiliar, None
+                return existe, auxiliar, auditoria, None
             quienes = c.execute(text(
                 "select r.rolname from pg_roles r where r.rolname like 'cem\\_%'"
                 " and has_function_privilege(r.oid, cast(:f as regprocedure), 'execute')"),
                 {"f": firma}).scalars().all()  # fmt: skip
-            return existe, auxiliar, sorted(quienes)
+            return existe, auxiliar, auditoria, sorted(quienes)
 
     command.upgrade(cfg, "0120")
-    assert estado() == (False, False, None)
+    assert estado() == (False, False, False, None)
     command.upgrade(cfg, "0121")
-    assert estado() == (True, True, ["cem_migrate", "cem_soporte_exportacion"])
+    assert estado() == (True, True, True, ["cem_migrate", "cem_soporte_exportacion"])
     command.downgrade(cfg, "0120")
-    assert estado() == (False, False, None)
+    assert estado() == (False, False, False, None)
     command.upgrade(cfg, "0121")  # control: vuelve a subir limpio
-    assert estado() == (True, True, ["cem_migrate", "cem_soporte_exportacion"])
+    assert estado() == (True, True, True, ["cem_migrate", "cem_soporte_exportacion"])

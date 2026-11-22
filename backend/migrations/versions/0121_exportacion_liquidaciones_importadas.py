@@ -30,7 +30,13 @@ pueden traer una cuenta escrita). El gasto en IA de la lectura (`plataforma.gast
 va: es un costo de la plataforma, no un dato del consorcio, y el paquete no lleva ninguna tabla de
 `plataforma` (la constancia tampoco).
 
-Downgrade: quita la función y la auxiliar. Las constancias quedan: `cantidades` es `jsonb` y no
+**La auditoría tampoco lleva cuentas.** `exportar_auditoria` (`0038`) ponía los cambios de cada
+evento tal como se registraron: el nombre de una correspondencia (`0116`) con una cuenta escrita
+salía entero (lo encontró la prueba de PA27 al sumar el caso que señaló Codex en #278). Desde acá
+los cambios pasan por `nucleo.jsonb_sin_cuenta`; el resto de la función queda igual.
+
+Downgrade: quita la función y la auxiliar, y deja `exportar_auditoria` como en `0038`. Las
+constancias quedan: `cantidades` es `jsonb` y no
 depende de las partes.
 
 Datos de prueba: SINTETICOS / NO REAL.
@@ -60,6 +66,31 @@ def _de_0069():
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)
     return modulo
+
+
+def _de_0038():
+    """`FUNCIONES` y `_funcion` de `0038`, para redefinir `exportar_auditoria` con el mismo
+    encabezado y los mismos permisos. `0038` ya está aplicada y no cambia."""
+    ruta = Path(__file__).with_name("0038_exportacion_soporte_2c3.py")
+    spec = importlib.util.spec_from_file_location("migracion_0038", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+CAMBIOS_0038 = "'cambios', auditoria.cambios_funcionales(g.antes, g.despues, p.campos))"
+CAMBIOS_SIN_CUENTA = (
+    "'cambios', nucleo.jsonb_sin_cuenta("
+    "auditoria.cambios_funcionales(g.antes, g.despues, p.campos)))"
+)
+
+
+def _auditoria(cambios: str) -> str:
+    m = _de_0038()
+    cuerpo = m.FUNCIONES["exportar_auditoria"]
+    assert cuerpo.count(CAMBIOS_0038) == 1, "la auditoría de 0038 no tiene la forma esperada"
+    sql = m._funcion("exportar_auditoria", cuerpo.replace(CAMBIOS_0038, cambios))
+    return sql.replace("create function", "create or replace function", 1)
 
 
 def _nombre(columna: str) -> str:
@@ -121,7 +152,8 @@ CUERPO = f"""
        order by p.importacion_id, p.orden;
     return query
       select 'correspondencia_grupo'::text,
-             jsonb_build_object('id', k.id, 'clave', k.clave, 'nombre', k.nombre,
+             jsonb_build_object('id', k.id, 'clave', {_texto("k.clave")},
+                                'nombre', {_texto("k.nombre")},
                                 'grupo', k.grupo, 'version', k.version,
                                 'definida_por_nombre', {_nombre("k.definida_por")},
                                 'definida_en', k.definida_en)
@@ -140,11 +172,11 @@ CUERPO = f"""
 
 
 def upgrade() -> None:
-    op.execute(AUXILIAR + _de_0069()._funcion(FUNCION, CUERPO))
+    op.execute(AUXILIAR + _de_0069()._funcion(FUNCION, CUERPO) + _auditoria(CAMBIOS_SIN_CUENTA))
 
 
 def downgrade() -> None:
     op.execute(
-        f"drop function nucleo.{FUNCION}(uuid, uuid);\n"
+        _auditoria(CAMBIOS_0038) + f"drop function nucleo.{FUNCION}(uuid, uuid);\n"
         "drop function nucleo.jsonb_sin_cuenta(jsonb);\n"
     )
