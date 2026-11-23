@@ -90,6 +90,9 @@ VERSIONES_QUE_NO_SE_CONFIRMAN = {
 }
 """El estado de la versión del comprobante que impide confirmar, con el motivo que da la base."""
 FACULTAD = "pagos.confirmar_informado"
+FACULTAD_VER = "fiscalizacion.ver_panel"
+"""Decidir exige también ver el panel (PI-D14): sin ella la persona no lista los pagos, así que ni
+decide ni la bandeja le cuenta los pendientes (observación de Codex en #290)."""
 AREA = "pagos"
 PAQUETES = ("miembro_consejo", "administrador")
 ACCION_POLITICA = "pagos_informados.confirmar"
@@ -291,8 +294,9 @@ create function nucleo.exigir_decidir_pago_informado(c uuid, actor uuid, sesion 
     hoy date;
   begin
     hoy := nucleo.exigir_sesion_pagos_informados(c, actor, sesion, origen_pedido, null);
-    if not nucleo.tiene_facultad_vigente(c, actor, '{FACULTAD}', hoy) then
-      raise exception 'sin {FACULTAD} en este consorcio' using errcode = '42501';
+    if not nucleo.tiene_facultad_vigente(c, actor, '{FACULTAD}', hoy)
+       or not nucleo.tiene_facultad_vigente(c, actor, '{FACULTAD_VER}', hoy) then
+      raise exception 'sin {FACULTAD} y {FACULTAD_VER} en este consorcio' using errcode = '42501';
     end if;
     return hoy;
   end
@@ -563,7 +567,8 @@ def _pendientes() -> str:
         ("    gestiona boolean;\n",
          "    gestiona boolean;\n    decide boolean;\n"),
         ("      continue when not (importa or firma or atiende or gestiona);\n",
-         f"      decide := {_puede(ACCION_POLITICA, FACULTAD, MODOS)};\n"
+         f"      decide := {_puede(ACCION_POLITICA, FACULTAD, MODOS)}"
+         f" and nucleo.tiene_facultad_vigente(x.c, x.persona, '{FACULTAD_VER}', x.hoy);\n"
          "      continue when not (importa or firma or atiende or gestiona or decide);\n"),
         ("                     and nucleo.estado_de_reparacion(x.c, r.id) = 'pedida') end;\n",
          "                     and nucleo.estado_de_reparacion(x.c, r.id) = 'pedida') end,\n"

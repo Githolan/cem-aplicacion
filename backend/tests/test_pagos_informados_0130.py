@@ -292,6 +292,24 @@ def test_solo_decide_quien_tiene_la_facultad(e, motor_app, motor_migrate):
     ):
         c.execute(CONFIRMAR, {"p": pago["id"], "a": e["acotado"], "s": e["sesion_acotado"]})
     assert isinstance(error.value.orig, InsufficientPrivilege)
+    # Al revés: un mandato al que el acta dejó solo confirmar, sin el panel (PI-D14, observación de
+    # Codex en #290). No ve los pagos, así que la base no lo deja decidir y la bandeja no le cuenta.
+    e["solo_decide"] = otra_persona(motor_migrate, e["cons"])
+    alta(motor_app, e["cons"], None, e["acta"], persona=e["solo_decide"], tipo="miembro_consejo",
+         origen="soporte", facultades=["pagos.confirmar_informado"])  # fmt: skip
+    e["sesion_solo_decide"] = nueva_sesion(motor_migrate, e["solo_decide"])
+    with (
+        pytest.raises(DBAPIError) as error,
+        transaccion(motor_app, persona_id=e["solo_decide"], consorcio_id=e["cons"]) as c,
+    ):
+        c.execute(CONFIRMAR, {"p": pago["id"], "a": e["solo_decide"],
+                              "s": e["sesion_solo_decide"]})  # fmt: skip
+    assert isinstance(error.value.orig, InsufficientPrivilege)
+    with transaccion(motor_app, persona_id=None) as c:
+        avisados = {f["persona_id"] for f in c.execute(text(PENDIENTES)).mappings()
+                    if f["consorcio_id"] == e["cons"] and f["pagos_informados"]}  # fmt: skip
+    assert e["solo_decide"] not in avisados
+    assert e["mc"] in avisados  # control: el Consejo completo sí ve el pendiente
     # La sesión de quien ayuda, con la ayuda en la transacción: la base la niega (sin alcance).
     autorizacion = ayuda(e, motor_migrate, ["consultar_expensas", "preparar_reclamos"])
     with motor_app.connect() as cx, cx.begin() as t:
