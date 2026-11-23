@@ -675,3 +675,31 @@ RF15,presupuesto.registrar,AE,C,,vigente,si,,403,sin_concesion,AE no registra el
 RF15,presupuesto.registrar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
 RF15,presupuesto.registrar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
 RF53,presupuesto.registrar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,registrar el presupuesto (decisorio): nunca quien ayuda
+PI-1,pagos_informados.informar,Pc,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,P confirmado informa el pago de su unidad (decisión del propietario del 23-11-2026)
+PI-1,pagos_informados.informar,Ic,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,I confirmado informa el pago de su unidad
+PI-1,pagos_informados.informar,Oc,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,O confirmado informa el pago de su unidad
+PI-1,pagos_informados.informar,Pc,AA,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,también en Administrador Aumentado
+PI-1,pagos_informados.informar,Pc,AG,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,también en Autogestión
+PI-1,pagos_informados.informar,Pc,C,unidad:5B,sin_mandato,si,,403,sin_concesion,P de 3-A no informa el pago de otra unidad
+PI-1,pagos_informados.informar,P,C,unidad:3A,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no informa
+PI-1,pagos_informados.informar,I,C,unidad:3A,sin_mandato,si,,403,sin_concesion,I con el vínculo sin confirmar no informa
+PI-1,pagos_informados.informar,O,C,unidad:3A,sin_mandato,si,,403,sin_concesion,O con el vínculo sin confirmar no informa
+PI-1,pagos_informados.informar,MC,C,unidad:3A,vigente,si,,403,sin_concesion,MC sin vínculo no informa pagos: ninguna facultad alcanza
+PI-1,pagos_informados.informar,AD,C,unidad:3A,vigente,si,,403,sin_concesion,la administración sin vínculo no informa pagos
+PI-1,pagos_informados.informar,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no informa pagos
+PI-1,pagos_informados.informar,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+PI-1,pagos_informados.informar,Pc,—,unidad:3A,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+PI-1,pagos_informados.informar,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,200,concedido_por_vinculo,quien ayuda con preparar_reclamos informa el pago de la unidad de la asistida
+PI-1,pagos_informados.informar,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas,403,fuera_del_alcance_de_ayuda,sin preparar_reclamos quien ayuda no informa
+PI-1,pagos_informados.informar,Pc,C,unidad:5B,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,sin_concesion,ni ayudando se informa el pago de una unidad que no es de la asistida
+PI-6,pagos_informados.ver,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado ve los pagos informados de su unidad (la base filtra)
+PI-6,pagos_informados.ver,Ic,AA,,sin_mandato,si,,200,concedido_por_vinculo,I confirmado ve los de su unidad
+PI-6,pagos_informados.ver,Oc,AG,,sin_mandato,si,,200,concedido_por_vinculo,O confirmado ve los de su unidad
+PI-6,pagos_informados.ver,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no los ve
+PI-6,pagos_informados.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC ve todos por fiscalizacion.ver_panel
+PI-6,pagos_informados.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,la administración ve todos por fiscalizacion.ver_panel
+PI-6,pagos_informados.ver,AE,C,,vigente,si,,403,sin_concesion,AE no ve los pagos informados
+PI-6,pagos_informados.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+PI-6,pagos_informados.ver,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
+PI-6,pagos_informados.ver,Pc,C,,sin_mandato,si,ayuda=consultar_expensas,200,concedido_por_vinculo,quien ayuda ve los pagos informados de la asistida
+PI-6,pagos_informados.ver,MC,C,,vigente,si,ayuda=consultar_expensas,404,fuera_de_ambito,el mandato de la asistida no da ámbito a quien ayuda

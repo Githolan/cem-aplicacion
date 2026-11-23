@@ -1679,7 +1679,8 @@
           "ayuda_ya_vigente",
           "ayuda_ya_revocada",
           "ayuda_revocada",
-          "presupuesto_superpuesto"
+          "presupuesto_superpuesto",
+          "comprobante_de_otra_unidad"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -2003,6 +2004,25 @@
           "fecha"
         ],
         "title": "ComprobantePagoNuevo",
+        "type": "object"
+      },
+      "ComprobantePagoSubido": {
+        "description": "`POST …/pagos-informados/comprobantes`: el documento y su versión en cuarentena.",
+        "properties": {
+          "archivo": {
+            "$ref": "#/components/schemas/VersionCargada"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "archivo"
+        ],
+        "title": "ComprobantePagoSubido",
         "type": "object"
       },
       "ComprobanteSubido": {
@@ -5564,6 +5584,14 @@
           "conciliada"
         ],
         "title": "EstadoOrdenPago",
+        "type": "string"
+      },
+      "EstadoPagoInformado": {
+        "description": "Hoy solo `informado`; PI-S2 suma `confirmado`, `rechazado` y `anulado`.",
+        "enum": [
+          "informado"
+        ],
+        "title": "EstadoPagoInformado",
         "type": "string"
       },
       "EstadoPedidoSalteo": {
@@ -9765,6 +9793,28 @@
         "title": "ListaOrdenesPago",
         "type": "object"
       },
+      "ListaPagosInformados": {
+        "description": "`GET …/pagos-informados`: los que la persona puede ver, del más nuevo al más viejo.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PagoInformado"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "largo_numero_operacion": {
+            "title": "Largo Numero Operacion",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "largo_numero_operacion"
+        ],
+        "title": "ListaPagosInformados",
+        "type": "object"
+      },
       "ListaPagosManuales": {
         "description": "Las órdenes con una ejecución manual: por pagar, por conciliar y ya resueltas.",
         "properties": {
@@ -10916,6 +10966,17 @@
         "title": "MedioEnvio",
         "type": "string"
       },
+      "MedioPago": {
+        "enum": [
+          "transferencia",
+          "deposito",
+          "efectivo",
+          "mercado_pago",
+          "otro"
+        ],
+        "title": "MedioPago",
+        "type": "string"
+      },
       "MedioRespuesta": {
         "enum": [
           "aplicacion",
@@ -11861,6 +11922,14 @@
         "title": "OrigenEvento",
         "type": "string"
       },
+      "OrigenPagoInformado": {
+        "enum": [
+          "app",
+          "correo"
+        ],
+        "title": "OrigenPagoInformado",
+        "type": "string"
+      },
       "Padron": {
         "description": "`GET /api/v1/consorcios/{consorcio_id}/padron`: vigentes y futuros, por unidad.",
         "properties": {
@@ -11947,6 +12016,317 @@
           "cotejado_en"
         ],
         "title": "PagoCotejado",
+        "type": "object"
+      },
+      "PagoInformado": {
+        "description": "Un pago informado, como lo ve quien puede verlo.",
+        "properties": {
+          "comprobante_estado": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cómo va el análisis del comprobante; nulo sin comprobante."
+          },
+          "comprobante_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante Version Id"
+          },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El pago rechazado o anulado que este corrige (PI-S2); nulo en este corte.",
+            "title": "Corrige A"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoPagoInformado"
+          },
+          "fecha_pago": {
+            "format": "date",
+            "title": "Fecha Pago",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Importe",
+            "type": "string"
+          },
+          "informado_en": {
+            "format": "date-time",
+            "title": "Informado En",
+            "type": "string"
+          },
+          "informado_por_nombre": {
+            "title": "Informado Por Nombre",
+            "type": "string"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioPago"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          },
+          "origen": {
+            "$ref": "#/components/schemas/OrigenPagoInformado"
+          },
+          "propio": {
+            "description": "Si lo informó quien pregunta.",
+            "title": "Propio",
+            "type": "boolean"
+          },
+          "unidad_designacion": {
+            "title": "Unidad Designacion",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unidad_id",
+          "unidad_designacion",
+          "importe",
+          "fecha_pago",
+          "medio",
+          "numero_operacion",
+          "comprobante_version_id",
+          "comprobante_estado",
+          "origen",
+          "estado",
+          "corrige_a",
+          "informado_por_nombre",
+          "informado_en",
+          "propio"
+        ],
+        "title": "PagoInformado",
+        "type": "object"
+      },
+      "PagoInformadoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/pagos-informados`: un pago que la persona hizo por una unidad.",
+        "properties": {
+          "comprobante_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La versión que devolvió `POST …/pagos-informados/comprobantes` para esta unidad; obligatoria salvo en efectivo. Puede estar todavía en cuarentena.",
+            "title": "Comprobante Version Id"
+          },
+          "fecha_pago": {
+            "description": "El día en que se pagó; no posterior a hoy.",
+            "format": "date",
+            "title": "Fecha Pago",
+            "type": "string"
+          },
+          "importe": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,16}|(?=[\\d.]{1,19}0*$)\\d{0,16}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "description": "En pesos.",
+            "title": "Importe"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioPago"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*[0-9A-Za-z][^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El de la transferencia, el depósito o el pago; obligatorio salvo en efectivo.",
+            "title": "Numero Operacion"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "importe",
+          "fecha_pago",
+          "medio"
+        ],
+        "title": "PagoInformadoNuevo",
+        "type": "object"
+      },
+      "PagoInformadoRespuesta": {
+        "description": "La respuesta de `POST …/pagos-informados`: 201 con `ya_informado` falso si es nuevo; 200 con\nel existente y `ya_informado` verdadero si ese pago ya estaba informado (PA07).",
+        "properties": {
+          "comprobante_estado": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cómo va el análisis del comprobante; nulo sin comprobante."
+          },
+          "comprobante_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante Version Id"
+          },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El pago rechazado o anulado que este corrige (PI-S2); nulo en este corte.",
+            "title": "Corrige A"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoPagoInformado"
+          },
+          "fecha_pago": {
+            "format": "date",
+            "title": "Fecha Pago",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Importe",
+            "type": "string"
+          },
+          "informado_en": {
+            "format": "date-time",
+            "title": "Informado En",
+            "type": "string"
+          },
+          "informado_por_nombre": {
+            "title": "Informado Por Nombre",
+            "type": "string"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioPago"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          },
+          "origen": {
+            "$ref": "#/components/schemas/OrigenPagoInformado"
+          },
+          "propio": {
+            "description": "Si lo informó quien pregunta.",
+            "title": "Propio",
+            "type": "boolean"
+          },
+          "unidad_designacion": {
+            "title": "Unidad Designacion",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          },
+          "ya_informado": {
+            "title": "Ya Informado",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "unidad_id",
+          "unidad_designacion",
+          "importe",
+          "fecha_pago",
+          "medio",
+          "numero_operacion",
+          "comprobante_version_id",
+          "comprobante_estado",
+          "origen",
+          "estado",
+          "corrige_a",
+          "informado_por_nombre",
+          "informado_en",
+          "propio",
+          "ya_informado"
+        ],
+        "title": "PagoInformadoRespuesta",
         "type": "object"
       },
       "PagoManual": {
@@ -26396,6 +26776,316 @@
           }
         },
         "summary": "Informe previo de una importación de padrón (RF02); no escribe nada",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados": {
+      "get": {
+        "operationId": "listar_pagos_informados_api_v1_consorcios__consorcio_id__pagos_informados_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPagosInformados"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "Sin vínculo ni mandato en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los pagos informados que la persona puede ver, del más nuevo al más viejo",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "informar_pago_api_v1_consorcios__consorcio_id__pagos_informados_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PagoInformadoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformadoRespuesta"
+                }
+              }
+            },
+            "description": "Ese pago ya estaba informado (la misma unidad y el mismo número de operación, o el mismo archivo): el existente, con `ya_informado` (PA07)."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformadoRespuesta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "Sin vínculo ni mandato en el consorcio."
+          },
+          "409": {
+            "description": "El comprobante ya se informó para otra unidad."
+          },
+          "422": {
+            "description": "La fecha es posterior a hoy, el número es una cuenta o el comprobante no sirve."
+          }
+        },
+        "summary": "Informar el pago de una unidad, con su comprobante; si ese pago ya estaba informado, responde el existente",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/comprobantes": {
+      "post": {
+        "operationId": "subir_comprobante_api_v1_consorcios__consorcio_id__pagos_informados_comprobantes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "La unidad cuyo pago se va a informar.",
+            "in": "query",
+            "name": "unidad_id",
+            "required": true,
+            "schema": {
+              "description": "La unidad cuyo pago se va a informar.",
+              "format": "uuid",
+              "title": "Unidad Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComprobantePagoSubido"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "El documento no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
+          }
+        },
+        "summary": "Subir el comprobante de un pago de una unidad: entra en cuarentena hasta que el antivirus lo acepta",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/{pago_id}/comprobante": {
+      "get": {
+        "operationId": "contenido_del_comprobante_api_v1_consorcios__consorcio_id__pagos_informados__pago_id__comprobante_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pago_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pago Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "El archivo, con `inline`, `nosniff` y una CSP que no deja ejecutar nada."
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "Sin vínculo ni mandato en el consorcio."
+          },
+          "409": {
+            "description": "Lo subió quien pregunta y todavía se revisa o fue rechazado."
+          },
+          "410": {
+            "description": "El archivo ya no está en el almacén (staging, a los 30 días)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ver el comprobante de un pago informado: por el mismo origen, si el antivirus lo aceptó",
         "tags": [
           "consorcios"
         ]
