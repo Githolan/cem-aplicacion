@@ -530,6 +530,8 @@ class Corrida:
     url: str
     host: str
     contexto: ssl.SSLContext | None
+    base: str | None = None
+    """El host de cem-postgres-staging (`--base`): cada escritura y la limpieza lo exigen."""
     id: str = field(default_factory=id_de_corrida)
     personas: dict[str, UUID] = field(default_factory=dict)
     correos: dict[str, str] = field(default_factory=dict)
@@ -551,8 +553,10 @@ class Corrida:
         print(f"ok  {que}", flush=True)
 
     def tx(self):
+        """Toda escritura de la corrida en la base pasa por acá: repite la guarda (#286)."""
         from app.db import transaccion
 
+        exigir_entorno(self)
         return transaccion(self.motor, persona_id=None, consorcio_id=self.consorcio)
 
     def c(self, resto: str = "") -> str:
@@ -565,6 +569,22 @@ class Corrida:
         """Un PDF nuevo por archivo: dos iguales serían el mismo para el almacén."""
         self.archivos += 1
         return pdf_documento(f"{que} LAB {self.id}-{self.archivos} SINTETICO NO REAL")
+
+
+def exigir_entorno(corrida: Corrida) -> None:
+    """La guarda de la corrida, repetida por cada función que escribe o limpia (revisión de Codex
+    en #286): el entorno del proceso es staging, la base del motor es `--base` y el `Host` es el
+    del origen público. Llamada sin `--base` o fuera de staging, se niega sin escribir."""
+    from app.config import cargar
+
+    if not corrida.base:
+        raise Negado("la corrida no tiene --base: no se escribe nada")
+    config = cargar()
+    exigir_staging(config.origen_publico, config.database_url, corrida.base, corrida.host)
+    if corrida.motor.url.host != corrida.base:
+        raise Negado(f"el motor de la corrida no apunta a --base {corrida.base!r}")
+    if corrida.origen_publico != config.origen_publico:
+        raise Negado("el origen público de la corrida no es el del proceso")
 
 
 def denegado(corrida: Corrida, persona: UUID, accion: str, motivo: str) -> dict | None:
@@ -589,6 +609,7 @@ def alta_del_consorcio(corrida: Corrida) -> None:
     Se niega si el consorcio ya existe: la corrida cuenta lo que crea."""
     from scripts import alta_consorcio
 
+    exigir_entorno(corrida)
     archivo = alta_consorcio.Archivo.model_validate({
         "consorcio": {"id": str(corrida.consorcio), "nombre": NOMBRE_CONSORCIO,
                       "zona_horaria": ZONA, "jurisdiccion": JURISDICCION},
@@ -754,6 +775,7 @@ def cuentas_del_aviso(corrida: Corrida) -> dict[str, dict[str, int]]:
     from app.consorcios import avisos_consejo
     from app.db import transaccion
 
+    exigir_entorno(corrida)
     with transaccion(corrida.motor, persona_id=None, consorcio_id=None) as conn:
         filas = [f for f in avisos_consejo.leer(conn) if f["consorcio_id"] == corrida.consorcio]
     por_persona = {v: k for k, v in corrida.personas.items()}
@@ -1145,6 +1167,7 @@ def recorrer_bandeja(corrida: Corrida) -> None:
     from app.db import transaccion
     from app.plataforma import correo
 
+    exigir_entorno(corrida)
     contadas = {"importaciones": para_confirmar(corrida), "reclamos": presentados_del_inicio(
         corrida), "reparaciones": reparaciones_del_inicio(corrida)[0]}  # fmt: skip
     comprobar(contadas == {"importaciones": 0, "reclamos": 1, "reparaciones": 1},
@@ -1256,8 +1279,11 @@ def cadena(corrida: Corrida) -> tuple[int, int, int, int]:
 def cerrar(corrida: Corrida, conservar: str | None) -> tuple[int, list[str]]:
     """Da de baja los mandatos (salvo el de `conservar`, que cierra la exportación) y revoca las
     sesiones de todas las personas. Cuenta las sesiones abiertas persona por persona (la RLS de
-    `nucleo.sesion` solo deja ver las propias) y qué navegadores siguen entrando."""
+    `nucleo.sesion` solo deja ver las propias) y qué navegadores siguen entrando. Repite la guarda:
+    llamada sola, fuera de staging, se niega sin escribir."""
     from app.db import transaccion
+
+    exigir_entorno(corrida)
 
     with corrida.tx() as conn:
         for rol, m in corrida.mandatos.items():
@@ -1281,6 +1307,7 @@ def cerrar(corrida: Corrida, conservar: str | None) -> tuple[int, list[str]]:
 
 
 def recorrer(corrida: Corrida, esperada: LecturaEsperada) -> dict:
+    exigir_entorno(corrida)
     preparar_escena(corrida)
     a, b = recorrer_importacion(corrida, esperada)
     recorrer_lecturas(corrida, a, b, esperada)
@@ -1351,10 +1378,9 @@ def clave_age(directorio: Path) -> tuple[str, Path]:
     return bech32("age", privada.public_key().public_bytes_raw()), identidad
 
 
-def exportar(datos: dict, base: str, controles: list[str]) -> None:
-    """Pide la exportación formal: negada al propietario sin mandato; armada para el Consejo; el
-    paquete lleva las partes nuevas y ninguna cuenta. Cierra el mandato que dejó el ensayo."""
-    from app.db import crear_motor
+def exigir_staging_exportacion(base: str) -> None:
+    """La guarda de `--exportar`, antes de cualquier escritura y de armar ninguna limpieza: las dos
+    bases (`CEM_DATABASE_URL` y la de exportación) en `--base` y el origen público de staging."""
     from scripts import exportar_consorcio
 
     for variable in ("CEM_DATABASE_URL", exportar_consorcio.VARIABLE_URL):
@@ -1362,6 +1388,15 @@ def exportar(datos: dict, base: str, controles: list[str]) -> None:
             raise Negado(f"{variable} no apunta a --base {base!r}: no es staging")
     exigir_staging(os.environ.get("CEM_ORIGEN_PUBLICO", ""), os.environ["CEM_DATABASE_URL"],
                    base, None)  # fmt: skip
+
+
+def exportar(datos: dict, base: str, controles: list[str]) -> None:
+    """Pide la exportación formal: negada al propietario sin mandato; armada para el Consejo; el
+    paquete lleva las partes nuevas y ninguna cuenta. Cierra el mandato que dejó el ensayo."""
+    from app.db import crear_motor
+    from scripts import exportar_consorcio
+
+    exigir_staging_exportacion(base)
 
     def pedido(solicitante: str, clave: str, salida: Path):
         return exportar_consorcio._argumentos([
@@ -1413,9 +1448,12 @@ def exportar(datos: dict, base: str, controles: list[str]) -> None:
                      " cuenta")  # fmt: skip
 
 
-def cerrar_exportacion(datos: dict) -> None:
+def cerrar_exportacion(datos: dict, base: str) -> None:
+    """Da de baja el mandato que dejó la corrida y revoca sus sesiones. Repite la guarda: llamada
+    sola, fuera de staging, se niega sin escribir (revisión de Codex en #286)."""
     from app.db import crear_motor, transaccion
 
+    exigir_staging_exportacion(base)
     motor = crear_motor(os.environ["CEM_DATABASE_URL"])
     try:
         with transaccion(motor, persona_id=None, consorcio_id=datos["consorcio"]) as conn:
@@ -1433,17 +1471,21 @@ def main_exportar(a: argparse.Namespace) -> int:
     datos = json.loads(base64.b64decode(a.datos))
     datos = datos.get("exportacion", datos)
     controles: list[str] = []
-    error = None
+    # La guarda va antes del bloque que limpia: rechazado el entorno, no se escribe nada, ni la
+    # baja del mandato ni la revocación de sesiones (revisión de Codex en #286).
     try:
-        exportar(datos, a.base, controles)
+        exigir_staging_exportacion(a.base)
     except Negado as e:
         print(f"negado: {e}", file=sys.stderr)
         return 3
+    error = None
+    try:
+        exportar(datos, a.base, controles)
     except Fallo as e:
         error = e
         print(f"FALLÓ: {e}", file=sys.stderr, flush=True)
     finally:
-        cerrar_exportacion(datos)
+        cerrar_exportacion(datos, a.base)
         controles.append("mandato de consejo1 dado de baja y sus sesiones revocadas")
         print(json.dumps({"controles": controles}, ensure_ascii=False, indent=2))
     return 1 if error else 0
@@ -1501,7 +1543,7 @@ def main(argumentos: list[str] | None = None) -> int:
         contexto.verify_mode = ssl.CERT_NONE
     motor = crear_motor(config.database_url)
     corrida = Corrida(motor, a.consorcio, config.origen_publico, a.url.rstrip("/"), a.host,
-                      contexto)  # fmt: skip
+                      contexto, a.base)  # fmt: skip
     try:
         with corrida.tx() as conn:
             existe = conn.execute(text("select count(*) from nucleo.consorcio where id = :c"),

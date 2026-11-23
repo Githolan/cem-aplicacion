@@ -55,6 +55,10 @@ Datos sintéticos (CEM LAB, `@cem-prueba.invalid`); nunca producción (sigue en 
 
 Ninguno.
 
+## Hallazgo en el script (revisión de Codex en #286, P1)
+
+En `--exportar`, la guarda corría dentro del `try` cuyo `finally` llamaba siempre a `cerrar_exportacion()`, que abría `CEM_DATABASE_URL` sin validar el entorno: una invocación rechazada con código 3 igual daba de baja el mandato y revocaba las sesiones de los ids recibidos. **No afectó la corrida de staging** (la guarda pasó: era staging). Arreglo: la guarda corre antes del bloque que limpia; `cerrar_exportacion()`, `cerrar()`, `Corrida.tx()` (toda escritura de la corrida en la base), el alta del consorcio y el aviso diario la repiten y se niegan solos fuera de staging. Pruebas nuevas con un mandato vigente y una sesión abierta reales: otra base y otro origen dan 3 y quedan intactos; la limpieza llamada sola se niega (control: con la guarda en orden, sí da de baja y revoca). Mutación: con el `finally` incondicional de antes, las dos primeras fallan en `assert _intactos(...) == (True, True)` (quedaba `(False, False)`); sin la guarda en `cerrar`/`tx` o en `cerrar_exportacion`, falla la tercera (`DID NOT RAISE Negado`); restaurado, `cmp` idéntico. La corrida no se repitió: el arreglo no cambia ningún paso cuando la guarda pasa.
+
 ## SIN VERIFICAR
 
 - La entrega real del aviso diario por el planificador: el ensayo arma el aviso con el código real pero solo para este consorcio (la corrida entera mandaría a todos los edificios de staging).

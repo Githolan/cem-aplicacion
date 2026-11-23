@@ -8,8 +8,9 @@ import base64
 import json
 import re
 import threading
+from dataclasses import replace
 from datetime import date
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -18,6 +19,10 @@ from app.plataforma.trabajos import Trabajador
 from pruebas import ensayo_modo_consejo_staging as ensayo
 from tests.test_documentos_2c1 import bucket, firmas_de_la_imagen  # noqa: F401
 from tests.test_exportacion_2c3 import con_url  # noqa: F401
+from tests.test_mandatos import otra_persona
+from tests.test_mandatos_0012 import alta
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
+from tests.test_orden_pago_neutra import nueva_sesion
 from tests.test_smoke_staging import HOST, ORIGEN_STAGING, entorno, servidor  # noqa: F401
 
 # ruff: noqa: F811
@@ -172,3 +177,81 @@ def test_la_guarda_se_niega_fuera_de_staging_sin_escribir(
     with motor_migrate.connect() as c:
         assert c.execute(text("select count(*) from nucleo.consorcio where id = :c"),
                          {"c": consorcio}).scalar_one() == 0  # fmt: skip
+
+
+# La guarda antes de la limpieza (revisión de Codex en #286) ----------------------------------
+
+
+def _mandato_y_sesion(motor_migrate, motor_app) -> dict:
+    """Un mandato vigente y una sesión abierta reales, con los ids que recibiría la limpieza."""
+    cons, _, _ = consorcio_con_persona(motor_migrate)
+    acta = decidir_equipo(motor_app, cons)
+    mc = otra_persona(motor_migrate, cons)
+    mandato = alta(motor_app, cons, None, acta, persona=mc, tipo="miembro_consejo",
+                   origen="soporte")  # fmt: skip
+    sesion = nueva_sesion(motor_migrate, mc)
+    return {"consorcio": str(cons), "mandato": str(mandato), "solicitante": str(mc),
+            "propietario": str(uuid4()), "hoy": date.today().isoformat(), "cuenta": "x",
+            "reclamo": "x", "sesion": sesion}  # fmt: skip
+
+
+def _intactos(motor_migrate, d: dict) -> tuple[bool, bool]:
+    with motor_migrate.connect() as c:
+        return c.execute(text(
+            "select (select vigente_hasta is null from nucleo.mandato where id = :m),"
+            " (select revocada_en is null from nucleo.sesion where id = :s)"),
+            {"m": d["mandato"], "s": d["sesion"]}).one()  # fmt: skip
+
+
+def _exportar(base: str, d: dict, capsys) -> tuple[int, str]:
+    datos = base64.b64encode(json.dumps({"exportacion": d | {"sesion": None}}).encode()).decode()
+    codigo, _, error = correr(["--exportar", "--base", base, "--datos", datos], capsys)
+    return codigo, error
+
+
+@pytest.mark.db
+@pytest.mark.redis
+def test_exportar_con_otra_base_se_niega_sin_dar_de_baja_ni_revocar(
+    entorno, con_url, capsys, motor_migrate, motor_app
+):
+    d = _mandato_y_sesion(motor_migrate, motor_app)
+    assert _intactos(motor_migrate, d) == (True, True)  # control: vigente y abierta
+    codigo, error = _exportar("cem-postgres", d, capsys)
+    assert codigo == 3 and "no apunta a --base" in error
+    assert _intactos(motor_migrate, d) == (True, True)
+
+
+@pytest.mark.db
+@pytest.mark.redis
+def test_exportar_fuera_de_staging_se_niega_sin_dar_de_baja_ni_revocar(
+    entorno, con_url, capsys, motor_migrate, motor_app, monkeypatch
+):
+    d = _mandato_y_sesion(motor_migrate, motor_app)
+    monkeypatch.setenv("CEM_ORIGEN_PUBLICO", "https://cem.ejemplo.com")
+    codigo, error = _exportar(entorno, d, capsys)
+    assert codigo == 3 and "no es de staging" in error
+    assert _intactos(motor_migrate, d) == (True, True)
+
+
+@pytest.mark.db
+@pytest.mark.redis
+def test_la_limpieza_llamada_sola_fuera_de_staging_no_escribe(
+    entorno, con_url, motor_migrate, motor_app, monkeypatch
+):
+    d = _mandato_y_sesion(motor_migrate, motor_app)
+    with pytest.raises(ensayo.Negado, match="no apunta a --base"):
+        ensayo.cerrar_exportacion(d, "cem-postgres")
+    corrida = ensayo.Corrida(motor_app, UUID(d["consorcio"]), ORIGEN_STAGING, "http://x", HOST,
+                             None, "cem-postgres")  # fmt: skip
+    corrida.mandatos["consejo1"] = UUID(d["mandato"])
+    corrida.personas["consejo1"] = UUID(d["solicitante"])
+    with pytest.raises(ensayo.Negado, match="no apunta a --base"):
+        ensayo.cerrar(corrida, None)
+    monkeypatch.setenv("CEM_ORIGEN_PUBLICO", "https://cem.ejemplo.com")
+    with pytest.raises(ensayo.Negado, match="no es de staging"):
+        ensayo.cerrar(replace(corrida, base=entorno), None)
+    assert _intactos(motor_migrate, d) == (True, True)
+    # Control: con la guarda en orden, la misma limpieza sí da de baja y revoca.
+    monkeypatch.setenv("CEM_ORIGEN_PUBLICO", ORIGEN_STAGING)
+    ensayo.cerrar_exportacion(d, entorno)
+    assert _intactos(motor_migrate, d) == (False, False)
