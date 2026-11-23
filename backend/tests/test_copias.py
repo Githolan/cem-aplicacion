@@ -520,3 +520,19 @@ def test_las_herramientas_no_heredan_las_variables_del_proceso(monkeypatch):
     with pytest.raises(copias.ErrorCopia):
         copias._correr(["sh", "-c", 'test -z "$CEM_COPIAS_S3_CLAVE_SECRETA"'],
                        dict(os.environ))  # fmt: skip
+
+
+def test_un_servidor_para_verificar_mas_viejo_que_la_base_frena_antes_de_volcar(
+    datos, tmp_path, monkeypatch
+):
+    # El 23-11-2026 la base pasó a 18.7 y la imagen seguía en 18.6: la copia fallaba al restaurar.
+    monkeypatch.setattr(copias, "version_servidor_local", lambda: 170000)
+    volcado = tmp_path / "cem.dump"
+    with pytest.raises(copias.ErrorCopia, match=r"PostgreSQL 18\.[0-9]+ .* es 17\.0: hay que"):
+        copias.volcar(url_rol("backup"), volcado)
+    assert not volcado.exists()
+
+
+def test_el_servidor_de_la_imagen_no_es_mas_viejo_que_la_base(motor_migrate):
+    with motor_migrate.connect() as conn:
+        copias.exigir_version_para_verificar(conn)
