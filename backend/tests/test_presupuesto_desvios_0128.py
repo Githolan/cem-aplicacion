@@ -18,12 +18,13 @@ import pytest
 from alembic import command
 from cem_contracts import presupuesto as contrato
 from cem_contracts.ayuda import ENCABEZADO_AYUDA
-from cem_contracts.importacion_liquidacion import PERIODOS_DE_GASTO
+from cem_contracts.importacion_liquidacion import LARGO_NOMBRE_RUBRO, PERIODOS_DE_GASTO
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
+from app.liquidacion.lectura_ia import RubroLeido
 from scripts import exportar_consorcio
 from tests.conftest import clave_idempotencia
 from tests.test_exportacion_2c3 import (  # noqa: F401  (`claves` y `con_url` son fixtures)
@@ -528,3 +529,19 @@ def test_0128_ida_y_vuelta_y_no_baja_con_datos(base_aparte):
     with pytest.raises(DBAPIError) as error:
         command.downgrade(cfg, "0127")
     assert hint(error) == "downgrade_con_datos"
+
+
+def test_el_nombre_del_rubro_admite_el_largo_de_la_importacion_sin_recortarlo(e, motor_app):
+    """Codex P2 en #285: un rubro leído con el nombre más largo que admite la importación lleva su
+    importe con ese mismo nombre, entero; uno más largo se rechaza (nunca se recorta)."""
+    assert LARGO_NOMBRE_RUBRO == 200
+    # La lectura con IA acepta ese largo (lo que puede llegar a una liquidación oficial).
+    [limite] = [m.max_length for m in RubroLeido.model_fields["nombre"].metadata
+                if getattr(m, "max_length", None) is not None]  # fmt: skip
+    assert limite == LARGO_NOMBRE_RUBRO
+    nombre = ("Mantenimiento de ascensores " * 10)[: LARGO_NOMBRE_RUBRO - 1] + "Z"
+    assert len(nombre) == LARGO_NOMBRE_RUBRO
+    p = registrado(e, cuerpo(SEPTIEMBRE, SEPTIEMBRE, [(1, nombre, "10.00")]))
+    assert p["rubros"] == [{"numero": 1, "nombre": nombre, "importe": "10.00"}]
+    r = registrar(e, cuerpo(OCTUBRE, OCTUBRE, [(1, nombre + "Z", "10.00")]))
+    assert r.status_code == 422, r.text

@@ -63,7 +63,7 @@ const PRESUPUESTOS = `GET /api/v1/consorcios/${C1}/presupuestos`;
 
 /** `GET …/presupuestos` (app 0128), con los límites del contrato. */
 const listaPresupuestos = (elementos: Presupuesto[], puede_registrar: boolean) => ({
-  elementos, puede_registrar, largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 120, maximo_rubros: 60,
+  elementos, puede_registrar, largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 200, maximo_rubros: 60,
 });
 
 const DATOS: Panel = {

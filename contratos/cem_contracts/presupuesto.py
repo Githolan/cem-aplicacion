@@ -21,11 +21,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from cem_contracts.importacion_liquidacion import LARGO_NOMBRE_RUBRO
+
 LARGO_APROBACION = 200
 LARGO_MOTIVO = 500
-LARGO_NOMBRE_RUBRO = 120
 MAXIMO_RUBROS = 60
-"""La base tiene el mismo control (`0128`)."""
+"""La base tiene el mismo control (`0128`). El largo del nombre de un rubro es el de la importación
+(`LARGO_NOMBRE_RUBRO`, de `cem_contracts.importacion_liquidacion`): el nombre se copia de la
+liquidación tal como se leyó, sin recortarlo."""
 UN_RENGLON = r"^[^\x00-\x1f\x7f]*$"
 CON_RENGLONES = r"^[^\x00-\x09\x0b-\x1f\x7f]*$"
 

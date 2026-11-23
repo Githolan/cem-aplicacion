@@ -11,7 +11,7 @@ const C1 = "11111111-1111-4111-8111-111111111111";
 const P1 = "66666666-6666-4666-8666-666666666666";
 const ANCHO_TELEFONO_PX = 360;
 const RUBRO_LARGO = "Mantenimiento de ascensores, montacargas y escaleras mecánicas del edificio";
-const LIMITES = { largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 120, maximo_rubros: 60 };
+const LIMITES = { largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 200, maximo_rubros: 60 };
 
 const BASE = {
   ordenes_por_estado: [],

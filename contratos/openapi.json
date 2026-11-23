@@ -15600,7 +15600,7 @@
           },
           "nombre": {
             "description": "El nombre con que se aprobó.",
-            "maxLength": 120,
+            "maxLength": 200,
             "minLength": 1,
             "pattern": "^[^\\x00-\\x1f\\x7f]*$",
             "title": "Nombre",
@@ -15633,7 +15633,7 @@
           },
           "nombre": {
             "description": "El nombre con que se aprobó.",
-            "maxLength": 120,
+            "maxLength": 200,
             "minLength": 1,
             "pattern": "^[^\\x00-\\x1f\\x7f]*$",
             "title": "Nombre",

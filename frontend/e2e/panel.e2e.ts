@@ -108,7 +108,7 @@ async function simularApi(pagina: Page, subidas: string[] = [], panel: object = 
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }] });
       if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: panel });
       if (camino === `/api/v1/consorcios/${C1}/presupuestos`)
-        return ruta.fulfill({ json: { elementos: [], puede_registrar: false, largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 120, maximo_rubros: 60 } });
+        return ruta.fulfill({ json: { elementos: [], puede_registrar: false, largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 200, maximo_rubros: 60 } });
       // El inicio de quien confirma vínculos los cuenta (G-26).
       if (camino === `/api/v1/consorcios/${C1}/padron`) return ruta.fulfill({ json: { elementos: [] } });
       if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });

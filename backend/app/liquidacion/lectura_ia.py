@@ -36,6 +36,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated, Any
 
+from cem_contracts.importacion_liquidacion import LARGO_NOMBRE_RUBRO
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -119,7 +120,7 @@ claves:
 - "periodo": texto, el mes que se liquida, en formato AAAA-MM.
 - "total_gastos": el total de gastos del período, como objeto con "importe" y su ubicación.
 - "rubros": lista de los rubros o categorías de gasto, en el orden del documento; cada uno con \
-"nombre" (hasta 200 caracteres), "total" (el total del rubro) y su ubicación.
+"nombre" (hasta {LARGO_NOMBRE_RUBRO} caracteres), "total" (el total del rubro) y su ubicación.
 - "gastos": lista de cada gasto, en el orden del documento; cada uno con "rubro" (el número de \
 orden del rubro en tu lista "rubros", desde 1), "concepto" (hasta {LARGO_CONCEPTO} caracteres), \
 "importe" y su ubicación.
@@ -180,7 +181,7 @@ class TotalLeido(_Ubicado):
 
 
 class RubroLeido(_Ubicado):
-    nombre: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    nombre: Annotated[str, StringConstraints(min_length=1, max_length=LARGO_NOMBRE_RUBRO)]
     total: Importe | None
 
 

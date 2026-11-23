@@ -65,9 +65,10 @@ FACULTAD = "presupuesto.registrar"
 ACCION = "consorcio.presupuesto.registrar"
 LARGO_APROBACION = 200
 LARGO_MOTIVO = 500
-LARGO_NOMBRE_RUBRO = 120
+LARGO_NOMBRE_RUBRO = 200
 MAXIMO_RUBROS = 60
-"""Los de `cem_contracts.presupuesto`; una prueba compara."""
+"""Los de `cem_contracts.presupuesto`; una prueba compara. El del nombre del rubro es el de la
+importación (`cem_contracts.importacion_liquidacion.LARGO_NOMBRE_RUBRO`), sin recortarlo."""
 CLAVE_TOTAL = "total:gastos"
 """El dato con los totales del gasto y los vencimientos (`importacion.campos`)."""
 TABLAS = ("nucleo.presupuesto", "nucleo.presupuesto_rubro")
