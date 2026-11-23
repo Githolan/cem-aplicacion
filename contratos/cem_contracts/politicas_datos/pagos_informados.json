@@ -28,7 +28,7 @@
       "economica": false,
       "destinatario_unico": false,
       "ayuda": "consultar_expensas",
-      "fuente_normativa": "Diseño «Pagos informados», PI-6: quien lo informó y quien tiene el vínculo confirmado con esa unidad ven los de esa unidad (la base filtra); quien tiene fiscalizacion.ver_panel, todos los del consorcio. Otras unidades, nunca"
+      "fuente_normativa": "Diseño «Pagos informados», PI-6: quien tiene el vínculo confirmado con esa unidad ve los de esa unidad, y quien lo informó lo sigue viendo mientras conserve algún vínculo confirmado en el consorcio (la base filtra); quien tiene fiscalizacion.ver_panel, todos los del consorcio. Otras unidades, nunca. Sin ningún vínculo confirmado ni la facultad, no ve nada, ni lo que informó: como los reclamos (reclamos_liquidacion.ver); decisión por defecto PI-D7 del 23-11-2026"
     }
   ]
 }
