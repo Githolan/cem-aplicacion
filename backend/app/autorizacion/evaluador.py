@@ -93,8 +93,11 @@ class Motivo(StrEnum):
 HUMANAS = frozenset(CodigoSeparacion) - {
     CodigoSeparacion.NO_ES_SU_PROPIO_VINCULO,
     CodigoSeparacion.NO_ES_QUIEN_REGISTRO,
+    CodigoSeparacion.NO_ES_QUIEN_INFORMO,
 }
-"""Las separaciones que comparan seres humanos (A13-C). P4-c queda afuera en este corte."""
+"""Las separaciones que comparan seres humanos (A13-C). P4-c queda afuera en este corte, y PI-5
+también (`0130`): quien informa un pago es un vecino sin identidad verificada, y exigirla dejaría
+sin confirmar todo pago informado."""
 
 SOLO_POR_CUENTA = frozenset({
     ("mandatos.baja", CodigoSeparacion.NO_ES_SU_PROPIO_MANDATO),
@@ -215,6 +218,9 @@ class Entidad:
     sin_decision: bool = False
     """La baja no usa decisión (renuncia, fallecimiento, `error_carga`, otro). Las dos marcas
     tienen que venir explícitas: una `decision_registrada_por` nula sin ellas niega."""
+    informado_por: tuple[UUID | None, ...] = ()
+    """Quien informó el pago que se decide y, si informó ayudando, también quien ayudó (PI-5,
+    `0130`). Vacío es un dato que falta: niega."""
     respaldo_presente: bool = False
 
 
@@ -465,6 +471,8 @@ def _partes(codigo: CodigoSeparacion, entidad: Entidad) -> tuple[UUID | None, ..
             otras = entidad.aprobado_por
         case CodigoSeparacion.FIRMA_REPETIDA:
             otras = entidad.firmas
+        case CodigoSeparacion.NO_ES_QUIEN_INFORMO:
+            otras = entidad.informado_por or (None,)
         case _:
             raise ValueError(f"código de separación sin implementar: {codigo!r}")
     return otras

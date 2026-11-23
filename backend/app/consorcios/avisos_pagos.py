@@ -28,10 +28,10 @@ programa ninguna corrida.
 
 **Lo del Consejo** (RF40, P0 S6; `avisos_consejo`, `0126`) va en el mismo correo y con el
 mismo tope, un renglón por edificio: liquidaciones del administrador por confirmar, solicitudes
-formales por vencer o recién vencidas, reclamos que esperan respuesta y pedidos de reparación que
-esperan responsable. Solo cuántos: nunca un texto, una unidad ni una persona. Con algo del Consejo
-el enlace es el inicio (la bandeja, decisión 9 del 18-11-2026), que lista también los pagos; sin
-nada del Consejo sigue siendo la bandeja de pagos.
+formales por vencer o recién vencidas, reclamos que esperan respuesta, pedidos de reparación que
+esperan responsable y pagos informados por confirmar (`0130`). Solo cuántos: nunca un texto, una
+unidad ni una persona. Con algo del Consejo el enlace es el inicio (la bandeja, decisión 9 del
+18-11-2026), que lista también los pagos; sin nada del Consejo sigue siendo la bandeja de pagos.
 
 El correo sale por el camino de siempre (`correo.solicitar`, outbox, `notificar.correo`), en la
 misma transacción que registra el aviso: o quedan los dos o ninguno.

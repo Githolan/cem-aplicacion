@@ -1113,7 +1113,12 @@
           "ayuda_ya_revocada",
           "ayuda_revocada",
           "presupuesto_superpuesto",
-          "comprobante_de_otra_unidad"
+          "comprobante_de_otra_unidad",
+          "pago_informado_decidido",
+          "comprobante_en_revision",
+          "comprobante_rechazado",
+          "correccion_de_pago_invalida",
+          "pago_ya_corregido"
         ],
         "title": "CodigoError",
         "type": "string"

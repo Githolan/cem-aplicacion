@@ -703,3 +703,17 @@ PI-6,pagos_informados.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin ví
 PI-6,pagos_informados.ver,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: no corre
 PI-6,pagos_informados.ver,Pc,C,,sin_mandato,si,ayuda=consultar_expensas,200,concedido_por_vinculo,quien ayuda ve los pagos informados de la asistida
 PI-6,pagos_informados.ver,MC,C,,vigente,si,ayuda=consultar_expensas,404,fuera_de_ambito,el mandato de la asistida no da ámbito a quien ayuda
+PI-5,pagos_informados.confirmar,MC,C,,vigente,si,informo=otro,200,concedido_por_facultad,MC confirma o rechaza un pago que informó otra persona (decisión del propietario del 23-11-2026)
+PI-5,pagos_informados.confirmar,AD,AA,,vigente,si,informo=otro,200,concedido_por_facultad,la administración confirma en Administrador Aumentado
+PI-5,pagos_informados.confirmar,MC,AG,,vigente,si,informo=otro,200,concedido_por_facultad,MC confirma en Autogestión
+PI-5,pagos_informados.confirmar,MC,C,,vigente,si,informo=yo,403,no_es_quien_informo,nadie confirma ni rechaza ni anula un pago que informó él mismo
+PI-5,pagos_informados.confirmar,AD,C,,vigente,si,informo=yo,403,no_es_quien_informo,tampoco la administración
+PI-5,pagos_informados.confirmar,MC,C,,vigente,si,informo=otro|yo,403,no_es_quien_informo,ni uno que informó ayudando a otra persona
+PI-5,pagos_informados.confirmar,MC,C,,vigente,si,,403,identidad_indeterminada,sin saber quién informó se niega
+PI-5,pagos_informados.confirmar,MC,C,,vigente,si,informo=otro;sin_identidad=yo|otro,200,concedido_por_facultad,compara cuentas: sin identidades verificadas igual confirma lo que informó otra cuenta
+PI-5,pagos_informados.confirmar,MC[fiscalizacion.ver_panel],C,,vigente,si,informo=otro,403,sin_concesion,el acta dejó el mandato sin pagos.confirmar_informado
+PI-5,pagos_informados.confirmar,Pc,C,,sin_mandato,si,informo=otro,403,sin_concesion,P confirmado informa pero no confirma
+PI-5,pagos_informados.confirmar,AE,C,,vigente,si,informo=otro,403,sin_concesion,AE no confirma pagos informados
+PI-5,pagos_informados.confirmar,ninguna,C,,sin_mandato,si,informo=otro,404,fuera_de_ambito,sin vínculo ni mandato
+PI-5,pagos_informados.confirmar,MC,—,,vigente,si,informo=otro,403,sin_modo_registrado,el mismo MC sin modo
+RF53,pagos_informados.confirmar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos;informo=otro,403,ayuda_no_admitida,confirmar un pago (decisorio): nunca quien ayuda

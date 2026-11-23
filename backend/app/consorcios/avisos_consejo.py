@@ -21,7 +21,10 @@ y la ventana del planificador: nadie recibe un correo de más por esto.
   pero el correo deja de repetirla: el aviso es el del vencimiento;
 - los reclamos sobre la liquidación que esperan respuesta, a quien los atiende (`reclamos.atender`);
 - los pedidos de reparación que esperan responsable, a quien gestiona (`reparaciones.gestionar`).
-  Las reparaciones en curso se ven en el inicio y no se repiten por correo: ya tienen responsable.
+  Las reparaciones en curso se ven en el inicio y no se repiten por correo: ya tienen responsable;
+- los pagos informados por confirmar (PI-S2, `0130`), a quien los confirma
+  (`pagos.confirmar_informado`): los `informado` del edificio que esa persona no informó. En el
+  inicio, el número sale de `por_confirmar` de `GET …/pagos-informados`.
 """
 
 from datetime import date
@@ -50,6 +53,10 @@ QUE_HACER = {
     "reparaciones": (
         "un pedido de reparación espera responsable",
         "{n} pedidos de reparación esperan responsable",
+    ),
+    "pagos_informados": (
+        "un pago informado espera confirmación",
+        "{n} pagos informados esperan confirmación",
     ),
 }
 """El orden de los renglones en el correo."""
@@ -83,6 +90,7 @@ def cuentas_de(fila: dict[str, Any]) -> dict[str, int]:
         "importaciones": fila["importaciones"] or 0,
         "reclamos": fila["reclamos"] or 0,
         "reparaciones": fila["reparaciones"] or 0,
+        "pagos_informados": fila["pagos_informados"] or 0,
         "por_vencer": 0,
         "vencidas": 0,
     }

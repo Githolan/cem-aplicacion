@@ -58,6 +58,17 @@
         "title": "AccionPago",
         "type": "string"
       },
+      "AccionPagoInformado": {
+        "description": "Lo que quien lee puede hacer con el pago ahora (la pantalla no ofrece otra cosa, C9).",
+        "enum": [
+          "confirmar",
+          "rechazar",
+          "anular",
+          "corregir"
+        ],
+        "title": "AccionPagoInformado",
+        "type": "string"
+      },
       "AccionReclamo": {
         "description": "Lo que la persona puede hacer con el reclamo ahora (la pantalla no ofrece otra cosa).",
         "enum": [
@@ -1680,7 +1691,12 @@
           "ayuda_ya_revocada",
           "ayuda_revocada",
           "presupuesto_superpuesto",
-          "comprobante_de_otra_unidad"
+          "comprobante_de_otra_unidad",
+          "pago_informado_decidido",
+          "comprobante_en_revision",
+          "comprobante_rechazado",
+          "correccion_de_pago_invalida",
+          "pago_ya_corregido"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -5587,9 +5603,12 @@
         "type": "string"
       },
       "EstadoPagoInformado": {
-        "description": "Hoy solo `informado`; PI-S2 suma `confirmado`, `rechazado` y `anulado`.",
+        "description": "PI-4: `informado` → `confirmado` o `rechazado`; `confirmado` → `anulado`.",
         "enum": [
-          "informado"
+          "informado",
+          "confirmado",
+          "rechazado",
+          "anulado"
         ],
         "title": "EstadoPagoInformado",
         "type": "string"
@@ -9803,14 +9822,25 @@
             "title": "Elementos",
             "type": "array"
           },
+          "largo_motivo": {
+            "title": "Largo Motivo",
+            "type": "integer"
+          },
           "largo_numero_operacion": {
             "title": "Largo Numero Operacion",
+            "type": "integer"
+          },
+          "por_confirmar": {
+            "description": "Cuántos pagos `informado` puede confirmar o rechazar quien lee ahora: el número de la bandeja del Consejo.",
+            "title": "Por Confirmar",
             "type": "integer"
           }
         },
         "required": [
           "elementos",
-          "largo_numero_operacion"
+          "largo_numero_operacion",
+          "largo_motivo",
+          "por_confirmar"
         ],
         "title": "ListaPagosInformados",
         "type": "object"
@@ -11064,6 +11094,24 @@
         "title": "ModoOperacion",
         "type": "string"
       },
+      "MotivoPagoInformado": {
+        "additionalProperties": false,
+        "description": "`POST …/{p}/rechazo` y `POST …/{p}/anulacion`: el motivo, que lee quien informó.",
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "MotivoPagoInformado",
+        "type": "object"
+      },
       "MotivoRechazo": {
         "enum": [
           "virus",
@@ -12021,6 +12069,13 @@
       "PagoInformado": {
         "description": "Un pago informado, como lo ve quien puede verlo.",
         "properties": {
+          "acciones": {
+            "items": {
+              "$ref": "#/components/schemas/AccionPagoInformado"
+            },
+            "title": "Acciones",
+            "type": "array"
+          },
           "comprobante_estado": {
             "anyOf": [
               {
@@ -12044,6 +12099,19 @@
             ],
             "title": "Comprobante Version Id"
           },
+          "corregido_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El pago que corrige a este, si es rechazado o anulado y ya se corrigió.",
+            "title": "Corregido Por"
+          },
           "corrige_a": {
             "anyOf": [
               {
@@ -12054,7 +12122,7 @@
                 "type": "null"
               }
             ],
-            "description": "El pago rechazado o anulado que este corrige (PI-S2); nulo en este corte.",
+            "description": "El pago rechazado o anulado que este corrige.",
             "title": "Corrige A"
           },
           "estado": {
@@ -12064,6 +12132,14 @@
             "format": "date",
             "title": "Fecha Pago",
             "type": "string"
+          },
+          "historia": {
+            "description": "Los cambios de estado, del primero al último; vacía mientras está informado.",
+            "items": {
+              "$ref": "#/components/schemas/PasoPagoInformado"
+            },
+            "title": "Historia",
+            "type": "array"
           },
           "id": {
             "format": "uuid",
@@ -12129,9 +12205,12 @@
           "origen",
           "estado",
           "corrige_a",
+          "corregido_por",
           "informado_por_nombre",
           "informado_en",
-          "propio"
+          "propio",
+          "historia",
+          "acciones"
         ],
         "title": "PagoInformado",
         "type": "object"
@@ -12152,6 +12231,19 @@
             ],
             "description": "La versión que devolvió `POST …/pagos-informados/comprobantes` para esta unidad; obligatoria salvo en efectivo. Puede estar todavía en cuarentena.",
             "title": "Comprobante Version Id"
+          },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El pago rechazado o anulado de la misma unidad que este corrige (PI-3). Con él, el pago nuevo se crea aunque tenga el mismo número o el mismo archivo.",
+            "title": "Corrige A"
           },
           "fecha_pago": {
             "description": "El día en que se pagó; no posterior a hoy.",
@@ -12209,6 +12301,13 @@
       "PagoInformadoRespuesta": {
         "description": "La respuesta de `POST …/pagos-informados`: 201 con `ya_informado` falso si es nuevo; 200 con\nel existente y `ya_informado` verdadero si ese pago ya estaba informado (PA07).",
         "properties": {
+          "acciones": {
+            "items": {
+              "$ref": "#/components/schemas/AccionPagoInformado"
+            },
+            "title": "Acciones",
+            "type": "array"
+          },
           "comprobante_estado": {
             "anyOf": [
               {
@@ -12232,6 +12331,19 @@
             ],
             "title": "Comprobante Version Id"
           },
+          "corregido_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El pago que corrige a este, si es rechazado o anulado y ya se corrigió.",
+            "title": "Corregido Por"
+          },
           "corrige_a": {
             "anyOf": [
               {
@@ -12242,7 +12354,7 @@
                 "type": "null"
               }
             ],
-            "description": "El pago rechazado o anulado que este corrige (PI-S2); nulo en este corte.",
+            "description": "El pago rechazado o anulado que este corrige.",
             "title": "Corrige A"
           },
           "estado": {
@@ -12252,6 +12364,14 @@
             "format": "date",
             "title": "Fecha Pago",
             "type": "string"
+          },
+          "historia": {
+            "description": "Los cambios de estado, del primero al último; vacía mientras está informado.",
+            "items": {
+              "$ref": "#/components/schemas/PasoPagoInformado"
+            },
+            "title": "Historia",
+            "type": "array"
           },
           "id": {
             "format": "uuid",
@@ -12321,9 +12441,12 @@
           "origen",
           "estado",
           "corrige_a",
+          "corregido_por",
           "informado_por_nombre",
           "informado_en",
           "propio",
+          "historia",
+          "acciones",
           "ya_informado"
         ],
         "title": "PagoInformadoRespuesta",
@@ -12941,6 +13064,47 @@
         ],
         "title": "PasoPago",
         "type": "string"
+      },
+      "PasoPagoInformado": {
+        "description": "Un cambio de estado, en el orden en que pasó.",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/EstadoPagoInformado"
+          },
+          "de": {
+            "$ref": "#/components/schemas/EstadoPagoInformado"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El del rechazo o la anulación; nulo al confirmar.",
+            "title": "Motivo"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por_nombre": {
+            "title": "Registrado Por Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "de",
+          "a",
+          "motivo",
+          "registrado_por_nombre",
+          "registrado_en"
+        ],
+        "title": "PasoPagoInformado",
+        "type": "object"
       },
       "PasoReclamo": {
         "description": "Un paso de la historia del reclamo.",
@@ -26893,10 +27057,10 @@
             "description": "Sin vínculo ni mandato en el consorcio."
           },
           "409": {
-            "description": "El comprobante ya se informó para otra unidad."
+            "description": "El comprobante ya se informó para otra unidad, o el pago que se corrige ya tiene su corrección."
           },
           "422": {
-            "description": "La fecha es posterior a hoy, el número es una cuenta o el comprobante no sirve."
+            "description": "La fecha es posterior a hoy, el número es una cuenta, el comprobante no sirve o lo que se corrige no es un pago rechazado o anulado de la misma unidad."
           }
         },
         "summary": "Informar el pago de una unidad, con su comprobante; si ese pago ya estaba informado, responde el existente",
@@ -27013,6 +27177,83 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/{pago_id}/anulacion": {
+      "post": {
+        "operationId": "anular_pago_api_v1_consorcios__consorcio_id__pagos_informados__pago_id__anulacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pago_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pago Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotivoPagoInformado"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad `pagos.confirmar_informado`, o el pago lo informó esta cuenta (`ya_participo`)."
+          },
+          "404": {
+            "description": "El pago no existe en este consorcio o no se puede ver."
+          },
+          "409": {
+            "description": "El pago ya no admite ese paso (`pago_informado_decidido`) o, al confirmar, el antivirus todavía revisa el comprobante o lo rechazó (`comprobante_en_revision`, `comprobante_rechazado`)."
+          },
+          "422": {
+            "description": "El motivo falta, es largo o lleva una cuenta."
+          }
+        },
+        "summary": "Anular un pago confirmado que resultó mal, con el motivo (nada se borra)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/pagos-informados/{pago_id}/comprobante": {
       "get": {
         "operationId": "contenido_del_comprobante_api_v1_consorcios__consorcio_id__pagos_informados__pago_id__comprobante_get",
@@ -27086,6 +27327,157 @@
           }
         },
         "summary": "Ver el comprobante de un pago informado: por el mismo origen, si el antivirus lo aceptó",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/{pago_id}/confirmacion": {
+      "post": {
+        "operationId": "confirmar_pago_api_v1_consorcios__consorcio_id__pagos_informados__pago_id__confirmacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pago_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pago Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad `pagos.confirmar_informado`, o el pago lo informó esta cuenta (`ya_participo`)."
+          },
+          "404": {
+            "description": "El pago no existe en este consorcio o no se puede ver."
+          },
+          "409": {
+            "description": "El pago ya no admite ese paso (`pago_informado_decidido`) o, al confirmar, el antivirus todavía revisa el comprobante o lo rechazó (`comprobante_en_revision`, `comprobante_rechazado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar un pago informado: el comprobante es creíble (no mueve dinero)",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/{pago_id}/rechazo": {
+      "post": {
+        "operationId": "rechazar_pago_api_v1_consorcios__consorcio_id__pagos_informados__pago_id__rechazo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pago_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pago Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotivoPagoInformado"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad `pagos.confirmar_informado`, o el pago lo informó esta cuenta (`ya_participo`)."
+          },
+          "404": {
+            "description": "El pago no existe en este consorcio o no se puede ver."
+          },
+          "409": {
+            "description": "El pago ya no admite ese paso (`pago_informado_decidido`) o, al confirmar, el antivirus todavía revisa el comprobante o lo rechazó (`comprobante_en_revision`, `comprobante_rechazado`)."
+          },
+          "422": {
+            "description": "El motivo falta, es largo o lleva una cuenta."
+          }
+        },
+        "summary": "Rechazar un pago informado, con el motivo que lee quien lo informó",
         "tags": [
           "consorcios"
         ]

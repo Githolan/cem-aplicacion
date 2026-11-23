@@ -103,6 +103,7 @@ TODO_PASA = Entidad(
     emitido_por=OTRO,
     ejecutado_por=OTRO,
     decision_registrada_por=OTRO,
+    informado_por=(OTRO,),
     respaldo_presente=True,
 )
 
@@ -361,8 +362,9 @@ def test_las_acciones_de_la_tabla():
     # (`reparaciones.pedir`, `.ver` y `.gestionar`, 0124) y las tres de la ayuda por una persona
     # autorizada (`ayuda.otorgar`, `.revocar` y `.ver_otorgadas`, 0127) y la del presupuesto
     # (`presupuesto.registrar`, 0128) y las dos de los pagos informados
-    # (`pagos_informados.informar` y `.ver`, 0129)
-    assert len(POLITICAS) == 75
+    # (`pagos_informados.informar` y `.ver`, 0129) y su confirmación
+    # (`pagos_informados.confirmar`, 0130)
+    assert len(POLITICAS) == 76
 
 
 def _archivo(tmp_path, nombre, politicas):
