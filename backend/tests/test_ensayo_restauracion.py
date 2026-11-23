@@ -2,6 +2,7 @@
 ensayo mismo corre en la PC contra la VM, con la identidad de la bóveda, y no se puede repetir
 acá; lo que decide qué bajar, hasta dónde recuperar y qué contenedores tocar, sí."""
 
+import itertools
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -128,3 +129,125 @@ def test_los_recursos_son_solo_los_del_proyecto_de_staging():
 ])  # fmt: skip
 def test_es_staging(valor, staging):
     assert ensayo.es_staging(valor) is staging
+
+
+# Hallazgos P2 de Codex en #287 ---------------------------------------------------------------
+
+
+def test_el_rpo_cuenta_desde_que_el_receptor_sincronizo_a_y_no_desde_a():
+    # A confirmada a las 04:22:43; el receptor atrasado sincroniza su posición a las 04:24:10.
+    seg = "000000010000000000000038"
+    sincronizo = datetime(2026, 11, 23, 4, 24, 10, 300000, tzinfo=UTC)
+    antes = f"wal-parcial/{seg}-20261123T042302Z.partial.gz.age"  # subido después de A
+    despues = f"wal-parcial/{seg}-20261123T042502Z.partial.gz.age"
+    assert ensayo.parcial_posterior([antes], seg, sincronizo) is None
+    assert ensayo.parcial_posterior([antes, despues], seg, sincronizo) == despues
+    # Control: contado desde la confirmación de A (lo de antes) se habría aceptado el primero.
+    a = datetime(2026, 11, 23, 4, 22, 43, tzinfo=UTC)
+    assert ensayo.parcial_posterior([antes, despues], seg, a) == antes
+
+
+def test_los_artefactos_al_rpo_son_los_de_ese_momento():
+    completos = [f"wal/0000000100000000000000{n:02X}.gz.age" for n in range(0x2E, 0x38)]
+    parcial = "wal-parcial/000000010000000000000038-20261123T042502Z.partial.gz.age"
+    elegidos = ensayo.artefactos_al_rpo(completos, "00000001000000000000002E", parcial)
+    assert elegidos == completos + [parcial]
+    # Con el segmento ya completo, hasta él y sin parcial.
+    completo = "wal/000000010000000000000035.gz.age"
+    hasta = ensayo.artefactos_al_rpo(completos, "00000001000000000000002E", completo)
+    assert hasta[-1] == completo and len(hasta) == 8
+    # El parcial del mismo segmento de la copia base: solo él.
+    del_inicio = "wal-parcial/00000001000000000000002E-20261123T042502Z.partial.gz.age"
+    assert ensayo.artefactos_al_rpo([], "00000001000000000000002E", del_inicio) == [del_inicio]
+    # Controles: un hueco, o un parcial anterior a la copia base, se niegan.
+    with pytest.raises(ensayo.Fallo, match="faltan 1 segmentos"):
+        ensayo.artefactos_al_rpo([c for c in completos if "33" not in c],
+                                 "00000001000000000000002E", parcial)  # fmt: skip
+    with pytest.raises(ensayo.Fallo, match="anterior a la copia base"):
+        ensayo.artefactos_al_rpo(completos, "000000010000000000000030", del_inicio)
+
+
+def test_la_promocion_espera_lo_que_queda_del_rto_y_no_un_plazo_nuevo():
+    assert ensayo.restante(100.0, 160.0, 14400) == 14340.0
+    with pytest.raises(ensayo.Fallo, match="pasó el RTO"):
+        ensayo.restante(100.0, 100.0 + 14400, 14400)
+    ensayo.exigir_rto(14400.0, 14400)
+    with pytest.raises(ensayo.Fallo, match="más que el RTO"):
+        ensayo.exigir_rto(14400.1, 14400)
+
+
+def test_sin_objetivo_aplica_todo_el_wal_y_promueve():
+    texto = ensayo.ajustes_recuperacion(None, "/restaurar/wal")
+    assert "recovery_target_time" not in texto
+    assert "recovery_target_action = 'promote'" in texto
+    assert "gunzip -c /restaurar/wal/%f.gz > %p" in texto
+
+
+SEG = "000000010000000000000038"
+A_CONFIRMADA = datetime(2026, 11, 23, 4, 22, 43, tzinfo=UTC)
+SINCRONIZO = datetime(2026, 11, 23, 4, 24, 10, 300000, tzinfo=UTC)
+PARCIAL_SIN_A = f"wal-parcial/{SEG}-20261123T042302Z.partial.gz.age"
+PARCIAL_CON_A = f"wal-parcial/{SEG}-20261123T042502Z.partial.gz.age"
+
+
+def ensayo_falso(monkeypatch) -> ensayo.Ensayo:
+    """Un ensayo sin VM: las lecturas de la base y del almacén son las de un receptor atrasado
+    (sincroniza A a las 04:24:10, después de subir un parcial a las 04:23:02)."""
+    e = ensayo.Ensayo(None, None, None)
+    marcas = iter([A_CONFIRMADA, A_CONFIRMADA + timedelta(minutes=3)])
+
+    def marca(consorcio, letra):
+        t = next(marcas)
+        return {"decision": letra, "antes": t, "despues": t}
+
+    def real(sql):
+        if "pg_current_wal_flush_lsn" in sql:
+            return [["0/38000100", SEG]]
+        if "pg_stat_replication" in sql:
+            return [["t", "0/38000200", str(SINCRONIZO.timestamp())]]
+        return [["0/39000000", SEG]]  # pg_switch_wal
+
+    def listar(*prefijos):
+        objetos = [{"clave": c, "bytes": 1, "modificado": m} for c, m in (
+            (PARCIAL_SIN_A, "2026-11-23T04:23:03+00:00"),
+            (PARCIAL_CON_A, "2026-11-23T04:25:03+00:00"),
+            (f"wal/{SEG}.gz.age", "2026-11-23T04:26:00+00:00"))]  # fmt: skip
+        return [o for o in objetos if o["clave"].startswith(prefijos)]
+
+    monkeypatch.setattr(e, "marca", marca)
+    monkeypatch.setattr(e, "real", real)
+    monkeypatch.setattr(e, "listar", listar)
+    return e
+
+
+def test_las_marcas_cuentan_el_parcial_tomado_con_a_sincronizada(monkeypatch, capsys):
+    e = ensayo_falso(monkeypatch)
+    e.marcas()
+    assert e.rpo["clave"] == PARCIAL_CON_A
+    assert e.rpo["lsn_a"] == "0/38000100"
+    assert e.resumen["rpo_subido_s"] == 140.0  # 04:25:03 − 04:22:43
+    # Control: el parcial de las 04:23:02, posterior a A pero anterior a la sincronización, estaba.
+    assert PARCIAL_SIN_A in [o["clave"] for o in e.listar("wal-parcial/")]
+
+
+def test_la_restauracion_falla_si_el_total_pasa_el_rto(monkeypatch):
+    e = ensayo.Ensayo(None, None, None)
+    reloj = itertools.chain([0.0], itertools.repeat(ensayo.ESPERA_PROMOCION_S + 1.0))
+    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
+    monkeypatch.setattr(e, "base_anterior", lambda antes: ("20261117T053929Z", SEG))
+    monkeypatch.setattr(e, "listar", lambda *p: [{"clave": f"wal/{SEG}.gz.age"}])
+    monkeypatch.setattr(e, "marca_base", {"inicio_lsn": "0/38000028"})
+    vistos = {}
+
+    def restaurar_con(que, momento, wal, objetivo, inicio, limite):
+        vistos.update(inicio=inicio, limite=limite)
+        return "c", "LOG:  recovery stopping before commit of transaction 1", 10
+
+    monkeypatch.setattr(e, "restaurar_con", restaurar_con)
+    monkeypatch.setattr(e, "controles", lambda contenedor: None)
+    a = {"despues": A_CONFIRMADA, "antes": A_CONFIRMADA}
+    b = {"antes": A_CONFIRMADA + timedelta(minutes=3)}
+    with pytest.raises(ensayo.Fallo, match="más que el RTO"):
+        e.restaurar(a, b, SEG)
+    # La espera recibió el inicio de todo el ensayo y el RTO entero como plazo total.
+    assert vistos == {"inicio": 0.0, "limite": ensayo.ESPERA_PROMOCION_S}

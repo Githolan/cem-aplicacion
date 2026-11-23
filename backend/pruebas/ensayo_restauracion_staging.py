@@ -16,9 +16,15 @@ PC**, habla con la VM por `ssh` y no escribe nada en producción:
 2. **Marca A.** En `cem-backend-staging`, un consorcio nuevo `CEM LAB — Ensayo PA26 <corrida>`
    (`scripts.alta_consorcio`, una unidad) y una decisión de soporte con la descripción
    `PA26 <corrida> marca A` (`nucleo.registrar_decision`: una fila y un evento de auditoría).
-3. **RPO observado.** Se espera a que el WAL de A llegue al bucket: un parcial
-   (`wal-parcial/<segmento>-<sello>.partial.gz.age`) con sello posterior a A, o el segmento
-   completo. Se informa el tiempo desde que A quedó confirmada.
+3. **RPO observado** (corregido por el hallazgo P2 de Codex en #287: un parcial subido después
+   de A puede no tener A si el receptor está atrasado). Se toma la posición de A
+   (`pg_current_wal_flush_lsn()` apenas A vuelve confirmada); se espera a que el receptor la
+   haya escrito y sincronizado (`flush_lsn` de `pg_stat_replication` del slot
+   `cem_copia_continua`, con `pg_receivewal --synchronous`) y se anota ese momento; recién un
+   parcial (`wal-parcial/<segmento>-<sello>.partial.gz.age`) con sello posterior a ese momento,
+   o el segmento completo, cuenta. Se informa el tiempo desde que A quedó confirmada hasta que
+   se ve en el bucket (y hasta su `LastModified`). **La prueba de que ese artefacto tiene A** es
+   el paso 7: una segunda restauración con solo lo que había en el almacén en ese momento.
 4. **Marca B**, igual, y `pg_switch_wal()` (superusuario, por `psql`): el segmento que tiene a B
    se completa y `cem-copia-continua-staging` lo sube a `wal/`. Se espera a que esté.
 5. **Restauración cronometrada** desde el inicio de la descarga hasta la base promovida:
@@ -32,7 +38,9 @@ PC**, habla con la VM por `ssh` y no escribe nada en producción:
    - `postgres:18-alpine` (el de `cem-postgres-staging`), sin red, arranca sobre ese volumen con
      `recovery_target_time` en el punto medio entre A y B y `recovery_target_action=promote`;
    - el reloj se detiene cuando el registro dice `database system is ready to accept
-     connections` después de la línea de promoción (`selected new timeline ID`).
+     connections` después de la línea de promoción (`selected new timeline ID`). El plazo es
+     uno solo, desde el inicio de la descarga: la espera de la promoción recibe lo que queda del
+     RTO, y el total se compara con el RTO (hallazgo P2 de Codex en #287).
 6. **Controles en la base restaurada**, cada uno con su control en la base real (solo lectura):
    A sí y B no (en la real, las dos); la cadena de auditoría con la fórmula de
    `copia_continua.CADENA` (total, enlaces rotos, hashes distintos y el control con la acción
@@ -40,12 +48,15 @@ PC**, habla con la VM por `ssh` y no escribe nada en producción:
    al menos los mismos, y al menos una decisión más: B, porque las decisiones de soporte no
    escriben eventos desde `0032`); y las tablas de `0119` a `0128` (sacadas de las migraciones)
    con la RLS activa, la forzada y la cantidad de políticas iguales a las de la base real.
-7. **Copia diaria** (`--diaria`): el objeto de hoy de `diarias/AAAA-MM-DD/` que registró el
+7. **Comprobación del RPO:** otra restauración, sin objetivo (aplica todo y se promueve), con la
+   misma copia base, los segmentos completos de `wal/` que había en el momento del RPO y el
+   parcial contado como su segmento; tiene que tener A (y no B, escrita después).
+8. **Copia diaria** (`--diaria`): el objeto de hoy de `diarias/AAAA-MM-DD/` que registró el
    trabajo `plataforma.copia_diaria` se baja cifrado, se compara su SHA-256 con el del trabajo,
    se descifra igual que arriba y se restaura con `pg_restore --no-owner --no-acl` (lo mismo que
    `copias.verificar_volcado`) en otro `postgres:18-alpine` sin red; las tablas y filas tienen
    que ser las que el trabajo registró.
-8. **Limpieza** siempre, también ante un fallo: contenedores, volúmenes y la carpeta cifrada de la
+9. **Limpieza** siempre, también ante un fallo: contenedores, volúmenes y la carpeta cifrada de la
    VM; después se comprueba que no queda ninguno (`docker ps -a`, `docker volume ls`, `test -e`).
 
 **La identidad privada.** Es `cem-clave-copias-age`, en la bóveda `cem-claves` de OCI (la misma
@@ -112,6 +123,8 @@ COPIA, BACKEND, POSTGRES = (
     "cem-postgres-staging",
 )
 """Los nombres de recurso de Coolify (`coolify.resourceName`), los de `REGISTRO_RECURSOS`."""
+SLOT_RECEPTOR = "cem_copia_continua"
+"""El slot de `cem-copia-continua` (`copia_continua.SLOT`)."""
 SECRETO = "cem-clave-copias-age"
 BOVEDA = "cem-claves"
 COMPARTIMENTO = "consorcio-en-mano"
@@ -208,9 +221,16 @@ def host_publico(origen: str) -> str:
 
 
 def parcial_posterior(claves: list[str], segmento: str, momento: datetime) -> str | None:
-    """Un parcial del `segmento` con sello posterior al segundo de `momento` (la foto se toma al
-    subir: del mismo segundo podría ser anterior), o un segmento completo igual o posterior:
-    cualquiera de los dos tiene lo escrito en `momento`."""
+    """Un parcial del `segmento` con sello posterior al segundo de `momento`, o un segmento
+    completo igual o posterior.
+
+    `momento` tiene que ser el instante en que el receptor ya **había escrito y sincronizado** la
+    posición de A (`flush_lsn` de `pg_stat_replication` ≥ la posición de A, con `pg_receivewal
+    --synchronous`), no el de la confirmación de A: con el receptor atrasado, un parcial subido
+    después de A puede tener solo lo anterior a A (hallazgo P2 de Codex en #287). La foto del
+    parcial se toma después de su sello (`subir_parcial` sella con el momento de la vuelta y copia
+    después), y del mismo segundo podría ser anterior: por eso el sello tiene que ser
+    estrictamente posterior al segundo de `momento`."""
     sello_minimo = f"{momento.astimezone(UTC):%Y%m%dT%H%M%SZ}"
     linea, numero = numero_de(segmento)
     for clave in sorted(claves):
@@ -226,13 +246,51 @@ def parcial_posterior(claves: list[str], segmento: str, momento: datetime) -> st
     return None
 
 
-def ajustes_recuperacion(objetivo: datetime, wal: str) -> str:
+def artefactos_al_rpo(claves_wal: list[str], desde: str, encontrado: str) -> list[str]:
+    """Lo que había en el almacén en el momento del RPO para llegar a A: los segmentos completos
+    desde la copia base y, si lo que se encontró es un parcial del segmento `S`, los completos
+    hasta `S - 1` y ese parcial (que la restauración usa como el segmento `S`). Con esto se
+    restaura otra vez, sin el WAL que se subió después, y se comprueba que A está."""
+    nombre = encontrado.split("/", 1)[1]
+    if encontrado.startswith("wal/"):
+        return segmentos_necesarios(claves_wal, desde, nombre.removesuffix(".gz.age"))
+    segmento = nombre[:24]
+    linea, numero = numero_de(segmento)
+    if numero_de(desde) > (linea, numero):
+        raise Fallo(f"el parcial {segmento} es anterior a la copia base ({desde})")
+    if numero_de(desde) == (linea, numero):
+        return [encontrado]
+    anterior = segmento_de(linea, (numero - 1) * TAMANO_SEGMENTO)
+    return segmentos_necesarios(claves_wal, desde, anterior) + [encontrado]
+
+
+def restante(inicio: float, ahora: float, limite: float) -> float:
+    """Lo que queda del plazo total `limite` (segundos) que empezó en `inicio`. Sin plazo, falla:
+    la espera de la promoción no empieza con un plazo nuevo (hallazgo P2 de Codex en #287)."""
+    queda = limite - (ahora - inicio)
+    if queda <= 0:
+        raise Fallo(f"pasó el RTO de {limite:.0f} s antes de esperar la promoción")
+    return queda
+
+
+def exigir_rto(segundos: float, limite: float) -> None:
+    if segundos > limite:
+        raise Fallo(f"la restauración tardó {segundos:.1f} s, más que el RTO de {limite:.0f} s")
+
+
+def ajustes_recuperacion(objetivo: datetime | None, wal: str) -> str:
     """Lo que se agrega a `postgresql.auto.conf` de la copia (manda sobre lo anterior). Los
-    mismos criterios que `copia_continua.AJUSTES_RESTAURADA`."""
+    mismos criterios que `copia_continua.AJUSTES_RESTAURADA`. Sin `objetivo`, aplica todo el WAL
+    que haya y se promueve (la restauración con lo disponible en el momento del RPO)."""
+    momento = (
+        {}
+        if objetivo is None
+        else {"recovery_target_time": objetivo.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f+00")}
+    )
     ajustes = {
         "listen_addresses": "",
         "hot_standby": "off",
-        "recovery_target_time": objetivo.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f+00"),
+        **momento,
         "recovery_target_action": "promote",
         "restore_command": f"test -f {wal}/%f.gz && gunzip -c {wal}/%f.gz > %p",
         "archive_mode": "off",
@@ -313,7 +371,9 @@ if orden == "listar":
     for prefijo in sys.argv[2:]:
         for pagina in s3.get_paginator("list_objects_v2").paginate(Bucket=cfg.bucket,
                                                                   Prefix=prefijo):
-            salida += [{"clave": o["Key"], "bytes": o["Size"]} for o in pagina.get("Contents", [])]
+            salida += [{"clave": o["Key"], "bytes": o["Size"],
+                        "modificado": o["LastModified"].isoformat()}
+                       for o in pagina.get("Contents", [])]
     print(json.dumps(salida))
 elif orden == "leer":
     sys.stdout.write(s3.get_object(Bucket=cfg.bucket, Key=sys.argv[2])["Body"].read().decode())
@@ -484,6 +544,8 @@ class Ensayo:
     corrida: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     resumen: dict = field(default_factory=dict)
     limpiar: list[str] = field(default_factory=list)
+    rpo: dict = field(default_factory=dict)
+    marca_base: dict = field(default_factory=dict)
 
     @property
     def carpeta(self) -> str:
@@ -574,16 +636,54 @@ class Ensayo:
         consorcio = uuid.uuid4()
         self.resumen["consorcio"] = str(consorcio)
         a = self.marca(consorcio, "A")
-        [[seg_a]] = self.real("select pg_walfile_name(pg_current_wal_lsn())")
+        # Cota de A: la posición sincronizada cuando A ya volvió confirmada (synchronous_commit por
+        # defecto): el registro de la confirmación de A termina en ella o antes.
+        [[lsn_a, seg_a]] = self.real(
+            "select l, pg_walfile_name(l) from (select pg_current_wal_flush_lsn() as l) x"
+        )
+        a["lsn"] = lsn_a
         self.ok(f"marca A {a['decision']} confirmada a las {a['despues'].isoformat()}"
-                f" (segmento {seg_a})")  # fmt: skip
-        encontrado, demora = self.esperar("el WAL de A en el bucket", ESPERA_RPO_S, lambda: (
-            parcial_posterior([o["clave"] for o in self.listar("wal-parcial/", "wal/")],
-                              seg_a, a["despues"])))  # fmt: skip
+                f" (posición {lsn_a}, segmento {seg_a})")  # fmt: skip
+
+        def receptor_alcanzo():
+            filas = self.real(
+                f"select r.flush_lsn >= '{lsn_a}'::pg_lsn, r.flush_lsn,"
+                " extract(epoch from clock_timestamp()) from pg_stat_replication r"
+                " join pg_replication_slots s on s.active_pid = r.pid"
+                f" where s.slot_name = '{SLOT_RECEPTOR}'")  # fmt: skip
+            if filas and filas[0][0] == "t":
+                return filas[0][1], datetime.fromtimestamp(float(filas[0][2]), UTC)
+            return None
+
+        (flush, alcanzo), _ = self.esperar("el receptor con A sincronizada", ESPERA_RPO_S,
+                                           receptor_alcanzo)  # fmt: skip
+        self.ok(f"el receptor sincronizó {flush} ≥ {lsn_a} a las {alcanzo.isoformat()}"
+                f" ({(alcanzo - a['despues']).total_seconds():.1f} s después de A)")  # fmt: skip
+
+        def subido():
+            objetos = self.listar("wal-parcial/", "wal/")
+            clave = parcial_posterior([o["clave"] for o in objetos], seg_a, alcanzo)
+            if clave is None:
+                return None
+            return clave, next(o for o in objetos if o["clave"] == clave), objetos
+
+        (encontrado, objeto, objetos), _ = self.esperar("el WAL de A en el bucket", ESPERA_RPO_S,
+                                                        subido)  # fmt: skip
         rpo = (datetime.now(UTC) - a["despues"]).total_seconds()
+        subido_en = datetime.fromisoformat(objeto["modificado"])
+        self.rpo = {
+            "clave": encontrado,
+            "segmento_a": seg_a,
+            "lsn_a": lsn_a,
+            "claves_wal": [o["clave"] for o in objetos if o["clave"].startswith("wal/")],
+        }
         self.resumen["rpo_observado_s"] = round(rpo, 1)
-        self.ok(f"el WAL de A está en el bucket ({encontrado}) {rpo:.0f} s después de confirmada,"
-                f" contra un RPO de {ESPERA_RPO_S // 60} min")  # fmt: skip
+        self.resumen["rpo_subido_s"] = round((subido_en - a["despues"]).total_seconds(), 1)
+        self.resumen["rpo_artefacto"] = encontrado
+        self.ok(f"el WAL de A está en el bucket ({encontrado}, subido"
+                f" {self.resumen['rpo_subido_s']:.0f} s después de A; visto a los {rpo:.0f} s),"
+                f" contra un RPO de {ESPERA_RPO_S // 60} min; se comprueba al final restaurando"
+                " solo con lo que había en ese momento")  # fmt: skip
         b = self.marca(consorcio, "B")
         [[fin, seg_b]] = self.real(
             "select s, pg_walfile_name(s - 1) from (select pg_switch_wal() as s) x"
@@ -599,36 +699,37 @@ class Ensayo:
 
     # 5 y 6 ------------------------------------------------------------------------------------
 
-    def restaurar(self, a: dict, b: dict, seg_b: str) -> None:
-        objetivo = punto_medio(a["despues"], b["antes"])
-        self.resumen["objetivo"] = objetivo.isoformat()
-        inicio = time.monotonic()
+    def base_anterior(self, antes_de: datetime) -> tuple[str, str]:
         marcas = {}
         for o in self.listar("base/"):
             partes = o["clave"].split("/")
             if len(partes) == 3 and partes[2] == "verificada.json":
                 marcas[partes[1]] = json.loads(self.almacen("leer", o["clave"]))
-        momento, marca = elegir_base(marcas, a["antes"])
-        desde = segmento_de(marca["linea_de_tiempo"], lsn(marca["inicio_lsn"]))
-        wal = segmentos_necesarios([o["clave"] for o in self.listar("wal/")], desde, seg_b)
+        momento, marca = elegir_base(marcas, antes_de)
+        self.marca_base = marca
+        return momento, segmento_de(marca["linea_de_tiempo"], lsn(marca["inicio_lsn"]))
+
+    def restaurar_con(self, que: str, momento: str, wal: list[str], objetivo: datetime | None,
+                      inicio: float, limite: float) -> tuple[str, str, int]:  # fmt: skip
+        """Baja la copia base `momento` y las claves `wal` cifradas, las descifra a un tmpfs y
+        levanta `postgres:18-alpine` sin red hasta que se promueve. Un parcial va como su
+        segmento. La espera de la promoción usa lo que queda del plazo total `limite` desde
+        `inicio`, no un plazo nuevo."""
         base = [f"base/{momento}/{n}.age" for n in ("base.tar.gz", "pg_wal.tar.gz")]
-        self.resumen["copia_base"] = {
-            "momento": momento,
-            "inicio_lsn": marca["inicio_lsn"],
-            "segmentos": len(wal),
-            "desde": desde,
-            "hasta": seg_b,
-        }
         self.limpiar.append(f"carpeta:{self.carpeta}")
-        cifrado = f"{self.carpeta}/pitr"
+        cifrado = f"{self.carpeta}/{que}"
         self.bajar(base + wal, cifrado)
-        self.vm.correr(f"mv {cifrado}/base/{momento}/* {cifrado}/base/ && rmdir"
-                       f" {cifrado}/base/{momento} && cat > {cifrado}/ajustes.conf",
+        renombrar = "".join(
+            f" && mv {cifrado}/{c} {cifrado}/wal/{c.split('/', 1)[1][:24]}.gz.age"
+            for c in wal if c.startswith("wal-parcial/"))  # fmt: skip
+        self.vm.correr(f"mkdir -p {cifrado}/wal && mv {cifrado}/base/{momento}/* {cifrado}/base/"
+                       f" && rmdir {cifrado}/base/{momento}{renombrar}"
+                       f" && cat > {cifrado}/ajustes.conf",
                        ajustes_recuperacion(objetivo, "/restaurar/wal"))  # fmt: skip
-        bajado = self.vm.correr(f"du -sb {cifrado} | cut -f1").strip()
-        volumen = self.volumen("pitr")
-        print(self.descifrar(DESCIFRAR_PITR, volumen, cifrado, "pitr").strip(), flush=True)
-        contenedor = self.efimero("pitr")
+        bajado = int(self.vm.correr(f"du -sb {cifrado} | cut -f1").strip())
+        volumen = self.volumen(que)
+        print(self.descifrar(DESCIFRAR_PITR, volumen, cifrado, que).strip(), flush=True)
+        contenedor = self.efimero(que)
         self.limpiar.append(f"contenedor:{contenedor}")
         self.vm.correr(
             f"docker run -d --name {contenedor} --network none --user {UID_POSTGRES}:{UID_POSTGRES}"
@@ -645,21 +746,68 @@ class Ensayo:
                 raise Fallo(f"la base restaurada se detuvo:\n{registro[-2000:]}")
             return None
 
-        registro, _ = self.esperar("la promoción", ESPERA_PROMOCION_S, promovida)
+        queda = restante(inicio, time.monotonic(), limite)
+        registro, _ = self.esperar("la promoción", queda, promovida)
+        return contenedor, registro, bajado
+
+    def restaurar(self, a: dict, b: dict, seg_b: str) -> None:
+        objetivo = punto_medio(a["despues"], b["antes"])
+        self.resumen["objetivo"] = objetivo.isoformat()
+        inicio = time.monotonic()
+        momento, desde = self.base_anterior(a["antes"])
+        wal = segmentos_necesarios([o["clave"] for o in self.listar("wal/")], desde, seg_b)
+        self.resumen["copia_base"] = {
+            "momento": momento,
+            "inicio_lsn": self.marca_base["inicio_lsn"],
+            "segmentos": len(wal),
+            "desde": desde,
+            "hasta": seg_b,
+        }
+        contenedor, registro, bajado = self.restaurar_con("pitr", momento, wal, objetivo, inicio,
+                                                          ESPERA_PROMOCION_S)  # fmt: skip
         segundos = time.monotonic() - inicio
         parada = [x for x in registro.splitlines() if "recovery stopping" in x]
         self.resumen["restauracion"] = {
-            "segundos": round(segundos, 1), "bytes_cifrados_bajados": int(bajado),
+            "segundos": round(segundos, 1), "bytes_cifrados_bajados": bajado,
             "parada": parada[0].split("LOG:", 1)[-1].strip() if parada else None,
             "rto_s": ESPERA_PROMOCION_S,
         }  # fmt: skip
+        exigir_rto(segundos, ESPERA_PROMOCION_S)
         if not parada:
             raise Fallo("el registro no dice dónde se detuvo la recuperación")
         self.ok(
-            f"restaurada y promovida en {segundos:.1f} s contra un RTO de 4 h"
-            f" ({int(bajado) / 1e6:.1f} MB cifrados); {parada[0].split('LOG:', 1)[-1].strip()}"
+            f"restaurada y promovida en {segundos:.1f} s, dentro del RTO de"
+            f" {ESPERA_PROMOCION_S} s ({bajado / 1e6:.1f} MB cifrados);"
+            f" {parada[0].split('LOG:', 1)[-1].strip()}"
         )
         self.controles(contenedor)
+
+    def comprobar_rpo(self, a: dict) -> None:
+        """Restaura otra vez, sin objetivo, solo con lo que había en el almacén en el momento del
+        RPO (la copia base, los segmentos completos de entonces y el parcial encontrado), y exige
+        A. Es la prueba de que el artefacto contado tiene A (hallazgo P2 de Codex en #287); el
+        orden «receptor sincronizado antes de la foto» es solo la condición para elegirlo."""
+        momento, desde = self.base_anterior(a["antes"])
+        wal = artefactos_al_rpo(self.rpo["claves_wal"], desde, self.rpo["clave"])
+        inicio = time.monotonic()
+        contenedor, _, bajado = self.restaurar_con("rpo", momento, wal, None, inicio,
+                                                   ESPERA_PROMOCION_S)  # fmt: skip
+        consorcio = self.resumen["consorcio"]
+        [[con_a, con_b]] = self.vm.psql(contenedor, (
+            f"select (select count(*) from nucleo.decision_formal where consorcio_id ="
+            f" '{consorcio}' and descripcion = 'PA26 {self.corrida} marca A'),"
+            f" (select count(*) from nucleo.decision_formal where consorcio_id ="
+            f" '{consorcio}' and descripcion = 'PA26 {self.corrida} marca B')"))  # fmt: skip
+        self.resumen["rpo_comprobado"] = {"archivos_wal": len(wal), "ultimo": wal[-1],
+                                          "marca_a": int(con_a), "marca_b": int(con_b),
+                                          "segundos": round(time.monotonic() - inicio, 1),
+                                          "bytes_cifrados_bajados": bajado}  # fmt: skip
+        if int(con_a) != 1:
+            raise Fallo(f"con lo que había al RPO ({wal[-1]}) la restaurada no tiene A: el RPO"
+                        " informado no vale")  # fmt: skip
+        self.ok(f"con lo que había en el almacén al RPO ({len(wal)} archivos de WAL, el último"
+                f" {wal[-1]}) la restaurada tiene A ({con_a}) y no B ({con_b}): el RPO contado"
+                " es real")  # fmt: skip
 
     def controles(self, contenedor: str) -> None:
         consorcio = self.resumen["consorcio"]
@@ -886,6 +1034,7 @@ def main(argumentos: list[str] | None = None) -> int:
     try:
         a_, b_, seg_b = ensayo.marcas()
         ensayo.restaurar(a_, b_, seg_b)
+        ensayo.comprobar_rpo(a_)
         if a.diaria:
             ensayo.diaria()
     except Fallo as e:

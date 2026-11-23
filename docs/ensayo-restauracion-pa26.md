@@ -2,41 +2,63 @@
 
 | Dato | Valor |
 |---|---|
-| Fecha | 23-11-2026, 04:10 a 04:27 UTC |
+| Fecha | 23-11-2026: corrida 5 (la que vale) de 05:31 a 05:38 UTC; corridas 1 a 4 de 04:10 a 04:27 UTC |
 | Staging | `c7c200a` (imagen `ghcr.io/githolan/cem-backend:c7c200a…`), base en `0128`, contrato `0.93.0` |
 | Producción | `1535bd7`, no se tocó |
 | Script | [`backend/pruebas/ensayo_restauracion_staging.py`](../backend/pruebas/ensayo_restauracion_staging.py) |
-| Pruebas del script | [`backend/tests/test_ensayo_restauracion.py`](../backend/tests/test_ensayo_restauracion.py) (14 de 14) |
+| Pruebas del script | [`backend/tests/test_ensayo_restauracion.py`](../backend/tests/test_ensayo_restauracion.py) (20 de 20; 8 controles por mutación, ninguno sobrevivió) |
 | Umbrales | RNF06: RPO de 15 minutos y RTO de 4 horas (documento 13, §17 y §20; H2c §6) |
 | Antecedente | 27-10-2026, base `0038`: 26 s, cadena de 1518 eventos (`doc/deploys/2026-10-27-4994f7c.md` del repositorio CEM) |
 
 ## Resultado
 
-**PA26 pasó sobre el esquema actual.** Corrida 4, consorcio del ensayo `523fe585-f95b-4111-bd53-cdd37b905a3e`.
+**PA26 pasó sobre el esquema actual.** Corrida 5, consorcio del ensayo `daf4df7a-a457-48d2-9809-7fd1d82a12ef`, con el script corregido por los dos hallazgos de Codex en #287 (sección siguiente). **Las cifras de la corrida 4 (RPO de 142 s, 55,6 s) quedan reemplazadas por estas:** aquel RPO contaba el primer parcial subido después de A sin probar que lo tuviera.
 
 | Control | Resultado | Control de la medición |
 |---|---|---|
-| Marca A | Decisión `01a206a4-5982-7d0f-8cf5-e264859c59a3`, confirmada a las 04:22:43.857 UTC, segmento `…038` | — |
-| RPO observado | El WAL de A llegó al bucket (`wal-parcial/000000010000000000000038-20261123T042502Z.partial.gz.age`) **142 s** después de confirmada, contra 15 min | En las corridas 1, 3 y 4: 257 s, 45 s y 142 s. Las tres por debajo de 5 min + 1 vuelta, el intervalo de los parciales |
-| Marca B | Decisión `01a206a6-91fb-753a-9f70-fc85174f90cd` a las 04:25:09.367; `pg_switch_wal()` y `wal/000000010000000000000038.gz.age` subido | — |
-| Momento objetivo | 04:23:56.612 UTC (punto medio entre A confirmada y B empezada) | — |
-| Copia base | `base/20261117T053929Z` (verificada), WAL `…02E` a `…038`: 11 segmentos, 46,0 MB cifrados | — |
-| Restauración | `postgres:18-alpine` sin red, datos en tmpfs. **55,6 s** desde el inicio de la descarga hasta la base promovida, contra un RTO de 4 h | El registro dice `recovery stopping before commit of transaction 53513, time 2026-11-23 04:25:00.57527+00` y `selected new timeline ID` |
+| Marca A | Decisión `01a206e3-9a81-76e8-95ea-2e09fe9455d8`, confirmada a las 05:31:49.346 UTC; posición `0/3960D020` (`pg_current_wal_flush_lsn()` apenas confirmada), segmento `…039` | — |
+| Receptor con A | `flush_lsn` del slot `cem_copia_continua` = `0/3960D020` ≥ A a las 05:31:52.543 (3,2 s después de A) | `pg_receivewal --synchronous`: `flush_lsn` es lo escrito y sincronizado en el `.partial` |
+| RPO observado | `wal-parcial/000000010000000000000039-20261123T053527Z.partial.gz.age`, el primer parcial sellado después de que el receptor tenía A: subido (`LastModified`) **219 s** después de A y visto a los **223 s**, contra 15 min | Comprobado por restauración (fila «Restauración con lo de ese momento») |
+| Marca B | Decisión `01a206e7-1024-790c-9c1d-703d3f1755c9` a las 05:35:35.967; `pg_switch_wal()` y `wal/000000010000000000000039.gz.age` subido | — |
+| Momento objetivo | 05:33:42.656 UTC (punto medio entre A confirmada y B empezada) | — |
+| Copia base | `base/20261117T053929Z` (verificada), WAL `…02E` a `…039`: 12 segmentos, 47,8 MB cifrados | — |
+| Restauración (RTO) | `postgres:18-alpine` sin red, datos en tmpfs. **54,6 s** desde el inicio de la descarga hasta la base promovida; la espera de la promoción recibió lo que quedaba del plazo y el total se comparó con el RTO de 14400 s | El registro dice `recovery stopping before commit of transaction 54207, time 2026-11-23 05:35:04.777399+00` y `selected new timeline ID` |
 | A sí, B no | Restaurada: A = 1, B = 0 | Base real: A = 1, B = 1 |
-| Cadena de auditoría | Restaurada: 6365 eventos, 0 enlaces rotos, 0 hashes distintos | La misma fórmula con la acción alterada da 6365 distintos (detecta una alteración). Real: 6365 eventos, 0 rotos |
-| Estado anterior a B | Restaurada: 286 decisiones, 95 consorcios | Real: 287 decisiones (B), 95 consorcios. Las decisiones de soporte no escriben eventos desde `0032`: por eso el control es la decisión y no el evento |
-| Tablas de `0119` a `0128` | Las 17 tablas están en la restaurada, con RLS, RLS forzada y cantidad de políticas iguales a las de la real | 15 con RLS forzada y 1 política. `nucleo.perfil_normativo` y `nucleo.perfil_normativo_requisito` sin RLS en las dos bases: catálogo por jurisdicción, sin `consorcio_id` (`0125`) |
-| Copia diaria de hoy | `diarias/2026-11-23/cem-20261123T033000Z.dump.age`: SHA-256 `412210c1…a95` igual al del trabajo, descifrada y restaurada con `pg_restore --no-owner --no-acl` en **29,3 s** | 120 tablas y 59623 filas, las que registró el trabajo `plataforma.copia_diaria` de las 03:30:05 UTC |
+| Cadena de auditoría | Restaurada: 6608 eventos, 0 enlaces rotos, 0 hashes distintos | La misma fórmula con la acción alterada da 6608 distintos. Real: 6608 eventos, 0 rotos |
+| Estado anterior a B | Restaurada: 290 decisiones, 98 consorcios | Real: 291 decisiones (B), 98 consorcios. Las decisiones de soporte no escriben eventos desde `0032`: por eso el control es la decisión |
+| Tablas de `0119` a `0128` | Las 17 tablas están en la restaurada, con RLS, RLS forzada y cantidad de políticas iguales a las de la real | `nucleo.perfil_normativo` y `nucleo.perfil_normativo_requisito` sin RLS en las dos bases: catálogo por jurisdicción, sin `consorcio_id` (`0125`) |
+| Restauración con lo de ese momento (RPO) | Otra restauración, sin objetivo, con la copia base, los 11 segmentos completos (`…02E` a `…038`) que había al RPO y el parcial contado como `…039`: **A = 1**, B = 0; 30,3 s | A está en el segmento `…039` (posición `0/3960D020`) y los completos llegan hasta `…038`: A solo puede venir del parcial. B = 0 porque se escribió después |
+| Copia diaria de hoy | `diarias/2026-11-23/cem-20261123T033000Z.dump.age`: SHA-256 `412210c1…a95` igual al del trabajo, descifrada y restaurada con `pg_restore --no-owner --no-acl` en **28,5 s** | 120 tablas y 59623 filas, las que registró el trabajo `plataforma.copia_diaria` de las 03:30:05 UTC |
 | Limpieza | 0 contenedores, 0 volúmenes y sin carpeta del ensayo en la VM | La misma cuenta encuentra `cem-postgres-staging` (1). Comprobado aparte por `ssh`: `docker ps -a` 0, `docker volume ls` 0, `/tmp/cem-pa26-*` no existe |
 
-**Comparado con el 27-10:** 55,6 s contra 26 s. El script cuenta también los viajes por `ssh` de cada paso (listar, leer la marca, bajar, descifrar, arrancar) y la base es más grande (6365 eventos contra 1518; 46 MB cifrados contra ~10 MB). Sigue a cuatro órdenes de magnitud del RTO.
+**Comparado con el 27-10:** 54,6 s contra 26 s. El script cuenta también los viajes por `ssh` de cada paso y la base es más grande (6608 eventos contra 1518; 47,8 MB cifrados contra ~10 MB). Sigue a cuatro órdenes de magnitud del RTO.
+
+## Hallazgos de Codex en #287 (P2, los dos reales y corregidos)
+
+1. **RPO sin prueba de contenido.** El script aceptaba el primer parcial con sello posterior a la confirmación de A. `copia_continua.subir_parcial()` sella con la hora de la vuelta una copia del archivo del receptor: si el receptor está atrasado, ese parcial puede tener solo lo anterior a A, y el RPO informado quedaba corto. La restauración posterior usaba el WAL completo subido después de B, así que encontrar A ahí no validaba el parcial.
+   - **Arreglo (el método más fuerte de los dos posibles):** se toma la posición de A; el parcial cuenta solo si su sello es posterior al momento en que `flush_lsn` del receptor llegó a esa posición (condición de elección); y **se prueba restaurando con exactamente los artefactos que había en el almacén en ese momento** (la copia base, los segmentos completos de entonces y ese parcial), sin objetivo, exigiendo A. Si A no está, el ensayo falla y no informa RPO.
+   - En esta corrida el receptor estaba al día (3,2 s): el parcial elegido sale igual que antes por el intervalo de 5 min, pero ahora está probado.
+2. **RTO con plazo nuevo.** El reloj empezaba antes de listar y bajar, pero la espera de la promoción recibía 4 horas nuevas después de bajar, descifrar y arrancar, y el total no se comparaba con el RTO.
+   - **Arreglo:** la espera recibe lo que queda del plazo total (`restante`), falla si ya no queda nada, y el total se compara con el RTO (`exigir_rto`).
+3. **Controles por mutación** (mutado, la prueba esperada falla en la aserción esperada, restaurado e idéntico con `cmp`; ninguno sobrevivió):
+
+| # | Mutación | Prueba que la detecta |
+|---|---|---|
+| M1 | Las marcas cuentan desde la confirmación de A en vez de desde la sincronización del receptor | `test_las_marcas_cuentan_el_parcial_tomado_con_a_sincronizada` |
+| M2 | Sello del parcial `>=` en vez de `>` | `test_el_parcial_tiene_que_ser_posterior_al_segundo_de_la_marca` |
+| M3 | Los artefactos al RPO toman los completos hasta `S` en vez de `S − 1` | `test_los_artefactos_al_rpo_son_los_de_ese_momento` |
+| M4 | Los artefactos al RPO sin el parcial | `test_los_artefactos_al_rpo_son_los_de_ese_momento` |
+| M5 | `restante` devuelve el RTO entero | `test_la_promocion_espera_lo_que_queda_del_rto_y_no_un_plazo_nuevo` |
+| M6 | `exigir_rto` con `>=` | ídem |
+| M7 | `restaurar` sin `exigir_rto` | `test_la_restauracion_falla_si_el_total_pasa_el_rto` |
+| M8 | `restaurar` pasa un inicio nuevo a la espera | ídem (falla en la aserción del inicio recibido) |
 
 ## Cómo se hizo
 
-- **La identidad privada** (`cem-clave-copias-age`, bóveda `cem-claves` de OCI) la lee el script con el SDK de OCI y el perfil `DEFAULT` de la PC, la tiene solo en memoria y la escribe en la entrada estándar del `ssh` del contenedor que descifra. Ese contenedor no tiene red, la guarda en su tmpfs y la borra al terminar; el script comprueba que `/run/clave` quedó vacío. Es la misma vía del 27-10 («la identidad de la bóveda solo en su tmpfs»).
-- **Nada en claro tocó el disco:** el texto cifrado baja a `/tmp/cem-pa26-<corrida>` de la VM; lo descifrado va a un volumen tmpfs. El WAL queda descifrado pero comprimido y lo descomprime `restore_command`, de a un segmento.
+- **La identidad privada** (`cem-clave-copias-age`, bóveda `cem-claves` de OCI) la lee el script con el SDK de OCI y el perfil `DEFAULT` de la PC, la tiene solo en memoria y la escribe en la entrada estándar del `ssh` del contenedor que descifra. Ese contenedor no tiene red, la guarda en su tmpfs y la borra al terminar; el script comprueba que `/run/clave` quedó vacío. Es la misma vía del 27-10 («la identidad de la bóveda solo en su tmpfs»). En la corrida 5 se descifró dos veces (la restauración a un momento y la del RPO), por la misma vía.
+- **Nada en claro tocó el disco:** el texto cifrado baja a `/tmp/cem-pa26-<corrida>` de la VM; lo descifrado va a un volumen tmpfs. El WAL queda descifrado pero comprimido y lo descomprime `restore_command`, de a un segmento; un parcial va como su segmento.
 - **La base de staging no se tocó** más que por las dos marcas (decisiones de soporte en un consorcio LAB nuevo) y `pg_switch_wal()`. La restauración va a un PostgreSQL efímero y separado.
-- **Lo que queda en staging:** los consorcios `CEM LAB — Ensayo PA26 <corrida> (SINTETICO, PRUEBA, NO REAL)` de las corridas 1, 3 y 4 (`1e48b3b3-0afd-4674-9ddc-02f977044067`, `35a17ef1-725b-4f85-acad-5f8e41635431`, `523fe585-f95b-4111-bd53-cdd37b905a3e`), una unidad y dos decisiones cada uno. Ninguna persona, sesión ni correo.
+- **Lo que queda en staging:** los consorcios `CEM LAB — Ensayo PA26 <corrida> (SINTETICO, PRUEBA, NO REAL)` de las corridas 1, 3, 4 y 5 (`1e48b3b3-0afd-4674-9ddc-02f977044067`, `35a17ef1-725b-4f85-acad-5f8e41635431`, `523fe585-f95b-4111-bd53-cdd37b905a3e`, `daf4df7a-a457-48d2-9809-7fd1d82a12ef`), una unidad y dos decisiones cada uno. Ninguna persona, sesión ni correo.
 
 ### Corridas que no cuentan
 
@@ -45,6 +67,7 @@
 | 1 | Marcas y RPO bien (257 s). El PostgreSQL efímero no encontró `/restaurar/datos`: un volumen tmpfs se vacía cuando ningún contenedor lo monta, y el contenedor que descifró era `--rm` | El que descifra queda vivo, durmiendo, hasta la limpieza. Limpieza: 0 restos |
 | 2 | Error de sintaxis del script; no escribió nada | Corregido |
 | 3 | Restaurada en 60,1 s, A sí y B no, cadena íntegra y tablas bien. Falló un control mal planteado: esperaba un evento más en la real por B, y las decisiones de soporte no escriben eventos desde `0032` | El control pasa a ser la cantidad de decisiones. La copia diaria no llegó a correr. Limpieza: 0 restos |
+| 4 | Todo verde (RPO 142 s, 55,6 s, cadena de 6365 eventos, copia diaria en 29,3 s), pero con el RPO sin prueba de contenido y el RTO sin plazo único (hallazgos de Codex) | Reemplazada por la corrida 5 |
 
 ## Procedimiento (tarjeta de tarea)
 
@@ -88,7 +111,7 @@
    - Si no: anotar el `NEGADO:` completo y detenerse.
 3. Correr el ensayo con la copia diaria:
    `$env:PYTHONIOENCODING = "utf-8"; & "C:\tmp\cemoci\v\Scripts\python.exe" "C:\tmp\app-h6b\backend\pruebas\ensayo_restauracion_staging.py" --version-esperada 0128 --identidad-boveda --diaria --ejecutar`
-   - Resultado esperado, en orden: `ok  marca A`, `ok  el WAL de A está en el bucket … contra un RPO de 15 min`, `ok  marca B`, `ok  wal/… subido`, `identidad borrada del tmpfs`, `ok  restaurada y promovida en N s contra un RTO de 4 h`, `ok  la restaurada tiene la marca A y no la B`, `ok  cadena íntegra`, `ok  las 17 tablas de 0119 a 0128`, `ok  copia diaria`, `ok  limpieza`. Código de salida 0.
+   - Resultado esperado, en orden: `ok  marca A`, `ok  el receptor sincronizó … ≥ …`, `ok  el WAL de A está en el bucket … contra un RPO de 15 min`, `ok  marca B`, `ok  wal/… subido`, `identidad borrada del tmpfs`, `ok  restaurada y promovida en N s, dentro del RTO de 14400 s`, `ok  la restaurada tiene la marca A y no la B`, `ok  cadena íntegra`, `ok  las 17 tablas de 0119 a 0128`, `ok  con lo que había en el almacén al RPO … la restaurada tiene A (1)`, `ok  copia diaria`, `ok  limpieza`. Código de salida 0.
    - Si no: anotar la línea `FALLÓ:` y el JSON final; detenerse. No repetir sin entender la falla.
 4. Comprobar la limpieza aparte:
    `ssh -o BatchMode=yes oci "docker ps -a --format '{{.Names}}' | grep -c pa26; docker volume ls --format '{{.Name}}' | grep -c pa26; ls -d /tmp/cem-pa26-*"`
@@ -99,7 +122,7 @@
 
 1. `NEGADO: recursos con más de un contenedor`.
    - Resultado esperado: hay un despliegue en curso. Esperar a que termine y volver al paso 2.
-2. `FALLÓ: el WAL de A en el bucket: no llegó en 900 s`.
+2. `FALLÓ: el receptor con A sincronizada: no llegó en 900 s`, `FALLÓ: el WAL de A en el bucket: no llegó en 900 s` o `FALLÓ: con lo que había al RPO … la restaurada no tiene A`.
    - Resultado esperado: RNF06 no se cumple. Anotar el estado del monitor de Kuma de la copia continua y detenerse.
 3. `FALLÓ: la base restaurada se detuvo`.
    - Resultado esperado: el final del registro de PostgreSQL va en el mensaje. Anotarlo y detenerse.
