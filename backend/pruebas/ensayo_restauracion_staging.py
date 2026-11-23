@@ -671,6 +671,10 @@ class Ensayo:
     def marcas(self) -> tuple[dict, dict, str]:
         consorcio = uuid.uuid4()
         self.resumen["consorcio"] = str(consorcio)
+        # Un solo reloj para el RPO (Codex P2 en #287): el monotónico de esta PC, tomado ANTES de
+        # pedir A. La confirmación de A ocurre después, así que el tiempo medido es una cota
+        # superior del real: nunca se acepta un RPO más alto que el umbral por relojes distintos.
+        inicio_rpo = time.monotonic()
         a = self.marca(consorcio, "A")
         # Cota de A: la posición sincronizada cuando A ya volvió confirmada (synchronous_commit por
         # defecto): el registro de la confirmación de A termina en ella o antes.
@@ -678,9 +682,6 @@ class Ensayo:
             "select l, pg_walfile_name(l) from (select pg_current_wal_flush_lsn() as l) x"
         )
         a["lsn"] = lsn_a
-        # Un solo plazo para todo el camino del RPO, desde que A volvió confirmada (un instante
-        # después de la confirmación real: el control final usa la hora exacta de A).
-        inicio_rpo = time.monotonic() - (datetime.now(UTC) - a["despues"]).total_seconds()
         self.ok(f"marca A {a['decision']} confirmada a las {a['despues'].isoformat()}"
                 f" (posición {lsn_a}, segmento {seg_a})")  # fmt: skip
 
@@ -710,7 +711,7 @@ class Ensayo:
         (encontrado, objeto, objetos), _ = self.esperar(
             "el WAL de A en el bucket",
             restante(inicio_rpo, time.monotonic(), ESPERA_RPO_S), subido)  # fmt: skip
-        rpo = (datetime.now(UTC) - a["despues"]).total_seconds()
+        rpo = time.monotonic() - inicio_rpo
         subido_en = datetime.fromisoformat(objeto["modificado"])
         self.rpo = {
             "clave": encontrado,
@@ -719,6 +720,8 @@ class Ensayo:
             "claves_wal": [o["clave"] for o in objetos if o["clave"].startswith("wal/")],
         }
         self.resumen["rpo_observado_s"] = round(rpo, 1)
+        # Informativo, no se compara con el umbral: `LastModified` es el reloj del bucket y A el de
+        # la base (dos relojes). El umbral lo decide `rpo`, medido con un solo reloj.
         self.resumen["rpo_subido_s"] = round((subido_en - a["despues"]).total_seconds(), 1)
         self.resumen["rpo_artefacto"] = encontrado
         exigir_rpo(rpo, ESPERA_RPO_S)

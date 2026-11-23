@@ -33,7 +33,7 @@
 
 **Comparado con el 27-10:** 54,6 s contra 26 s. El script cuenta también los viajes por `ssh` de cada paso y la base es más grande (6608 eventos contra 1518; 47,8 MB cifrados contra ~10 MB). Sigue a cuatro órdenes de magnitud del RTO.
 
-## Hallazgos de Codex en #287 (P2, los cuatro reales y corregidos)
+## Hallazgos de Codex en #287 (P2, los cinco reales y corregidos)
 
 1. **RPO sin prueba de contenido.** El script aceptaba el primer parcial con sello posterior a la confirmación de A. `copia_continua.subir_parcial()` sella con la hora de la vuelta una copia del archivo del receptor: si el receptor está atrasado, ese parcial puede tener solo lo anterior a A, y el RPO informado quedaba corto. La restauración posterior usaba el WAL completo subido después de B, así que encontrar A ahí no validaba el parcial.
    - **Arreglo (el método más fuerte de los dos posibles):** se toma la posición de A; el parcial cuenta solo si su sello es posterior al momento en que `flush_lsn` del receptor llegó a esa posición (condición de elección); y **se prueba restaurando con exactamente los artefactos que había en el almacén en ese momento** (la copia base, los segmentos completos de entonces y ese parcial), sin objetivo, exigiendo A. Si A no está, el ensayo falla y no informa RPO.
@@ -88,6 +88,13 @@
 - Arreglo: `postgres_inicializado(registro)` exige la marca de fin de inicialización y, después de ella, la de listo.
 - Prueba: `test_postgres_inicializado_exige_el_fin_de_la_inicializacion`. Control por mutación: con el predicado viejo, la prueba falla; restaurado, `cmp` idéntico. 35 de 35 en el compose `cem-h6b`; ruff limpio.
 - Staging no se repitió: la corrida 5 restauró la diaria bien (28,5 s) y el cambio solo endurece la espera. **SIN VERIFICAR** por ejecución en staging.
+
+### Quinto hallazgo P2 de Codex en #287 (en `0b9e82c`, real y corregido)
+
+- El RPO restaba la hora de la base (`clock_timestamp()` en la VM) de la hora de la PC (`datetime.now`). Con la PC atrasada, un RPO alto podía pasar: 10 min de atraso daban 25 min de plazo y mostraban 20 min como 10.
+- Arreglo: un solo reloj, el monotónico de la PC, tomado **antes** de pedir A. La confirmación de A ocurre después, así que lo medido es una cota superior del real. El plazo compartido y `rpo_observado_s` salen de ese reloj. `rpo_subido_s` (`LastModified` del bucket menos la hora de A en la base) queda como dato informativo, sin umbral.
+- Pruebas: las de las marcas pasan al reloj monotónico, y una nueva, `test_el_rpo_no_depende_de_la_hora_de_la_pc`, falla si vuelve la resta entre relojes. Control por mutación: con la resta vieja en `rpo` o en el inicio del plazo, fallan 3 pruebas cada vez (por la aserción, no por un import); restaurado, `cmp` idéntico. 36 de 36; ruff limpio.
+- **Las cifras de la corrida 5 cruzan relojes** (219 s: bucket contra base; 223 s: PC contra base). Los tres relojes se sincronizan por NTP y el margen es amplio (219 s contra 900 s), pero la medición con un solo reloj **no corrió en staging: SIN VERIFICAR**. La prueba de contenido (restaurar solo con lo que había en el momento del RPO: A presente, B ausente) no depende de relojes y sigue valiendo.
 
 ## Cómo se hizo
 

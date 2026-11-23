@@ -283,35 +283,60 @@ def test_el_rpo_y_el_tope_de_cada_paso_no_pasan_su_limite():
         ensayo.tope_paso(0.0, 14400.0, 14400)
 
 
-def test_las_esperas_del_rpo_comparten_un_plazo_desde_a(monkeypatch):
-    e = ensayo_falso(monkeypatch)
-    # A volvió 147 s antes del monotónico 1000; la segunda espera empieza a los 1600.
-    reloj = itertools.chain([1000.0, 1000.0, 1600.0], itertools.repeat(1600.0))
-    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
-    topes = []
+def reloj_monotonico(monkeypatch, *lecturas: float) -> None:
+    """`time.monotonic` del ensayo devuelve `lecturas` en orden (y la última de ahí en adelante)."""
+    sucesivas = itertools.chain(lecturas, itertools.repeat(lecturas[-1]))
+    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(sucesivas))
+
+
+def esperas_directas(monkeypatch, e) -> list[float]:
+    topes: list[float] = []
 
     def esperar(que, tope, condicion):
         topes.append(tope)
         return condicion(), 0.0
 
     monkeypatch.setattr(e, "esperar", esperar)
+    return topes
+
+
+def test_las_esperas_del_rpo_comparten_un_plazo_desde_a(monkeypatch):
+    e = ensayo_falso(monkeypatch)
+    # Antes de pedir A: 1000. La primera espera empieza a los 1147 y la segunda a los 1747.
+    reloj_monotonico(monkeypatch, 1000.0, 1147.0, 1747.0, 1747.0)
+    topes = esperas_directas(monkeypatch, e)
     e.marcas()
-    # 900 − 147 para la primera; para la segunda, lo que queda: 900 − (1600 − 853).
+    # 900 − 147 para la primera; para la segunda, lo que queda: 900 − 747.
     assert topes == [753.0, 153.0, ensayo.ESPERA_SEGMENTO_S]
+    assert e.resumen["rpo_observado_s"] == 747.0
 
 
 def test_las_marcas_fallan_si_el_rpo_pasa_los_15_minutos(monkeypatch):
     e = ensayo_falso(monkeypatch)
     # El receptor y el parcial llegan a tiempo para las esperas, pero A se ve recién a los 1200 s.
-    fijar_ahora(monkeypatch, A_CONFIRMADA + timedelta(seconds=10),
-                A_CONFIRMADA + timedelta(seconds=1200))  # fmt: skip
+    reloj_monotonico(monkeypatch, 1000.0, 1010.0, 1010.0, 2200.0)
+    esperas_directas(monkeypatch, e)
     with pytest.raises(ensayo.Fallo, match="más que el RPO de 900 s"):
         e.marcas()
     assert e.resumen["rpo_observado_s"] == 1200.0
     # Control: con A vista a los 147 s, las mismas lecturas pasan.
     otro = ensayo_falso(monkeypatch)
+    reloj_monotonico(monkeypatch, 1000.0, 1010.0, 1010.0, 1147.0)
+    esperas_directas(monkeypatch, otro)
     otro.marcas()
     assert otro.resumen["rpo_observado_s"] == 147.0
+
+
+def test_el_rpo_no_depende_de_la_hora_de_la_pc(monkeypatch):
+    """Codex P2 en #287: con la hora de la PC 10 min atrasada respecto de la base, un RPO de 20 min
+    se veía como 10 y pasaba. Medido con un solo reloj (el monotónico), falla."""
+    e = ensayo_falso(monkeypatch)
+    fijar_ahora(monkeypatch, A_CONFIRMADA - timedelta(minutes=10) + timedelta(minutes=20))
+    reloj_monotonico(monkeypatch, 1000.0, 1010.0, 1010.0, 2200.0)
+    esperas_directas(monkeypatch, e)
+    with pytest.raises(ensayo.Fallo, match="más que el RPO de 900 s"):
+        e.marcas()
+    assert e.resumen["rpo_observado_s"] == 1200.0
 
 
 class VmFalsa:
