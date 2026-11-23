@@ -169,7 +169,7 @@ def test_los_artefactos_al_rpo_son_los_de_ese_momento():
 
 def test_la_promocion_espera_lo_que_queda_del_rto_y_no_un_plazo_nuevo():
     assert ensayo.restante(100.0, 160.0, 14400) == 14340.0
-    with pytest.raises(ensayo.Fallo, match="pasó el RTO"):
+    with pytest.raises(ensayo.Fallo, match="pasó el plazo total"):
         ensayo.restante(100.0, 100.0 + 14400, 14400)
     ensayo.exigir_rto(14400.0, 14400)
     with pytest.raises(ensayo.Fallo, match="más que el RTO"):
@@ -188,6 +188,21 @@ A_CONFIRMADA = datetime(2026, 11, 23, 4, 22, 43, tzinfo=UTC)
 SINCRONIZO = datetime(2026, 11, 23, 4, 24, 10, 300000, tzinfo=UTC)
 PARCIAL_SIN_A = f"wal-parcial/{SEG}-20261123T042302Z.partial.gz.age"
 PARCIAL_CON_A = f"wal-parcial/{SEG}-20261123T042502Z.partial.gz.age"
+
+
+VISTO_A_LOS = timedelta(seconds=147)  # el parcial con A, visto a las 04:25:10
+
+
+def fijar_ahora(monkeypatch, *horas: datetime) -> None:
+    """`datetime.now` del ensayo devuelve `horas` en orden (y la última de ahí en adelante)."""
+    sucesivas = itertools.chain(horas, itertools.repeat(horas[-1]))
+
+    class Reloj(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return next(sucesivas)
+
+    monkeypatch.setattr(ensayo, "datetime", Reloj)
 
 
 def ensayo_falso(monkeypatch) -> ensayo.Ensayo:
@@ -217,6 +232,7 @@ def ensayo_falso(monkeypatch) -> ensayo.Ensayo:
     monkeypatch.setattr(e, "marca", marca)
     monkeypatch.setattr(e, "real", real)
     monkeypatch.setattr(e, "listar", listar)
+    fijar_ahora(monkeypatch, A_CONFIRMADA + VISTO_A_LOS)
     return e
 
 
@@ -251,3 +267,120 @@ def test_la_restauracion_falla_si_el_total_pasa_el_rto(monkeypatch):
         e.restaurar(a, b, SEG)
     # La espera recibió el inicio de todo el ensayo y el RTO entero como plazo total.
     assert vistos == {"inicio": 0.0, "limite": ensayo.ESPERA_PROMOCION_S}
+
+
+# Tercera vuelta de Codex en #287: un solo plazo por camino y cada cifra medida contra su umbral.
+
+
+def test_el_rpo_y_el_tope_de_cada_paso_no_pasan_su_limite():
+    ensayo.exigir_rpo(900.0, 900)
+    with pytest.raises(ensayo.Fallo, match="más que el RPO"):
+        ensayo.exigir_rpo(900.1, 900)
+    assert ensayo.tope_paso(0.0, 100.0, 14400) == ensayo.TOPE_PASO_S
+    assert ensayo.tope_paso(0.0, 14000.0, 14400) == 400.0
+    assert ensayo.tope_paso(0.0, 14000.0, 14400, 300) == 300
+    with pytest.raises(ensayo.Fallo, match="pasó el plazo total"):
+        ensayo.tope_paso(0.0, 14400.0, 14400)
+
+
+def test_las_esperas_del_rpo_comparten_un_plazo_desde_a(monkeypatch):
+    e = ensayo_falso(monkeypatch)
+    # A volvió 147 s antes del monotónico 1000; la segunda espera empieza a los 1600.
+    reloj = itertools.chain([1000.0, 1000.0, 1600.0], itertools.repeat(1600.0))
+    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
+    topes = []
+
+    def esperar(que, tope, condicion):
+        topes.append(tope)
+        return condicion(), 0.0
+
+    monkeypatch.setattr(e, "esperar", esperar)
+    e.marcas()
+    # 900 − 147 para la primera; para la segunda, lo que queda: 900 − (1600 − 853).
+    assert topes == [753.0, 153.0, ensayo.ESPERA_SEGMENTO_S]
+
+
+def test_las_marcas_fallan_si_el_rpo_pasa_los_15_minutos(monkeypatch):
+    e = ensayo_falso(monkeypatch)
+    # El receptor y el parcial llegan a tiempo para las esperas, pero A se ve recién a los 1200 s.
+    fijar_ahora(monkeypatch, A_CONFIRMADA + timedelta(seconds=10),
+                A_CONFIRMADA + timedelta(seconds=1200))  # fmt: skip
+    with pytest.raises(ensayo.Fallo, match="más que el RPO de 900 s"):
+        e.marcas()
+    assert e.resumen["rpo_observado_s"] == 1200.0
+    # Control: con A vista a los 147 s, las mismas lecturas pasan.
+    otro = ensayo_falso(monkeypatch)
+    otro.marcas()
+    assert otro.resumen["rpo_observado_s"] == 147.0
+
+
+class VmFalsa:
+    def __init__(self, respuestas: dict[str, str]):
+        self.respuestas, self.topes = respuestas, {}
+
+    def correr(self, comando, entrada=None, *, tope=600):
+        for clave, respuesta in self.respuestas.items():
+            if clave in comando:
+                self.topes[clave] = tope
+                return respuesta
+        return ""
+
+    def psql(self, contenedor, sql, base="cem"):
+        return [["1", "0"]]
+
+
+def pasos_con_tope(monkeypatch, e: ensayo.Ensayo) -> dict:
+    topes = {}
+
+    def bajar(claves, destino, tope=ensayo.TOPE_PASO_S):
+        topes["bajar"] = tope
+
+    monkeypatch.setattr(e, "bajar", bajar)
+
+    def descifrar(guion, volumen, cifrado, que, tope=ensayo.TOPE_PASO_S):
+        topes["descifrar"] = tope
+        return ""
+
+    def esperar(que, tope, condicion):
+        topes["esperar"] = tope
+        return "", 0.0
+
+    monkeypatch.setattr(e, "descifrar", descifrar)
+    monkeypatch.setattr(e, "esperar", esperar)
+    return topes
+
+
+def test_bajar_y_descifrar_de_la_restauracion_usan_lo_que_queda_del_rto(monkeypatch):
+    e = ensayo.Ensayo(VmFalsa({"du -sb": "123"}), None, None)
+    topes = pasos_con_tope(monkeypatch, e)
+    reloj = iter([14000.0, 14100.0, 14200.0])
+    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
+    e.restaurar_con("pitr", "20261117T053929Z", [f"wal/{SEG}.gz.age"], None, 0.0, 14400)
+    assert topes == {"bajar": 400.0, "descifrar": 300.0, "esperar": 200.0}
+
+
+def test_la_diaria_comparte_un_plazo_y_falla_si_pasa_el_rto(monkeypatch):
+    clave = "diaria/20261123T030000Z.dump.age"
+    vm = VmFalsa({"sha256sum": "abc", "pg_restore": "", "psql -U postgres": "CONTEO 3 10"})
+    e = ensayo.Ensayo(vm, None, None)
+    monkeypatch.setattr(e, "real", lambda sql: [[clave, "abc", "3", "10", "2026-11-23"]])
+    topes = pasos_con_tope(monkeypatch, e)
+    reloj = iter([0.0, 14000.0, 14100.0, 14150.0, 14200.0, 14500.0])
+    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
+    with pytest.raises(ensayo.Fallo, match="tardó 14500.0 s, más que el RTO"):
+        e.diaria()
+    assert topes == {"bajar": 400.0, "descifrar": 300.0, "esperar": 250.0}
+    assert vm.topes["pg_restore"] == 200.0
+
+
+def test_la_comprobacion_del_rpo_falla_si_pasa_el_rto(monkeypatch):
+    e = ensayo.Ensayo(VmFalsa({}), None, None)
+    e.resumen["consorcio"] = "c"
+    e.rpo = {"claves_wal": [f"wal/{SEG}.gz.age"], "clave": f"wal/{SEG}.gz.age"}
+    monkeypatch.setattr(e, "base_anterior", lambda antes: ("20261117T053929Z", SEG))
+    monkeypatch.setattr(e, "restaurar_con", lambda *a: ("c", "", 10))
+    reloj = iter([0.0, 14400.1])
+    monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
+    with pytest.raises(ensayo.Fallo, match="más que el RTO"):
+        e.comprobar_rpo({"antes": A_CONFIRMADA})
+    assert e.resumen["rpo_comprobado"]["segundos"] == 14400.1

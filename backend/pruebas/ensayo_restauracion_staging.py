@@ -113,6 +113,11 @@ TMPFS_MAXIMO = "2g"
 ESPERA_RPO_S = 15 * 60
 """Lo más que se espera al WAL de A: el RPO de RNF06."""
 ESPERA_SEGMENTO_S = 10 * 60
+"""Espera de preparación (el segmento de B en el bucket): no mide ningún umbral de RNF06."""
+TOPE_PASO_S = 3600
+"""Tope de un paso por `ssh` (bajar, descifrar, `pg_restore`), acotado además por lo que quede
+del plazo total del camino al que pertenece (`tope_paso`)."""
+ESPERA_ARRANQUE_DIARIA_S = 300
 ESPERA_PROMOCION_S = 4 * 3600
 """El RTO de RNF06: pasado esto, el ensayo falla."""
 SONDEO_S = 5
@@ -269,13 +274,27 @@ def restante(inicio: float, ahora: float, limite: float) -> float:
     la espera de la promoción no empieza con un plazo nuevo (hallazgo P2 de Codex en #287)."""
     queda = limite - (ahora - inicio)
     if queda <= 0:
-        raise Fallo(f"pasó el RTO de {limite:.0f} s antes de esperar la promoción")
+        raise Fallo(f"pasó el plazo total de {limite:.0f} s (RTO o RPO) antes del paso siguiente")
     return queda
 
 
 def exigir_rto(segundos: float, limite: float) -> None:
     if segundos > limite:
         raise Fallo(f"la restauración tardó {segundos:.1f} s, más que el RTO de {limite:.0f} s")
+
+
+def exigir_rpo(segundos: float, limite: float) -> None:
+    """El RPO medido desde la confirmación de A no puede pasar el de RNF06 (hallazgo P2 de Codex
+    en #287, tercera vuelta: antes se registraba sin compararlo)."""
+    if segundos > limite:
+        raise Fallo(f"el WAL de A tardó {segundos:.1f} s en el almacén, más que el RPO de"
+                    f" {limite:.0f} s")  # fmt: skip
+
+
+def tope_paso(inicio: float, ahora: float, limite: float, maximo: float = TOPE_PASO_S) -> float:
+    """El tope de un paso dentro de un camino con plazo total: el menor entre `maximo` y lo que
+    queda del plazo (falla si no queda nada). Ningún paso recibe un plazo nuevo."""
+    return min(maximo, restante(inicio, ahora, limite))
 
 
 def ajustes_recuperacion(objetivo: datetime | None, wal: str) -> str:
@@ -566,14 +585,14 @@ class Ensayo:
     def listar(self, *prefijos: str) -> list[dict]:
         return json.loads(self.almacen("listar", *prefijos))
 
-    def bajar(self, claves: list[str], destino: str) -> None:
+    def bajar(self, claves: list[str], destino: str, tope: float = TOPE_PASO_S) -> None:
         """Baja las claves cifradas a `destino` en la VM, como un tar desde la copia continua."""
         lista = shlex.quote(json.dumps(claves))
         self.vm.correr(
             f"set -o pipefail; mkdir -p {shlex.quote(destino)} && docker exec -i -w /app -e"
             f" PYTHONPATH=/app {shlex.quote(self.st.copia)} python - bajar {lista}"
             f" | tar -x -C {shlex.quote(destino)} && chmod -R a+rX {shlex.quote(self.carpeta)}",
-            PROGRAMA_ALMACEN, tope=3600)  # fmt: skip
+            PROGRAMA_ALMACEN, tope=tope)  # fmt: skip
 
     def marca(self, consorcio: uuid.UUID, letra: str) -> dict:
         salida = self.vm.correr(
@@ -588,7 +607,8 @@ class Ensayo:
     def real(self, sql: str) -> list[list[str]]:
         return self.vm.psql(self.st.postgres, sql)
 
-    def descifrar(self, guion: str, volumen: str, cifrado: str, que: str) -> str:
+    def descifrar(self, guion: str, volumen: str, cifrado: str, que: str,
+                  tope: float = TOPE_PASO_S) -> str:  # fmt: skip
         """El contenedor sin red que descifra: la identidad, solo por la entrada estándar, a su
         tmpfs, y se borra al terminar. El contenedor **queda vivo** (durmiendo) hasta la
         limpieza: un volumen tmpfs vive mientras algún contenedor lo tenga montado, y el
@@ -606,7 +626,7 @@ class Ensayo:
             f" --entrypoint sleep {shlex.quote(self.st.imagen)} infinity >/dev/null")  # fmt: skip
         try:
             salida = self.vm.correr(f"docker exec -i {contenedor} sh -c {shlex.quote(guion)}",
-                                    self.identidad, tope=3600)  # fmt: skip
+                                    self.identidad, tope=tope)  # fmt: skip
         finally:
             self.vm.correr(f"docker exec {contenedor} rm -f /run/clave/identidad")
         self.vm.correr(f"docker exec {contenedor} sh -c 'test ! -e /run/clave/identidad"
@@ -642,6 +662,9 @@ class Ensayo:
             "select l, pg_walfile_name(l) from (select pg_current_wal_flush_lsn() as l) x"
         )
         a["lsn"] = lsn_a
+        # Un solo plazo para todo el camino del RPO, desde que A volvió confirmada (un instante
+        # después de la confirmación real: el control final usa la hora exacta de A).
+        inicio_rpo = time.monotonic() - (datetime.now(UTC) - a["despues"]).total_seconds()
         self.ok(f"marca A {a['decision']} confirmada a las {a['despues'].isoformat()}"
                 f" (posición {lsn_a}, segmento {seg_a})")  # fmt: skip
 
@@ -655,8 +678,9 @@ class Ensayo:
                 return filas[0][1], datetime.fromtimestamp(float(filas[0][2]), UTC)
             return None
 
-        (flush, alcanzo), _ = self.esperar("el receptor con A sincronizada", ESPERA_RPO_S,
-                                           receptor_alcanzo)  # fmt: skip
+        (flush, alcanzo), _ = self.esperar(
+            "el receptor con A sincronizada",
+            restante(inicio_rpo, time.monotonic(), ESPERA_RPO_S), receptor_alcanzo)  # fmt: skip
         self.ok(f"el receptor sincronizó {flush} ≥ {lsn_a} a las {alcanzo.isoformat()}"
                 f" ({(alcanzo - a['despues']).total_seconds():.1f} s después de A)")  # fmt: skip
 
@@ -667,8 +691,9 @@ class Ensayo:
                 return None
             return clave, next(o for o in objetos if o["clave"] == clave), objetos
 
-        (encontrado, objeto, objetos), _ = self.esperar("el WAL de A en el bucket", ESPERA_RPO_S,
-                                                        subido)  # fmt: skip
+        (encontrado, objeto, objetos), _ = self.esperar(
+            "el WAL de A en el bucket",
+            restante(inicio_rpo, time.monotonic(), ESPERA_RPO_S), subido)  # fmt: skip
         rpo = (datetime.now(UTC) - a["despues"]).total_seconds()
         subido_en = datetime.fromisoformat(objeto["modificado"])
         self.rpo = {
@@ -680,6 +705,7 @@ class Ensayo:
         self.resumen["rpo_observado_s"] = round(rpo, 1)
         self.resumen["rpo_subido_s"] = round((subido_en - a["despues"]).total_seconds(), 1)
         self.resumen["rpo_artefacto"] = encontrado
+        exigir_rpo(rpo, ESPERA_RPO_S)
         self.ok(f"el WAL de A está en el bucket ({encontrado}, subido"
                 f" {self.resumen['rpo_subido_s']:.0f} s después de A; visto a los {rpo:.0f} s),"
                 f" contra un RPO de {ESPERA_RPO_S // 60} min; se comprueba al final restaurando"
@@ -718,7 +744,7 @@ class Ensayo:
         base = [f"base/{momento}/{n}.age" for n in ("base.tar.gz", "pg_wal.tar.gz")]
         self.limpiar.append(f"carpeta:{self.carpeta}")
         cifrado = f"{self.carpeta}/{que}"
-        self.bajar(base + wal, cifrado)
+        self.bajar(base + wal, cifrado, tope_paso(inicio, time.monotonic(), limite))
         renombrar = "".join(
             f" && mv {cifrado}/{c} {cifrado}/wal/{c.split('/', 1)[1][:24]}.gz.age"
             for c in wal if c.startswith("wal-parcial/"))  # fmt: skip
@@ -728,7 +754,12 @@ class Ensayo:
                        ajustes_recuperacion(objetivo, "/restaurar/wal"))  # fmt: skip
         bajado = int(self.vm.correr(f"du -sb {cifrado} | cut -f1").strip())
         volumen = self.volumen(que)
-        print(self.descifrar(DESCIFRAR_PITR, volumen, cifrado, que).strip(), flush=True)
+        print(
+            self.descifrar(
+                DESCIFRAR_PITR, volumen, cifrado, que, tope_paso(inicio, time.monotonic(), limite)
+            ).strip(),
+            flush=True,
+        )
         contenedor = self.efimero(que)
         self.limpiar.append(f"contenedor:{contenedor}")
         self.vm.correr(
@@ -792,6 +823,7 @@ class Ensayo:
         inicio = time.monotonic()
         contenedor, _, bajado = self.restaurar_con("rpo", momento, wal, None, inicio,
                                                    ESPERA_PROMOCION_S)  # fmt: skip
+        segundos = time.monotonic() - inicio
         consorcio = self.resumen["consorcio"]
         [[con_a, con_b]] = self.vm.psql(contenedor, (
             f"select (select count(*) from nucleo.decision_formal where consorcio_id ="
@@ -800,8 +832,9 @@ class Ensayo:
             f" '{consorcio}' and descripcion = 'PA26 {self.corrida} marca B')"))  # fmt: skip
         self.resumen["rpo_comprobado"] = {"archivos_wal": len(wal), "ultimo": wal[-1],
                                           "marca_a": int(con_a), "marca_b": int(con_b),
-                                          "segundos": round(time.monotonic() - inicio, 1),
+                                          "segundos": round(segundos, 1),
                                           "bytes_cifrados_bajados": bajado}  # fmt: skip
+        exigir_rto(segundos, ESPERA_PROMOCION_S)
         if int(con_a) != 1:
             raise Fallo(f"con lo que había al RPO ({wal[-1]}) la restaurada no tiene A: el RPO"
                         " informado no vale")  # fmt: skip
@@ -894,13 +927,15 @@ class Ensayo:
         cifrado = f"{self.carpeta}/diaria"
         self.limpiar.append(f"carpeta:{self.carpeta}")
         inicio = time.monotonic()
-        self.bajar([clave], cifrado)
+        self.bajar([clave], cifrado, tope_paso(inicio, time.monotonic(), ESPERA_PROMOCION_S))
         self.vm.correr(f"mv {cifrado}/{clave} {cifrado}/diaria.dump.age")
         leida = self.vm.correr(f"sha256sum {cifrado}/diaria.dump.age | cut -d' ' -f1").strip()
         if leida != suma:
             raise Fallo(f"el SHA-256 de {clave} no es el del trabajo")
         volumen = self.volumen("diaria")
-        print(self.descifrar(DESCIFRAR_DIARIA, volumen, cifrado, "diaria").strip(), flush=True)
+        print(self.descifrar(DESCIFRAR_DIARIA, volumen, cifrado, "diaria",
+                             tope_paso(inicio, time.monotonic(), ESPERA_PROMOCION_S)).strip(),
+              flush=True)  # fmt: skip
         contenedor = self.efimero("diaria")
         self.limpiar.append(f"contenedor:{contenedor}")
         self.vm.correr(
@@ -908,15 +943,18 @@ class Ensayo:
             f" -e POSTGRES_HOST_AUTH_METHOD=trust -e PGDATA=/restaurar/datos"
             f" -v {volumen}:/restaurar {IMAGEN_POSTGRES} -c listen_addresses='' -c fsync=off"
             " >/dev/null")  # fmt: skip
-        self.esperar("el PostgreSQL de la diaria", 300, lambda: True if (
+        arranque = tope_paso(inicio, time.monotonic(), ESPERA_PROMOCION_S,
+                             ESPERA_ARRANQUE_DIARIA_S)  # fmt: skip
+        self.esperar("el PostgreSQL de la diaria", arranque, lambda: True if (
             "database system is ready to accept connections" in self.vm.correr(
                 f"docker logs {contenedor} 2>&1").split("init process complete", 1)[-1])
             else None)  # fmt: skip
         self.vm.correr(
             f"docker exec {contenedor} sh -c 'createdb -U postgres verificacion && pg_restore"
             " --exit-on-error --no-owner --no-acl -U postgres -d verificacion /restaurar/cem.dump'",
-            tope=3600)  # fmt: skip
+            tope=tope_paso(inicio, time.monotonic(), ESPERA_PROMOCION_S))  # fmt: skip
         segundos = time.monotonic() - inicio
+        exigir_rto(segundos, ESPERA_PROMOCION_S)
         salida = self.vm.correr(
             f"docker exec -i {contenedor} psql -U postgres -d verificacion -v ON_ERROR_STOP=1"
             " 2>&1", CONTAR_TABLAS)  # fmt: skip

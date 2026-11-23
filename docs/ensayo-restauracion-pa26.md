@@ -33,7 +33,7 @@
 
 **Comparado con el 27-10:** 54,6 s contra 26 s. El script cuenta también los viajes por `ssh` de cada paso y la base es más grande (6608 eventos contra 1518; 47,8 MB cifrados contra ~10 MB). Sigue a cuatro órdenes de magnitud del RTO.
 
-## Hallazgos de Codex en #287 (P2, los dos reales y corregidos)
+## Hallazgos de Codex en #287 (P2, los tres reales y corregidos)
 
 1. **RPO sin prueba de contenido.** El script aceptaba el primer parcial con sello posterior a la confirmación de A. `copia_continua.subir_parcial()` sella con la hora de la vuelta una copia del archivo del receptor: si el receptor está atrasado, ese parcial puede tener solo lo anterior a A, y el RPO informado quedaba corto. La restauración posterior usaba el WAL completo subido después de B, así que encontrar A ahí no validaba el parcial.
    - **Arreglo (el método más fuerte de los dos posibles):** se toma la posición de A; el parcial cuenta solo si su sello es posterior al momento en que `flush_lsn` del receptor llegó a esa posición (condición de elección); y **se prueba restaurando con exactamente los artefactos que había en el almacén en ese momento** (la copia base, los segmentos completos de entonces y ese parcial), sin objetivo, exigiendo A. Si A no está, el ensayo falla y no informa RPO.
@@ -52,6 +52,35 @@
 | M6 | `exigir_rto` con `>=` | ídem |
 | M7 | `restaurar` sin `exigir_rto` | `test_la_restauracion_falla_si_el_total_pasa_el_rto` |
 | M8 | `restaurar` pasa un inicio nuevo a la espera | ídem (falla en la aserción del inicio recibido) |
+
+### Tercer hallazgo P2 de Codex en #287 (en `7b375c9`, real y corregido)
+
+4. **RPO con plazos nuevos y sin comparar.** Con el receptor atrasado, la espera de la sincronización y la de la subida al almacén recibían 900 s cada una, y `rpo_observado_s` se registraba sin compararlo con el umbral: sincronizar a los 10 min y subir 10 min después se aceptaba con 1200 s.
+   - **Arreglo:** un solo plazo desde la confirmación de A para las dos esperas (`restante`) y `exigir_rpo`: falla si `rpo_observado_s` pasa 900 s.
+   - **Revisión del resto del script** (misma regla: ningún paso con un plazo nuevo dentro de un camino con límite, ninguna cifra medida sin comparar):
+     - `restaurar_con`: bajar y descifrar tenían 3600 s fijos cada uno; ahora reciben `tope_paso`, el menor entre 3600 s y lo que queda del RTO.
+     - `comprobar_rpo`: los segundos de su restauración se registraban sin comparar; ahora pasan por `exigir_rto`.
+     - `diaria`: bajar, descifrar, el arranque (300 s) y `pg_restore` (3600 s) tenían plazos propios y el total no se comparaba; ahora comparten el plazo del RTO desde el inicio de la diaria y el total pasa por `exigir_rto`.
+     - Queda con plazo propio solo la espera del segmento de B (10 min): es de preparación y no mide ningún umbral de RNF06.
+   - **Staging no se volvió a correr:** la corrida 5 dio RPO 219 s (subido) y 223 s (visto), dentro de 900 s, y la restauración 54,6 s, dentro del RTO de 14 400 s. El cambio solo agrega comprobaciones y acota plazos; con esos números no cambia el resultado.
+   - **Controles por mutación** (mismo método; ninguno sobrevivió; archivo restaurado, `cmp` idéntico y SHA-256 igual antes y después):
+
+| # | Mutación | Prueba que la detecta |
+|---|---|---|
+| R1 | Espera del receptor con 900 s nuevos | `test_las_esperas_del_rpo_comparten_un_plazo_desde_a` |
+| R2 | Espera de la subida con 900 s nuevos | ídem |
+| R3 | El plazo del RPO empieza ahora y no en la confirmación de A | ídem |
+| R4 | `marcas` sin `exigir_rpo` | `test_las_marcas_fallan_si_el_rpo_pasa_los_15_minutos` |
+| R5 | `exigir_rpo` con `>=` | `test_el_rpo_y_el_tope_de_cada_paso_no_pasan_su_limite` |
+| R6 | `tope_paso` sin acotar por lo que queda | ídem |
+| R7 | `restaurar_con` baja con 3600 s fijos | `test_bajar_y_descifrar_de_la_restauracion_usan_lo_que_queda_del_rto` |
+| R8 | `restaurar_con` descifra con 3600 s fijos | ídem |
+| R9 | `diaria` baja con 3600 s fijos | `test_la_diaria_comparte_un_plazo_y_falla_si_pasa_el_rto` |
+| R10 | `diaria` descifra con 3600 s fijos | ídem |
+| R11 | `diaria` espera el arranque con 300 s fijos | ídem |
+| R12 | `pg_restore` con 3600 s fijos | ídem |
+| R13 | `diaria` sin `exigir_rto` | ídem |
+| R14 | `comprobar_rpo` sin `exigir_rto` | `test_la_comprobacion_del_rpo_falla_si_pasa_el_rto` |
 
 ## Cómo se hizo
 
