@@ -33,6 +33,7 @@ import {
   rubrosDelPeriodo,
 } from "./datos";
 import { GraficoBarras } from "./GraficoBarras";
+import { DesviosDelPresupuesto, textoVencimientos } from "./Presupuesto";
 
 // Página /panel: el resumen de pagos del edificio en solo lectura (RF48; app 0094, H4a corte 1). Lo
 // decide la API con `fiscalizacion.ver_panel`; la pantalla solo muestra. Cada gráfico dice su base
@@ -195,7 +196,9 @@ function Contenido({ panel, consorcio, veRegistros, subeFacturas, veLiquidacione
   return (
     <div className="panel-consejo">
       {veRegistros && <EnlacePagos consorcio={consorcio} />}
-      {panel.gasto_liquidado.length > 0 && <Liquidadas panel={panel} consorcio={consorcio} veLiquidaciones={veLiquidaciones} />}
+      {panel.gasto_liquidado.length > 0 && (
+        <Liquidadas panel={panel} consorcio={consorcio} veLiquidaciones={veLiquidaciones} aEntrar={aEntrar} alCambiar={alCambiar} />
+      )}
       {lista.map((moneda) => (
         <PorMoneda key={moneda} panel={panel} moneda={moneda} conMoneda={lista.length > 1} />
       ))}
@@ -263,12 +266,13 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
   );
 }
 
-type PropsLiquidadas = { panel: DatosPanel; consorcio: string; veLiquidaciones: boolean };
+type PropsLiquidadas = { panel: DatosPanel; consorcio: string; veLiquidaciones: boolean; aEntrar: () => void; alCambiar: () => void };
 
 /** Modo Consejo (app 0120): el gasto según las liquidaciones oficiales, por período y por rubro, cada
  * gráfico con su tabla equivalente. Un solo enlace lleva a las liquidaciones, si la persona las puede
- * abrir: el de lo que no cierra, si hay diferencias; si no, el general. */
-function Liquidadas({ panel, consorcio, veLiquidaciones }: PropsLiquidadas) {
+ * abrir: el de lo que no cierra, si hay diferencias; si no, el general. Desde app 0128, los vencimientos
+ * de la vigente (los que trae la liquidación, nada más) y los desvíos frente al presupuesto. */
+function Liquidadas({ panel, consorcio, veLiquidaciones, aEntrar, alCambiar }: PropsLiquidadas) {
   const id = useId();
   const periodos = periodosConRubros(panel);
   const [elegido, setElegido] = useState("");
@@ -287,6 +291,7 @@ function Liquidadas({ panel, consorcio, veLiquidaciones }: PropsLiquidadas) {
       {vigente !== null && <AvisoEnlaceDocumentacion periodo={vigente.periodo} enlace={vigente.enlace_documentacion} />}
       {noCierra !== null && (veLiquidaciones ? enlace(noCierra) : <p>{noCierra}</p>)}
       {noCierra === null && veLiquidaciones && enlace(VER_LIQUIDACIONES)}
+      {vigente !== null && vigente.vencimientos.length > 0 && <p>{textoVencimientos(vigente.periodo, vigente.vencimientos)}</p>}
       <GraficoBarras
         titulo={TITULO_GASTO_POR_PERIODO}
         aviso={SEGUN_LAS_OFICIALES}
@@ -319,6 +324,7 @@ function Liquidadas({ panel, consorcio, veLiquidaciones }: PropsLiquidadas) {
         columna="Rubro"
         valor="Gasto"
       />
+      <DesviosDelPresupuesto panel={panel} consorcio={consorcio} aEntrar={aEntrar} alCambiar={alCambiar} />
     </>
   );
 }

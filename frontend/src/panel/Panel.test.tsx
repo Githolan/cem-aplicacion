@@ -11,6 +11,7 @@ import { ContextoVersion } from "../version";
 import { nombreDeFacultad } from "../facultades";
 import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTO_RECHAZADA } from "../pagos/SubirFactura";
+import type { components } from "../api/tipos";
 import {
   gastoLiquidadoPorPeriodo,
   gastoPorMes,
@@ -32,9 +33,25 @@ import {
   TITULO_GASTO_POR_RUBRO,
   VER_LIQUIDACIONES,
 } from "./Panel";
+import {
+  NO_FIGURA,
+  NO_SE_CALCULA,
+  REEMPLAZAR,
+  REGISTRADO,
+  REGISTRAR,
+  SEGUN_EL_PRESUPUESTO,
+  SIN_PRESUPUESTO,
+  SIN_PRESUPUESTO_PARA_LOS_PERIODOS,
+  textoDesvio,
+  textoVencimientos,
+  TITULO_DESVIOS,
+  TITULO_REEMPLAZAR,
+} from "./Presupuesto";
 
 // Resumen de pagos del edificio (app 0094; antes «Panel del Consejo»). Datos ficticios: ningún
 // proveedor ni importe real.
+
+type Presupuesto = components["schemas"]["Presupuesto"];
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -42,6 +59,12 @@ const O1 = "33333333-3333-4333-8333-333333333333";
 const O2 = "44444444-4444-4444-8444-444444444444";
 const PANEL = `GET /api/v1/consorcios/${C1}/panel`;
 const ACCIONES = `GET /api/v1/consorcios/${C1}/mis-acciones`;
+const PRESUPUESTOS = `GET /api/v1/consorcios/${C1}/presupuestos`;
+
+/** `GET …/presupuestos` (app 0128), con los límites del contrato. */
+const listaPresupuestos = (elementos: Presupuesto[], puede_registrar: boolean) => ({
+  elementos, puede_registrar, largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 120, maximo_rubros: 60,
+});
 
 const DATOS: Panel = {
   ordenes_por_estado: [
@@ -63,10 +86,11 @@ const DATOS: Panel = {
   gasto_liquidado: [],
   rubros_liquidados: [],
   liquidacion_vigente: null,
+  desvios_presupuesto: [],
 };
 const VACIO: Panel = {
   ordenes_por_estado: [], gasto_pagado: [], comprobantes_faltantes: [], solicitudes_abiertas: 0, gasto_liquidado: [], rubros_liquidados: [],
-  liquidacion_vigente: null,
+  liquidacion_vigente: null, desvios_presupuesto: [],
 };  // prettier-ignore
 
 /** Modo Consejo (app 0120): sin órdenes, dos liquidaciones oficiales. SINTETICO. */
@@ -84,7 +108,7 @@ const CONSEJO: Panel = {
     { periodo: "2026-10-01", numero: 1, nombre: "Servicios públicos SINTETICOS", total: "1500.50" },
     { periodo: "2026-10-01", numero: 2, nombre: "Mantenimiento SINTETICO", total: "1000.00" },
   ],
-  liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 2, enlace_documentacion: null },
+  liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 2, enlace_documentacion: null, vencimientos: [] },
 };  // prettier-ignore
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
@@ -96,6 +120,7 @@ const INICIO: Respuestas = {
   "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
   "GET /api/v1/me/invitaciones": () => Response.json({ elementos: [] }),
   "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+  [PRESUPUESTOS]: () => Response.json(listaPresupuestos([], false)),
 };
 
 function backend(respuestas: Respuestas) {
@@ -207,7 +232,7 @@ describe("Modo Consejo: el gasto según las liquidaciones oficiales (app 0120)",
   });
 
   it("sin diferencias ofrece las liquidaciones; quien no las abre no recibe enlace", async () => {
-    const sinDiferencias: Panel = { ...CONSEJO, liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 0, enlace_documentacion: null } };
+    const sinDiferencias: Panel = { ...CONSEJO, liquidacion_vigente: { id: L1, periodo: "2026-10-01", diferencias: 0, enlace_documentacion: null, vencimientos: [] } };
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(sinDiferencias) }));
     abrir();
     expect((await screen.findByRole("link", { name: VER_LIQUIDACIONES })).getAttribute("href")).toBe("/liquidacion-oficial");
@@ -787,5 +812,162 @@ describe("las facturas faltantes, de vuelta al resumen y en el teléfono (flujos
     expect(ficha.getByRole("link", { name: "Ver la orden" }).getAttribute("href")).toBe(`/pagos/${O2}`);
     fireEvent.click(ficha.getByRole("button", { name: SUBIR_FACTURA }));
     expect(await screen.findByRole("dialog", { name: SUBIR_FACTURA })).toBeTruthy();
+  });
+});
+
+describe("presupuesto, desvíos y vencimientos en Modo Consejo (app 0128)", () => {
+  const P1 = "66666666-6666-4666-8666-666666666666";
+  const P2 = "77777777-7777-4777-8777-777777777777";
+  const VIGENTE: Presupuesto = {
+    id: P1, desde: "2026-09-01", hasta: "2026-10-01", aprobacion: "Asamblea ordinaria del 12-03-2026 (SINTETICA)",
+    rubros: [{ numero: 1, nombre: "Servicios públicos SINTETICOS", importe: "1500.00" }, { numero: 3, nombre: "Fondo SINTETICO", importe: "300.00" }],
+    reemplaza_a: null, motivo: null, reemplazado_por: null, registrado_por_nombre: "Consejera SINTETICA", registrado_en: "2026-11-20T15:00:00Z",
+  };  // prettier-ignore
+  type Desvio = Panel["desvios_presupuesto"][number];
+  const fila = (periodo: string, numero: number, nombre: string, presupuestado: string | null, liquidado: string | null, desvio: string | null, porcentaje: string | null): Desvio =>
+    ({ periodo, numero, nombre, presupuesto_id: P1, presupuestado, liquidado, desvio, porcentaje });  // prettier-ignore
+  const CON_PRESUPUESTO: Panel = {
+    ...CONSEJO,
+    liquidacion_vigente: { ...CONSEJO.liquidacion_vigente!, vencimientos: ["2026-11-10", "2026-11-20"] },
+    desvios_presupuesto: [
+      fila("2026-09-01", 1, "Servicios públicos SINTETICOS", "1500.00", "1500.50", "0.50", "0.03"),
+      fila("2026-09-01", 2, "Mantenimiento SINTETICO", null, "899.99", null, null),
+      fila("2026-09-01", 3, "Fondo SINTETICO", "300.00", null, null, null),
+      fila("2026-10-01", 1, "Servicios públicos SINTETICOS", "1500.00", "1500.50", "0.50", "0.03"),
+      fila("2026-10-01", 2, "Mantenimiento SINTETICO", "0.00", "1000.00", "1000.00", null),
+    ],
+  };
+  const pedidos = (api: ReturnType<typeof backend>, metodo: string, camino: string) =>
+    api.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
+  const RUTA = `/api/v1/consorcios/${C1}/presupuestos`;
+  const RUTA_PANEL = `/api/v1/consorcios/${C1}/panel`;
+
+  it("los textos: el desvío con signo y porcentaje, y los vencimientos como se leen", () => {
+    expect(textoDesvio(CON_PRESUPUESTO.desvios_presupuesto[0]!)).toMatch(/^\+\$\s?0,50 \(\+0,03 %\)$/);
+    expect(textoDesvio({ ...CON_PRESUPUESTO.desvios_presupuesto[0]!, desvio: "-100.00", porcentaje: "-9.09" })).toMatch(/^-\$\s?100,00 \(-9,09 %\)$/);
+    // Con lo presupuestado en cero, el desvío sin porcentaje; sin uno de los dos importes, no se calcula.
+    expect(textoDesvio(CON_PRESUPUESTO.desvios_presupuesto[4]!)).toMatch(/^\+\$\s?1\.000,00$/);
+    expect(textoDesvio(CON_PRESUPUESTO.desvios_presupuesto[1]!)).toBe(NO_SE_CALCULA);
+    expect(textoVencimientos("2026-10-01", ["2026-11-10", "2026-11-20"])).toBe("Vencimientos de la liquidación de octubre de 2026: 10/11/2026 y 20/11/2026");
+    expect(textoVencimientos("2026-10-01", ["2026-11-10"])).toBe("Vencimiento de la liquidación de octubre de 2026: 10/11/2026");
+  });
+
+  it("muestra los vencimientos y, por período, lo presupuestado frente a lo liquidado sin inventar ningún desvío", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(CON_PRESUPUESTO), [PRESUPUESTOS]: () => Response.json(listaPresupuestos([VIGENTE], false)) }));
+    const { container } = abrir();
+    expect(await screen.findByText("Vencimientos de la liquidación de octubre de 2026: 10/11/2026 y 20/11/2026")).toBeTruthy();
+    const region = screen.getByRole("region", { name: TITULO_DESVIOS });
+    expect(within(region).getByText(SEGUN_EL_PRESUPUESTO)).toBeTruthy();
+    const tabla = () => within(region).getByRole("table");
+    expect(within(tabla()).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Rubro", "Presupuestado", "Liquidado", "Desvío"]);
+    // El período más nuevo primero: el rubro presupuestado en cero tiene desvío y no porcentaje.
+    expect(within(tabla()).getAllByRole("row").slice(1).map((f) => f.textContent)).toEqual([
+      expect.stringMatching(/^Servicios públicos SINTETICOS\$\s?1\.500,00\$\s?1\.500,50\+\$\s?0,50 \(\+0,03 %\)$/),
+      expect.stringMatching(/^Mantenimiento SINTETICO\$\s?0,00\$\s?1\.000,00\+\$\s?1\.000,00$/),
+    ]);
+    fireEvent.change(within(region).getByLabelText("Período"), { target: { value: "2026-09-01" } });
+    // Sin presupuesto para el rubro: «Sin presupuesto», nunca un 100 %; el que la liquidación no trae, tampoco.
+    expect(within(tabla()).getAllByRole("row").slice(1).map((f) => f.textContent)).toEqual([
+      expect.stringMatching(/^Servicios públicos SINTETICOS/),
+      expect.stringMatching(new RegExp(`^Mantenimiento SINTETICO${SIN_PRESUPUESTO}\\$\\s?899,99${NO_SE_CALCULA}$`)),
+      expect.stringMatching(new RegExp(`^Fondo SINTETICO\\$\\s?300,00${NO_FIGURA}${NO_SE_CALCULA}$`)),
+    ]);
+    expect(region.textContent).not.toMatch(/100 %/);
+    // Sin la facultad, ni registrar ni reemplazar; la historia sí se lee.
+    expect(await within(region).findByText("Presupuestos registrados (1)")).toBeTruthy();
+    expect(within(region).queryByRole("button", { name: REGISTRAR })).toBeNull();
+    expect(within(region).queryByRole("button", { name: REEMPLAZAR })).toBeNull();
+    for (const detalle of container.querySelectorAll("details")) detalle.open = true;
+    await sinViolaciones(container);
+  });
+
+  it("sin ningún presupuesto que cubra los períodos lo dice, sin tabla", async () => {
+    const sinCubrir: Panel = { ...CONSEJO, desvios_presupuesto: [{ ...fila("2026-10-01", 2, "Mantenimiento SINTETICO", null, "1000.00", null, null), presupuesto_id: null }] };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(sinCubrir) }));
+    abrir();
+    const region = await screen.findByRole("region", { name: `${TITULO_DESVIOS}, octubre de 2026` });
+    expect(within(region).getByText(SIN_PRESUPUESTO_PARA_LOS_PERIODOS)).toBeTruthy();
+    expect(within(region).queryByRole("table")).toBeNull();
+  });
+
+  it("registra con los rubros de la liquidación: importe mensual, meses AAAA-MM-01, y vuelve a leer el resumen", async () => {
+    const api = backend({
+      [PANEL]: () => Response.json(CONSEJO),
+      [PRESUPUESTOS]: () => Response.json(listaPresupuestos([], true)),
+      [`POST ${RUTA}`]: () => Response.json({ ...VIGENTE, id: P2 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: REGISTRAR }));
+    const ventana = await screen.findByRole("dialog", { name: REGISTRAR });
+    // Los rubros son los de la liquidación, por número; sin motivo (no reemplaza).
+    expect(within(ventana).getByLabelText("1. Servicios públicos SINTETICOS")).toBeTruthy();
+    expect(within(ventana).getByLabelText("2. Mantenimiento SINTETICO")).toBeTruthy();
+    expect(within(ventana).queryByLabelText("Motivo del reemplazo")).toBeNull();
+    // Vacío no viaja: dice qué falta junto a cada campo.
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar" }));
+    expect(await within(ventana).findByText("Falta el primer mes.")).toBeTruthy();
+    expect(within(ventana).getByText("Falta de dónde sale el presupuesto.")).toBeTruthy();
+    expect(within(ventana).getByText("Falta el importe de al menos un rubro.")).toBeTruthy();
+    expect(pedidos(api, "POST", RUTA)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Primer mes (AAAA-MM)"), { target: { value: "2026-09" } });
+    fireEvent.change(within(ventana).getByLabelText("Último mes (AAAA-MM)"), { target: { value: "2026-08" } });
+    fireEvent.change(within(ventana).getByLabelText("De dónde sale"), { target: { value: "Asamblea ordinaria del 12-03-2026 (SINTETICA)" } });
+    fireEvent.change(within(ventana).getByLabelText("1. Servicios públicos SINTETICOS"), { target: { value: "1.500,5" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar" }));
+    expect(await within(ventana).findByText("El último mes no puede ser anterior al primero.")).toBeTruthy();
+    expect(pedidos(api, "POST", RUTA)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Último mes (AAAA-MM)"), { target: { value: "2026-12" } });
+    fireEvent.change(within(ventana).getByLabelText("2. Mantenimiento SINTETICO"), { target: { value: "0" } });
+    const lecturas = pedidos(api, "GET", RUTA_PANEL).length;
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar" }));
+    expect(await screen.findByText(REGISTRADO)).toBeTruthy();
+    const [pedido] = pedidos(api, "POST", RUTA);
+    expect(await pedido!.json()).toEqual({
+      desde: "2026-09-01", hasta: "2026-12-01", aprobacion: "Asamblea ordinaria del 12-03-2026 (SINTETICA)",
+      rubros: [{ numero: 1, nombre: "Servicios públicos SINTETICOS", importe: "1500.50" }, { numero: 2, nombre: "Mantenimiento SINTETICO", importe: "0.00" }],
+      reemplaza_a: null, motivo: null,
+    });  // prettier-ignore
+    expect(pedido!.headers.get("Idempotency-Key")).toBeTruthy();
+    await waitFor(() => expect(pedidos(api, "GET", RUTA_PANEL).length).toBeGreaterThan(lecturas));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("reemplazar empieza con lo del vigente, suma su rubro que la liquidación no trae y pide el motivo", async () => {
+    const api = backend({
+      [PANEL]: () => Response.json(CON_PRESUPUESTO),
+      [PRESUPUESTOS]: () => Response.json(listaPresupuestos([VIGENTE], true)),
+      [`POST ${RUTA}`]: () => error("presupuesto_superpuesto", 409),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByText("Presupuestos registrados (1)"));
+    fireEvent.click(await screen.findByRole("button", { name: REEMPLAZAR }));
+    const ventana = await screen.findByRole("dialog", { name: TITULO_REEMPLAZAR });
+    expect((within(ventana).getByLabelText("Primer mes (AAAA-MM)") as HTMLInputElement).value).toBe("2026-09");
+    expect((within(ventana).getByLabelText("1. Servicios públicos SINTETICOS") as HTMLInputElement).value).toBe("1500");
+    expect((within(ventana).getByLabelText("3. Fondo SINTETICO") as HTMLInputElement).value).toBe("300");
+    expect((within(ventana).getByLabelText("2. Mantenimiento SINTETICO") as HTMLInputElement).value).toBe("");
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar" }));
+    expect(await within(ventana).findByText("Falta el motivo del reemplazo.")).toBeTruthy();
+    expect(pedidos(api, "POST", RUTA)).toHaveLength(0);
+    fireEvent.change(within(ventana).getByLabelText("Motivo del reemplazo"), { target: { value: "El acta decía otra cosa" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Registrar" }));
+    // El rechazo se dice adentro, con qué hacer; la ventana queda abierta.
+    expect(await within(ventana).findByText(/Otro presupuesto vigente ya cubre alguno de esos meses/)).toBeTruthy();
+    const [pedido] = pedidos(api, "POST", RUTA);
+    expect(await pedido!.json()).toMatchObject({
+      reemplaza_a: P1, motivo: "El acta decía otra cosa",
+      rubros: [{ numero: 1, importe: "1500.00" }, { numero: 3, importe: "300.00" }],
+    });  // prettier-ignore
+  });
+
+  it("sin rubros numerados en las liquidaciones no ofrece registrar aunque tenga la facultad", async () => {
+    const sinNumeros: Panel = { ...CONSEJO, rubros_liquidados: CONSEJO.rubros_liquidados.map((r) => ({ ...r, numero: null })) };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(sinNumeros), [PRESUPUESTOS]: () => Response.json(listaPresupuestos([], true)) }));
+    abrir();
+    await screen.findByRole("region", { name: TITULO_DESVIOS });
+    await waitFor(() => expect(screen.queryByText("Cargando los presupuestos…")).toBeNull());
+    expect(screen.queryByRole("button", { name: REGISTRAR })).toBeNull();
   });
 });

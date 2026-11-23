@@ -112,11 +112,11 @@ def test_consejo_y_administracion_ven_el_panel(e):
         assert r.status_code == 200, r.text
         assert set(r.json()) == {"ordenes_por_estado", "gasto_pagado", "comprobantes_faltantes",
                                  "solicitudes_abiertas", "gasto_liquidado", "rubros_liquidados",
-                                 "liquidacion_vigente"}  # fmt: skip
+                                 "liquidacion_vigente", "desvios_presupuesto"}  # fmt: skip
         # Sin liquidaciones oficiales (Modo Administrador Aumentado), las secciones van vacías.
         d = r.json()
-        assert (d["gasto_liquidado"], d["rubros_liquidados"], d["liquidacion_vigente"]) == (
-            [], [], None)  # fmt: skip
+        assert (d["gasto_liquidado"], d["rubros_liquidados"], d["liquidacion_vigente"],
+                d["desvios_presupuesto"]) == ([], [], None, [])  # fmt: skip
 
 
 def test_la_propietaria_y_el_inquilino_no_y_queda_el_motivo(motor_migrate, e):

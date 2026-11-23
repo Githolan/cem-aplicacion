@@ -9,7 +9,8 @@ READ`: un pago confirmado en el medio no puede dejar el gráfico de un momento y
 **Modo Consejo (`0120`).** Sin órdenes de pago, el gasto sale de las liquidaciones oficiales (la
 confirmada de cada período, `0119`): el total y los grupos por período, los rubros por período
 (los últimos `PERIODOS_DE_GASTO` períodos que la tienen) y cuántas diferencias dejó la lectura de
-la vigente. Las secciones de las órdenes siguen igual para los otros modos.
+la vigente. Desde `0128`, los vencimientos de la vigente y, por período y rubro, lo presupuestado
+frente a lo liquidado (RF15, RF48). Las secciones de las órdenes siguen igual para los otros modos.
 
 **Solicitudes formales.** Cada ruta evalúa su política con la solicitud a la vista (las firmas
 que ya tiene, para PA36 y A14) y la base vuelve a exigir todo: la facultad, el modo, la sesión, la
@@ -59,6 +60,7 @@ from cem_contracts.fiscalizacion import (
     SolicitudFormalNueva,
 )
 from cem_contracts.importacion_liquidacion import PERIODOS_DE_GASTO, TotalDelGrupo
+from cem_contracts.presupuesto import DesvioPresupuesto
 from fastapi import APIRouter, Depends, Query, Request, Response
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
@@ -132,6 +134,8 @@ def ver_panel(
             liquidado = de_la_ventana("panel_gasto_liquidado_por_periodo")
             rubros = de_la_ventana("panel_gasto_liquidado_por_rubro")
             vigente = leer("panel_diferencias_liquidacion_vigente")
+            vencimientos = leer("panel_vencimientos_liquidacion_vigente")
+            desvios = de_la_ventana("panel_desvios_presupuesto")
             senales = enlaces_documentacion(c)
     except DBAPIError as e:
         if isinstance(e.orig, InsufficientPrivilege):
@@ -156,11 +160,23 @@ def ver_panel(
         ],  # fmt: skip
         rubros_liquidados=[RubroLiquidado(**f) for f in rubros],
         liquidacion_vigente=LiquidacionVigente(
-            **vigente[0], enlace_documentacion=senales.get(vigente[0]["id"])
+            **vigente[0],
+            enlace_documentacion=senales.get(vigente[0]["id"]),
+            vencimientos=_vencimientos(vencimientos, vigente[0]["id"]),
         )
         if vigente
         else None,  # fmt: skip
+        desvios_presupuesto=[DesvioPresupuesto(**f) for f in desvios],
     )
+
+
+def _vencimientos(filas: list, vigente: UUID) -> list[str]:
+    """Los de la misma liquidación vigente que las diferencias (la misma foto): una lista de
+    textos `AAAA-MM-DD`, como los leyó la importación (`0128`)."""
+    [fila] = filas
+    if fila["id"] != vigente:
+        raise Discrepancia("la vigente de los vencimientos no es la de las diferencias")
+    return fila["vencimientos"]
 
 
 # --- Solicitud formal de documentación (RF49; `0108`) -------------------------------------------

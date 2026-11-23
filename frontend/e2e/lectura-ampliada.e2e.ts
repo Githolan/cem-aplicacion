@@ -459,6 +459,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
         gasto_liquidado: [],
         rubros_liquidados: [],
         liquidacion_vigente: null,
+        desvios_presupuesto: [],
       },
     },
   },

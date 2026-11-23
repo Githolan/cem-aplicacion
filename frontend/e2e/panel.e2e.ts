@@ -38,6 +38,7 @@ const PANEL = {
   gasto_liquidado: [],
   rubros_liquidados: [],
   liquidacion_vigente: null,
+  desvios_presupuesto: [],
 };
 // Modo Consejo (app 0120): sin órdenes, el gasto de las liquidaciones oficiales. Los textos y los
 // importes, de los más largos. SINTETICO.
@@ -65,7 +66,9 @@ const PANEL_CONSEJO = {
     { periodo: "2026-10-01", numero: 2, nombre: RUBRO_LARGO, total: "123456789012.34" },
   ],
   // RF47 (app 0125): la vigente sin el enlace a la documentación.
-  liquidacion_vigente: { id: "77777777-7777-4777-8777-777777777777", periodo: "2026-10-01", diferencias: 12, enlace_documentacion: SIN_ENLACE },
+  liquidacion_vigente: { id: "77777777-7777-4777-8777-777777777777", periodo: "2026-10-01", diferencias: 12, enlace_documentacion: SIN_ENLACE, vencimientos: [] },
+  // Sin presupuesto registrado (app 0128): el bloque lo dice, sin tabla.
+  desvios_presupuesto: [],
 };
 const D1 ="55555555-5555-4555-8555-555555555555";
 const V1 = "66666666-6666-4666-8666-666666666666";
@@ -104,6 +107,8 @@ async function simularApi(pagina: Page, subidas: string[] = [], panel: object = 
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }] });
       if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: panel });
+      if (camino === `/api/v1/consorcios/${C1}/presupuestos`)
+        return ruta.fulfill({ json: { elementos: [], puede_registrar: false, largo_aprobacion: 200, largo_motivo: 500, largo_nombre_rubro: 120, maximo_rubros: 60 } });
       // El inicio de quien confirma vínculos los cuenta (G-26).
       if (camino === `/api/v1/consorcios/${C1}/padron`) return ruta.fulfill({ json: { elementos: [] } });
       if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });

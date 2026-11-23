@@ -192,6 +192,13 @@ ADICIONES_0124 = {
     "administrador": ["reparaciones.gestionar"],
     "administrador_externo": [],
 }
+# `0128` (RF15, decisión del 22-11-2026): registrar el presupuesto aprobado, MC y AD.
+CATALOGO |= {"presupuesto.registrar": False}
+ADICIONES_0128 = {
+    "miembro_consejo": ["presupuesto.registrar"],
+    "administrador": ["presupuesto.registrar"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -205,6 +212,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0122[tipo]
     + ADICIONES_0123[tipo]
     + ADICIONES_0124[tipo]
+    + ADICIONES_0128[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

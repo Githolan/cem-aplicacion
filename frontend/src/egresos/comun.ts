@@ -339,6 +339,8 @@ const MENSAJES: Record<string, string> = {
   ayuda_no_admitida: "Esto no se puede hacer mientras se ayuda a otra persona.",
   ayuda_revocada: "La persona asistida dejó de autorizar la ayuda. Esta pestaña vuelve a la cuenta propia.",
   fotos_completas: "El pedido ya tiene todas las fotos que admite.",
+  // Presupuesto y desvíos (RF15, app 0128).
+  presupuesto_superpuesto: "Otro presupuesto vigente ya cubre alguno de esos meses. Para cambiarlo, se reemplaza esa versión, con el motivo.",
   idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
   idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
 };
