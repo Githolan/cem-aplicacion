@@ -80,7 +80,7 @@ Después del pico, staging volvió solo: `/health` `ok` con `c7c200a`, `/api/v1/
 1. **Defecto de capacidad de staging (no del código), corregido el 23-11-2026:** `cem-postgres-staging` tenía 0,15 CPU y 256 MiB. Con 10 pedidos por segundo satura la CPU y se queda sin memoria; el kernel mata un proceso por minuto y PostgreSQL reinicia todas las conexiones. El documento 13, §19.2 proponía 0,3 CPU y 512 MB para `cem-postgres`. El propietario aprobó subirlos; con 0,3 CPU y 512 MiB la repetición dio 0 errores y p95 de 43,7 ms.
 2. **`too many connections for role`** (28 veces): durante las recuperaciones, el rol de la aplicación llegó a su tope de conexiones. Sin las caídas no pasó (0 en la repetición).
 3. **La medición al pico no es válida como cifra de RNF01**: la tasa lograda fue 10,0 y no 13,9 por segundo, porque la base no respondía. Lo válido es el veredicto: con menos tasa que la del pico ya no cumple.
-4. **Producción no se midió** ni se cambiaron sus límites: `cem-postgres` sigue con los suyos (SIN VERIFICAR si alcanzan; cambiarlos es decisión del propietario para el pase a producción).
+4. **Producción no se midió ni se tocó.** `cem-postgres` ya tiene 0,3 CPU y 512 MiB (leído con `docker inspect` el 23-11-2026: `NanoCpus=300000000`, `Memory=536870912`), los mismos que staging desde esta repetición. La carga en producción queda SIN VERIFICAR.
 5. **El generador corre dentro de `cem-backend-staging`** (como el smoke y los ensayos): comparte el medio CPU del backend. El control a 2 por segundo muestra que eso no explica segundos de latencia, pero a la tasa del pico le resta CPU al backend. Una corrida desde otro contenedor queda SIN VERIFICAR.
 
 ## Lo que queda en staging
