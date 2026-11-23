@@ -1112,7 +1112,8 @@
           "ayuda_ya_vigente",
           "ayuda_ya_revocada",
           "ayuda_revocada",
-          "presupuesto_superpuesto"
+          "presupuesto_superpuesto",
+          "comprobante_de_otra_unidad"
         ],
         "title": "CodigoError",
         "type": "string"

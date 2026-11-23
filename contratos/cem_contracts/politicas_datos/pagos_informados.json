@@ -1,0 +1,34 @@
+{
+  "politicas": [
+    {
+      "accion": "pagos_informados.informar",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": true, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "ayuda": "preparar_reclamos",
+      "fuente_normativa": "Diseño «Pagos informados», PI-1 y PI-S1; decisión del propietario del 23-11-2026 (Q1): informa quien tiene un vínculo confirmado de propietario, inquilino u ocupante con esa unidad, en los tres modos, o quien lo ayuda; ninguna facultad alcanza. No mueve dinero (económica no). También sube el comprobante. PA07, RN08: un solo registro por pago"
+    },
+    {
+      "accion": "pagos_informados.ver",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": false, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": "fiscalizacion.ver_panel",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "ayuda": "consultar_expensas",
+      "fuente_normativa": "Diseño «Pagos informados», PI-6: quien tiene el vínculo confirmado con esa unidad ve los de esa unidad, y quien lo informó lo sigue viendo mientras conserve algún vínculo confirmado en el consorcio (la base filtra); quien tiene fiscalizacion.ver_panel, todos los del consorcio. Otras unidades, nunca. Sin ningún vínculo confirmado ni la facultad, no ve nada, ni lo que informó: como los reclamos (reclamos_liquidacion.ver); decisión por defecto PI-D7 del 23-11-2026"
+    }
+  ]
+}

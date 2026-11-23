@@ -173,6 +173,9 @@ def test_ninguna_politica_decisoria_admite_ayuda():
         "fiscalizacion.ver_resumen": AlcanceAyuda.CONSULTAR_EXPENSAS,
         "reclamos_liquidacion.ver": AlcanceAyuda.CONSULTAR_EXPENSAS,
         "reclamos_liquidacion.presentar": AlcanceAyuda.PREPARAR_RECLAMOS,
+        # `0129` (PI-1 y PI-6): informar un pago es preparar una constancia, y verlo, consultar.
+        "pagos_informados.informar": AlcanceAyuda.PREPARAR_RECLAMOS,
+        "pagos_informados.ver": AlcanceAyuda.CONSULTAR_EXPENSAS,
     }
     # El contrato no deja declarar ayuda en una económica, con separación o con respaldo.
     base = POLITICAS["reclamos_liquidacion.presentar"].model_dump()
@@ -248,7 +251,7 @@ def test_ayudando_toda_accion_sin_ayuda_declarada_se_niega():
     negadas = {a for a in POLITICAS if evaluar(a, con, Entidad()).motivo_interno
                == Motivo.AYUDA_NO_ADMITIDA}  # fmt: skip
     assert negadas == {a for a, p in POLITICAS.items() if p.ayuda is None}
-    assert len(negadas) == len(POLITICAS) - 5
+    assert len(negadas) == len(POLITICAS) - 7
 
 
 def test_el_alcance_se_respeta_y_los_mandatos_no_se_prestan():
@@ -316,7 +319,8 @@ def test_quien_ayuda_consulta_lo_de_la_asistida_y_nada_mas(e, motor_migrate):
     a = otorgada(e, motor_migrate)
     acciones = ayudando(e, a["id"], "GET", ruta(e, "mis-acciones")).json()["acciones"]
     assert acciones == ["consorcios.mis_acciones", "cuenta.ver_propia",
-                        "fiscalizacion.ver_resumen", "reclamos_liquidacion.ver"]  # fmt: skip
+                        "fiscalizacion.ver_resumen", "pagos_informados.ver",
+                        "reclamos_liquidacion.ver"]  # fmt: skip
     cuenta = ayudando(e, a["id"], "GET", ruta(e, "mi-cuenta"))
     assert cuenta.status_code == 200, cuenta.text
     assert {u["designacion"] for u in cuenta.json()["liquidacion"]["unidades"]} == {"1-A", "1° A"}

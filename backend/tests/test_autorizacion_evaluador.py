@@ -360,8 +360,9 @@ def test_las_acciones_de_la_tabla():
     # (`reclamos_liquidacion.presentar`, `.ver` y `.atender`, 0123) y las tres de las reparaciones
     # (`reparaciones.pedir`, `.ver` y `.gestionar`, 0124) y las tres de la ayuda por una persona
     # autorizada (`ayuda.otorgar`, `.revocar` y `.ver_otorgadas`, 0127) y la del presupuesto
-    # (`presupuesto.registrar`, 0128)
-    assert len(POLITICAS) == 73
+    # (`presupuesto.registrar`, 0128) y las dos de los pagos informados
+    # (`pagos_informados.informar` y `.ver`, 0129)
+    assert len(POLITICAS) == 75
 
 
 def _archivo(tmp_path, nombre, politicas):

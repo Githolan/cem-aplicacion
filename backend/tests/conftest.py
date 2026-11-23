@@ -159,6 +159,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     Y con 0127, que se niega a bajar si hay autorizaciones de ayuda o eventos hechos ayudando
     (`vaciar_ayudas`). Y con 0128, que se niega a bajar si hay presupuestos, que citan personas:
     se borran también antes que todo, los rubros primero.
+    Y con 0129, que se niega a bajar si hay pagos informados o comprobantes subidos, que citan
+    documentos, unidades y personas: se borran también antes que todo, los pagos primero.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -187,6 +189,17 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "   delete from nucleo.consorcio_perfil_normativo;"
                 "   alter table nucleo.busqueda_enlaces_liquidacion enable trigger user;"
                 "   alter table nucleo.consorcio_perfil_normativo enable trigger user;"
+                " end if;"
+                # Los pagos informados (0129) citan comprobantes, documentos, unidades y personas,
+                # solo se agregan y niegan su downgrade: van primero, los pagos antes que los
+                # comprobantes que citan.
+                " if to_regclass('nucleo.pago_informado') is not null then"
+                "   alter table nucleo.pago_informado disable trigger user;"
+                "   alter table nucleo.comprobante_pago_subido disable trigger user;"
+                "   delete from nucleo.pago_informado;"
+                "   delete from nucleo.comprobante_pago_subido;"
+                "   alter table nucleo.pago_informado enable trigger user;"
+                "   alter table nucleo.comprobante_pago_subido enable trigger user;"
                 " end if;"
                 # Las reparaciones (0124) citan importaciones, documentos, decisiones, unidades y
                 # personas, solo se agregan y niegan su downgrade: van primero, de la última tabla

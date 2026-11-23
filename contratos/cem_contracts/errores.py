@@ -432,6 +432,9 @@ class CodigoError(StrEnum):
     PRESUPUESTO_SUPERPUESTO = "presupuesto_superpuesto"
     """Otro presupuesto vigente ya cubre alguno de esos períodos: se corrige reemplazándolo, con
     su motivo (`0128`)."""
+    COMPROBANTE_DE_OTRA_UNIDAD = "comprobante_de_otra_unidad"
+    """Ese comprobante ya se informó como el pago de otra unidad: un archivo respalda un solo pago
+    (PA07, `0129`). No se dice cuál, para no mostrar una unidad ajena."""
 
 
 class Error(BaseModel):
