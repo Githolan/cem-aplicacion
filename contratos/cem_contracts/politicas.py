@@ -79,6 +79,10 @@ class CodigoSeparacion(StrEnum):
     """Quien registró la decisión no la usa para dar de alta ni para remover (A15, P2, 2b-4b).
     Una decisión del equipo (soporte) o una baja sin decisión lo dicen explícito
     (`decision_del_equipo`, `sin_decision`)."""
+    NO_ES_QUIEN_INFORMO = "no_es_quien_informo"
+    """Nadie confirma, rechaza ni anula un pago que informó él mismo, ni uno que informó ayudando a
+    otra persona (PI-5, `0130`). Compara cuentas, no seres humanos: quien informa un pago es un
+    vecino que no necesita identidad verificada."""
 
 
 class _Estricto(BaseModel):

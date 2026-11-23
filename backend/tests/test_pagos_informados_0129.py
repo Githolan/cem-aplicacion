@@ -61,11 +61,15 @@ TABLAS = ("nucleo.comprobante_pago_subido", "nucleo.pago_informado")
 NUMERO = "AB-12.345 678"
 NUMERO_OTRA_FORMA = "ab12345678"
 """El mismo número sin guiones, puntos ni espacios y en minúsculas (PI-3)."""
-INFORMAR = text("select * from nucleo.informar_pago(:u, :i, :f, :m, :n, :comp, :a, 'api', :s)")
+INFORMAR = text(
+    "select * from nucleo.informar_pago(:u, :i, :f, :m, :n, :comp, null, :a, 'api', :s)"
+)
+"""Con la firma de `0130` (suma `corrige`, nula: sin corrección)."""
+MIGRACION_0130 = MIGRACION.with_name("0130_pagos_informados_confirmar.py")
 
 
-def _migracion():
-    spec = importlib.util.spec_from_file_location("migracion_0129", MIGRACION)
+def _migracion(ruta: Path = MIGRACION):
+    spec = importlib.util.spec_from_file_location(ruta.stem, ruta)
     assert spec is not None and spec.loader is not None
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)
@@ -558,7 +562,8 @@ def test_la_migracion_copia_las_listas_y_limites_del_contrato():
     m = _migracion()
     assert m.MEDIOS == tuple(contrato.MedioPago)
     assert m.MEDIO_SIN_COMPROBANTE == contrato.MEDIO_SIN_COMPROBANTE
-    assert m.ESTADOS == tuple(contrato.EstadoPagoInformado)
+    # `0130` suma los otros tres (lo compara `test_pagos_informados_0130.py`).
+    assert m.ESTADOS == (contrato.EstadoPagoInformado.INFORMADO,)
     assert m.ESTADOS_QUE_NO_CUENTAN == contrato.ESTADOS_QUE_NO_CUENTAN
     assert m.ORIGENES == tuple(contrato.OrigenPagoInformado)
     assert m.LARGO_NUMERO_OPERACION == contrato.LARGO_NUMERO_OPERACION
@@ -566,9 +571,12 @@ def test_la_migracion_copia_las_listas_y_limites_del_contrato():
 
 def test_las_rutas_son_solo_para_cem_app_y_las_internas_para_nadie(motor_migrate):
     m = _migracion()
+    # Las que `0130` borra y crea con otra firma o con otro resultado las prueba su archivo.
+    reemplazadas = {f for f, _ in _migracion(MIGRACION_0130).REEMPLAZADAS}
+    assert reemplazadas < set(m.RUTAS)  # control: las nombra igual que esta migración
     puede = text("select has_function_privilege(:r, :f, 'EXECUTE')")
     with motor_migrate.connect() as c:
-        for f in m.RUTAS:
+        for f in set(m.RUTAS) - reemplazadas:
             assert c.execute(puede, {"r": "cem_app", "f": f}).scalar_one() is True, f
             assert c.execute(puede, {"r": "cem_ro", "f": f}).scalar_one() is False, f
         for f in m.INTERNAS:

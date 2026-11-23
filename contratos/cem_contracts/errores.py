@@ -435,6 +435,21 @@ class CodigoError(StrEnum):
     COMPROBANTE_DE_OTRA_UNIDAD = "comprobante_de_otra_unidad"
     """Ese comprobante ya se informó como el pago de otra unidad: un archivo respalda un solo pago
     (PA07, `0129`). No se dice cuál, para no mostrar una unidad ajena."""
+    PAGO_INFORMADO_DECIDIDO = "pago_informado_decidido"
+    """El pago informado no admite ese paso en su estado: otra persona ya lo confirmó, rechazó o
+    anuló, o se anula uno que no está confirmado (PI-4, `0130`)."""
+    COMPROBANTE_EN_REVISION = "comprobante_en_revision"
+    """El antivirus todavía revisa el comprobante: hasta que lo acepta, el pago no se confirma
+    (PI-4, `0130`). Rechazarlo sí se puede."""
+    COMPROBANTE_RECHAZADO = "comprobante_rechazado"
+    """El antivirus rechazó el comprobante: el pago no se confirma; se rechaza y quien lo informó
+    lo corrige con otro archivo (PI-4, `0130`)."""
+    CORRECCION_DE_PAGO_INVALIDA = "correccion_de_pago_invalida"
+    """`corrige_a` no es un pago rechazado o anulado de la misma unidad en este edificio (PI-3,
+    `0130`)."""
+    PAGO_YA_CORREGIDO = "pago_ya_corregido"
+    """Ese pago rechazado o anulado ya tiene su corrección: se corrige una sola vez, y la
+    corrección, si también se rechaza, se corrige a su vez (PI-3, `0130`)."""
 
 
 class Error(BaseModel):

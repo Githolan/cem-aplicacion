@@ -110,8 +110,9 @@ PRESUPUESTOS = set(exportar_consorcio.PARTES["presupuestos"])
 """RF15 (`0128`): el edificio de estas pruebas no tiene presupuestos; su contenido lo prueba
 `test_presupuesto_desvios_0128.py`. Sus claves sí están decididas acá."""
 PAGOS_INFORMADOS = set(exportar_consorcio.PARTES["pagos_informados"])
-"""PI-S1 (`0129`): el edificio de estas pruebas no tiene pagos informados; su contenido lo prueba
-`test_pagos_informados_0129.py`. Sus claves sí están decididas acá."""
+"""PI-S1 y PI-S2 (`0129`, `0130`): el edificio de estas pruebas no tiene pagos informados; su
+contenido lo prueban `test_pagos_informados_0129.py` y `test_pagos_informados_0130.py`. Sus claves
+sí están decididas acá."""
 PARTES_POSTERIORES = (
     "liquidaciones_importadas", "comunicados", "reclamos_liquidacion", "reparaciones",
     "perfil_normativo", "ayudas", "presupuestos", "pagos_informados",
@@ -287,6 +288,8 @@ CLAVES_POR_ENTIDAD = {
                        "numero_operacion", "comprobante_documento_id", "comprobante_version_id",
                        "comprobante_sha256", "origen", "estado", "corrige_a",
                        "informado_por_nombre", "informado_en"},
+    "pago_informado_estado": {"pago_id", "de", "a", "motivo", "registrado_por_nombre",
+                              "registrado_en"},
 }  # fmt: skip
 
 

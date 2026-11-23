@@ -115,6 +115,10 @@ YA_PARTICIPO: dict[tuple[str, CodigoSeparacion], str] = {
     ("padron.confirmar_vinculo", _S.NO_ES_QUIEN_REGISTRO): (
         "El vínculo lo registró esta cuenta: lo confirma otra persona."
     ),
+    ("pagos_informados.confirmar", _S.NO_ES_QUIEN_INFORMO): (
+        "El pago lo informó esta cuenta: lo confirma, lo rechaza o lo anula otra persona del"
+        " Consejo o de la administración."
+    ),
 }
 """Qué decirle a quien frena la separación de funciones (pregunta 10 del propietario, 13-11-2026):
 el motivo concreto. Quien la recibe ya participa de eso (lo preparó, lo aprobó, es su mandato), así
@@ -276,6 +280,7 @@ def _personas(entidad: Entidad) -> set[UUID]:
         entidad.persona_objetivo, entidad.registrado_por, entidad.emitido_por,
         entidad.ejecutado_por,
         entidad.decision_registrada_por, *entidad.aprobado_por, *entidad.firmas,
+        *entidad.informado_por,
     )  # fmt: skip
     return {p for p in candidatas if p is not None}
 

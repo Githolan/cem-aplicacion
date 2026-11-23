@@ -161,6 +161,7 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     se borran también antes que todo, los rubros primero.
     Y con 0129, que se niega a bajar si hay pagos informados o comprobantes subidos, que citan
     documentos, unidades y personas: se borran también antes que todo, los pagos primero.
+    Y con 0130, que suma la historia de los estados de esos pagos: se borra antes que los pagos.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -196,6 +197,12 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " if to_regclass('nucleo.pago_informado') is not null then"
                 "   alter table nucleo.pago_informado disable trigger user;"
                 "   alter table nucleo.comprobante_pago_subido disable trigger user;"
+                # 0130: la historia de los estados cita los pagos; se borra antes.
+                "   if to_regclass('nucleo.pago_informado_estado') is not null then"
+                "     alter table nucleo.pago_informado_estado disable trigger user;"
+                "     delete from nucleo.pago_informado_estado;"
+                "     alter table nucleo.pago_informado_estado enable trigger user;"
+                "   end if;"
                 "   delete from nucleo.pago_informado;"
                 "   delete from nucleo.comprobante_pago_subido;"
                 "   alter table nucleo.pago_informado enable trigger user;"

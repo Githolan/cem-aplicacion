@@ -29,6 +29,20 @@
       "destinatario_unico": false,
       "ayuda": "consultar_expensas",
       "fuente_normativa": "Diseño «Pagos informados», PI-6: quien tiene el vínculo confirmado con esa unidad ve los de esa unidad, y quien lo informó lo sigue viendo mientras conserve algún vínculo confirmado en el consorcio (la base filtra); quien tiene fiscalizacion.ver_panel, todos los del consorcio. Otras unidades, nunca. Sin ningún vínculo confirmado ni la facultad, no ve nada, ni lo que informó: como los reclamos (reclamos_liquidacion.ver); decisión por defecto PI-D7 del 23-11-2026"
+    },
+    {
+      "accion": "pagos_informados.confirmar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "pagos.confirmar_informado",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": ["no_es_quien_informo"],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Diseño «Pagos informados», PI-4, PI-5, PI-9 y PI-S2; decisión del propietario del 23-11-2026: confirma, rechaza (con motivo) o anula un confirmado (con motivo) quien tiene la facultad pagos.confirmar_informado, en los paquetes de miembro del Consejo y de administrador, en los tres modos. Nadie decide sobre un pago que informó él mismo (separación de funciones; compara cuentas: quien informa no necesita identidad verificada). No mueve dinero (económica no): confirma que el comprobante es creíble. Sin ayuda (RF53): es decisorio"
     }
   ]
 }

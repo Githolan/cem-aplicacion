@@ -1,6 +1,6 @@
-"""Pagos informados por los vecinos, primer corte (PI-S1; `0129`).
+"""Pagos informados por los vecinos, cortes PI-S1 (`0129`) y PI-S2 (`0130`).
 
-Diseño: `doc/diseno/Pagos_Informados.md` del repositorio CEM (reglas PI-1, PI-2, PI-3 y PI-6).
+Diseño: `doc/diseno/Pagos_Informados.md` del repositorio CEM (reglas PI-1 a PI-6 y PI-9).
 CEM no mueve dinero: quien pagó las expensas de una unidad deja la constancia con el comprobante,
 para que el Consejo la confirme (PI-S2) y se coteje con la liquidación oficial (PI-S3).
 
@@ -14,7 +14,16 @@ para que el Consejo la confirme (PI-S2) y se coteje con la liquidación oficial 
 - **Un solo registro por pago (PA07, RN08, PI-3):** si ya hay uno con la misma unidad y el mismo
   número de operación (sin espacios, puntos ni guiones, sin distinguir mayúsculas) o con el mismo
   archivo, no se crea otro: se responde 200 con el existente y `ya_informado`. La primera vez,
-  201. Un pago rechazado o anulado (PI-S2) no cuenta.
+  201. Un pago rechazado o anulado no cuenta.
+- **Confirmar, rechazar y anular** (`pagos_informados.confirmar`, PI-4, PI-5 y PI-9): quien tiene la
+  facultad `pagos.confirmar_informado` (paquetes de miembro del Consejo y de administrador, los tres
+  modos). Nadie decide sobre un pago que informó él mismo, ni ayudando a otra persona. `informado`
+  pasa a `confirmado` (con el comprobante ya aceptado por el antivirus, o sin comprobante en
+  efectivo) o a `rechazado` (con motivo); `confirmado` pasa a `anulado` (con motivo). Nada se borra:
+  cada paso queda en `historia`. Cada pago dice en `acciones` lo que quien lee puede hacer ahora.
+- **Corregir** (PI-3): un pago rechazado o anulado se informa de nuevo con `corrige_a`, aunque tenga
+  el mismo número de operación o el mismo archivo; cada pago se corrige una sola vez y solo cuenta
+  la última versión vigente.
 - **Quién lee** (`pagos_informados.ver`): quien lo informó y quien tiene el vínculo que cuenta con
   esa unidad; quien tiene la facultad `fiscalizacion.ver_panel`, todos los del consorcio.
 """
@@ -31,6 +40,9 @@ from cem_contracts.documentos import EstadoVersion, VersionCargada
 
 LARGO_NUMERO_OPERACION = 60
 """La base tiene el mismo control (`0129`)."""
+LARGO_MOTIVO = 500
+"""El del motivo de un rechazo o una anulación; la base tiene el mismo control (`0130`)."""
+UN_RENGLON = r"^[^\x00-\x1f\x7f]*$"
 UN_RENGLON_CON_ALGO = r"^[^\x00-\x1f\x7f]*[0-9A-Za-z][^\x00-\x1f\x7f]*$"
 """Un renglón con al menos una letra o un dígito: hecho solo de separadores no es un número."""
 
@@ -48,14 +60,25 @@ MEDIO_SIN_COMPROBANTE = MedioPago.EFECTIVO
 
 
 class EstadoPagoInformado(StrEnum):
-    """Hoy solo `informado`; PI-S2 suma `confirmado`, `rechazado` y `anulado`."""
+    """PI-4: `informado` → `confirmado` o `rechazado`; `confirmado` → `anulado`."""
 
     INFORMADO = "informado"
+    CONFIRMADO = "confirmado"
+    RECHAZADO = "rechazado"
+    ANULADO = "anulado"
 
 
-ESTADOS_QUE_NO_CUENTAN = ("rechazado", "anulado")
-"""Los estados de PI-S2 que no cuentan para «un solo registro por pago»: la base los excluye de
-sus índices únicos (`0129`)."""
+ESTADOS_QUE_NO_CUENTAN = (EstadoPagoInformado.RECHAZADO, EstadoPagoInformado.ANULADO)
+"""Los que no cuentan para «un solo registro por pago»: la base los excluye de sus índices únicos
+(`0129`) y solo ellos se corrigen (`0130`)."""
+TRANSICIONES = (
+    (EstadoPagoInformado.INFORMADO, EstadoPagoInformado.CONFIRMADO),
+    (EstadoPagoInformado.INFORMADO, EstadoPagoInformado.RECHAZADO),
+    (EstadoPagoInformado.CONFIRMADO, EstadoPagoInformado.ANULADO),
+)
+"""Los pasos que admite la base (`0130`); ningún otro."""
+ESTADOS_CON_MOTIVO = (EstadoPagoInformado.RECHAZADO, EstadoPagoInformado.ANULADO)
+"""Llegar a estos estados pide el motivo; a `confirmado`, no."""
 
 
 class OrigenPagoInformado(StrEnum):
@@ -63,6 +86,12 @@ class OrigenPagoInformado(StrEnum):
     CORREO = "correo"
     """La entrada por correo llega en PI-S4."""
 
+
+MotivoDecision = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MOTIVO,
+                      pattern=UN_RENGLON),
+]  # fmt: skip
 
 NumeroOperacion = Annotated[
     str,
@@ -89,6 +118,11 @@ class PagoInformadoNuevo(BaseModel):
         description="La versión que devolvió `POST …/pagos-informados/comprobantes` para esta"
         " unidad; obligatoria salvo en efectivo. Puede estar todavía en cuarentena.",
     )
+    corrige_a: UUID | None = Field(
+        default=None,
+        description="El pago rechazado o anulado de la misma unidad que este corrige (PI-3). Con"
+        " él, el pago nuevo se crea aunque tenga el mismo número o el mismo archivo.",
+    )
 
     @model_validator(mode="after")
     def _del_medio(self) -> "PagoInformadoNuevo":
@@ -109,6 +143,37 @@ class ComprobantePagoSubido(BaseModel):
     archivo: VersionCargada
 
 
+class AccionPagoInformado(StrEnum):
+    """Lo que quien lee puede hacer con el pago ahora (la pantalla no ofrece otra cosa, C9)."""
+
+    CONFIRMAR = "confirmar"
+    RECHAZAR = "rechazar"
+    ANULAR = "anular"
+    CORREGIR = "corregir"
+    """Informarlo de nuevo con `corrige_a`: rechazado o anulado, todavía sin corrección, y por
+    quien puede informar el pago de esa unidad."""
+
+
+class PasoPagoInformado(BaseModel):
+    """Un cambio de estado, en el orden en que pasó."""
+
+    model_config = ConfigDict(frozen=True)
+
+    de: EstadoPagoInformado
+    a: EstadoPagoInformado
+    motivo: str | None = Field(description="El del rechazo o la anulación; nulo al confirmar.")
+    registrado_por_nombre: str
+    registrado_en: datetime
+
+
+class MotivoPagoInformado(BaseModel):
+    """`POST …/{p}/rechazo` y `POST …/{p}/anulacion`: el motivo, que lee quien informó."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: MotivoDecision
+
+
 class PagoInformado(BaseModel):
     """Un pago informado, como lo ve quien puede verlo."""
 
@@ -127,12 +192,17 @@ class PagoInformado(BaseModel):
     )
     origen: OrigenPagoInformado
     estado: EstadoPagoInformado
-    corrige_a: UUID | None = Field(
-        description="El pago rechazado o anulado que este corrige (PI-S2); nulo en este corte."
+    corrige_a: UUID | None = Field(description="El pago rechazado o anulado que este corrige.")
+    corregido_por: UUID | None = Field(
+        description="El pago que corrige a este, si es rechazado o anulado y ya se corrigió."
     )
     informado_por_nombre: str
     informado_en: datetime
     propio: bool = Field(description="Si lo informó quien pregunta.")
+    historia: list[PasoPagoInformado] = Field(
+        description="Los cambios de estado, del primero al último; vacía mientras está informado."
+    )
+    acciones: list[AccionPagoInformado]
 
 
 class PagoInformadoRespuesta(PagoInformado):
@@ -149,3 +219,8 @@ class ListaPagosInformados(BaseModel):
 
     elementos: list[PagoInformado]
     largo_numero_operacion: int
+    largo_motivo: int
+    por_confirmar: int = Field(
+        description="Cuántos pagos `informado` puede confirmar o rechazar"
+        " quien lee ahora: el número de la bandeja del Consejo."
+    )

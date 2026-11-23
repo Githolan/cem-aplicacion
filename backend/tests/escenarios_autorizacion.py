@@ -199,6 +199,13 @@ ADICIONES_0128 = {
     "administrador": ["presupuesto.registrar"],
     "administrador_externo": [],
 }
+# `0130` (PI-5, decisión del propietario del 23-11-2026): confirmar los pagos informados, MC y AD.
+CATALOGO |= {"pagos.confirmar_informado": False}
+ADICIONES_0130 = {
+    "miembro_consejo": ["pagos.confirmar_informado"],
+    "administrador": ["pagos.confirmar_informado"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -213,6 +220,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0123[tipo]
     + ADICIONES_0124[tipo]
     + ADICIONES_0128[tipo]
+    + ADICIONES_0130[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 
@@ -281,7 +289,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dic
     desconocidas = set(valores) - {
         "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
         "emitio", "decision", "respaldo", "actor", "sin_identidad", "misma_identidad",
-        "controles", "ejecuto", "autorizado", "ayuda",
+        "controles", "ejecuto", "autorizado", "ayuda", "informo",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
@@ -322,6 +330,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dic
         registrado_por_soporte=valores.get("registrado") == "soporte",
         emitido_por=persona("emitio"),
         ejecutado_por=persona("ejecuto"),
+        informado_por=personas("informo"),
         decision_registrada_por=persona("decision"),
         decision_del_equipo=valores.get("decision") == "equipo",
         sin_decision=valores.get("decision") == "ninguna",
