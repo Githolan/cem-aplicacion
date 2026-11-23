@@ -72,11 +72,13 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.state.salud_dependencias = CacheDependencias(config.salud_cache_segundos)
     errores.instalar(app)
     app.state.limitador = limite.crear_limitador(config.redis_url)
+    # RF53: la ayuda pedida en el encabezado, para toda la petición (`app/ayuda.py`). Va por
+    # dentro del límite de tasa: un pedido con `X-CEM-Ayuda` gasta cupo y, si se pasa, recibe el
+    # 429 antes de que se lea la ayuda.
+    app.add_middleware(ayuda.AyudaDePeticion)
     app.add_middleware(
         limite.LimiteDeTasa, limitador=app.state.limitador, exentas=SIN_LIMITE_DE_TASA
     )
-    # RF53: la ayuda pedida en el encabezado, para toda la petición (`app/ayuda.py`).
-    app.add_middleware(ayuda.AyudaDePeticion)
     # El último agregado queda por fuera: registra también los 429 y 503 del límite de tasa.
     app.add_middleware(registros.RegistroDePeticiones)
     app.include_router(plataforma)
