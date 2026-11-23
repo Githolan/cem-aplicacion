@@ -79,6 +79,10 @@ router = APIRouter(prefix="/api/v1", tags=["consorcios"], dependencies=[Depends(
 INFORMAR = "pagos_informados.informar"
 VER = "pagos_informados.ver"
 CONFIRMAR = "pagos_informados.confirmar"
+PANEL = "fiscalizacion.ver_panel"
+"""Decidir exige también ver el panel (PI-D14), como la base (`exigir_decidir_pago_informado`):
+quien tiene solo la facultad de confirmar y un vínculo ve los pagos de su unidad, pero no los
+decide ni se los cuenta `por_confirmar` (observación de Codex en #290)."""
 BASE = "/consorcios/{consorcio_id}/pagos-informados"
 
 ERRORES = {
@@ -186,14 +190,16 @@ class Permisos:
     ver: Permiso
     informar: Permiso
     confirmar: Permiso
+    panel: Permiso
 
 
 def _permisos(
     ver: Annotated[Permiso, Depends(requiere(VER, al_entrar=True))],
     informar: Annotated[Permiso, Depends(requiere(INFORMAR))],
     confirmar: Annotated[Permiso, Depends(requiere(CONFIRMAR))],
+    panel: Annotated[Permiso, Depends(requiere(PANEL))],
 ) -> Permisos:
-    return Permisos(ver, informar, confirmar)
+    return Permisos(ver, informar, confirmar, panel)
 
 
 PermisosDep = Annotated[Permisos, Depends(_permisos)]
@@ -213,7 +219,10 @@ def _acciones(f, permisos: Permisos) -> list[AccionPagoInformado]:
         ):
             return [AccionPagoInformado.CORREGIR]
         return []
-    if not permisos.confirmar.decidir(de_quien_informo(f)).permitido:
+    if not (
+        permisos.panel.decidir().permitido
+        and permisos.confirmar.decidir(de_quien_informo(f)).permitido
+    ):
         return []
     if estado is EstadoPagoInformado.CONFIRMADO:
         return [AccionPagoInformado.ANULAR]
@@ -415,6 +424,7 @@ def _decidir(
     ctx = permisos.ver.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
         visto = _fila(c, permisos, pago_id)
+    permisos.panel.verificar()
     confirmar = permisos.confirmar
     confirmar.verificar(de_quien_informo(visto))
 

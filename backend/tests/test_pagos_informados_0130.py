@@ -310,6 +310,15 @@ def test_solo_decide_quien_tiene_la_facultad(e, motor_app, motor_migrate):
                     if f["consorcio_id"] == e["cons"] and f["pagos_informados"]}  # fmt: skip
     assert e["solo_decide"] not in avisados
     assert e["mc"] in avisados  # control: el Consejo completo sí ve el pendiente
+    # Con solo confirmar y un vínculo (la ocupante de «PB-A»): ve el pago de su unidad, pero la API
+    # no le ofrece decidirlo ni se lo cuenta, y si lo intenta recibe 403, no un 500.
+    alta(motor_app, e["cons"], None, e["acta"], persona=e["oc"], tipo="miembro_consejo",
+         origen="soporte", facultades=["pagos.confirmar_informado"])  # fmt: skip
+    de_la_unidad = efectivo(e, "inq", "PB-A")
+    assert visto(e, "oc", de_la_unidad["id"])["acciones"] == []
+    assert listar(e, "oc").json()["por_confirmar"] == 0
+    assert codigo(paso(e, "oc", de_la_unidad["id"], "confirmacion")) == (403, "sin_permiso")
+    assert visto(e, "mc", de_la_unidad["id"])["acciones"] == ["confirmar", "rechazar"]  # control
     # La sesión de quien ayuda, con la ayuda en la transacción: la base la niega (sin alcance).
     autorizacion = ayuda(e, motor_migrate, ["consultar_expensas", "preparar_reclamos"])
     with motor_app.connect() as cx, cx.begin() as t:
