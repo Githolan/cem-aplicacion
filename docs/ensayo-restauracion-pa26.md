@@ -33,7 +33,7 @@
 
 **Comparado con el 27-10:** 54,6 s contra 26 s. El script cuenta también los viajes por `ssh` de cada paso y la base es más grande (6608 eventos contra 1518; 47,8 MB cifrados contra ~10 MB). Sigue a cuatro órdenes de magnitud del RTO.
 
-## Hallazgos de Codex en #287 (P2, los seis reales y corregidos)
+## Hallazgos de Codex en #287 (P2, los siete reales y corregidos)
 
 1. **RPO sin prueba de contenido.** El script aceptaba el primer parcial con sello posterior a la confirmación de A. `copia_continua.subir_parcial()` sella con la hora de la vuelta una copia del archivo del receptor: si el receptor está atrasado, ese parcial puede tener solo lo anterior a A, y el RPO informado quedaba corto. La restauración posterior usaba el WAL completo subido después de B, así que encontrar A ahí no validaba el parcial.
    - **Arreglo (el método más fuerte de los dos posibles):** se toma la posición de A; el parcial cuenta solo si su sello es posterior al momento en que `flush_lsn` del receptor llegó a esa posición (condición de elección); y **se prueba restaurando con exactamente los artefactos que había en el almacén en ese momento** (la copia base, los segmentos completos de entonces y ese parcial), sin objetivo, exigiendo A. Si A no está, el ensayo falla y no informa RPO.
@@ -102,6 +102,13 @@
 - Arreglo: al ver el WAL de A, `marcas()` congela también la base verificada (`self.rpo["base"]`), antes de leer el reloj; `comprobar_rpo()` usa exactamente esa.
 - Prueba: `test_la_comprobacion_del_rpo_usa_la_base_congelada_al_rpo`. Control por mutación: con la búsqueda nueva al final, la prueba recibe la base posterior y falla; restaurado, `cmp` idéntico. 37 de 37; ruff limpio.
 - La corrida 5 no se repitió: su comprobación usó `base/20261117T053929Z`, verificada seis días antes de la corrida, así que estaba disponible al RPO y esa prueba sigue valiendo.
+
+### Séptimo hallazgo P2 de Codex en #287 (en `3c5ed07`, real y corregido)
+
+- `elegir_base` elegía por el nombre de la carpeta, que es la hora de **inicio** de la copia base. Una base que empezó antes de A y terminó después no se puede recuperar a un momento anterior a su fin, y podía desplazar a una anterior que sí servía.
+- Arreglo: `elegir_base(marcas, antes_de, hasta_lsn)` exige además `fin_lsn` ≤ la posición capturada de A. Vale para la restauración a un momento y para la base congelada al RPO.
+- Prueba: `test_no_elige_una_base_que_termino_despues_de_a`, con su control (si terminó antes de A, se elige la más nueva). Control por mutación: sin la condición de `fin_lsn`, la prueba elige la base posterior y falla; restaurado, `cmp` idéntico. 38 de 38; ruff limpio.
+- La corrida 5 no se repitió: su base (17-11, desde `…02E`) terminó seis días antes de A (`0/3960D020`).
 
 ## Cómo se hizo
 

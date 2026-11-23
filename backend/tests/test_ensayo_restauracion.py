@@ -28,12 +28,26 @@ def test_el_nombre_del_segmento_es_el_de_pg_walfile_name():
 
 
 def test_elige_la_copia_base_mas_nueva_anterior_a_la_marca():
-    marcas = {"20261110T060926Z": {"n": 1}, "20261117T053929Z": {"n": 2},
-              "20261124T050000Z": {"n": 3}}  # fmt: skip
-    momento, marca = ensayo.elegir_base(marcas, datetime(2026, 11, 23, tzinfo=UTC))
-    assert (momento, marca) == ("20261117T053929Z", {"n": 2})
+    marcas = {"20261110T060926Z": {"n": 1, "fin_lsn": "0/10000000"},
+              "20261117T053929Z": {"n": 2, "fin_lsn": "0/2E000100"},
+              "20261124T050000Z": {"n": 3, "fin_lsn": "0/50000000"}}  # fmt: skip
+    momento, marca = ensayo.elegir_base(marcas, datetime(2026, 11, 23, tzinfo=UTC), "0/38000100")
+    assert (momento, marca["n"]) == ("20261117T053929Z", 2)
     with pytest.raises(ensayo.Fallo, match="no hay copia base"):
-        ensayo.elegir_base(marcas, datetime(2026, 11, 1, tzinfo=UTC))
+        ensayo.elegir_base(marcas, datetime(2026, 11, 1, tzinfo=UTC), "0/38000100")
+
+
+def test_no_elige_una_base_que_termino_despues_de_a():
+    """Codex P2 en #287: la carpeta lleva la hora de inicio; una base que empezó antes de A y
+    terminó después no sirve para recuperar hasta A. Se usa la anterior."""
+    marcas = {"20261117T053929Z": {"n": 2, "fin_lsn": "0/2E000100"},
+              "20261123T042000Z": {"n": 4, "fin_lsn": "0/39000200"}}  # fmt: skip
+    momento, _ = ensayo.elegir_base(marcas, datetime(2026, 11, 23, 4, 22, tzinfo=UTC), "0/38000100")
+    assert momento == "20261117T053929Z"
+    # Control: si terminó antes de A, la más nueva es la elegida.
+    marcas["20261123T042000Z"]["fin_lsn"] = "0/38000000"
+    momento, _ = ensayo.elegir_base(marcas, datetime(2026, 11, 23, 4, 22, tzinfo=UTC), "0/38000100")
+    assert momento == "20261123T042000Z"
 
 
 def test_los_segmentos_necesarios_son_todos_y_sin_huecos():
@@ -235,7 +249,7 @@ def ensayo_falso(monkeypatch) -> ensayo.Ensayo:
     monkeypatch.setattr(e, "marca", marca)
     monkeypatch.setattr(e, "real", real)
     monkeypatch.setattr(e, "listar", listar)
-    monkeypatch.setattr(e, "base_anterior", lambda antes: (BASE_AL_RPO, SEG))
+    monkeypatch.setattr(e, "base_anterior", lambda antes, hasta: (BASE_AL_RPO, SEG))
     fijar_ahora(monkeypatch, A_CONFIRMADA + VISTO_A_LOS)
     return e
 
@@ -255,7 +269,7 @@ def test_la_restauracion_falla_si_el_total_pasa_el_rto(monkeypatch):
     e = ensayo.Ensayo(None, None, None)
     reloj = itertools.chain([0.0], itertools.repeat(ensayo.ESPERA_PROMOCION_S + 1.0))
     monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
-    monkeypatch.setattr(e, "base_anterior", lambda antes: ("20261117T053929Z", SEG))
+    monkeypatch.setattr(e, "base_anterior", lambda antes, hasta: ("20261117T053929Z", SEG))
     monkeypatch.setattr(e, "listar", lambda *p: [{"clave": f"wal/{SEG}.gz.age"}])
     monkeypatch.setattr(e, "marca_base", {"inicio_lsn": "0/38000028"})
     vistos = {}
@@ -266,7 +280,7 @@ def test_la_restauracion_falla_si_el_total_pasa_el_rto(monkeypatch):
 
     monkeypatch.setattr(e, "restaurar_con", restaurar_con)
     monkeypatch.setattr(e, "controles", lambda contenedor: None)
-    a = {"despues": A_CONFIRMADA, "antes": A_CONFIRMADA}
+    a = {"despues": A_CONFIRMADA, "antes": A_CONFIRMADA, "lsn": "0/38000100"}
     b = {"antes": A_CONFIRMADA + timedelta(minutes=3)}
     with pytest.raises(ensayo.Fallo, match="más que el RTO"):
         e.restaurar(a, b, SEG)
@@ -438,7 +452,7 @@ def test_la_comprobacion_del_rpo_usa_la_base_congelada_al_rpo(monkeypatch):
     e.resumen["consorcio"] = "c"
     e.rpo = {"claves_wal": [f"wal/{SEG}.gz.age"], "clave": f"wal/{SEG}.gz.age",
              "base": {"momento": BASE_AL_RPO, "desde": SEG}}  # fmt: skip
-    monkeypatch.setattr(e, "base_anterior", lambda antes: (BASE_POSTERIOR, SEG))
+    monkeypatch.setattr(e, "base_anterior", lambda antes, hasta: (BASE_POSTERIOR, SEG))
     usadas = []
 
     def restaurar_con(que, momento, *resto):

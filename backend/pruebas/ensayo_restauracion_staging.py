@@ -165,16 +165,21 @@ def numero_de(nombre: str, tamano: int = TAMANO_SEGMENTO) -> tuple[int, int]:
     return int(nombre[:8], 16), int(nombre[8:16], 16) * por_id + int(nombre[16:24], 16)
 
 
-def elegir_base(marcas: dict[str, dict], antes_de: datetime) -> tuple[str, dict]:
-    """La copia base verificada más nueva tomada antes de `antes_de`. `marcas` es
-    {momento `AAAAMMDDTHHMMSSZ`: contenido de `verificada.json`}."""
+def elegir_base(marcas: dict[str, dict], antes_de: datetime, hasta_lsn: str) -> tuple[str, dict]:
+    """La copia base verificada más nueva que empezó antes de `antes_de` **y terminó** (`fin_lsn`,
+    el punto en que queda consistente) en o antes de `hasta_lsn`. El nombre de la carpeta es la
+    hora de inicio: una base que empezó antes de A y terminó después no se puede recuperar a un
+    momento anterior a su fin (Codex P2 en #287). `marcas` es {momento `AAAAMMDDTHHMMSSZ`:
+    contenido de `verificada.json`}."""
+    tope = lsn(hasta_lsn)
     candidatas = sorted(
         (m for m in marcas if datetime.strptime(m, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-         < antes_de),
+         < antes_de and lsn(marcas[m]["fin_lsn"]) <= tope),
         reverse=True,
     )  # fmt: skip
     if not candidatas:
-        raise Fallo(f"no hay copia base verificada anterior a {antes_de.isoformat()}")
+        raise Fallo(f"no hay copia base verificada anterior a {antes_de.isoformat()} y terminada"
+                    f" en o antes de {hasta_lsn}")  # fmt: skip
     return candidatas[0], marcas[candidatas[0]]
 
 
@@ -715,7 +720,7 @@ class Ensayo:
         # WAL (Codex P2 en #287): una base que empezó antes de A pero se verificó y subió después
         # no estaba disponible al RPO. Se toma antes de leer el reloj: lo medido sigue siendo una
         # cota superior.
-        base_momento, base_desde = self.base_anterior(a["antes"])
+        base_momento, base_desde = self.base_anterior(a["antes"], a["lsn"])
         rpo = time.monotonic() - inicio_rpo
         subido_en = datetime.fromisoformat(objeto["modificado"])
         self.rpo = {
@@ -750,13 +755,13 @@ class Ensayo:
 
     # 5 y 6 ------------------------------------------------------------------------------------
 
-    def base_anterior(self, antes_de: datetime) -> tuple[str, str]:
+    def base_anterior(self, antes_de: datetime, hasta_lsn: str) -> tuple[str, str]:
         marcas = {}
         for o in self.listar("base/"):
             partes = o["clave"].split("/")
             if len(partes) == 3 and partes[2] == "verificada.json":
                 marcas[partes[1]] = json.loads(self.almacen("leer", o["clave"]))
-        momento, marca = elegir_base(marcas, antes_de)
+        momento, marca = elegir_base(marcas, antes_de, hasta_lsn)
         self.marca_base = marca
         return momento, segmento_de(marca["linea_de_tiempo"], lsn(marca["inicio_lsn"]))
 
@@ -810,7 +815,7 @@ class Ensayo:
         objetivo = punto_medio(a["despues"], b["antes"])
         self.resumen["objetivo"] = objetivo.isoformat()
         inicio = time.monotonic()
-        momento, desde = self.base_anterior(a["antes"])
+        momento, desde = self.base_anterior(a["antes"], a["lsn"])
         wal = segmentos_necesarios([o["clave"] for o in self.listar("wal/")], desde, seg_b)
         self.resumen["copia_base"] = {
             "momento": momento,
