@@ -18,7 +18,31 @@
 
 ## Resultado
 
-**RNF01 NO SE CUMPLE en staging con el perfil del pico.** El cuello es `cem-postgres-staging`: llegó al tope de CPU y de memoria de su contenedor y el kernel mató cuatro procesos de PostgreSQL por memoria (`signal 9`), cada uno con un reinicio de todas las conexiones y una recuperación de 4 a 7 s.
+**Con 0,3 CPU y 512 MiB en `cem-postgres-staging`, RNF01 SE CUMPLE en staging al pico (latencia; las 500 sesiones siguen SIN VERIFICAR).** Los límites los subió el propietario el 23-11-2026 (ver «Repetición»). La corrida de abajo, con 0,15 CPU y 256 MiB, queda como antecedente.
+
+### Repetición con 0,3 CPU y 512 MiB (consorcio `bda461ef-5897-45c4-8ffc-f37d18e194e9`, corrida `a5d96402`)
+
+| Dato | Valor |
+|---|---|
+| Cambio | Sí del propietario en el chat (23-11-2026): `PATCH /api/v1/databases/<cem-postgres-staging>` con `limits_cpus` `0.3` y `limits_memory` `512m`, y `POST …/restart`. Leído después: API `0.3` y `512m`; `docker inspect` `NanoCpus=300000000`, `Memory=536870912`, `healthy` desde 12:45:59 UTC. Control de la API: token inventado → 401 |
+| Configuración de PostgreSQL | Sin cambios: `shared_buffers` 128 MB, `max_connections` 100, `cem_app` con tope de 40 conexiones |
+| Ventana | 12:47:13 a 12:50:13 UTC; escena 12,2 s |
+| Pedidos | 2502 en 179,9 s: **13,9 por segundo logrados**, 0 tarde, `medicion_valida: true` |
+| Lecturas | 2492: p50 **17,0 ms**, p95 **43,7 ms**, p99 95,9 ms, máximo 215,9 ms |
+| Escrituras | 10, todas 201; p50 60,4 ms, máximo 111,7 ms |
+| Códigos | 200: 2492; 201: 10; **0 errores** |
+| Ruta más lenta (p95) | `{c}/reclamos-liquidacion` 202,3 ms (5 pedidos); `{c}/panel` 142,6 ms (8) |
+| PostgreSQL en la ventana | 0 `terminated by signal`, 0 `recovery mode`, 0 `too many connections`; `OOMKilled=false`, 0 reinicios. Control de la búsqueda: el registro empieza en el reinicio (12:45:59) y la misma búsqueda encuentra su único `ready to accept connections` |
+| `cem-postgres-staging` (`docker stats`, 11 muestras) | CPU 14,1 % al armar la escena, después **5 a 8,5 %** (tope 30 %); memoria de 46 a **173 MiB** de 512 |
+| `cem-backend-staging` (con el generador) | CPU 15 a 18 %, 379 MiB de 512 |
+| VM | carga hasta 1,90; libres de 311 a 522 MB de 11927 (5 GB disponibles) |
+| Cierre | 0 sesiones abiertas, 0 personas siguen entrando; `/health` `ok` con `c7c200a`, `deps` `db ok, redis ok`, `cola` 0 pendientes y 0 muertos |
+
+**Lectura (INFERENCIA, no medida):** con 0,15 CPU la base no alcanzaba a responder, las conexiones se acumulaban (hasta el tope de `cem_app`) y la memoria por conexión llevó el contenedor a 256 MiB; con el doble de CPU no hay cola y la memoria no pasa de 173 MiB. No se probó cuál de los dos límites alcanza solo.
+
+### Antecedente: corrida con 0,15 CPU y 256 MiB
+
+**RNF01 NO SE CUMPLÍA en staging con el perfil del pico.** El cuello es `cem-postgres-staging`: llegó al tope de CPU y de memoria de su contenedor y el kernel mató cuatro procesos de PostgreSQL por memoria (`signal 9`), cada uno con un reinicio de todas las conexiones y una recuperación de 4 a 7 s.
 
 ### Corrida al pico (consorcio `3f601bc6-1a08-44ae-97f0-7b65b49ec72a`, corrida `c002fb41`)
 
@@ -53,10 +77,10 @@ Después del pico, staging volvió solo: `/health` `ok` con `c7c200a`, `/api/v1/
 
 ## Hallazgos
 
-1. **Defecto de capacidad de staging (no del código):** `cem-postgres-staging` tiene 0,15 CPU y 256 MiB. Con 10 pedidos por segundo satura la CPU y se queda sin memoria; el kernel mata un proceso por minuto y PostgreSQL reinicia todas las conexiones. El documento 13, §19.2 proponía 0,3 CPU y 512 MB para `cem-postgres`. **No se cambió nada:** cambiar los límites es configuración de Coolify y la decide el propietario.
-2. **`too many connections for role`** (28 veces): durante las recuperaciones, el rol de la aplicación llegó a su tope de conexiones. SIN VERIFICAR si pasa sin las caídas.
+1. **Defecto de capacidad de staging (no del código), corregido el 23-11-2026:** `cem-postgres-staging` tenía 0,15 CPU y 256 MiB. Con 10 pedidos por segundo satura la CPU y se queda sin memoria; el kernel mata un proceso por minuto y PostgreSQL reinicia todas las conexiones. El documento 13, §19.2 proponía 0,3 CPU y 512 MB para `cem-postgres`. El propietario aprobó subirlos; con 0,3 CPU y 512 MiB la repetición dio 0 errores y p95 de 43,7 ms.
+2. **`too many connections for role`** (28 veces): durante las recuperaciones, el rol de la aplicación llegó a su tope de conexiones. Sin las caídas no pasó (0 en la repetición).
 3. **La medición al pico no es válida como cifra de RNF01**: la tasa lograda fue 10,0 y no 13,9 por segundo, porque la base no respondía. Lo válido es el veredicto: con menos tasa que la del pico ya no cumple.
-4. **Producción no se midió** ni se miraron sus límites: SIN VERIFICAR si tiene los mismos.
+4. **Producción no se midió ni se tocó.** `cem-postgres` ya tiene 0,3 CPU y 512 MiB (leído con `docker inspect` el 23-11-2026: `NanoCpus=300000000`, `Memory=536870912`), los mismos que staging desde esta repetición. La carga en producción queda SIN VERIFICAR.
 5. **El generador corre dentro de `cem-backend-staging`** (como el smoke y los ensayos): comparte el medio CPU del backend. El control a 2 por segundo muestra que eso no explica segundos de latencia, pero a la tasa del pico le resta CPU al backend. Una corrida desde otro contenedor queda SIN VERIFICAR.
 
 ## Lo que queda en staging
@@ -83,7 +107,7 @@ Consorcios `CEM LAB — Carga de pico mensual (SINTETICO, PRUEBA, NO REAL)` `3f6
 
 #### Advertencias
 
-> **WARNING:** con los límites actuales de `cem-postgres-staging`, la corrida al pico hizo caer la base de staging cuatro veces en 4 minutos. No correrla durante una prueba con personas ni durante un despliegue.
+> **WARNING:** con 0,15 CPU y 256 MiB la corrida al pico hizo caer la base de staging cuatro veces en 4 minutos; con 0,3 CPU y 512 MiB no cayó. Antes de correrla, comprobar los límites (`docker inspect <cem-postgres-staging> --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}'` → `300000000 536870912`). No correrla durante una prueba con personas ni durante un despliegue.
 
 > **WARNING:** nunca contra producción. La guarda se niega si `CEM_ORIGEN_PUBLICO` no es de staging.
 
