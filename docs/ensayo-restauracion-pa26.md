@@ -33,7 +33,7 @@
 
 **Comparado con el 27-10:** 54,6 s contra 26 s. El script cuenta también los viajes por `ssh` de cada paso y la base es más grande (6608 eventos contra 1518; 47,8 MB cifrados contra ~10 MB). Sigue a cuatro órdenes de magnitud del RTO.
 
-## Hallazgos de Codex en #287 (P2, los tres reales y corregidos)
+## Hallazgos de Codex en #287 (P2, los cuatro reales y corregidos)
 
 1. **RPO sin prueba de contenido.** El script aceptaba el primer parcial con sello posterior a la confirmación de A. `copia_continua.subir_parcial()` sella con la hora de la vuelta una copia del archivo del receptor: si el receptor está atrasado, ese parcial puede tener solo lo anterior a A, y el RPO informado quedaba corto. La restauración posterior usaba el WAL completo subido después de B, así que encontrar A ahí no validaba el parcial.
    - **Arreglo (el método más fuerte de los dos posibles):** se toma la posición de A; el parcial cuenta solo si su sello es posterior al momento en que `flush_lsn` del receptor llegó a esa posición (condición de elección); y **se prueba restaurando con exactamente los artefactos que había en el almacén en ese momento** (la copia base, los segmentos completos de entonces y ese parcial), sin objetivo, exigiendo A. Si A no está, el ensayo falla y no informa RPO.
@@ -81,6 +81,13 @@
 | R12 | `pg_restore` con 3600 s fijos | ídem |
 | R13 | `diaria` sin `exigir_rto` | ídem |
 | R14 | `comprobar_rpo` sin `exigir_rto` | `test_la_comprobacion_del_rpo_falla_si_pasa_el_rto` |
+
+### Cuarto hallazgo P2 de Codex en #287 (en `f62bd38`, real y corregido)
+
+- `--diaria` aceptaba el «ready to accept connections» del servidor temporal de la inicialización cuando todavía no estaba la marca `init process complete` (`split(...)[-1]` devolvía el registro entero). `createdb` y `pg_restore` podían correr contra ese servidor, que el entrypoint apaga: una copia buena podía fallar a veces.
+- Arreglo: `postgres_inicializado(registro)` exige la marca de fin de inicialización y, después de ella, la de listo.
+- Prueba: `test_postgres_inicializado_exige_el_fin_de_la_inicializacion`. Control por mutación: con el predicado viejo, la prueba falla; restaurado, `cmp` idéntico. 35 de 35 en el compose `cem-h6b`; ruff limpio.
+- Staging no se repitió: la corrida 5 restauró la diaria bien (28,5 s) y el cambio solo endurece la espera. **SIN VERIFICAR** por ejecución en staging.
 
 ## Cómo se hizo
 

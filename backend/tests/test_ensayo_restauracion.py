@@ -384,3 +384,18 @@ def test_la_comprobacion_del_rpo_falla_si_pasa_el_rto(monkeypatch):
     with pytest.raises(ensayo.Fallo, match="más que el RTO"):
         e.comprobar_rpo({"antes": A_CONFIRMADA})
     assert e.resumen["rpo_comprobado"]["segundos"] == 14400.1
+
+
+def test_postgres_inicializado_exige_el_fin_de_la_inicializacion():
+    """Codex P2 en #287: el «ready» del servidor temporal no cuenta."""
+    temporal = (
+        "fixing permissions on existing directory /restaurar/datos ... ok\n"
+        "LOG:  database system is ready to accept connections\n"
+        "waiting for server to start.... done\n"
+    )
+    assert ensayo.postgres_inicializado(temporal) is False
+    apagando = temporal + "PostgreSQL init process complete; ready for start up.\n"
+    assert ensayo.postgres_inicializado(apagando) is False
+    definitivo = apagando + "LOG:  database system is ready to accept connections\n"
+    assert ensayo.postgres_inicializado(definitivo) is True
+    assert ensayo.postgres_inicializado("") is False

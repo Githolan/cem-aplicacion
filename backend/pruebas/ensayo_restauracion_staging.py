@@ -278,6 +278,22 @@ def restante(inicio: float, ahora: float, limite: float) -> float:
     return queda
 
 
+MARCA_INICIALIZADO = "init process complete"
+MARCA_LISTO = "database system is ready to accept connections"
+
+
+def postgres_inicializado(registro: str) -> bool:
+    """El servidor definitivo está listo: la marca de fin de inicialización y, después, la de listo.
+
+    El servidor temporal de la inicialización también escribe «ready to accept connections»;
+    aceptarlo haría correr `pg_restore` contra un servidor que el entrypoint va a apagar
+    (Codex P2 en #287).
+    """
+    if MARCA_INICIALIZADO not in registro:
+        return False
+    return MARCA_LISTO in registro.split(MARCA_INICIALIZADO, 1)[1]
+
+
 def exigir_rto(segundos: float, limite: float) -> None:
     if segundos > limite:
         raise Fallo(f"la restauración tardó {segundos:.1f} s, más que el RTO de {limite:.0f} s")
@@ -945,10 +961,8 @@ class Ensayo:
             " >/dev/null")  # fmt: skip
         arranque = tope_paso(inicio, time.monotonic(), ESPERA_PROMOCION_S,
                              ESPERA_ARRANQUE_DIARIA_S)  # fmt: skip
-        self.esperar("el PostgreSQL de la diaria", arranque, lambda: True if (
-            "database system is ready to accept connections" in self.vm.correr(
-                f"docker logs {contenedor} 2>&1").split("init process complete", 1)[-1])
-            else None)  # fmt: skip
+        self.esperar("el PostgreSQL de la diaria", arranque, lambda: True if postgres_inicializado(
+            self.vm.correr(f"docker logs {contenedor} 2>&1")) else None)  # fmt: skip
         self.vm.correr(
             f"docker exec {contenedor} sh -c 'createdb -U postgres verificacion && pg_restore"
             " --exit-on-error --no-owner --no-acl -U postgres -d verificacion /restaurar/cem.dump'",
