@@ -282,6 +282,22 @@ create function nucleo.informo_el_pago(c uuid, pago uuid, actor uuid)
                       and e.actor_persona_id = actor)
   $$;
 
+-- Quien informó el pago ayudando a otra persona, si fue así (el primer evento de informar con
+-- `en_representacion_de`). Aparte de la lectura: esa lectura devuelve el motivo de cada paso, y la
+-- función que lee la auditoría no debe nombrar claves que E31 vigila (`test_vinculo_0014`).
+create function nucleo.quien_ayudo_a_informar(c uuid, pago uuid)
+  returns uuid
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select e.actor_persona_id from auditoria.eventos e
+     where e.consorcio_id = c and e.entidad = 'pago_informado'
+       and e.entidad_id = pago and e.accion = '{ACCION_INFORMAR}'
+       and e.en_representacion_de is not null
+     order by e.secuencia
+     limit 1
+  $$;
+
 -- Quien decide (PI-5): la persona de la sesión, sin ayuda (la sesión se pide sin alcance), con un
 -- modo registrado y `{FACULTAD}` vigente. Devuelve el día del consorcio.
 create function nucleo.exigir_decidir_pago_informado(c uuid, actor uuid, sesion uuid,
@@ -507,12 +523,7 @@ create function nucleo.pagos_informados_lectura(actor uuid, origen_pedido text, 
                          join nucleo.persona hp on hp.id = h.registrado_por
                         where h.consorcio_id = c and h.pago_id = p.id), '[]'::jsonb),
              p.informado_por,
-             (select e.actor_persona_id from auditoria.eventos e
-               where e.consorcio_id = c and e.entidad = 'pago_informado'
-                 and e.entidad_id = p.id and e.accion = '{ACCION_INFORMAR}'
-                 and e.en_representacion_de is not null
-               order by e.secuencia
-               limit 1)
+             nucleo.quien_ayudo_a_informar(c, p.id)
         from nucleo.pago_informado p
         join nucleo.unidad u on u.consorcio_id = c and u.id = p.unidad_id
         join nucleo.persona pe on pe.id = p.informado_por
@@ -536,6 +547,7 @@ INTERNAS = (
     "nucleo.decidir_pago_informado(uuid, text, text, uuid, text, uuid)",
     "nucleo.exigir_decidir_pago_informado(uuid, uuid, uuid, text)",
     "nucleo.informo_el_pago(uuid, uuid, uuid)",
+    "nucleo.quien_ayudo_a_informar(uuid, uuid)",
 )
 """En el orden en que se pueden borrar: cada una antes de las que llama."""
 REEMPLAZADAS = (
