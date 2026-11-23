@@ -20,7 +20,9 @@ const EDIFICIO_AYUDA = "Torre de la Avenida Libertador 4500 SINTETICA";
 /** Lo que el servidor deja ayudando con «consultar» y «preparar»: ninguna acción decisoria. */
 const ACCIONES_AYUDANDO = ["consorcios.mis_acciones", "cuenta.ver_propia", "fiscalizacion.ver_resumen", "reclamos_liquidacion.ver", "reclamos_liquidacion.presentar"];
 
-type Estado = { otorgada: boolean; revocada: boolean };
+/** `revocarAlLeerLaCuenta`: la persona asistida revoca justo antes de que «Mis expensas» lea su
+ * cuenta (solo esa pantalla la lee), así la revocación llega en un momento fijo de la prueba. */
+type Estado = { otorgada: boolean; revocada: boolean; revocarAlLeerLaCuenta?: boolean };
 
 function vigilarErrores(pagina: Page): string[] {
   const errores: string[] = [];
@@ -45,6 +47,7 @@ async function simularApi(pagina: Page, estado: Estado): Promise<string[]> {
     const aC2 = camino.startsWith(`/api/v1/consorcios/${C2}/`);
     const admite = aC2 || camino === "/api/v1/me/consorcios";
     if ((aC2 && ayuda !== A1) || (ayuda !== undefined && !admite)) imprevistos.push(`encabezado ${ayuda ?? "-"} en ${pedido.method()} ${camino}`);
+    if (ayuda === A1 && estado.revocarAlLeerLaCuenta === true && camino === `/api/v1/consorcios/${C2}/mi-cuenta`) estado.revocada = true;
     if (ayuda === A1 && estado.revocada)
       return ruta.fulfill({ status: 403, json: { codigo: "ayuda_revocada", mensaje: "La persona asistida dejó de autorizar esta ayuda.", detalle: null, id_correlacion: "e2e" } });
     if (camino === "/api/v1/me/consorcios")
@@ -172,8 +175,16 @@ test.describe("ayuda por una persona autorizada (app 0127)", () => {
     await page.waitForURL((url) => url.pathname === "/");
     await expect(page.getByRole("region", { name: "Ayuda en curso" })).toBeVisible();
 
-    estado.revocada = true;
-    await page.goto("/mis-expensas");
+    // La revocación llega cuando «Mis expensas» lee la cuenta, y la propia aplicación recarga en el
+    // inicio al ver `ayuda_revocada` (`vigilarRevocacion`). Sin `goto`: con uno, la recarga de la
+    // aplicación lo abortaba (net::ERR_ABORTED en la CI). Se entra por el menú, dentro de la
+    // aplicación, y se espera la única carga completa que sigue: esa recarga.
+    estado.revocarAlLeerLaCuenta = true;
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.getByRole("navigation", { name: "Secciones" }).locator('a[href="/mis-expensas"]').click(),
+    ]);
+    expect(estado.revocada).toBe(true);
     await expect(page.getByText(`${PROPIA} dejó de autorizar la ayuda. Esta pestaña volvió a la cuenta propia.`)).toBeVisible();
     await expect(page.getByRole("region", { name: "Ayuda en curso" })).toHaveCount(0);
     await expect(page).toHaveURL((url) => url.pathname === "/");
