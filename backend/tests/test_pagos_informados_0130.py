@@ -517,8 +517,13 @@ def test_el_estado_solo_cambia_por_la_funcion_y_la_historia_no_se_toca(e, motor_
         )
     assert hint(error) == "pago_informado_decidido"
     with pytest.raises(IntegrityError) as error, motor_migrate.begin() as c:
-        c.execute(text(f"insert into {HISTORIA} (consorcio_id, pago_id, de, a, motivo,"
-                       " registrado_por) values (:c, :p, 'informado', 'anulado', 'M', :m)"), p)
+        c.execute(
+            text(
+                f"insert into {HISTORIA} (consorcio_id, pago_id, de, a, motivo,"
+                " registrado_por) values (:c, :p, 'informado', 'anulado', 'M', :m)"
+            ),
+            p,
+        )
     assert error.value.orig.diag.constraint_name == "pago_informado_estado_paso"
     # La historia escrita no se cambia ni se borra.
     assert paso(e, "mc", pago, "rechazo", MOTIVO).status_code == 200
