@@ -1678,7 +1678,8 @@
           "ayuda_a_si_misma",
           "ayuda_ya_vigente",
           "ayuda_ya_revocada",
-          "ayuda_revocada"
+          "ayuda_revocada",
+          "presupuesto_superpuesto"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -3914,6 +3915,116 @@
         ],
         "title": "DespuesDelActo",
         "type": "string"
+      },
+      "DesvioPresupuesto": {
+        "description": "Un rubro de un período del panel: lo presupuestado por el vigente que cubre el período, lo\nliquidado por la liquidación oficial y el desvío (`0128`). Nada se estima: sin presupuesto, o\nsin el rubro en la liquidación, el importe que falta y el desvío van nulos.",
+        "properties": {
+          "desvio": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Liquidado − presupuestado, con los dos importes.",
+            "title": "Desvio"
+          },
+          "liquidado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo: la liquidación no trae ese rubro.",
+            "title": "Liquidado"
+          },
+          "nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El de la liquidación; si no lo trae, el del presupuesto.",
+            "title": "Nombre"
+          },
+          "numero": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "porcentaje": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Desvío × 100 / presupuestado, a dos decimales; nulo si falta un importe o lo presupuestado es cero.",
+            "title": "Porcentaje"
+          },
+          "presupuestado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo: «sin presupuesto» para ese rubro.",
+            "title": "Presupuestado"
+          },
+          "presupuesto_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El presupuesto vigente que cubre el período; nulo si no hay ninguno.",
+            "title": "Presupuesto Id"
+          }
+        },
+        "required": [
+          "periodo",
+          "numero",
+          "nombre",
+          "presupuesto_id",
+          "presupuestado",
+          "liquidado",
+          "desvio",
+          "porcentaje"
+        ],
+        "title": "DesvioPresupuesto",
+        "type": "object"
       },
       "DiferenciaLeida": {
         "additionalProperties": true,
@@ -9037,13 +9148,22 @@
             "format": "date",
             "title": "Periodo",
             "type": "string"
+          },
+          "vencimientos": {
+            "description": "Los vencimientos que trae su dato oficial de los totales (`AAAA-MM-DD`, como los leyó la importación: 1.º y 2.º), en ese orden; vacía si no trae ninguno (`0128`).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vencimientos",
+            "type": "array"
           }
         },
         "required": [
           "id",
           "periodo",
           "diferencias",
-          "enlace_documentacion"
+          "enlace_documentacion",
+          "vencimientos"
         ],
         "title": "LiquidacionVigente",
         "type": "object"
@@ -9694,6 +9814,48 @@
           "elementos"
         ],
         "title": "ListaPedidosSalteo",
+        "type": "object"
+      },
+      "ListaPresupuestos": {
+        "description": "`GET …/presupuestos`: todas las versiones, la más nueva primero.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/Presupuesto"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "largo_aprobacion": {
+            "title": "Largo Aprobacion",
+            "type": "integer"
+          },
+          "largo_motivo": {
+            "title": "Largo Motivo",
+            "type": "integer"
+          },
+          "largo_nombre_rubro": {
+            "title": "Largo Nombre Rubro",
+            "type": "integer"
+          },
+          "maximo_rubros": {
+            "title": "Maximo Rubros",
+            "type": "integer"
+          },
+          "puede_registrar": {
+            "title": "Puede Registrar",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "elementos",
+          "puede_registrar",
+          "largo_aprobacion",
+          "largo_motivo",
+          "largo_nombre_rubro",
+          "maximo_rubros"
+        ],
+        "title": "ListaPresupuestos",
         "type": "object"
       },
       "ListaProveedores": {
@@ -12244,6 +12406,14 @@
             "title": "Comprobantes Faltantes",
             "type": "array"
           },
+          "desvios_presupuesto": {
+            "description": "Por período de esa misma ventana y por rubro, lo presupuestado frente a lo liquidado (`0128`): del período más viejo al más nuevo y, en cada uno, en el orden de la liquidación, con los rubros que solo están en el presupuesto al final.",
+            "items": {
+              "$ref": "#/components/schemas/DesvioPresupuesto"
+            },
+            "title": "Desvios Presupuesto",
+            "type": "array"
+          },
           "gasto_liquidado": {
             "description": "De los últimos `PERIODOS_DE_GASTO` períodos con liquidación oficial, del más viejo al más nuevo (`0120`).",
             "items": {
@@ -12300,7 +12470,8 @@
           "solicitudes_abiertas",
           "gasto_liquidado",
           "rubros_liquidados",
-          "liquidacion_vigente"
+          "liquidacion_vigente",
+          "desvios_presupuesto"
         ],
         "title": "PanelFiscalizacion",
         "type": "object"
@@ -12847,6 +13018,168 @@
           "archivo"
         ],
         "title": "PlanillaPadron",
+        "type": "object"
+      },
+      "Presupuesto": {
+        "description": "Una versión registrada: la vigente o una reemplazada.",
+        "properties": {
+          "aprobacion": {
+            "title": "Aprobacion",
+            "type": "string"
+          },
+          "desde": {
+            "format": "date",
+            "title": "Desde",
+            "type": "string"
+          },
+          "hasta": {
+            "format": "date",
+            "title": "Hasta",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reemplaza A"
+          },
+          "reemplazado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nula mientras está vigente.",
+            "title": "Reemplazado Por"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por_nombre": {
+            "title": "Registrado Por Nombre",
+            "type": "string"
+          },
+          "rubros": {
+            "description": "Por número de rubro.",
+            "items": {
+              "$ref": "#/components/schemas/RubroPresupuestado-Output"
+            },
+            "title": "Rubros",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "desde",
+          "hasta",
+          "aprobacion",
+          "rubros",
+          "reemplaza_a",
+          "motivo",
+          "reemplazado_por",
+          "registrado_por_nombre",
+          "registrado_en"
+        ],
+        "title": "Presupuesto",
+        "type": "object"
+      },
+      "PresupuestoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/presupuestos`: un presupuesto nuevo, o la versión que reemplaza a uno vigente.",
+        "properties": {
+          "aprobacion": {
+            "description": "De dónde sale, por ejemplo «Asamblea ordinaria del 12-03-2026».",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Aprobacion",
+            "type": "string"
+          },
+          "desde": {
+            "description": "El primer período que cubre (`AAAA-MM-01`).",
+            "format": "date",
+            "title": "Desde",
+            "type": "string"
+          },
+          "hasta": {
+            "description": "El último período que cubre, incluido (`AAAA-MM-01`).",
+            "format": "date",
+            "title": "Hasta",
+            "type": "string"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por qué se reemplaza; obligatorio con `reemplaza_a`.",
+            "title": "Motivo"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El presupuesto vigente que esta versión reemplaza.",
+            "title": "Reemplaza A"
+          },
+          "rubros": {
+            "items": {
+              "$ref": "#/components/schemas/RubroPresupuestado-Input"
+            },
+            "maxItems": 60,
+            "minItems": 1,
+            "title": "Rubros",
+            "type": "array"
+          }
+        },
+        "required": [
+          "desde",
+          "hasta",
+          "aprobacion",
+          "rubros"
+        ],
+        "title": "PresupuestoNuevo",
         "type": "object"
       },
       "PresupuestoReparacion": {
@@ -15245,6 +15578,80 @@
           "total"
         ],
         "title": "RubroLiquidado",
+        "type": "object"
+      },
+      "RubroPresupuestado-Input": {
+        "additionalProperties": false,
+        "description": "El importe mensual aprobado para un rubro, por su número en la liquidación.",
+        "properties": {
+          "importe": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,16}|(?=[\\d.]{1,19}0*$)\\d{0,16}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "description": "Por mes, en pesos.",
+            "title": "Importe"
+          },
+          "nombre": {
+            "description": "El nombre con que se aprobó.",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Nombre",
+            "type": "string"
+          },
+          "numero": {
+            "description": "El número del rubro en la liquidación importada.",
+            "minimum": 1.0,
+            "title": "Numero",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "numero",
+          "nombre",
+          "importe"
+        ],
+        "title": "RubroPresupuestado",
+        "type": "object"
+      },
+      "RubroPresupuestado-Output": {
+        "additionalProperties": false,
+        "description": "El importe mensual aprobado para un rubro, por su número en la liquidación.",
+        "properties": {
+          "importe": {
+            "description": "Por mes, en pesos.",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,16}|(?=[\\d.]{1,19}0*$)\\d{0,16}\\.\\d{0,2}0*$)",
+            "title": "Importe",
+            "type": "string"
+          },
+          "nombre": {
+            "description": "El nombre con que se aprobó.",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Nombre",
+            "type": "string"
+          },
+          "numero": {
+            "description": "El número del rubro en la liquidación importada.",
+            "minimum": 1.0,
+            "title": "Numero",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "numero",
+          "nombre",
+          "importe"
+        ],
+        "title": "RubroPresupuestado",
         "type": "object"
       },
       "RubrosLegalesProveedor": {
@@ -27772,6 +28179,114 @@
         "summary": "Los pedidos de salteo del consorcio, con su estado: para quien saltea (el Consejo) y para quien prepara las órdenes",
         "tags": [
           "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/presupuestos": {
+      "get": {
+        "operationId": "listar_presupuestos_api_v1_consorcios__consorcio_id__presupuestos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPresupuestos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `fiscalizacion.ver_panel` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los presupuestos registrados, la versión más nueva primero",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "registrar_presupuesto_api_v1_consorcios__consorcio_id__presupuestos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresupuestoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presupuesto"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, fuera de Modo Consejo o ayudando a otra persona."
+          },
+          "409": {
+            "description": "Otro vigente cubre esos períodos (`presupuesto_superpuesto`) o el que se reemplaza ya no está vigente (`reemplazo_invalido`)."
+          },
+          "422": {
+            "description": "La aprobación o el motivo llevan una cuenta (`texto_con_cuenta`)."
+          }
+        },
+        "summary": "Registrar el presupuesto que aprobó la asamblea, o la versión que reemplaza a uno vigente, con su motivo",
+        "tags": [
+          "consorcios"
         ]
       }
     },

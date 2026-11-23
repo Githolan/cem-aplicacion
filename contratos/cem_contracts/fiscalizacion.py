@@ -30,6 +30,7 @@ from cem_contracts.documentos import EstadoVersion, VersionCargada
 from cem_contracts.egresos import EstadoOrdenPago, Version
 from cem_contracts.importacion_liquidacion import TotalDelGrupo
 from cem_contracts.perfil_normativo import EnlaceDocumentacion
+from cem_contracts.presupuesto import DesvioPresupuesto
 
 
 class OrdenesPorEstado(BaseModel):
@@ -123,6 +124,10 @@ class LiquidacionVigente(BaseModel):
         description="Lo que pide el perfil normativo del consorcio sobre el enlace a la"
         " documentación y lo que encontró la lectura (RF47, `0125`); nulo si no lo exige."
     )
+    vencimientos: list[str] = Field(
+        description="Los vencimientos que trae su dato oficial de los totales (`AAAA-MM-DD`, como"
+        " los leyó la importación: 1.º y 2.º), en ese orden; vacía si no trae ninguno (`0128`)."
+    )
 
 
 class PanelFiscalizacion(BaseModel):
@@ -153,6 +158,11 @@ class PanelFiscalizacion(BaseModel):
     )
     liquidacion_vigente: LiquidacionVigente | None = Field(
         description="Nula si todavía no hay ninguna liquidación oficial (`0120`)."
+    )
+    desvios_presupuesto: list[DesvioPresupuesto] = Field(
+        description="Por período de esa misma ventana y por rubro, lo presupuestado frente a lo"
+        " liquidado (`0128`): del período más viejo al más nuevo y, en cada uno, en el orden de"
+        " la liquidación, con los rubros que solo están en el presupuesto al final."
     )
 
 

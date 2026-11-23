@@ -1,0 +1,18 @@
+{
+  "politicas": [
+    {
+      "accion": "presupuesto.registrar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "presupuesto.registrar",
+      "modos": ["consejo"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF15 (controlar presupuesto) y RF48 (desvíos presupuestarios en el panel); documento 08, §2 («toda desviación presupuestaria»); diseño P0 S9 y decisión por recomendación del 22-11-2026: el Consejo o la administración registran el presupuesto que aprobó la asamblea, con el importe mensual de cada rubro; una corrección es otra versión con su motivo. Solo Modo Consejo en este corte (lo liquidado sale de las liquidaciones importadas). Sin ayuda (RF53): es decisorio"
+    }
+  ]
+}

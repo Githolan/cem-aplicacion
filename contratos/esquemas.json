@@ -1111,7 +1111,8 @@
           "ayuda_a_si_misma",
           "ayuda_ya_vigente",
           "ayuda_ya_revocada",
-          "ayuda_revocada"
+          "ayuda_revocada",
+          "presupuesto_superpuesto"
         ],
         "title": "CodigoError",
         "type": "string"

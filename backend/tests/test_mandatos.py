@@ -51,6 +51,7 @@ PAQUETE_CONSEJO = sorted(
         "mandatos.ver",
         "padron.confirmar_vinculo",  # `0110`, pregunta 7 del propietario
         "padron.ver",
+        "presupuesto.registrar",  # `0128`, RF15
         "reclamos.atender",  # `0123`, RF34
         "reparaciones.gestionar",  # `0124`, RF19
         "solicitud_formal.firmar",

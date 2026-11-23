@@ -157,7 +157,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     consorcio con perfil normativo o una búsqueda de enlaces, que citan consorcios e importaciones:
     se borran también antes que todo (el perfil, que es de la jurisdicción, lo borra su downgrade).
     Y con 0127, que se niega a bajar si hay autorizaciones de ayuda o eventos hechos ayudando
-    (`vaciar_ayudas`).
+    (`vaciar_ayudas`). Y con 0128, que se niega a bajar si hay presupuestos, que citan personas:
+    se borran también antes que todo, los rubros primero.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -190,6 +191,16 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 # Las reparaciones (0124) citan importaciones, documentos, decisiones, unidades y
                 # personas, solo se agregan y niegan su downgrade: van primero, de la última tabla
                 # a la primera.
+                # Los presupuestos (0128) citan personas, solo se agregan y niegan su downgrade:
+                # van primero, los rubros antes que la versión que citan.
+                " if to_regclass('nucleo.presupuesto') is not null then"
+                "   alter table nucleo.presupuesto_rubro disable trigger user;"
+                "   alter table nucleo.presupuesto disable trigger user;"
+                "   delete from nucleo.presupuesto_rubro;"
+                "   delete from nucleo.presupuesto;"
+                "   alter table nucleo.presupuesto_rubro enable trigger user;"
+                "   alter table nucleo.presupuesto enable trigger user;"
+                " end if;"
                 " if to_regclass('nucleo.reparacion') is not null then"
                 "   alter table nucleo.reparacion_estado disable trigger user;"
                 "   alter table nucleo.reparacion_gestion disable trigger user;"

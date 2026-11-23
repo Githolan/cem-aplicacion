@@ -664,3 +664,14 @@ RF53,invitaciones.crear,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas|p
 RF53,proveedores.autorizar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,autorizar a ver proveedores (permisos): nunca quien ayuda
 RF53,documentos.ver,Pc,C,,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,los documentos no están en este alcance
 RF53,reparaciones.pedir,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,pedir una reparación no está en este alcance
+RF15,presupuesto.registrar,MC,C,,vigente,si,,200,concedido_por_facultad,MC registra el presupuesto aprobado en Modo Consejo (decisión del 22-11-2026)
+RF15,presupuesto.registrar,AD,C,,vigente,si,,200,concedido_por_facultad,la administración registra el presupuesto en Modo Consejo
+RF15,presupuesto.registrar,MC,AA,,vigente,si,,403,modo_no_admitido,solo Modo Consejo en este corte
+RF15,presupuesto.registrar,AD,AG,,vigente,si,,403,modo_no_admitido,solo Modo Consejo en este corte
+RF15,presupuesto.registrar,MC[fiscalizacion.ver_panel],C,,vigente,si,,403,sin_concesion,el acta dejó el mandato sin presupuesto.registrar
+RF15,presupuesto.registrar,Pc,C,,sin_mandato,si,,403,sin_concesion,P confirmado no registra el presupuesto
+RF15,presupuesto.registrar,Ic,C,,sin_mandato,si,,403,sin_concesion,I confirmado no registra el presupuesto
+RF15,presupuesto.registrar,AE,C,,vigente,si,,403,sin_concesion,AE no registra el presupuesto
+RF15,presupuesto.registrar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF15,presupuesto.registrar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
+RF53,presupuesto.registrar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,registrar el presupuesto (decisorio): nunca quien ayuda

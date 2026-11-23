@@ -429,6 +429,9 @@ class CodigoError(StrEnum):
     """Quien ayuda pide con una autorización que la persona asistida revocó, o que dejó de valer
     porque ya no es propietaria confirmada: la pantalla sale sola de la ayuda y lo dice (`0127`).
     Solo lo recibe quien tenía la autorización; a cualquier otra persona, 404."""
+    PRESUPUESTO_SUPERPUESTO = "presupuesto_superpuesto"
+    """Otro presupuesto vigente ya cubre alguno de esos períodos: se corrige reemplazándolo, con
+    su motivo (`0128`)."""
 
 
 class Error(BaseModel):

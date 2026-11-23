@@ -158,7 +158,8 @@ def test_rf47_la_oficial_sin_enlace_se_senala_en_la_lista_el_detalle_y_el_panel(
     assert en_la_lista(e) == {con: senal("encontrado"), sin: None}
     assert (del_detalle(e, con), del_detalle(e, sin)) == (senal("encontrado"), None)
     assert del_panel(e) == {"id": con, "periodo": "2026-09-01", "diferencias": 0,
-                            "enlace_documentacion": senal("encontrado")}  # fmt: skip
+                            "enlace_documentacion": senal("encontrado"),
+                            "vencimientos": ["2026-10-13", "2026-10-23"]}  # fmt: skip
     # Octubre sin enlace pasa a ser la vigente del panel; septiembre sigue con el suyo.
     octubre = oficial(e, motor_app, pdf_de(de_octubre()))
     assert del_panel(e)["id"] == octubre and del_panel(e)["periodo"] == OCTUBRE

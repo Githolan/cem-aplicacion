@@ -19,6 +19,7 @@ from app.consorcios.liquidaciones import router as liquidaciones
 from app.consorcios.mandatos import router as mandatos
 from app.consorcios.mandatos_invitaciones import router as mandatos_invitaciones
 from app.consorcios.padron import router as padron
+from app.consorcios.presupuesto import router as presupuesto
 from app.consorcios.reclamos import router as reclamos
 from app.consorcios.reparaciones import router as reparaciones
 from app.consorcios.router import router as consorcios
@@ -103,6 +104,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(importacion_liquidacion)
     app.include_router(liquidacion_oficial)
     app.include_router(fiscalizacion)
+    app.include_router(presupuesto)
     app.include_router(comunicados)
     app.include_router(reclamos)
     app.include_router(reparaciones)

@@ -337,6 +337,11 @@ class RecalculoLiquidacion(BaseModel):
 
 # --- La liquidación oficial y quién la lee (`0119`; diseño H5 §6, D3-A) -----------------------
 
+LARGO_NOMBRE_RUBRO = 200
+"""El largo máximo del nombre de un rubro: el que acepta la lectura de la liquidación con IA
+(`app.liquidacion.lectura_ia`) y el del presupuesto (`cem_contracts.presupuesto`, `0128`), para que
+todo rubro leído pueda llevar su importe presupuestado con el mismo nombre (Codex P2 en #285)."""
+
 PERIODOS_DE_GASTO = 12
 """Cuántos períodos con liquidación oficial muestran el gasto por período del panel y del resumen
 (`0120`): los últimos que la tienen."""
