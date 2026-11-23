@@ -711,6 +711,11 @@ class Ensayo:
         (encontrado, objeto, objetos), _ = self.esperar(
             "el WAL de A en el bucket",
             restante(inicio_rpo, time.monotonic(), ESPERA_RPO_S), subido)  # fmt: skip
+        # La copia base verificada que había en ese momento, congelada junto con el inventario de
+        # WAL (Codex P2 en #287): una base que empezó antes de A pero se verificó y subió después
+        # no estaba disponible al RPO. Se toma antes de leer el reloj: lo medido sigue siendo una
+        # cota superior.
+        base_momento, base_desde = self.base_anterior(a["antes"])
         rpo = time.monotonic() - inicio_rpo
         subido_en = datetime.fromisoformat(objeto["modificado"])
         self.rpo = {
@@ -718,6 +723,7 @@ class Ensayo:
             "segmento_a": seg_a,
             "lsn_a": lsn_a,
             "claves_wal": [o["clave"] for o in objetos if o["clave"].startswith("wal/")],
+            "base": {"momento": base_momento, "desde": base_desde},
         }
         self.resumen["rpo_observado_s"] = round(rpo, 1)
         # Informativo, no se compara con el umbral: `LastModified` es el reloj del bucket y A el de
@@ -837,7 +843,7 @@ class Ensayo:
         RPO (la copia base, los segmentos completos de entonces y el parcial encontrado), y exige
         A. Es la prueba de que el artefacto contado tiene A (hallazgo P2 de Codex en #287); el
         orden «receptor sincronizado antes de la foto» es solo la condición para elegirlo."""
-        momento, desde = self.base_anterior(a["antes"])
+        momento, desde = self.rpo["base"]["momento"], self.rpo["base"]["desde"]
         wal = artefactos_al_rpo(self.rpo["claves_wal"], desde, self.rpo["clave"])
         inicio = time.monotonic()
         contenedor, _, bajado = self.restaurar_con("rpo", momento, wal, None, inicio,

@@ -190,6 +190,9 @@ PARCIAL_SIN_A = f"wal-parcial/{SEG}-20261123T042302Z.partial.gz.age"
 PARCIAL_CON_A = f"wal-parcial/{SEG}-20261123T042502Z.partial.gz.age"
 
 
+BASE_AL_RPO = "20261117T053929Z"
+BASE_POSTERIOR = "20261123T042000Z"  # empezó antes de A, verificada y subida después del RPO
+
 VISTO_A_LOS = timedelta(seconds=147)  # el parcial con A, visto a las 04:25:10
 
 
@@ -232,6 +235,7 @@ def ensayo_falso(monkeypatch) -> ensayo.Ensayo:
     monkeypatch.setattr(e, "marca", marca)
     monkeypatch.setattr(e, "real", real)
     monkeypatch.setattr(e, "listar", listar)
+    monkeypatch.setattr(e, "base_anterior", lambda antes: (BASE_AL_RPO, SEG))
     fijar_ahora(monkeypatch, A_CONFIRMADA + VISTO_A_LOS)
     return e
 
@@ -241,6 +245,7 @@ def test_las_marcas_cuentan_el_parcial_tomado_con_a_sincronizada(monkeypatch, ca
     e.marcas()
     assert e.rpo["clave"] == PARCIAL_CON_A
     assert e.rpo["lsn_a"] == "0/38000100"
+    assert e.rpo["base"] == {"momento": BASE_AL_RPO, "desde": SEG}
     assert e.resumen["rpo_subido_s"] == 140.0  # 04:25:03 − 04:22:43
     # Control: el parcial de las 04:23:02, posterior a A pero anterior a la sincronización, estaba.
     assert PARCIAL_SIN_A in [o["clave"] for o in e.listar("wal-parcial/")]
@@ -401,8 +406,8 @@ def test_la_diaria_comparte_un_plazo_y_falla_si_pasa_el_rto(monkeypatch):
 def test_la_comprobacion_del_rpo_falla_si_pasa_el_rto(monkeypatch):
     e = ensayo.Ensayo(VmFalsa({}), None, None)
     e.resumen["consorcio"] = "c"
-    e.rpo = {"claves_wal": [f"wal/{SEG}.gz.age"], "clave": f"wal/{SEG}.gz.age"}
-    monkeypatch.setattr(e, "base_anterior", lambda antes: ("20261117T053929Z", SEG))
+    e.rpo = {"claves_wal": [f"wal/{SEG}.gz.age"], "clave": f"wal/{SEG}.gz.age",
+             "base": {"momento": BASE_AL_RPO, "desde": SEG}}  # fmt: skip
     monkeypatch.setattr(e, "restaurar_con", lambda *a: ("c", "", 10))
     reloj = iter([0.0, 14400.1])
     monkeypatch.setattr(ensayo.time, "monotonic", lambda: next(reloj))
@@ -424,3 +429,22 @@ def test_postgres_inicializado_exige_el_fin_de_la_inicializacion():
     definitivo = apagando + "LOG:  database system is ready to accept connections\n"
     assert ensayo.postgres_inicializado(definitivo) is True
     assert ensayo.postgres_inicializado("") is False
+
+
+def test_la_comprobacion_del_rpo_usa_la_base_congelada_al_rpo(monkeypatch):
+    """Codex P2 en #287: al final puede haber una base más nueva (empezó antes de A, se verificó
+    después del RPO). La comprobación usa la que estaba al RPO, no busca otra."""
+    e = ensayo.Ensayo(VmFalsa({}), None, None)
+    e.resumen["consorcio"] = "c"
+    e.rpo = {"claves_wal": [f"wal/{SEG}.gz.age"], "clave": f"wal/{SEG}.gz.age",
+             "base": {"momento": BASE_AL_RPO, "desde": SEG}}  # fmt: skip
+    monkeypatch.setattr(e, "base_anterior", lambda antes: (BASE_POSTERIOR, SEG))
+    usadas = []
+
+    def restaurar_con(que, momento, *resto):
+        usadas.append(momento)
+        return "c", "", 10
+
+    monkeypatch.setattr(e, "restaurar_con", restaurar_con)
+    e.comprobar_rpo({"antes": A_CONFIRMADA})
+    assert usadas == [BASE_AL_RPO]
