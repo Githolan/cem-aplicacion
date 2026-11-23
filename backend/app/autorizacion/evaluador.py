@@ -27,6 +27,14 @@ verificado hace poco (`segundo_factor_reciente`) y la identidad humana verificad
 La sesión de menos de 12 horas salió el 09-11-2026 (decisión del propietario, comentario 28 de la
 revisión de pantallas): la sesión vence a los 45 días sin uso.
 
+**Ayuda por una persona autorizada (RF53, `0127`).** Con `ContextoAutorizacion.ayuda`, quien pide es
+otra persona que ayuda a la del contexto (la asistida) con una autorización vigente. Se niega toda
+acción cuya política no admite ayuda (`ayuda_no_admitida`: los actos decisorios, que ninguna admite)
+y toda la que admite un alcance que la autorización no da (`fuera_del_alcance_de_ayuda`). Va
+después del ámbito y antes de la concesión, así que niega aunque la persona asistida tenga la
+facultad. Ayudando, solo conceden el vínculo y el ámbito: nunca un mandato, una facultad, la
+configuración del consorcio ni una autorización del Consejo, que son de la persona y no se prestan.
+
 **`alcanza` (documento 13, §10.5)** responde otra pregunta, sin entidad: si la interfaz le muestra
 la acción a la persona. Es solo para mostrar: no concede nada y toda ruta decide con `evaluar`.
 
@@ -43,6 +51,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
+from cem_contracts.ayuda import AlcanceAyuda
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 from cem_contracts.politicas import (
     CodigoSeparacion,
@@ -77,6 +86,8 @@ class Motivo(StrEnum):
     SIN_ADMINISTRADOR_VIGENTE = "sin_administrador_vigente"
     IDENTIDAD_NO_VERIFICADA = "identidad_no_verificada"
     REQUIERE_SEGUNDO_FACTOR_RECIENTE = "requiere_segundo_factor_reciente"
+    AYUDA_NO_ADMITIDA = "ayuda_no_admitida"
+    FUERA_DEL_ALCANCE_DE_AYUDA = "fuera_del_alcance_de_ayuda"
 
 
 HUMANAS = frozenset(CodigoSeparacion) - {
@@ -163,6 +174,9 @@ class ContextoAutorizacion:
     """Las acciones que el Consejo le autorizó a esta persona y que cuentan hoy
     (`nucleo.acciones_autorizadas`, `0105`). Solo las concede una política con
     `concede_por_configuracion`."""
+    ayuda: frozenset[AlcanceAyuda] | None = None
+    """Si quien pide ayuda a la persona del contexto (RF53): los alcances de su autorización
+    vigente, con `orientarse`. None: la persona actúa por sí misma."""
 
 
 @dataclass(frozen=True)
@@ -233,6 +247,10 @@ def evaluar(
     politica = politicas.get(accion)
     if politica is None:
         return _niega(Motivo.ACCION_NO_DECLARADA)
+    # 2b. Ayuda (RF53): antes de la concesión, para que niegue aunque la asistida pueda.
+    motivo_ayuda = _filtrar_ayuda(politica, contexto)
+    if motivo_ayuda is not None:
+        return _niega(motivo_ayuda)
     # 3. Concesión.
     concesion = _concesion(politica, contexto, entidad, mandatos_validos)
     if not concesion.permitido:
@@ -273,14 +291,30 @@ def alcanza(
     if not contexto.vinculos and not mandatos_validos:
         return False
     politica = politicas.get(accion)
-    if politica is None or not _concesion_posible(politica, contexto, mandatos_validos):
+    if politica is None or _filtrar_ayuda(politica, contexto) is not None:
+        return False
+    if not _concesion_posible(politica, contexto, mandatos_validos):
         return False
     if _filtrar_modo(politica, contexto) is not None:
         return False
     return not politica.economica or contexto.persona_id in contexto.identidades
 
 
+def _filtrar_ayuda(politica: Politica, contexto: ContextoAutorizacion) -> str | None:
+    """RF53: quien ayuda solo hace lo que la política admite y la autorización alcanza."""
+    if contexto.ayuda is None:
+        return None
+    if politica.ayuda is None:
+        return Motivo.AYUDA_NO_ADMITIDA
+    if politica.ayuda not in contexto.ayuda:
+        return Motivo.FUERA_DEL_ALCANCE_DE_AYUDA
+    return None
+
+
 def _mandatos_validos(contexto: ContextoAutorizacion) -> set[UUID]:
+    """Ayudando no cuenta ningún mandato (RF53): las facultades son de la persona."""
+    if contexto.ayuda is not None:
+        return set()
     return {
         m.id
         for m in contexto.mandatos
@@ -294,7 +328,7 @@ def _por_configuracion(
     """El Consejo le autorizó la acción a la persona (`0105`), o algún rol de la persona hoy está
     entre los que la configuración lista para la acción: el tipo de un mandato válido de este
     consorcio o el tipo de un vínculo vigente."""
-    if not politica.concede_por_configuracion:
+    if not politica.concede_por_configuracion or contexto.ayuda is not None:
         return False
     if politica.accion in contexto.autorizaciones:
         return True

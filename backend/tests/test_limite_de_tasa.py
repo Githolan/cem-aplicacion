@@ -10,9 +10,11 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from cem_contracts.ayuda import ENCABEZADO_AYUDA
 from fastapi.testclient import TestClient
 
 from app import llm
+from app.ayuda import AyudaDePeticion
 from app.config import Config
 from app.limite import LIMITE_API, LIMITE_AUTENTICACION_IP, LimiteDeTasa
 from app.main import crear_app
@@ -31,9 +33,34 @@ def app_con(redis_url: str):
 
 def test_el_limite_es_un_middleware_de_toda_la_app():
     # La ausencia del middleware es exactamente el defecto que se midió en AnalytikCapital.
+    # La lista completa y en orden, de afuera hacia adentro: el registro por fuera de todo (anota
+    # también los 429 y 503 del límite), el límite de tasa enseguida, antes que cualquier otra cosa
+    # de la petición, y la ayuda (RF53) por dentro, así un pedido con `X-CEM-Ayuda` se limita antes
+    # de que se lea la autorización.
     app = app_con("memory://")
-    assert [m.cls for m in app.user_middleware] == [RegistroDePeticiones, LimiteDeTasa]
+    assert [m.cls for m in app.user_middleware] == [
+        RegistroDePeticiones,
+        LimiteDeTasa,
+        AyudaDePeticion,
+    ]
     assert str(LIMITE_API) == "300 per 1 minute"
+
+
+def test_un_pedido_con_el_encabezado_de_la_ayuda_tambien_se_limita():
+    # Con `X-CEM-Ayuda` el pedido gasta el mismo cupo y recibe el 429 del límite, no la respuesta
+    # de la ayuda. Control: antes de agotar el cupo, la ruta rechaza el encabezado (no lo admite).
+    cupo = LIMITE_AUTENTICACION_IP.amount
+    ayuda = {ENCABEZADO_AYUDA: str(uuid4())}
+    with TestClient(app_con("memory://"), client=("203.0.113.40", 40000)) as c:
+        primera = c.get("/api/v1/auth/sesiones", headers=ayuda)
+        assert (
+            primera.status_code in (401, 403)
+            and primera.json()["codigo"] != "demasiadas_peticiones"
+        )
+        respuestas = [c.get("/api/v1/auth/sesiones", headers=ayuda) for _ in range(cupo)]
+        ultima = respuestas[-1]
+        assert ultima.status_code == 429
+        assert ultima.json()["codigo"] == "demasiadas_peticiones"
 
 
 def test_preguntar_si_hay_sesion_no_consume_el_cupo_de_autenticacion():

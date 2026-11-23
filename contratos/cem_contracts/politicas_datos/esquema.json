@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "AlcanceAyuda": {
+      "description": "Lo que una autorización deja hacer en nombre de la persona asistida (§1.7, «puede»).",
+      "enum": [
+        "orientarse",
+        "consultar_expensas",
+        "preparar_reclamos"
+      ],
+      "title": "AlcanceAyuda",
+      "type": "string"
+    },
     "CodigoSeparacion": {
       "description": "Incompatibilidades de la separación de funciones (R8, A4 y A5).\n\nSe comparan siempre por `persona_id`; si una identidad no se puede determinar, se niega.\nEl código es también el motivo interno de la negación.",
       "enum": [
@@ -63,6 +73,17 @@
           "pattern": "^[a-z_]+\\.[a-z_]+$",
           "title": "Accion",
           "type": "string"
+        },
+        "ayuda": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AlcanceAyuda"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "concede_por_ambito": {
           "default": false,

@@ -156,6 +156,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     decisiones: se borran también antes que todo. Y con 0125, que se niega a bajar si hay un
     consorcio con perfil normativo o una búsqueda de enlaces, que citan consorcios e importaciones:
     se borran también antes que todo (el perfil, que es de la jurisdicción, lo borra su downgrade).
+    Y con 0127, que se niega a bajar si hay autorizaciones de ayuda o eventos hechos ayudando
+    (`vaciar_ayudas`).
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -168,6 +170,13 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
                 " end if;"
+                " end $$"
+            )
+        )
+        vaciar_ayudas(c)
+        c.execute(
+            text(
+                "do $$ begin"
                 # El perfil vinculado y las búsquedas de enlaces (0125) citan consorcios e
                 # importaciones, solo se agregan y niegan su downgrade: van primero.
                 " if to_regclass('nucleo.consorcio_perfil_normativo') is not null then"
@@ -567,6 +576,51 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
         )
     faltan = sin_procedencia(motor_migrate)
     assert not faltan, f"vínculos sin procedencia antes de bajar (E58): {faltan}"
+
+
+AYUDA_SIN_EVENTOS = """
+do $$
+declare
+  c uuid;
+  e record;
+  previo text;
+  h text;
+begin
+  if to_regclass('nucleo.autorizacion_ayuda') is null then
+    return;
+  end if;
+  for c in select distinct x.consorcio_id from auditoria.eventos x
+            where x.autorizacion_id is not null loop
+    delete from auditoria.eventos x where x.consorcio_id = c and x.autorizacion_id is not null;
+    previo := '';
+    for e in select * from auditoria.eventos x where x.consorcio_id = c order by x.secuencia loop
+      h := encode(sha256(convert_to(concat_ws('|',
+        previo, e.consorcio_id, e.id, e.secuencia,
+        to_char(e.creado_en at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'),
+        e.actor_persona_id, e.origen, e.accion, e.entidad, e.entidad_id,
+        e.antes, e.despues, e.motivo, e.ip, e.en_representacion_de, e.autorizacion_id),
+        'UTF8')), 'hex');
+      update auditoria.eventos x set hash_previo = previo, hash = h
+       where x.consorcio_id = e.consorcio_id and x.id = e.id and x.creado_en = e.creado_en;
+      previo := h;
+    end loop;
+  end loop;
+  alter table nucleo.autorizacion_ayuda_revocacion disable trigger user;
+  alter table nucleo.autorizacion_ayuda disable trigger user;
+  delete from nucleo.autorizacion_ayuda_revocacion;
+  delete from nucleo.autorizacion_ayuda;
+  alter table nucleo.autorizacion_ayuda_revocacion enable trigger user;
+  alter table nucleo.autorizacion_ayuda enable trigger user;
+end $$
+"""
+
+
+def vaciar_ayudas(c) -> None:
+    """La ayuda (0127) niega su downgrade si hay autorizaciones o eventos hechos ayudando. En la
+    base **descartable**: se borran esos eventos, se vuelve a encadenar el resto de la cadena de
+    cada consorcio afectado (con la misma fórmula de `auditoria.encadenar`, así las pruebas de la
+    cadena siguen pasando) y se borran las autorizaciones."""
+    c.exec_driver_sql(AYUDA_SIN_EVENTOS)
 
 
 def dar_procedencia_sintetica(motor_migrate: Engine) -> None:

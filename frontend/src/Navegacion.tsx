@@ -20,6 +20,7 @@ import { RUTA_MIS_EXPENSAS, TITULO_MIS_EXPENSAS } from "./fiscalizacion/MisExpen
 import { RUTA_RECLAMOS, TITULO_RECLAMOS } from "./fiscalizacion/Reclamos";
 import { RUTA_REPARACIONES, TITULO_REPARACIONES } from "./reparaciones/textos";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
+import { RUTA_AYUDA } from "./ayuda/estadoAyuda";
 import { useSolicitudesDirigidas } from "./fiscalizacion/solicitudesDirigidas";
 import { cumpleEnAlguno, ofreceEnAlguno, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
 import { useSesionConNombre } from "./sesion";
@@ -137,6 +138,7 @@ const RUTAS_CON_NAVEGACION: readonly string[] = [
   RUTA_COTEJO,
   `${RUTA_PAGOS}/:orden`,
   RUTA_POR_ACLARAR,
+  RUTA_AYUDA,
 ];
 
 /** Adónde lleva la entrada para esta persona; null si no se le ofrece. La misma regla en el menú y

@@ -11,6 +11,10 @@ para que el backend las encuentre instalado; el frontend lee los mismos archivos
   `false`) o por una facultad exacta (`facultad`) cuyo recurso alcance (`recurso`).
 - **Filtros, que solo niegan:** `modos` y `sin_modo` (R6), `separacion` (R8), `respaldo` (R9),
   `destinatario_unico` (A14) y `economica` (R10: se niega hasta 2b-6).
+- **`ayuda`** (RF53, `0127`): si quien ayuda a otra persona puede hacer la acción en su nombre,
+  y con qué alcance. Sin este campo, no: el evaluador la niega a quien ayuda aunque la persona
+  asistida la tenga. Solo la admite una acción que concede por vínculo o por ámbito, no económica,
+  sin separación, sin respaldo y sin destinatario único: nunca un acto decisorio (§1.7).
 - **`fuente_normativa`** (D8): obligatoria y no vacía. No concede ni niega; la revisa el asesor
   antes del piloto (G5).
 
@@ -26,6 +30,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints, model_validator
 
+from cem_contracts.ayuda import AlcanceAyuda
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 
 DIRECTORIO = Path(__file__).resolve().parent / "politicas_datos"
@@ -132,6 +137,8 @@ class Politica(_Estricto):
     economica: StrictBool
     destinatario_unico: StrictBool = False
     """La transición necesita al único administrador vigente (A14)."""
+    ayuda: AlcanceAyuda | None = None
+    """El alcance de una autorización de ayuda que admite la acción (RF53); None: no la admite."""
     fuente_normativa: TextoNoVacio
 
     @model_validator(mode="after")
@@ -142,6 +149,17 @@ class Politica(_Estricto):
             raise ValueError("códigos de separación repetidos")
         if self.recurso is not None and self.facultad is None:
             raise ValueError("`recurso` solo tiene sentido con `facultad`")
+        if self.ayuda is not None and (
+            self.economica
+            or self.separacion
+            or self.respaldo is not None
+            or self.destinatario_unico
+            or (self.concede_por_vinculo is None and not self.concede_por_ambito)
+        ):
+            raise ValueError(
+                "`ayuda` solo en una acción por vínculo o por ámbito, no económica, sin"
+                " separación, respaldo ni destinatario único (RF53, §1.7)"
+            )
         return self
 
 

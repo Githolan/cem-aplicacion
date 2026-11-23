@@ -305,6 +305,16 @@
         "title": "AdjuntoSubido",
         "type": "object"
       },
+      "AlcanceAyuda": {
+        "description": "Lo que una autorización deja hacer en nombre de la persona asistida (§1.7, «puede»).",
+        "enum": [
+          "orientarse",
+          "consultar_expensas",
+          "preparar_reclamos"
+        ],
+        "title": "AlcanceAyuda",
+        "type": "string"
+      },
       "AltaTotp": {
         "description": "Respuesta de `POST /api/v1/auth/totp/alta`: el secreto para cargar en la aplicación.\n\nSe muestra una sola vez y queda pendiente hasta que la persona lo confirme con un código.",
         "properties": {
@@ -598,6 +608,129 @@
           "proveedor_admite_orden"
         ],
         "title": "AvisoRechazo",
+        "type": "object"
+      },
+      "AyudaNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/ayudas`: a quién y con qué alcance.",
+        "properties": {
+          "alcances": {
+            "description": "Lo que puede hacer en nombre de quien autoriza. `preparar_reclamos` pide también `consultar_expensas`.",
+            "items": {
+              "$ref": "#/components/schemas/AlcanceAyuda"
+            },
+            "minItems": 1,
+            "title": "Alcances",
+            "type": "array"
+          },
+          "correo": {
+            "description": "La dirección de la cuenta de la persona que va a ayudar.",
+            "examples": [
+              "beto@ejemplo.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo",
+          "alcances"
+        ],
+        "title": "AyudaNueva",
+        "type": "object"
+      },
+      "AyudaOtorgada": {
+        "description": "Una autorización que dio la persona, vigente o revocada (la historia no se borra).",
+        "properties": {
+          "alcances": {
+            "items": {
+              "$ref": "#/components/schemas/AlcanceAyuda"
+            },
+            "title": "Alcances",
+            "type": "array"
+          },
+          "autorizado_nombre": {
+            "title": "Autorizado Nombre",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "otorgada_en": {
+            "format": "date-time",
+            "title": "Otorgada En",
+            "type": "string"
+          },
+          "revocada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocada En"
+          }
+        },
+        "required": [
+          "id",
+          "autorizado_nombre",
+          "alcances",
+          "otorgada_en",
+          "revocada_en"
+        ],
+        "title": "AyudaOtorgada",
+        "type": "object"
+      },
+      "AyudaRecibida": {
+        "description": "Una autorización vigente que la persona de la sesión puede usar para ayudar.",
+        "properties": {
+          "alcances": {
+            "items": {
+              "$ref": "#/components/schemas/AlcanceAyuda"
+            },
+            "title": "Alcances",
+            "type": "array"
+          },
+          "consorcio_id": {
+            "format": "uuid",
+            "title": "Consorcio Id",
+            "type": "string"
+          },
+          "consorcio_nombre": {
+            "title": "Consorcio Nombre",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "otorgada_en": {
+            "format": "date-time",
+            "title": "Otorgada En",
+            "type": "string"
+          },
+          "otorgante_nombre": {
+            "title": "Otorgante Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "consorcio_id",
+          "consorcio_nombre",
+          "otorgante_nombre",
+          "alcances",
+          "otorgada_en"
+        ],
+        "title": "AyudaRecibida",
         "type": "object"
       },
       "BajaMandato": {
@@ -1539,7 +1672,13 @@
           "constancia_invalida",
           "gasto_no_oficial",
           "gasto_ya_enlazado",
-          "fotos_completas"
+          "fotos_completas",
+          "ayuda_no_admitida",
+          "ayuda_sin_cuenta",
+          "ayuda_a_si_misma",
+          "ayuda_ya_vigente",
+          "ayuda_ya_revocada",
+          "ayuda_revocada"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -8923,6 +9062,47 @@
           "elementos"
         ],
         "title": "ListaAutorizacionesVerProveedores",
+        "type": "object"
+      },
+      "ListaAyudasOtorgadas": {
+        "properties": {
+          "alcances_otorgables": {
+            "items": {
+              "$ref": "#/components/schemas/AlcanceAyuda"
+            },
+            "title": "Alcances Otorgables",
+            "type": "array"
+          },
+          "elementos": {
+            "description": "La más nueva primero.",
+            "items": {
+              "$ref": "#/components/schemas/AyudaOtorgada"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos",
+          "alcances_otorgables"
+        ],
+        "title": "ListaAyudasOtorgadas",
+        "type": "object"
+      },
+      "ListaAyudasRecibidas": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/AyudaRecibida"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaAyudasRecibidas",
         "type": "object"
       },
       "ListaCandidatos": {
@@ -18740,6 +18920,188 @@
         "summary": "Autorizar a un habitante a ver los proveedores, o retirarle la autorización, con el motivo: queda quién y cuándo, y nada se borra",
         "tags": [
           "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ayudas": {
+      "get": {
+        "operationId": "listar_ayudas_api_v1_consorcios__consorcio_id__ayudas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaAyudasOtorgadas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado, o mientras se ayuda a otra persona."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Las autorizaciones de ayuda que dio la persona en el edificio, vigentes y revocadas",
+        "tags": [
+          "consorcios"
+        ]
+      },
+      "post": {
+        "operationId": "otorgar_ayuda_api_v1_consorcios__consorcio_id__ayudas_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AyudaNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AyudaOtorgada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado, o mientras se ayuda a otra persona."
+          },
+          "409": {
+            "description": "Esa persona ya tiene una autorización vigente (`ayuda_ya_vigente`)."
+          },
+          "422": {
+            "description": "La dirección no tiene cuenta (`ayuda_sin_cuenta`) o es la propia (`ayuda_a_si_misma`)."
+          }
+        },
+        "summary": "Autorizar a otra persona con cuenta a ayudar en el edificio, con un alcance; le avisa por correo",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ayudas/{autorizacion_id}/revocacion": {
+      "post": {
+        "operationId": "revocar_ayuda_api_v1_consorcios__consorcio_id__ayudas__autorizacion_id__revocacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "autorizacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Autorizacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AyudaOtorgada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo de propietario confirmado, o mientras se ayuda a otra persona."
+          },
+          "404": {
+            "description": "La autorización no existe en el edificio o no la dio esta persona."
+          },
+          "409": {
+            "description": "Ya estaba revocada (`ayuda_ya_revocada`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revocar una autorización de ayuda que dio la persona; queda en la historia",
+        "tags": [
+          "consorcios"
         ]
       }
     },
@@ -30654,6 +31016,28 @@
         "summary": "Dependencias",
         "tags": [
           "plataforma"
+        ]
+      }
+    },
+    "/api/v1/me/ayudas": {
+      "get": {
+        "description": "Ruta de la persona (alcance `propia`, fuera de la matriz, como `/me/consorcios`): la base\ndevuelve solo las suyas, vigentes y de una persona asistida que sigue siendo propietaria\nconfirmada.",
+        "operationId": "mis_ayudas_api_v1_me_ayudas_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaAyudasRecibidas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Las autorizaciones vigentes con que la persona puede ayudar a otra",
+        "tags": [
+          "consorcios"
         ]
       }
     },

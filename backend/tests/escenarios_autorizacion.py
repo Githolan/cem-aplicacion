@@ -19,6 +19,8 @@ El CSV es legible para el propietario; acá se traduce cada fila a tipos puros:
   `controles=sin_segundo_factor` o `ninguno` lo quitan. La sesión de 12 horas salió el
   09-11-2026 (comentario 28 de la revisión de pantallas). `autorizado=accion|accion` son las
   acciones que el Consejo le autorizó a `yo` (`0105`): van al contexto, no a la entidad.
+  `ayuda=alcance|alcance` (RF53, `0127`): quien pide ayuda a `yo` (la figura es la persona
+  asistida) con una autorización de esos alcances, más `orientarse`; también va al contexto.
 
 Los símbolos (`3A`, `5B`, `X`, `X2`…) se reemplazan por UUID canónicos fijos.
 """
@@ -31,6 +33,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from cem_contracts.ayuda import AlcanceAyuda
 from cem_contracts.egresos import (
     ROLES_QUE_AUTORIZAN_PROVEEDORES,
     ROLES_QUE_SALTEAN_DOCUMENTACION,
@@ -270,7 +273,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dic
     desconocidas = set(valores) - {
         "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
         "emitio", "decision", "respaldo", "actor", "sin_identidad", "misma_identidad",
-        "controles", "ejecuto", "autorizado",
+        "controles", "ejecuto", "autorizado", "ayuda",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
@@ -397,5 +400,9 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         segundo_factor_reciente=segundo_factor,
         roles_configurados=ROLES_CONFIGURADOS,
         autorizaciones=frozenset(filter(None, valores.get("autorizado", "").split("|"))),
+        ayuda=None
+        if "ayuda" not in valores
+        else frozenset(AlcanceAyuda(a) for a in valores["ayuda"].split("|"))
+        | {AlcanceAyuda.ORIENTARSE},
     )
     return contexto, entidad

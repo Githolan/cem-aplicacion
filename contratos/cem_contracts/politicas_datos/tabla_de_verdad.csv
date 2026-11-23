@@ -623,3 +623,44 @@ RF19,reparaciones.gestionar,Ic,C,,sin_mandato,si,,403,sin_concesion,I confirmado
 RF19,reparaciones.gestionar,AE,C,,vigente,si,,403,sin_concesion,AE no gestiona reparaciones
 RF19,reparaciones.gestionar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
 RF19,reparaciones.gestionar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo
+RF53,ayuda.otorgar,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado autoriza a otra persona a ayudarle (§1.7)
+RF53,ayuda.otorgar,Pc,AA,,sin_mandato,si,,200,concedido_por_vinculo,también en Administrador Aumentado
+RF53,ayuda.otorgar,Pc,AG,,sin_mandato,si,,200,concedido_por_vinculo,también en Autogestión
+RF53,ayuda.otorgar,P,C,,sin_mandato,si,,403,sin_concesion,P con el vínculo sin confirmar no autoriza
+RF53,ayuda.otorgar,Ic,C,,sin_mandato,si,,403,sin_concesion,I confirmado no autoriza en este corte
+RF53,ayuda.otorgar,MC,C,,vigente,si,,403,sin_concesion,MC sin vínculo no autoriza (la ayuda es de lo propio)
+RF53,ayuda.otorgar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF53,ayuda.otorgar,Pc,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo no se autoriza
+RF53,ayuda.otorgar,Pc,C,,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,quien ayuda no autoriza a otra persona en nombre de la asistida (permisos)
+RF53,ayuda.revocar,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado revoca (la base exige que sea quien la dio)
+RF53,ayuda.revocar,Pc,—,,sin_mandato,no,,200,concedido_por_vinculo,revocar corre también sin modo
+RF53,ayuda.revocar,Ic,C,,sin_mandato,si,,403,sin_concesion,I no revoca
+RF53,ayuda.revocar,Pc,C,,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,quien ayuda no revoca en nombre de la asistida
+RF53,ayuda.ver_otorgadas,Pc,C,,sin_mandato,si,,200,concedido_por_vinculo,P confirmado ve las que dio
+RF53,ayuda.ver_otorgadas,MC,C,,vigente,si,,403,sin_concesion,MC sin vínculo no ve autorizaciones
+RF53,ayuda.ver_otorgadas,Pc,C,,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,quien ayuda no ve las autorizaciones de la asistida
+RF53,consorcios.mis_acciones,Pc,C,,sin_mandato,si,ayuda=consultar_expensas,200,concedido_por_ambito,quien ayuda sabe qué puede hacer (orientarse va con toda autorización)
+RF53,cuenta.ver_propia,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas,200,concedido_por_vinculo,quien ayuda consulta las expensas de la unidad de la asistida
+RF53,cuenta.ver_propia,Pc,C,unidad:5B,sin_mandato,si,ayuda=consultar_expensas,403,sin_concesion,ni ayudando se ve una unidad que no es de la asistida
+RF53,fiscalizacion.ver_resumen,Pc,C,,sin_mandato,si,ayuda=consultar_expensas,200,concedido_por_vinculo,quien ayuda ve el resumen que ve la asistida
+RF53,reclamos_liquidacion.ver,Pc,C,,sin_mandato,si,ayuda=consultar_expensas,200,concedido_por_vinculo,quien ayuda ve los reclamos de la asistida
+RF53,reclamos_liquidacion.ver,MC,C,,vigente,si,ayuda=consultar_expensas,404,fuera_de_ambito,el mandato de la asistida no da ámbito a quien ayuda
+RF53,reclamos_liquidacion.ver,Pc+MC,C,,vigente,si,ayuda=consultar_expensas,200,concedido_por_vinculo,solo por el vínculo: la facultad de atender no se presta
+RF53,reclamos_liquidacion.presentar,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,200,concedido_por_vinculo,quien ayuda presenta el reclamo que preparó sobre la unidad de la asistida
+RF53,reclamos_liquidacion.presentar,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas,403,fuera_del_alcance_de_ayuda,sin preparar_reclamos no presenta
+RF53,reclamos_liquidacion.presentar,Pc,C,unidad:5B,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,sin_concesion,ni ayudando reclama por una unidad ajena
+RF53,reclamos_liquidacion.presentar,Pc,—,unidad:3A,sin_mandato,no,ayuda=consultar_expensas|preparar_reclamos,403,sin_modo_registrado,los filtros siguen valiendo ayudando
+RF53,reclamos_liquidacion.atender,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,la asistida atiende reclamos; quien ayuda no
+RF53,solicitud_formal.firmar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,firmar: nunca quien ayuda aunque la asistida firme
+RF53,solicitud_formal.preparar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,preparar una solicitud formal es del mandato de la asistida
+RF53,egresos.aprobar_orden,Pc+MC,AA,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,aprobar: nunca quien ayuda
+RF53,egresos.ejecutar_pago,Pc+AD,AA,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,pagar: nunca quien ayuda
+RF53,egresos.preparar_orden,Pc+AD,AA,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,facultad económica: nunca quien ayuda
+RF53,decisiones.registrar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,votar o registrar una decisión: nunca quien ayuda
+RF53,modo.cambiar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,cambiar el modo: nunca quien ayuda
+RF53,mandatos.alta,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,otorgar mandatos: nunca quien ayuda
+RF53,padron.confirmar_vinculo,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,confirmar un vínculo (permisos): nunca quien ayuda
+RF53,invitaciones.crear,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,invitar a la unidad (permisos): nunca quien ayuda
+RF53,proveedores.autorizar,Pc+MC,C,,vigente,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,autorizar a ver proveedores (permisos): nunca quien ayuda
+RF53,documentos.ver,Pc,C,,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,los documentos no están en este alcance
+RF53,reparaciones.pedir,Pc,C,unidad:3A,sin_mandato,si,ayuda=consultar_expensas|preparar_reclamos,403,ayuda_no_admitida,pedir una reparación no está en este alcance

@@ -1,17 +1,22 @@
 """Selector de edificio y padrón de unidades."""
 
 from typing import Annotated
+from uuid import UUID
 
 from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, MisAcciones, Unidad
+from cem_contracts.errores import CodigoError
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
+from app import ayuda
 from app.autorizacion.evaluador import alcanza, evaluar
 from app.autorizacion.politicas import POLITICAS
 from app.autorizacion.requiere import Permiso, requiere
+from app.consorcios import ayudas
 from app.consorcios.padron import sobre_unidad
-from app.contexto import IdentidadDep, MotorDep
+from app.contexto import IdentidadDep, MotorDep, rechazar_ayuda_no_vigente
 from app.db import transaccion
+from app.errores import ErrorApi
 
 router = APIRouter(prefix="/api/v1", tags=["consorcios"])
 
@@ -26,6 +31,8 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
     # el ámbito: la primera consulta junta candidatos (vínculos propios de cualquier fecha y los
     # consorcios de `nucleo.consorcios_con_mandato_vigente()`, que ya aplica la fecha de cada
     # uno y devuelve solo ids) y la segunda decide con la fecha de cada consorcio.
+    if ayuda.pedida() is not None:
+        return _de_la_asistida(identidad, motor)
     p = identidad.persona_id
     with transaccion(motor, persona_id=p) as conn:
         por_vinculo = set(
@@ -40,7 +47,25 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
         por_mandato = set(
             conn.execute(text("select nucleo.consorcios_con_mandato_vigente()")).scalars()
         )
-    ids = sorted(por_vinculo | por_mandato)
+    return _resumenes(motor, p, sorted(por_vinculo | por_mandato), sorted(por_mandato))
+
+
+def _de_la_asistida(identidad, motor) -> list[ConsorcioResumen]:
+    """RF53: ayudando, el selector muestra solo el edificio de la autorización, con los vínculos
+    de la persona asistida y sin sus mandatos (no se prestan). Una autorización que no es de esta
+    sesión responde 404; una que la persona asistida revocó, `ayuda_revocada`, como en el
+    edificio."""
+    try:
+        autorizacion = UUID(ayuda.pedida() or "")
+    except ValueError:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No se encontró lo pedido.") from None
+    f = ayudas.recibida(motor, identidad, autorizacion)
+    if f is None:
+        rechazar_ayuda_no_vigente(motor, identidad, autorizacion)
+    return _resumenes(motor, f["otorgante_id"], [f["consorcio_id"]], [])
+
+
+def _resumenes(motor, p: UUID, ids: list[UUID], por_mandato: list[UUID]) -> list[ConsorcioResumen]:
     if not ids:
         return []
     # Ruta de persona: la política alternativa filtra por la lista de consorcios propios (§8.5).
@@ -63,7 +88,7 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
                 " having count(v.tipo) > 0 or c.id = any(:mandatos)"
                 " order by c.nombre"
             ),
-            {"p": p, "ids": ids, "mandatos": sorted(por_mandato)},
+            {"p": p, "ids": ids, "mandatos": por_mandato},
         ).mappings()
         return [ConsorcioResumen(**f) for f in filas]
 
