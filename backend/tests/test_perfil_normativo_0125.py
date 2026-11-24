@@ -58,7 +58,13 @@ migracion = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(migracion)
 
 URL = "https://comprobantes.ejemplo.com/consorcio/2026-09/comprobantes.pdf"
-CABA = migracion.CABA_1
+_ruta_0133 = _ruta.with_name("0133_perfil_caba_desde_agosto.py")
+_spec_0133 = importlib.util.spec_from_file_location("migracion_0133", _ruta_0133)
+correccion = importlib.util.module_from_spec(_spec_0133)
+_spec_0133.loader.exec_module(correccion)
+
+CABA = {**migracion.CABA_1, "vigente_desde": correccion.VIGENTE_DESDE}
+"""La versión 1 como queda después de `0133` (P0-13: desde el 1-8-2024)."""
 SENAL = text("select * from nucleo.enlace_documentacion_liquidaciones()")
 TABLAS_DEL_CONSORCIO = ("nucleo.busqueda_enlaces_liquidacion", "nucleo.consorcio_perfil_normativo")
 TABLAS = migracion.TABLAS_NUEVAS
@@ -177,7 +183,7 @@ def test_sin_perfil_vinculado_o_antes_de_la_version_no_hay_senal(
     assert del_panel(e)["enlace_documentacion"] is None
     vincular(motor_app, e["cons"])
     assert en_la_lista(e) == {sin: senal("no_encontrado")}  # control: con el perfil, sí
-    # La versión 1 rige desde el 31-7-2024: julio de 2024 no se mide con ella; agosto sí.
+    # La versión 1 rige desde el 1-8-2024 (`0133`): julio de 2024 no se mide con ella; agosto sí.
     julio = oficial(e, motor_app, pdf_de(del_periodo(2024, 7)))
     agosto = oficial(e, motor_app, pdf_de(del_periodo(2024, 8)))
     lista = en_la_lista(e)

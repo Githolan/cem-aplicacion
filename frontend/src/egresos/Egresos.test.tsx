@@ -221,6 +221,10 @@ const INICIO: Respuestas = {
   [`GET ${BASE}/reparaciones`]: () => Response.json({ elementos: [] }),
   // Las liquidaciones del administrador que esperan confirmación (RF40, P0 S6).
   [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([]),
+  // Los pagos informados (app 0129 a 0134), sin pendientes.
+  [`GET ${BASE}/pagos-informados`]: () => Response.json({ elementos: [], largo_numero_operacion: 60, largo_motivo: 500, por_confirmar: 0, unidades: [] }),
+  [`GET ${BASE}/pagos-informados/cotejo`]: () => Response.json({ liquidacion: null }),
+  [`GET ${BASE}/pagos-informados/por-correo`]: () => Response.json({ elementos: [], direccion: null }),
 };
 
 function abrir(ruta: string | { pathname: string; state: unknown }) {

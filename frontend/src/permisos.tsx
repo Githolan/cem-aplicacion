@@ -297,4 +297,9 @@ export const REQUISITOS = {
   gestionarReparaciones: [["reparaciones.gestionar"]],
   /** Autorizar a otra persona a ayudar (RF53, app 0127): el propietario con el vínculo confirmado. */
   ayudas: [["ayuda.ver_otorgadas"]],
+  /** Los pagos informados (app 0129 a 0134): quien tiene el vínculo confirmado con una unidad los
+   * ve y los informa; quien ve el panel, todos. */
+  pagosInformados: [["pagos_informados.ver"], ["pagos_informados.informar"]],
+  /** Quien confirma o rechaza los pagos informados: el inicio le cuenta los que esperan (PI-D14). */
+  confirmarPagosInformados: [["pagos_informados.confirmar", "fiscalizacion.ver_panel"]],
 } as const satisfies Record<string, Requisito>;

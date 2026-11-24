@@ -217,6 +217,15 @@ class PagoInformadoRespuesta(PagoInformado):
     ya_informado: bool
 
 
+class UnidadParaInformar(BaseModel):
+    """Una unidad para la que la persona puede informar un pago (`0134`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    designacion: str
+
+
 class ListaPagosInformados(BaseModel):
     """`GET …/pagos-informados`: los que la persona puede ver, del más nuevo al más viejo."""
 
@@ -228,6 +237,10 @@ class ListaPagosInformados(BaseModel):
     por_confirmar: int = Field(
         description="Cuántos pagos `informado` puede confirmar o rechazar"
         " quien lee ahora: el número de la bandeja del Consejo."
+    )
+    unidades: list[UnidadParaInformar] = Field(
+        description="Las unidades para las que la persona puede informar un pago, por designación"
+        " (`0134`); vacía si no puede informar ninguno."
     )
 
 
@@ -365,6 +378,10 @@ class ListaPagosPorCorreo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[PagoPorCorreo]
+    direccion: str | None = Field(
+        description="La dirección a la que se mandan los comprobantes en este entorno (PC-1); nula"
+        " mientras la entrada por correo no está configurada: la pantalla no la ofrece."
+    )
 
 
 class PagoPorCorreoInforme(BaseModel):

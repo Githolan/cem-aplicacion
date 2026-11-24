@@ -662,3 +662,14 @@ def test_0132_ida_y_vuelta_y_no_baja_con_datos(base_aparte):
     with pytest.raises(DBAPIError) as error:
         command.downgrade(cfg, "0131")
     assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+
+
+def test_la_direccion_se_ofrece_solo_con_la_entrada_configurada(e, monkeypatch):
+    """`ListaPagosPorCorreo.direccion` (PI-S6): con la dirección y la clave; sin una, nula."""
+    direccion = "pagos@cem-pagos-pruebas.ejemplo.com"
+    monkeypatch.delenv(pagos_por_correo.VARIABLE_DIRECCION, raising=False)
+    assert por_correo(e, "prop").json()["direccion"] is None  # control: sin la dirección
+    monkeypatch.setenv(pagos_por_correo.VARIABLE_DIRECCION, direccion)
+    assert por_correo(e, "prop").json()["direccion"] == direccion
+    monkeypatch.delenv(pagos_por_correo.VARIABLE_CLAVE)
+    assert por_correo(e, "prop").json()["direccion"] is None

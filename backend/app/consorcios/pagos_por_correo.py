@@ -85,6 +85,9 @@ router = APIRouter(prefix="/api/v1", tags=["consorcios"], dependencies=[Depends(
 entrada = APIRouter(prefix="/api/v1/entrada", tags=["entrada"], dependencies=[Depends(sin_cache)])
 
 VARIABLE_CLAVE = "CEM_CORREO_PAGOS_CLAVE"
+VARIABLE_DIRECCION = "CEM_CORREO_PAGOS_DIRECCION"
+"""La dirección de este entorno (`pagos@cem-pagos[-staging].holancloud.com`, PC-1). La pantalla la
+ofrece solo si está, junto con la clave: sin las dos, un correo no entraría."""
 """El secreto compartido con el Worker; distinto por entorno. Sin él, la entrada no recibe nada."""
 AUTENTICADOR = "mx.cloudflare.net"
 """El `authserv-id` del encabezado que agrega Cloudflare Email Routing. Solo vale el primero: los
@@ -415,7 +418,11 @@ def listar_pagos_por_correo(ver: VerDep, motor: MotorDep) -> ListaPagosPorCorreo
         filas = _ejecutar(
             c, ver, "select * from nucleo.pagos_por_correo_lectura(:actor, 'api', :sesion)", {}
         ).mappings().all()  # fmt: skip
-    return ListaPagosPorCorreo(elementos=[PagoPorCorreo(**f) for f in filas])
+    configurada = os.environ.get(VARIABLE_CLAVE) and os.environ.get(VARIABLE_DIRECCION)
+    return ListaPagosPorCorreo(
+        elementos=[PagoPorCorreo(**f) for f in filas],
+        direccion=os.environ[VARIABLE_DIRECCION] if configurada else None,
+    )
 
 
 @router.post(

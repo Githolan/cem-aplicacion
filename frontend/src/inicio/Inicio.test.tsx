@@ -138,6 +138,10 @@ function backend({
     if (camino.endsWith("/liquidaciones-importadas")) return Response.json([]);
     if (camino.endsWith("/reclamos-liquidacion")) return Response.json({ elementos: [] });
     if (camino.endsWith("/reparaciones")) return Response.json({ elementos: [] });
+    // Los pagos informados (app 0129 a 0134): nada por confirmar, por revisar ni por completar.
+    if (camino.endsWith("/pagos-informados")) return Response.json({ elementos: [], largo_numero_operacion: 60, largo_motivo: 500, por_confirmar: 0, unidades: [] });
+    if (camino.endsWith("/pagos-informados/cotejo")) return Response.json({ liquidacion: null });
+    if (camino.endsWith("/pagos-informados/por-correo")) return Response.json({ elementos: [], direccion: null });
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
   });
 }
@@ -508,6 +512,37 @@ describe("Bandeja del Consejo (RF40, P0 S6)", () => {
     // Control: preguntó por cada cosa.
     for (const parte of ["liquidaciones-importadas", "solicitudes-formales", "reclamos-liquidacion", "reparaciones"])
       expect(pedidosA(simulado, ruta(C1, parte))).toBeGreaterThan(0);
+  });
+
+  it("los pagos informados: lo que espera al Consejo, el cotejo y lo que falta completar del correo", async () => {
+    const vacia = { largo_numero_operacion: 60, largo_motivo: 500, unidades: [] };
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        acciones: { [C1]: ["pagos_informados.ver", "pagos_informados.confirmar", "fiscalizacion.ver_panel", "pagos_informados.informar"] },
+        otras: {
+          [ruta(C1, "pagos-informados")]: () => Response.json({ ...vacia, elementos: [], por_confirmar: 2 }),
+          [ruta(C1, "pagos-informados/cotejo")]: () =>
+            Response.json({ liquidacion: { importacion_id: C1, periodo: "2026-11-01", pagos_desde: "2026-10-01", pagos_hasta: "2026-10-31", unidades: [], para_revisar: 1 } }),
+          [ruta(C1, "pagos-informados/por-correo")]: () => Response.json({ elementos: [{ id: "x" }], direccion: null }),
+        },
+      }),
+    );
+    abrir();
+    const confirmar = await fila("Pagos informados", "2 pagos informados esperan confirmación");
+    expect(confirmar.getAttribute("href")).toBe("/pagos-informados");
+    const cotejo = await fila("Cotejo con la liquidación", "1 unidad para revisar");
+    expect(cotejo.getAttribute("href")).toBe("/pagos-informados/cotejo");
+    await fila("Pagos informados", "1 comprobante llegó por correo y falta completarlo");
+  });
+
+  it("quien no confirma pagos no pide el cotejo para el inicio", async () => {
+    const simulado = backend({ acciones: { [C1]: ["pagos_informados.ver", "pagos_informados.informar"] } });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(NADA_PENDIENTE)).toBeTruthy();
+    expect(pedidosA(simulado, ruta(C1, "pagos-informados/cotejo"))).toBe(0);
+    expect(pedidosA(simulado, ruta(C1, "pagos-informados/por-correo"))).toBeGreaterThan(0);
   });
 
   it("quien no importa no pide la lista de liquidaciones; quien importa, sí", async () => {
