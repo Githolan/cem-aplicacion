@@ -1,6 +1,6 @@
-"""Pagos informados por los vecinos, cortes PI-S1 (`0129`) y PI-S2 (`0130`).
+"""Pagos informados por los vecinos, cortes PI-S1 (`0129`), PI-S2 (`0130`) y PI-S3 (`0131`).
 
-Diseño: `doc/diseno/Pagos_Informados.md` del repositorio CEM (reglas PI-1 a PI-6 y PI-9).
+Diseño: `doc/diseno/Pagos_Informados.md` del repositorio CEM (reglas PI-1 a PI-9).
 CEM no mueve dinero: quien pagó las expensas de una unidad deja la constancia con el comprobante,
 para que el Consejo la confirme (PI-S2) y se coteje con la liquidación oficial (PI-S3).
 
@@ -26,6 +26,10 @@ para que el Consejo la confirme (PI-S2) y se coteje con la liquidación oficial 
   la última versión vigente.
 - **Quién lee** (`pagos_informados.ver`): quien lo informó y quien tiene el vínculo que cuenta con
   esa unidad; quien tiene la facultad `fiscalizacion.ver_panel`, todos los del consorcio.
+- **El cotejo** (`GET …/pagos-informados/cotejo`, PI-7 y PI-8): por cada unidad de la liquidación
+  oficial vigente, lo informado y confirmado del mes anterior al período contra la columna «Pagos»
+  de la liquidación. Se calcula cada vez que se lee: nunca queda un resultado viejo. Nunca dice que
+  la administración se equivocó: dice «lo informado y confirmado suma X; la liquidación dice Y».
 """
 
 from datetime import date, datetime
@@ -224,3 +228,77 @@ class ListaPagosInformados(BaseModel):
         description="Cuántos pagos `informado` puede confirmar o rechazar"
         " quien lee ahora: el número de la bandeja del Consejo."
     )
+
+
+# --- El cotejo con la liquidación oficial (PI-S3, `0131`) -------------------------------------
+
+MESES_ANTES_COLUMNA_PAGOS = 1
+"""Decisión del propietario del 23-11-2026 (Q2): la columna «Pagos» de la liquidación de un mes
+suma lo pagado el mes anterior (la de noviembre, lo de octubre). La base usa el mismo valor
+(`0131`). SIN VERIFICAR contra una liquidación real: se comprueba con la primera."""
+
+
+class ResultadoCotejoLiquidacion(StrEnum):
+    """PI-7: cómo queda cada unidad."""
+
+    COINCIDE = "coincide"
+    """Lo informado y confirmado suma lo mismo que la columna «Pagos» (también cero y cero)."""
+    DIFIERE = "difiere"
+    """Suman distinto; con los dos importes."""
+    SIN_DATOS = "sin_datos"
+    """La liquidación no trae la columna «Pagos» de la unidad, o no se puede leer como importe."""
+
+
+class UnidadCotejada(BaseModel):
+    """Una unidad en el cotejo. La pantalla dice «lo informado y confirmado suma X; la liquidación
+    dice Y» (PI-8), nunca que alguien se equivocó."""
+
+    model_config = ConfigDict(frozen=True)
+
+    unidad_id: UUID
+    unidad_designacion: str
+    informado_confirmado: Decimal = Field(
+        description="La suma de los pagos confirmados de la unidad con la fecha del pago entre"
+        " `pagos_desde` y `pagos_hasta`; cero si no hay ninguno."
+    )
+    pagos_confirmados: int = Field(description="Cuántos pagos confirmados suma.")
+    sin_pagos_informados: bool = Field(
+        description="Ningún pago confirmado en la ventana: si la liquidación trae pagos, la"
+        " pantalla lo dice así y no como una diferencia de alguien."
+    )
+    liquidacion: Decimal | None = Field(
+        description="La columna «Pagos» de la unidad en la liquidación oficial; nula con"
+        " `sin_datos`."
+    )
+    diferencia: Decimal | None = Field(
+        description="`liquidacion` − `informado_confirmado`; nula con `sin_datos`."
+    )
+    resultado: ResultadoCotejoLiquidacion
+
+
+class CotejoDeLaLiquidacion(BaseModel):
+    """El cotejo de una liquidación oficial vigente."""
+
+    model_config = ConfigDict(frozen=True)
+
+    importacion_id: UUID
+    periodo: date = Field(description="El de la liquidación: el primer día del mes.")
+    pagos_desde: date = Field(description="El primer día de los pagos que cuentan (incluido).")
+    pagos_hasta: date = Field(description="El último día de los pagos que cuentan (incluido).")
+    unidades: list[UnidadCotejada] = Field(
+        description="Las que quien lee puede ver: todas con `fiscalizacion.ver_panel`; si no, las"
+        " de sus vínculos confirmados."
+    )
+    para_revisar: int = Field(
+        description="Cuántas de esas unidades tienen `difiere` con al menos un pago confirmado: el"
+        " número de la bandeja y del aviso diario del Consejo. Las que difieren sin pagos"
+        " informados no se cuentan (decisión por defecto de PI-S3)."
+    )
+
+
+class CotejoPagosInformados(BaseModel):
+    """`GET …/pagos-informados/cotejo`: nula si todavía no hay una liquidación oficial vigente."""
+
+    model_config = ConfigDict(frozen=True)
+
+    liquidacion: CotejoDeLaLiquidacion | None

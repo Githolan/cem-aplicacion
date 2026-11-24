@@ -24,7 +24,12 @@ y la ventana del planificador: nadie recibe un correo de más por esto.
   Las reparaciones en curso se ven en el inicio y no se repiten por correo: ya tienen responsable;
 - los pagos informados por confirmar (PI-S2, `0130`), a quien los confirma
   (`pagos.confirmar_informado`): los `informado` del edificio que esa persona no informó. En el
-  inicio, el número sale de `por_confirmar` de `GET …/pagos-informados`.
+  inicio, el número sale de `por_confirmar` de `GET …/pagos-informados`;
+- las unidades con algún pago confirmado donde lo informado y confirmado no suma lo que dice la
+  columna «Pagos» de la liquidación oficial vigente más nueva (PI-S3, `0131`), a quien ve el panel
+  (`fiscalizacion.ver_panel`). El cotejo se calcula al leer, así que el número es el de ese
+  momento. El texto no dice que alguien se equivocó (PI-8). En el inicio, el número sale de
+  `para_revisar` de `GET …/pagos-informados/cotejo`.
 """
 
 from datetime import date
@@ -57,6 +62,10 @@ QUE_HACER = {
     "pagos_informados": (
         "un pago informado espera confirmación",
         "{n} pagos informados esperan confirmación",
+    ),
+    "diferencias_cotejo": (
+        "en una unidad lo informado y confirmado no suma lo que dice la liquidación",
+        "en {n} unidades lo informado y confirmado no suma lo que dice la liquidación",
     ),
 }
 """El orden de los renglones en el correo."""
@@ -91,6 +100,7 @@ def cuentas_de(fila: dict[str, Any]) -> dict[str, int]:
         "reclamos": fila["reclamos"] or 0,
         "reparaciones": fila["reparaciones"] or 0,
         "pagos_informados": fila["pagos_informados"] or 0,
+        "diferencias_cotejo": fila["diferencias_cotejo"] or 0,
         "por_vencer": 0,
         "vencidas": 0,
     }
