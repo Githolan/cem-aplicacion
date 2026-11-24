@@ -18,6 +18,7 @@ import {
   AVISO_MONEDA,
   enPesos,
   importeLeido,
+  MONEDA_DEL_EDIFICIO,
   INFORMAR,
   PAGO_RECHAZADO,
   POR_CONFIRMAR,
@@ -85,7 +86,9 @@ const pedidos = (simulado: ReturnType<typeof vi.fn>, metodo: string, camino: str
     .map((c) => (c as unknown as [Request])[0])
     .filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
 
-const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio SINTETICO", vinculos: [] }]);
+/** El edificio opera en pesos (P-14); con `monedas` se le habilita otra. */
+const conMonedas = (monedas: string[]) => () => Response.json([{ id: C1, nombre: "Edificio SINTETICO", vinculos: [], monedas }]);
+const CONSORCIOS = conMonedas(["ARS"]);
 const VECINA = alcanza("pagos_informados.ver", "pagos_informados.informar");
 const CONSEJO = alcanza("pagos_informados.ver", "pagos_informados.confirmar", "fiscalizacion.ver_panel");
 const error = (estado: number, codigo: string, mensaje = "x") => Response.json({ codigo, mensaje, detalle: null, id_correlacion: "c" }, { status: estado });
@@ -331,13 +334,14 @@ describe("pantalla /pagos-informados", () => {
     expect(pedidos(api, "POST", `${PAGOS}/comprobantes`)).toHaveLength(0);
   });
 
-  it("un importe leído en otra moneda, o sin moneda, se muestra con ella y no entra como pesos", async () => {
-    for (const moneda of ["USD", null]) {
+  it("un importe leído en otra moneda, o sin moneda en un edificio con dos, se muestra así y no entra como pesos", async () => {
+    // Sin moneda solo se queda sin moneda si el edificio opera en más de una (PI-D35).
+    for (const [moneda, monedas] of [["USD", ["ARS"]], [null, ["ARS", "USD"]], ["USD", ["ARS", "USD"]]] as const) {
       const recibido = { ...RECIBIDO, importe: "100.00", moneda };
       vi.stubGlobal(
         "fetch",
         backend({
-          "GET /api/v1/me/consorcios": CONSORCIOS,
+          "GET /api/v1/me/consorcios": conMonedas([...monedas]),
           [`GET ${BASE}/mis-acciones`]: VECINA,
           [`GET ${PAGOS}`]: () => Response.json(lista([])),
           [`GET ${CORREO}`]: correo([recibido]),
@@ -349,10 +353,40 @@ describe("pantalla /pagos-informados", () => {
       expect(ficha.getByText(comoSeLee(importeLeido({ importe: "100.00", moneda })))).toBeTruthy();
       expect(ficha.queryByText(comoSeLee(enPesos("100.00")))).toBeNull();
       expect(ficha.getByText(AVISO_MONEDA)).toBeTruthy();
+      expect(ficha.queryByText(MONEDA_DEL_EDIFICIO)).toBeNull();
       fireEvent.click(ficha.getByRole("button", { name: COMPLETAR }));
       const ventana = within(await screen.findByRole("dialog", { name: COMPLETAR }));
       expect((ventana.getByLabelText("Importe pagado (en pesos)") as HTMLInputElement).value).toBe("");
       expect((ventana.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("777 SINTETICO");
+      cleanup();
+    }
+  });
+
+  it("en un edificio que opera solo en pesos, un importe leído sin moneda se toma en pesos y entra en el campo", async () => {
+    // PI-D35. Control: la misma lectura en un edificio con dos monedas no supone nada (prueba de arriba).
+    for (const moneda of [null, "??"]) {
+      const recibido = { ...RECIBIDO, importe: "100.00", moneda };
+      const api = backend({
+        "GET /api/v1/me/consorcios": CONSORCIOS,
+        [`GET ${BASE}/mis-acciones`]: VECINA,
+        [`GET ${PAGOS}`]: () => Response.json(lista([])),
+        [`GET ${CORREO}`]: correo([recibido]),
+        [`POST ${CORREO}/${R1}/informe`]: respuesta({ origen: "correo" }),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir();
+      fireEvent.click(await screen.findByRole("button", { name: /Expensas de octubre SINTETICO/ }));
+      const ficha = within(await screen.findByRole("dialog"));
+      expect(ficha.getByText(comoSeLee(enPesos("100.00")))).toBeTruthy();
+      expect(ficha.getByText(MONEDA_DEL_EDIFICIO)).toBeTruthy();
+      expect(ficha.queryByText(AVISO_MONEDA)).toBeNull();
+      fireEvent.click(ficha.getByRole("button", { name: COMPLETAR }));
+      const ventana = within(await screen.findByRole("dialog", { name: COMPLETAR }));
+      expect((ventana.getByLabelText("Importe pagado (en pesos)") as HTMLInputElement).value).not.toBe("");
+      fireEvent.click(ventana.getByRole("button", { name: "Informar el pago" }));
+      expect(await screen.findByText(pagoInformado(false))).toBeTruthy();
+      const [informe] = pedidos(api, "POST", `${CORREO}/${R1}/informe`);
+      expect(await informe?.json()).toMatchObject({ importe: "100.00" });
       cleanup();
     }
   });
