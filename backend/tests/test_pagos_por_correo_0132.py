@@ -404,7 +404,7 @@ def test_el_tope_diario_por_persona_rebota(e, motor_migrate, motor_app):
     tope = contrato.MAXIMO_COMPROBANTES_POR_DIA
     recibir = text("select * from nucleo.recibir_pago_por_correo(:p, :m, null,"
                    " 'application/pdf', 10, :s)")  # fmt: skip
-    with transaccion(motor_app, persona_id=None, consorcio_id=e["cons"]) as c:
+    with transaccion(motor_app, persona_id=e["prop"], consorcio_id=e["cons"]) as c:
         for i in range(tope - 1):
             c.execute(recibir, {"p": e["prop"], "m": f"<tope-{i}>", "s": f"{i:064x}"}).one()
     direccion = de(motor_migrate, e, "prop")
@@ -563,14 +563,16 @@ def test_la_fila_cambia_solo_como_se_permite(e, motor_migrate, motor_app):
     assert error.value.orig.diag.message_hint == "historia_inmutable"
 
 
-def test_la_entrada_no_corre_con_una_sesion_en_el_ambito(e, motor_app):
+def test_la_entrada_corre_solo_en_el_ambito_de_quien_manda(e, motor_app):
+    """Ni en el de otra persona ni en uno sin persona: la API no abre ámbitos de trabajo."""
     recibir = text("select * from nucleo.recibir_pago_por_correo(:p, '<x>', null,"
                    " 'application/pdf', 10, :s)")  # fmt: skip
-    with pytest.raises(DBAPIError) as error:
-        with transaccion(motor_app, persona_id=e["prop"], consorcio_id=e["cons"]) as c:
-            c.execute(recibir, {"p": e["prop"], "s": "a" * 64})
-    assert error.value.orig.sqlstate == "42501"
-    with transaccion(motor_app, persona_id=None, consorcio_id=e["cons"]) as c:  # control
+    for ambito in (e["inq"], None):
+        with pytest.raises(DBAPIError) as error:
+            with transaccion(motor_app, persona_id=ambito, consorcio_id=e["cons"]) as c:
+                c.execute(recibir, {"p": e["prop"], "s": "a" * 64})
+        assert error.value.orig.sqlstate == "42501", ambito
+    with transaccion(motor_app, persona_id=e["prop"], consorcio_id=e["cons"]) as c:  # control
         assert c.execute(recibir, {"p": e["prop"], "s": "a" * 64}).one().resultado == "nuevo"
 
 

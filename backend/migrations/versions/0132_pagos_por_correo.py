@@ -223,8 +223,9 @@ create function nucleo.remitente_de_pagos_por_correo(correo_remitente text)
      where p.correo = lower(btrim(correo_remitente)) and p.eliminado_en is null
   $$;
 
--- La entrada por correo: sin sesión (no hay persona en el ámbito), con el consorcio fijado, un modo
--- registrado y un vínculo que cuenta. Devuelve el día del consorcio.
+-- La entrada por correo: el ámbito es el de quien manda (la persona que identificó el DMARC, sin
+-- sesión ni ayuda), con el consorcio fijado, un modo registrado y un vínculo que cuenta. Nunca un
+-- ámbito sin persona: la API no abre ámbitos de trabajo. Devuelve el día del consorcio.
 create function nucleo.exigir_entrada_por_correo(c uuid, remitente uuid)
   returns date
   language plpgsql volatile
@@ -233,7 +234,7 @@ create function nucleo.exigir_entrada_por_correo(c uuid, remitente uuid)
   declare
     hoy date;
   begin
-    if c is null or remitente is null or plataforma.persona_actual() is not null
+    if c is null or remitente is null or plataforma.persona_actual() is distinct from remitente
        or {AYUDA_GUC} is not null then
       raise exception 'solo la entrada por correo' using errcode = '42501';
     end if;
@@ -337,7 +338,7 @@ create function nucleo.recibir_pago_por_correo(remitente uuid, mensaje text, asu
   $$;
 
 -- El `VersionId` del almacén para la versión de un adjunto recién guardado (como
--- `fijar_version_objeto`, sin sesión).
+-- `fijar_version_objeto`, en el ámbito de quien manda).
 create function nucleo.fijar_version_pago_por_correo(version uuid, version_almacen text,
                                                      remitente uuid)
   returns void

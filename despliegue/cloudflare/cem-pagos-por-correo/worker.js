@@ -21,7 +21,7 @@
 //   CEM_ENTRADA_URL          https://cem-staging.holancloud.com/api/v1/entrada/correo-pagos
 
 const REBOTE_GENERICO =
-  "No se pudo recibir el comprobante. Puede informar el pago desde la app de Consorcio en Mano.";
+  "No se pudo recibir el comprobante. El pago se puede informar desde la aplicación Consorcio en Mano.";
 
 export default {
   async email(message, env) {
