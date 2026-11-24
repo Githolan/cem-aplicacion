@@ -69,6 +69,22 @@ export function importeLeido(r: { importe: string; moneda: string | null }): str
 /** El importe leído entra en el campo en pesos solo si la lectura dijo que son pesos. */
 export const leidoEnPesos = (r: { importe: string | null; moneda: string | null }) => r.importe !== null && r.moneda?.toUpperCase() === MONEDA_DEL_PAGO;
 
+/**
+ * Un importe leído sin moneda (o con un código que no es de moneda), en un edificio que opera en una
+ * sola moneda, se toma en esa moneda (pedido del propietario del 24-11-2026, PI-D35). La moneda del
+ * edificio es la que ya se configura con `scripts/moneda_consorcio.py` (P-14). Con más de una moneda
+ * habilitada no se supone nada: queda «moneda sin leer», como antes.
+ */
+export function conMonedaDelEdificio<T extends { importe: string | null; moneda: string | null }>(r: T, monedas: readonly string[]): T & { monedaSupuesta: boolean } {
+  const sinMoneda = r.moneda === null || !CODIGO_DE_MONEDA.test(r.moneda);
+  const unica = monedas.length === 1 ? monedas[0] : undefined;
+  if (r.importe === null || !sinMoneda || unica === undefined) return { ...r, monedaSupuesta: false };
+  return { ...r, moneda: unica, monedaSupuesta: true };
+}
+
+/** Ayuda cuando la moneda no se leyó y se tomó la del edificio. */
+export const MONEDA_DEL_EDIFICIO = "No se leyó la moneda en el comprobante: se toma la del edificio, que opera en una sola moneda.";
+
 /** Aviso cuando hay un importe leído que no entra como pesos. */
 export const AVISO_MONEDA = "El importe leído no está en pesos o no se leyó la moneda: al completar hay que escribir lo pagado en pesos.";
 

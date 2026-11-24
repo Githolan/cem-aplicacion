@@ -6,7 +6,7 @@ import { api } from "../api/cliente";
 import { type Aviso, ESTADO, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, monedasDe, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { RUTA_INICIO } from "../enlace";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
@@ -286,6 +286,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   consorcio={consorcio}
                   recibido={correoAbierto}
                   lista={lista}
+                  monedas={monedasDe(pantalla, consorcio)}
                   aEntrar={aEntrar}
                   alCerrar={() => cerrar()}
                   alTerminar={terminar}

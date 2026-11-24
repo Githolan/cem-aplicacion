@@ -10,7 +10,22 @@ import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { HojaDelArchivo } from "../VisorDocumento";
 import { useArchivoDelPago } from "./archivos";
 import { InformarPago } from "./InformarPago";
-import { ARCHIVO_DESCARTADO, AVISO_MONEDA, COMPLETAR, DESCARTAR, fecha, importeLeido, leidoEnPesos, type ListaPagos, mensajeDePago, type PagoPorCorreo, tituloCorreo, VER_ARCHIVO } from "./textos";
+import {
+  ARCHIVO_DESCARTADO,
+  AVISO_MONEDA,
+  COMPLETAR,
+  conMonedaDelEdificio,
+  DESCARTAR,
+  fecha,
+  importeLeido,
+  leidoEnPesos,
+  type ListaPagos,
+  mensajeDePago,
+  MONEDA_DEL_EDIFICIO,
+  type PagoPorCorreo,
+  tituloCorreo,
+  VER_ARCHIVO,
+} from "./textos";
 
 // Un comprobante que llegó por correo y espera a quien lo mandó (PC-4, app 0132). La ficha muestra
 // lo que leyó la aplicación como propuesta (RN21: la IA propone, la persona decide) y ofrece
@@ -22,6 +37,8 @@ type Props = {
   consorcio: string;
   recibido: PagoPorCorreo;
   lista: ListaPagos;
+  /** Las monedas en que opera el edificio (P-14): con una sola, un importe sin moneda se toma en ella. */
+  monedas: readonly string[];
   aEntrar: () => void;
   alCerrar: () => void;
   alTerminar: (texto: string) => void;
@@ -29,8 +46,9 @@ type Props = {
 
 const propuesto = (valor: string | null | undefined, texto: (v: string) => string = (v) => v) => (valor == null ? "No se leyó" : texto(valor));
 
-export function FichaCorreo({ consorcio, recibido, lista, aEntrar, alCerrar, alTerminar }: Props) {
+export function FichaCorreo({ consorcio, recibido: tal, lista, monedas, aEntrar, alCerrar, alTerminar }: Props) {
   const [abierta, setAbierta] = useState<Abierta>(null);
+  const recibido = conMonedaDelEdificio(tal, monedas);
   const leido = recibido.leido && recibido.legible !== false;
   const datos: DatoDeFicha[] = [
     { etiqueta: "Llegó", valor: momento(recibido.recibido_en) },
@@ -62,6 +80,7 @@ export function FichaCorreo({ consorcio, recibido, lista, aEntrar, alCerrar, alT
   return (
     <FichaDeRegistro titulo={tituloCorreo(recibido)} datos={datos} alCerrar={alCerrar} ventana={ventana}>
       {leido && <p className="ayuda">Lo leyó la aplicación en el archivo: es una propuesta para revisar al completar.</p>}
+      {leido && recibido.monedaSupuesta && <p className="ayuda">{MONEDA_DEL_EDIFICIO}</p>}
       {leido && recibido.importe !== null && !leidoEnPesos(recibido) && <p className="ayuda">{AVISO_MONEDA}</p>}
       <p className="ficha-registro__acciones">
         {puedeInformar && (
