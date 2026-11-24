@@ -1,6 +1,6 @@
-"""Pagos informados por los vecinos, cortes PI-S1 (`0129`) y PI-S2 (`0130`).
+"""Pagos informados por los vecinos, cortes PI-S1 (`0129`), PI-S2 (`0130`) y PI-S3 (`0131`).
 
-Diseño «Pagos informados» del repositorio CEM (reglas PI-1 a PI-6 y PI-9). Todas las rutas
+Diseño «Pagos informados» del repositorio CEM (reglas PI-1 a PI-9). Todas las rutas
 cuelgan de `…/pagos-informados`:
 
 - **`POST …/comprobantes?unidad_id=…`** (`pagos_informados.informar`): el comprobante (el cuerpo
@@ -17,6 +17,10 @@ cuelgan de `…/pagos-informados`:
   (`pagos_informados.confirmar`, con `Idempotency-Key`; PI-4, PI-5, PI-9): confirmar un pago
   `informado` (con el comprobante ya aceptado), rechazarlo con motivo, o anular uno `confirmado`
   con motivo. Nadie decide sobre un pago que informó él mismo (`no_es_quien_informo`).
+- **`GET …/cotejo?periodo=AAAA-MM-01`** (`pagos_informados.ver`; PI-7, PI-8): por unidad, lo
+  informado y confirmado del mes anterior al período contra la columna «Pagos» de la liquidación
+  oficial vigente (sin período, la más nueva). Se calcula al leer; nunca se guarda. Quien tiene
+  `fiscalizacion.ver_panel` ve todas las unidades; los vecinos, las suyas.
 
 La política decide al entrar o apenas se conoce la unidad; la base repite la barrera en cada
 función. Si la base niega lo que el evaluador concedió, es una discrepancia (500).
@@ -35,6 +39,8 @@ from cem_contracts.pagos_informados import (
     LARGO_NUMERO_OPERACION,
     AccionPagoInformado,
     ComprobantePagoSubido,
+    CotejoDeLaLiquidacion,
+    CotejoPagosInformados,
     EstadoPagoInformado,
     ListaPagosInformados,
     MotivoPagoInformado,
@@ -42,6 +48,8 @@ from cem_contracts.pagos_informados import (
     PagoInformadoNuevo,
     PagoInformadoRespuesta,
     PasoPagoInformado,
+    ResultadoCotejoLiquidacion,
+    UnidadCotejada,
 )
 from cem_contracts.politicas import CodigoSeparacion
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -71,6 +79,7 @@ from app.consorcios.padron import Discrepancia, sobre_unidad
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, detalle_de_campo, sin_cache
+from app.liquidacion.oficial import PERIODO_INVALIDO, PeriodoConsulta
 from app.plataforma import almacen
 from app.plataforma.idempotencia import ClaveIdempotenciaDep, IdempotenciaDep, responder_una_vez
 
@@ -480,3 +489,61 @@ def anular_pago(
 ) -> Response:
     sql = "select nucleo.anular_pago_informado(:p, :motivo, :actor, 'api', :sesion)"
     return _decidir(pago_id, sql, {"motivo": cuerpo.motivo}, permisos, idempotencia, motor)
+
+
+COTEJO_SQL = (
+    "select * from nucleo.cotejo_pagos_informados_lectura(:periodo, :actor, 'api', :sesion)"
+)
+
+
+def _unidad_cotejada(f) -> UnidadCotejada:
+    liquidacion = f["liquidacion"]
+    return UnidadCotejada(
+        unidad_id=f["unidad_id"],
+        unidad_designacion=f["unidad_designacion"],
+        informado_confirmado=f["informado_confirmado"],
+        pagos_confirmados=f["pagos_confirmados"],
+        sin_pagos_informados=f["pagos_confirmados"] == 0,
+        liquidacion=liquidacion,
+        diferencia=None if liquidacion is None else liquidacion - f["informado_confirmado"],
+        resultado=ResultadoCotejoLiquidacion(f["resultado"]),
+    )
+
+
+@router.get(
+    BASE + "/cotejo",
+    response_model=CotejoPagosInformados,
+    summary="El cotejo de lo informado y confirmado con la columna «Pagos» de la liquidación"
+    " oficial vigente, unidad por unidad",
+    responses={
+        **RESPUESTAS,
+        404: {"description": "Ese período no tiene liquidación oficial vigente, o sin vínculo ni"
+              " mandato en el consorcio."},
+        422: {"description": "El período no es el primer día de un mes."},
+    },
+)  # fmt: skip
+def cotejo_pagos_informados(
+    ver: VerDep, motor: MotorDep, periodo: PeriodoConsulta = None
+) -> CotejoPagosInformados:
+    """PI-7: se calcula cada vez, con los pagos confirmados de ese momento y la liquidación
+    vigente; PI-8: solo los dos importes, sin juzgar a nadie."""
+    if periodo is not None and periodo.day != 1:
+        raise ErrorApi(422, CodigoError.PETICION_INVALIDA, PERIODO_INVALIDO)
+    ctx = ver.ctx
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
+        filas = ejecutar(c, ver, COTEJO_SQL, {"periodo": periodo}).mappings().all()
+    if not filas:
+        if periodo is not None:
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        return CotejoPagosInformados(liquidacion=None)
+    unidades = [_unidad_cotejada(f) for f in filas if f["unidad_id"] is not None]
+    primera = filas[0]
+    return CotejoPagosInformados(liquidacion=CotejoDeLaLiquidacion(
+        importacion_id=primera["importacion_id"], periodo=primera["periodo"],
+        pagos_desde=primera["pagos_desde"], pagos_hasta=primera["pagos_hasta"],
+        unidades=unidades,
+        para_revisar=sum(
+            1 for u in unidades
+            if u.resultado is ResultadoCotejoLiquidacion.DIFIERE and not u.sin_pagos_informados
+        ),
+    ))  # fmt: skip

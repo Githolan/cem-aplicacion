@@ -3374,6 +3374,77 @@
         "title": "CotejoAnulado",
         "type": "object"
       },
+      "CotejoDeLaLiquidacion": {
+        "description": "El cotejo de una liquidación oficial vigente.",
+        "properties": {
+          "importacion_id": {
+            "format": "uuid",
+            "title": "Importacion Id",
+            "type": "string"
+          },
+          "pagos_desde": {
+            "description": "El primer día de los pagos que cuentan (incluido).",
+            "format": "date",
+            "title": "Pagos Desde",
+            "type": "string"
+          },
+          "pagos_hasta": {
+            "description": "El último día de los pagos que cuentan (incluido).",
+            "format": "date",
+            "title": "Pagos Hasta",
+            "type": "string"
+          },
+          "para_revisar": {
+            "description": "Cuántas de esas unidades tienen `difiere` con al menos un pago confirmado: el número de la bandeja y del aviso diario del Consejo. Las que difieren sin pagos informados no se cuentan (decisión por defecto de PI-S3).",
+            "title": "Para Revisar",
+            "type": "integer"
+          },
+          "periodo": {
+            "description": "El de la liquidación: el primer día del mes.",
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "unidades": {
+            "description": "Las que quien lee puede ver: todas con `fiscalizacion.ver_panel`; si no, las de sus vínculos confirmados.",
+            "items": {
+              "$ref": "#/components/schemas/UnidadCotejada"
+            },
+            "title": "Unidades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "importacion_id",
+          "periodo",
+          "pagos_desde",
+          "pagos_hasta",
+          "unidades",
+          "para_revisar"
+        ],
+        "title": "CotejoDeLaLiquidacion",
+        "type": "object"
+      },
+      "CotejoPagosInformados": {
+        "description": "`GET …/pagos-informados/cotejo`: nula si todavía no hay una liquidación oficial vigente.",
+        "properties": {
+          "liquidacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CotejoDeLaLiquidacion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "liquidacion"
+        ],
+        "title": "CotejoPagosInformados",
+        "type": "object"
+      },
       "CuentaDelPeriodo": {
         "properties": {
           "confirmada_en": {
@@ -15708,6 +15779,16 @@
         "title": "ResultadoCotejo",
         "type": "object"
       },
+      "ResultadoCotejoLiquidacion": {
+        "description": "PI-7: cómo queda cada unidad.",
+        "enum": [
+          "coincide",
+          "difiere",
+          "sin_datos"
+        ],
+        "title": "ResultadoCotejoLiquidacion",
+        "type": "string"
+      },
       "ResumenDelPeriodo": {
         "description": "El resumen de la liquidación vigente de un período para el propietario\n(`fiscalizacion.ver_resumen`): el gasto por rubro y los totales. Sin el detalle de los gastos,\nsin diferencias y sin unidades.",
         "properties": {
@@ -17222,6 +17303,77 @@
           "invitable"
         ],
         "title": "Unidad",
+        "type": "object"
+      },
+      "UnidadCotejada": {
+        "description": "Una unidad en el cotejo. La pantalla dice «lo informado y confirmado suma X; la liquidación\ndice Y» (PI-8), nunca que alguien se equivocó.",
+        "properties": {
+          "diferencia": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`liquidacion` − `informado_confirmado`; nula con `sin_datos`.",
+            "title": "Diferencia"
+          },
+          "informado_confirmado": {
+            "description": "La suma de los pagos confirmados de la unidad con la fecha del pago entre `pagos_desde` y `pagos_hasta`; cero si no hay ninguno.",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Informado Confirmado",
+            "type": "string"
+          },
+          "liquidacion": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La columna «Pagos» de la unidad en la liquidación oficial; nula con `sin_datos`.",
+            "title": "Liquidacion"
+          },
+          "pagos_confirmados": {
+            "description": "Cuántos pagos confirmados suma.",
+            "title": "Pagos Confirmados",
+            "type": "integer"
+          },
+          "resultado": {
+            "$ref": "#/components/schemas/ResultadoCotejoLiquidacion"
+          },
+          "sin_pagos_informados": {
+            "description": "Ningún pago confirmado en la ventana: si la liquidación trae pagos, la pantalla lo dice así y no como una diferencia de alguien.",
+            "title": "Sin Pagos Informados",
+            "type": "boolean"
+          },
+          "unidad_designacion": {
+            "title": "Unidad Designacion",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "unidad_designacion",
+          "informado_confirmado",
+          "pagos_confirmados",
+          "sin_pagos_informados",
+          "liquidacion",
+          "diferencia",
+          "resultado"
+        ],
+        "title": "UnidadCotejada",
         "type": "object"
       },
       "UnidadEnLaLiquidacion": {
@@ -27172,6 +27324,68 @@
           }
         },
         "summary": "Subir el comprobante de un pago de una unidad: entra en cuarentena hasta que el antivirus lo acepta",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/cotejo": {
+      "get": {
+        "description": "PI-7: se calcula cada vez, con los pagos confirmados de ese momento y la liquidación\nvigente; PI-8: solo los dos importes, sin juzgar a nadie.",
+        "operationId": "cotejo_pagos_informados_api_v1_consorcios__consorcio_id__pagos_informados_cotejo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El primer día del mes (`AAAA-MM-01`); sin él, el último con liquidación.",
+            "in": "query",
+            "name": "periodo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "El primer día del mes (`AAAA-MM-01`); sin él, el último con liquidación.",
+              "title": "Periodo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CotejoPagosInformados"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "Ese período no tiene liquidación oficial vigente, o sin vínculo ni mandato en el consorcio."
+          },
+          "422": {
+            "description": "El período no es el primer día de un mes."
+          }
+        },
+        "summary": "El cotejo de lo informado y confirmado con la columna «Pagos» de la liquidación oficial vigente, unidad por unidad",
         "tags": [
           "consorcios"
         ]
