@@ -52,6 +52,26 @@ export const MEDIOS: readonly Medio[] = ["transferencia", "deposito", "mercado_p
 /** El único medio que se informa sin comprobante ni número de operación (contrato). */
 export const SIN_COMPROBANTE: Medio = "efectivo";
 
+/** La moneda de lo que se informa: el pago y la liquidación están en pesos. */
+export const MONEDA_DEL_PAGO = "ARS";
+const CODIGO_DE_MONEDA = /^[A-Za-z]{3}$/;
+
+/**
+ * El importe leído de un correo, con la moneda que leyó la lectura (puede ser otra que pesos).
+ * Sin moneda leída, el número solo: no se supone que son pesos.
+ */
+export function importeLeido(r: { importe: string; moneda: string | null }): string {
+  const centavos = aCentavos(r.importe);
+  if (centavos === null || r.moneda === null || !CODIGO_DE_MONEDA.test(r.moneda)) return `${r.importe} (moneda sin leer)`;
+  return importe(centavos, r.moneda.toUpperCase());
+}
+
+/** El importe leído entra en el campo en pesos solo si la lectura dijo que son pesos. */
+export const leidoEnPesos = (r: { importe: string | null; moneda: string | null }) => r.importe !== null && r.moneda?.toUpperCase() === MONEDA_DEL_PAGO;
+
+/** Aviso cuando hay un importe leído que no entra como pesos. */
+export const AVISO_MONEDA = "El importe leído no está en pesos o no se leyó la moneda: al completar hay que escribir lo pagado en pesos.";
+
 /** «$ 45.000,00» desde el decimal de la API («45000.00»). */
 export function enPesos(decimal: string): string {
   const centavos = aCentavos(decimal);

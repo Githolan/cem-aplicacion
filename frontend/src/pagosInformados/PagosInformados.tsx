@@ -113,11 +113,14 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
 
-  // Mientras un comprobante sigue en el antivirus, el pago no se confirma ni se ve: se vuelve a leer
-  // cada tanto, con el mismo ritmo y tope que los archivos de una reparación.
+  // Mientras un comprobante sigue en el antivirus, el pago no se confirma ni se ve; y un correo ya
+  // analizado espera la lectura automática, que es otro trabajo. Se vuelve a leer cada tanto, con el
+  // mismo ritmo y tope que los archivos de una reparación (con la lectura apagada, `leido` nunca
+  // llega: el tope corta).
   const enAntivirus =
     lectura.tipo === "ok" &&
-    [...lectura.lista.elementos, ...lectura.correo.elementos].some((e) => e.comprobante_estado === "en_cuarentena");
+    ([...lectura.lista.elementos, ...lectura.correo.elementos].some((e) => e.comprobante_estado === "en_cuarentena") ||
+      lectura.correo.elementos.some((r) => r.comprobante_estado === "disponible" && !r.leido));
   useEffect(() => {
     if (!enAntivirus || consultas >= CONSULTAS_MAXIMAS) return;
     const reloj = setTimeout(() => {

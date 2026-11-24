@@ -15,7 +15,9 @@ import {
   COMPLETAR,
   CONFIRMAR,
   DESCARTAR,
+  AVISO_MONEDA,
   enPesos,
+  importeLeido,
   INFORMAR,
   PAGO_RECHAZADO,
   POR_CONFIRMAR,
@@ -328,6 +330,49 @@ describe("pantalla /pagos-informados", () => {
     });  // prettier-ignore
     expect(pedidos(api, "POST", `${PAGOS}/comprobantes`)).toHaveLength(0);
   });
+
+  it("un importe leído en otra moneda, o sin moneda, se muestra con ella y no entra como pesos", async () => {
+    for (const moneda of ["USD", null]) {
+      const recibido = { ...RECIBIDO, importe: "100.00", moneda };
+      vi.stubGlobal(
+        "fetch",
+        backend({
+          "GET /api/v1/me/consorcios": CONSORCIOS,
+          [`GET ${BASE}/mis-acciones`]: VECINA,
+          [`GET ${PAGOS}`]: () => Response.json(lista([])),
+          [`GET ${CORREO}`]: correo([recibido]),
+        }),
+      );
+      abrir();
+      fireEvent.click(await screen.findByRole("button", { name: /Expensas de octubre SINTETICO/ }));
+      const ficha = within(await screen.findByRole("dialog"));
+      expect(ficha.getByText(comoSeLee(importeLeido({ importe: "100.00", moneda })))).toBeTruthy();
+      expect(ficha.queryByText(comoSeLee(enPesos("100.00")))).toBeNull();
+      expect(ficha.getByText(AVISO_MONEDA)).toBeTruthy();
+      fireEvent.click(ficha.getByRole("button", { name: COMPLETAR }));
+      const ventana = within(await screen.findByRole("dialog", { name: COMPLETAR }));
+      expect((ventana.getByLabelText("Importe pagado (en pesos)") as HTMLInputElement).value).toBe("");
+      expect((ventana.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("777 SINTETICO");
+      cleanup();
+    }
+  });
+
+  it("un correo ya analizado sin lectura todavía se vuelve a leer hasta que llega lo leído", async () => {
+    let leyo = false;
+    const sinLeer = { ...RECIBIDO, leido: false, legible: null, importe: null, moneda: null, numero_operacion: null, fecha_pago: null };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: VECINA,
+      [`GET ${PAGOS}`]: () => Response.json(lista([])),
+      [`GET ${CORREO}`]: () => Response.json({ elementos: [leyo ? RECIBIDO : sinLeer], direccion: null }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /Expensas de octubre SINTETICO/ }));
+    expect(await within(await screen.findByRole("dialog")).findByText(/Sin lectura automática/)).toBeTruthy();
+    leyo = true;  // la lectura termina
+    expect(await within(screen.getByRole("dialog")).findByText(comoSeLee(enPesos("52000.50")), {}, { timeout: 5000 })).toBeTruthy();
+  }, 15000);
 
   it("descartar lo recibido pregunta antes y no informa nada", async () => {
     const api = backend({

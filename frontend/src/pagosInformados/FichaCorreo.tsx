@@ -10,7 +10,7 @@ import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { HojaDelArchivo } from "../VisorDocumento";
 import { useArchivoDelPago } from "./archivos";
 import { InformarPago } from "./InformarPago";
-import { ARCHIVO_DESCARTADO, COMPLETAR, DESCARTAR, enPesos, fecha, type ListaPagos, mensajeDePago, type PagoPorCorreo, tituloCorreo, VER_ARCHIVO } from "./textos";
+import { ARCHIVO_DESCARTADO, AVISO_MONEDA, COMPLETAR, DESCARTAR, fecha, importeLeido, leidoEnPesos, type ListaPagos, mensajeDePago, type PagoPorCorreo, tituloCorreo, VER_ARCHIVO } from "./textos";
 
 // Un comprobante que llegó por correo y espera a quien lo mandó (PC-4, app 0132). La ficha muestra
 // lo que leyó la aplicación como propuesta (RN21: la IA propone, la persona decide) y ofrece
@@ -36,7 +36,7 @@ export function FichaCorreo({ consorcio, recibido, lista, aEntrar, alCerrar, alT
     { etiqueta: "Llegó", valor: momento(recibido.recibido_en) },
     ...(leido
       ? [
-          { etiqueta: "Importe leído", valor: propuesto(recibido.importe, enPesos) },
+          { etiqueta: "Importe leído", valor: recibido.importe === null ? propuesto(null) : importeLeido({ importe: recibido.importe, moneda: recibido.moneda }) },
           { etiqueta: "Fecha leída", valor: propuesto(recibido.fecha_pago, fecha) },
           { etiqueta: "Número leído", valor: propuesto(recibido.numero_operacion) },
         ]
@@ -62,6 +62,7 @@ export function FichaCorreo({ consorcio, recibido, lista, aEntrar, alCerrar, alT
   return (
     <FichaDeRegistro titulo={tituloCorreo(recibido)} datos={datos} alCerrar={alCerrar} ventana={ventana}>
       {leido && <p className="ayuda">Lo leyó la aplicación en el archivo: es una propuesta para revisar al completar.</p>}
+      {leido && recibido.importe !== null && !leidoEnPesos(recibido) && <p className="ayuda">{AVISO_MONEDA}</p>}
       <p className="ficha-registro__acciones">
         {puedeInformar && (
           <button type="button" onClick={() => setAbierta("completar")}>

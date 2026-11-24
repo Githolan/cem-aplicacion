@@ -16,6 +16,7 @@ import {
   CORREGIR,
   INFORMAR,
   type Medio,
+  leidoEnPesos,
   MEDIOS,
   mensajeDePago,
   type PagoInformado,
@@ -61,7 +62,8 @@ function valoresIniciales(modo: Modo, unidades: readonly Unidad[]) {
   const unaSola = unidades.length === 1 ? (unidades[0]?.id ?? NINGUNA) : NINGUNA;
   if (modo.tipo === "correo") {
     const r = modo.recibido;
-    const centavos = r.importe == null ? null : aCentavos(r.importe);
+    // Solo un importe leído en pesos entra en el campo «en pesos»; otra moneda, o sin moneda, no.
+    const centavos = r.importe !== null && leidoEnPesos(r) ? aCentavos(r.importe) : null;
     return { unidad: unaSola, importe: centavos === null ? "" : aTexto(centavos), fecha: r.fecha_pago ?? "", medio: "transferencia" as Medio, numero: r.numero_operacion ?? "" };
   }
   return { unidad: unaSola, importe: "", fecha: "", medio: "transferencia" as Medio, numero: "" };
