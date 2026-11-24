@@ -1,4 +1,5 @@
-"""Pagos informados por los vecinos, cortes PI-S1 (`0129`), PI-S2 (`0130`) y PI-S3 (`0131`).
+"""Pagos informados por los vecinos: cortes PI-S1 (`0129`), PI-S2 (`0130`), PI-S3 (`0131`) y
+PI-S4 (`0132`, la entrada por correo).
 
 Diseño: `doc/diseno/Pagos_Informados.md` del repositorio CEM (reglas PI-1 a PI-9).
 CEM no mueve dinero: quien pagó las expensas de una unidad deja la constancia con el comprobante,
@@ -40,7 +41,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from cem_contracts.documentos import EstadoVersion, VersionCargada
+from cem_contracts.documentos import EstadoVersion, TipoArchivo, VersionCargada
 
 LARGO_NUMERO_OPERACION = 60
 """La base tiene el mismo control (`0129`)."""
@@ -302,3 +303,96 @@ class CotejoPagosInformados(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     liquidacion: CotejoDeLaLiquidacion | None
+
+
+# --- La entrada por correo (PI-S4, `0132`) ------------------------------------------------------
+
+ENCABEZADO_CLAVE_CORREO = "X-CEM-Clave-Correo"
+"""El encabezado con la clave compartida que manda el Worker de Cloudflare (PC-2)."""
+MAXIMO_COMPROBANTES_POR_CORREO = 10
+"""Más adjuntos que esto en un correo se rebotan: que los mande en varios correos."""
+MAXIMO_COMPROBANTES_POR_DIA = 30
+"""Cuántos adjuntos nuevos acepta por persona en 24 horas; los demás se rebotan."""
+TOPE_CORREO_BYTES = 26 * 1024 * 1024
+"""Lo que acepta la entrada: 25 MiB es el tope de Email Routing para un correo entrante, más el
+margen de la codificación del cuerpo."""
+
+
+class EstadoPagoPorCorreo(StrEnum):
+    POR_COMPLETAR = "por_completar"
+    INFORMADO = "informado"
+    DESCARTADO = "descartado"
+
+
+class EntradaCorreoRecibida(BaseModel):
+    """`POST /api/v1/entrada/correo-pagos`: qué pasó con cada adjunto del correo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    nuevos: int = Field(description="Adjuntos guardados por primera vez, por completar.")
+    ya_recibidos: int = Field(
+        description="Adjuntos que ya estaban: un reintento del mismo correo, o el mismo archivo"
+        " todavía por completar."
+    )
+    ya_informados: int = Field(
+        description="Adjuntos que ya son el comprobante de un pago vigente: no se guardaron (PA07)."
+    )
+
+
+class PagoPorCorreo(BaseModel):
+    """Un comprobante recibido por correo que quien lo mandó todavía tiene que completar. Lo leído
+    por la IA es una propuesta (RN21): la persona lo revisa antes de informarlo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    recibido_en: datetime
+    asunto: str | None
+    comprobante_version_id: UUID
+    comprobante_tipo: TipoArchivo
+    comprobante_estado: EstadoVersion
+    leido: bool = Field(description="Si ya pasó la lectura (con la lectura apagada, nunca).")
+    legible: bool | None = Field(description="Si la lectura encontró los datos; nulo sin lectura.")
+    importe: Decimal | None = Field(description="Propuesto por la lectura.")
+    moneda: str | None = Field(description="Propuesta por la lectura.")
+    numero_operacion: str | None = Field(description="Propuesto por la lectura.")
+    fecha_pago: date | None = Field(description="Propuesta por la lectura.")
+
+
+class ListaPagosPorCorreo(BaseModel):
+    """`GET …/pagos-informados/por-correo`: lo que la persona mandó y le falta completar."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[PagoPorCorreo]
+
+
+class PagoPorCorreoInforme(BaseModel):
+    """`POST …/pagos-informados/por-correo/{r}/informe`: los datos revisados por la persona. El
+    comprobante es el del correo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    unidad_id: UUID
+    importe: Decimal = Field(gt=0, max_digits=18, decimal_places=2, description="En pesos.")
+    fecha_pago: date = Field(description="El día en que se pagó; no posterior a hoy.")
+    medio: MedioPago
+    numero_operacion: NumeroOperacion | None = Field(
+        default=None,
+        description="El de la transferencia, el depósito o el pago; obligatorio salvo en efectivo.",
+    )
+
+    @model_validator(mode="after")
+    def _del_medio(self) -> "PagoPorCorreoInforme":
+        if self.medio is not MEDIO_SIN_COMPROBANTE and self.numero_operacion is None:
+            raise ValueError("sin número de operación solo se informa un pago en efectivo")
+        return self
+
+
+class PagoPorCorreoDescartado(BaseModel):
+    """`POST …/pagos-informados/por-correo/{r}/descarte`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    estado: EstadoPagoPorCorreo

@@ -1696,7 +1696,15 @@
           "comprobante_en_revision",
           "comprobante_rechazado",
           "correccion_de_pago_invalida",
-          "pago_ya_corregido"
+          "pago_ya_corregido",
+          "remitente_no_identificado",
+          "remitente_en_varios_consorcios",
+          "sin_comprobantes",
+          "demasiados_comprobantes",
+          "clave_de_entrada_invalida",
+          "entrada_no_configurada",
+          "pago_por_correo_descartado",
+          "pago_por_correo_informado"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -5121,6 +5129,33 @@
         "title": "EntradaContrasena",
         "type": "object"
       },
+      "EntradaCorreoRecibida": {
+        "description": "`POST /api/v1/entrada/correo-pagos`: qué pasó con cada adjunto del correo.",
+        "properties": {
+          "nuevos": {
+            "description": "Adjuntos guardados por primera vez, por completar.",
+            "title": "Nuevos",
+            "type": "integer"
+          },
+          "ya_informados": {
+            "description": "Adjuntos que ya son el comprobante de un pago vigente: no se guardaron (PA07).",
+            "title": "Ya Informados",
+            "type": "integer"
+          },
+          "ya_recibidos": {
+            "description": "Adjuntos que ya estaban: un reintento del mismo correo, o el mismo archivo todavía por completar.",
+            "title": "Ya Recibidos",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nuevos",
+          "ya_recibidos",
+          "ya_informados"
+        ],
+        "title": "EntradaCorreoRecibida",
+        "type": "object"
+      },
       "EnvioARevision": {
         "additionalProperties": false,
         "properties": {
@@ -5682,6 +5717,15 @@
           "anulado"
         ],
         "title": "EstadoPagoInformado",
+        "type": "string"
+      },
+      "EstadoPagoPorCorreo": {
+        "enum": [
+          "por_completar",
+          "informado",
+          "descartado"
+        ],
+        "title": "EstadoPagoPorCorreo",
         "type": "string"
       },
       "EstadoPedidoSalteo": {
@@ -9950,6 +9994,23 @@
         "title": "ListaPagosPorAclarar",
         "type": "object"
       },
+      "ListaPagosPorCorreo": {
+        "description": "`GET …/pagos-informados/por-correo`: lo que la persona mandó y le falta completar.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PagoPorCorreo"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaPagosPorCorreo",
+        "type": "object"
+      },
       "ListaPedidosSalteo": {
         "description": "`GET …/pedidos-salteo`: los del consorcio, del más nuevo al más viejo. Los lee quien\nsaltea (el Consejo, por la configuración) y quien prepara las órdenes.",
         "properties": {
@@ -12875,6 +12936,202 @@
           "comprobante_estado"
         ],
         "title": "PagoPorAclarar",
+        "type": "object"
+      },
+      "PagoPorCorreo": {
+        "description": "Un comprobante recibido por correo que quien lo mandó todavía tiene que completar. Lo leído\npor la IA es una propuesta (RN21): la persona lo revisa antes de informarlo.",
+        "properties": {
+          "asunto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asunto"
+          },
+          "comprobante_estado": {
+            "$ref": "#/components/schemas/EstadoVersion"
+          },
+          "comprobante_tipo": {
+            "$ref": "#/components/schemas/TipoArchivo"
+          },
+          "comprobante_version_id": {
+            "format": "uuid",
+            "title": "Comprobante Version Id",
+            "type": "string"
+          },
+          "fecha_pago": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Propuesta por la lectura.",
+            "title": "Fecha Pago"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Propuesto por la lectura.",
+            "title": "Importe"
+          },
+          "legible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si la lectura encontró los datos; nulo sin lectura.",
+            "title": "Legible"
+          },
+          "leido": {
+            "description": "Si ya pasó la lectura (con la lectura apagada, nunca).",
+            "title": "Leido",
+            "type": "boolean"
+          },
+          "moneda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Propuesta por la lectura.",
+            "title": "Moneda"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Propuesto por la lectura.",
+            "title": "Numero Operacion"
+          },
+          "recibido_en": {
+            "format": "date-time",
+            "title": "Recibido En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "recibido_en",
+          "asunto",
+          "comprobante_version_id",
+          "comprobante_tipo",
+          "comprobante_estado",
+          "leido",
+          "legible",
+          "importe",
+          "moneda",
+          "numero_operacion",
+          "fecha_pago"
+        ],
+        "title": "PagoPorCorreo",
+        "type": "object"
+      },
+      "PagoPorCorreoDescartado": {
+        "description": "`POST …/pagos-informados/por-correo/{r}/descarte`.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoPagoPorCorreo"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "estado"
+        ],
+        "title": "PagoPorCorreoDescartado",
+        "type": "object"
+      },
+      "PagoPorCorreoInforme": {
+        "additionalProperties": false,
+        "description": "`POST …/pagos-informados/por-correo/{r}/informe`: los datos revisados por la persona. El\ncomprobante es el del correo.",
+        "properties": {
+          "fecha_pago": {
+            "description": "El día en que se pagó; no posterior a hoy.",
+            "format": "date",
+            "title": "Fecha Pago",
+            "type": "string"
+          },
+          "importe": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,16}|(?=[\\d.]{1,19}0*$)\\d{0,16}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "description": "En pesos.",
+            "title": "Importe"
+          },
+          "medio": {
+            "$ref": "#/components/schemas/MedioPago"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*[0-9A-Za-z][^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El de la transferencia, el depósito o el pago; obligatorio salvo en efectivo.",
+            "title": "Numero Operacion"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "importe",
+          "fecha_pago",
+          "medio"
+        ],
+        "title": "PagoPorCorreoInforme",
         "type": "object"
       },
       "PagoPorCotejar": {
@@ -27391,6 +27648,294 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/por-correo": {
+      "get": {
+        "operationId": "listar_pagos_por_correo_api_v1_consorcios__consorcio_id__pagos_informados_por_correo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPagosPorCorreo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "Sin vínculo ni mandato en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los comprobantes que la persona mandó por correo y le falta completar, con lo que propone la lectura",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/por-correo/{recibido_id}/comprobante": {
+      "get": {
+        "operationId": "contenido_pago_por_correo_api_v1_consorcios__consorcio_id__pagos_informados_por_correo__recibido_id__comprobante_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recibido_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recibido Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "El archivo, con `inline`, `nosniff` y una CSP que no deja ejecutar nada."
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "Sin vínculo ni mandato en el consorcio."
+          },
+          "409": {
+            "description": "Todavía se revisa o fue rechazado."
+          },
+          "410": {
+            "description": "El archivo ya no está en el almacén (staging, a los 30 días)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ver un comprobante recibido por correo, si el antivirus lo aceptó",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/por-correo/{recibido_id}/descarte": {
+      "post": {
+        "operationId": "descartar_pago_por_correo_api_v1_consorcios__consorcio_id__pagos_informados_por_correo__recibido_id__descarte_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recibido_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recibido Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoPorCorreoDescartado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "No es un comprobante que mandó esta cuenta."
+          },
+          "409": {
+            "description": "Ya se informó."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Descartar un comprobante recibido por correo que no era un pago",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-informados/por-correo/{recibido_id}/informe": {
+      "post": {
+        "operationId": "informar_pago_por_correo_api_v1_consorcios__consorcio_id__pagos_informados_por_correo__recibido_id__informe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recibido_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recibido Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PagoPorCorreoInforme"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformadoRespuesta"
+                }
+              }
+            },
+            "description": "Ese pago ya estaba informado (PA07) o este comprobante ya se informó: el existente, con `ya_informado`."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoInformadoRespuesta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin un vínculo confirmado con la unidad que cuente."
+          },
+          "404": {
+            "description": "No es un comprobante que mandó esta cuenta."
+          },
+          "409": {
+            "description": "Se descartó, o el archivo ya se informó para otra unidad."
+          },
+          "422": {
+            "description": "La fecha es posterior a hoy o el número es una cuenta."
+          }
+        },
+        "summary": "Informar un comprobante recibido por correo, con la unidad y los datos que revisó la persona; si ese pago ya estaba informado, responde el existente",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/pagos-informados/{pago_id}/anulacion": {
       "post": {
         "operationId": "anular_pago_api_v1_consorcios__consorcio_id__pagos_informados__pago_id__anulacion_post",
@@ -32773,6 +33318,68 @@
         "summary": "Finalizar un vínculo (PA17)",
         "tags": [
           "consorcios"
+        ]
+      }
+    },
+    "/api/v1/entrada/correo-pagos": {
+      "post": {
+        "operationId": "recibir_correo_de_pagos_api_v1_entrada_correo_pagos_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CEM-Clave-Correo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Cem-Clave-Correo"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "message/rfc822": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntradaCorreoRecibida"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Clave equivocada o ausente."
+          },
+          "413": {
+            "description": "El correo pasa del tope de Email Routing."
+          },
+          "422": {
+            "description": "Rebote: `mensaje` es el texto que recibe el remitente (sin DMARC alineado o sin cuenta, unidades en varios edificios, sin comprobantes o demasiados)."
+          },
+          "503": {
+            "description": "La entrada no tiene su clave en este entorno."
+          }
+        },
+        "summary": "Entrada del correo de pagos (Worker de Cloudflare): guarda cada comprobante adjunto para que quien lo mandó lo complete en la app",
+        "tags": [
+          "entrada"
         ]
       }
     },

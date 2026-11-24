@@ -450,6 +450,25 @@ class CodigoError(StrEnum):
     PAGO_YA_CORREGIDO = "pago_ya_corregido"
     """Ese pago rechazado o anulado ya tiene su corrección: se corrige una sola vez, y la
     corrección, si también se rechaza, se corrige a su vez (PI-3, `0130`)."""
+    REMITENTE_NO_IDENTIFICADO = "remitente_no_identificado"
+    """El correo de pagos no pasó DMARC alineado con la dirección de quien manda, o esa dirección
+    no es de una cuenta con un vínculo que permita informar pagos: se rebota (PC-3, Q3, `0132`)."""
+    REMITENTE_EN_VARIOS_CONSORCIOS = "remitente_en_varios_consorcios"
+    """Quien manda el correo de pagos tiene unidades en más de un edificio: no se sabe de cuál es
+    el pago y se rebota con el aviso de informarlo desde la app (PI-D22, `0132`)."""
+    SIN_COMPROBANTES = "sin_comprobantes"
+    """El correo de pagos no trae ningún adjunto PDF, JPG o PNG de hasta 20 MB (PC-4, `0132`)."""
+    DEMASIADOS_COMPROBANTES = "demasiados_comprobantes"
+    """El correo trae más adjuntos de los que se aceptan juntos, o la persona ya mandó el máximo
+    del día (`0132`)."""
+    CLAVE_DE_ENTRADA_INVALIDA = "clave_de_entrada_invalida"
+    """La entrada de correo de pagos recibió una clave equivocada o ninguna (PC-2, `0132`)."""
+    ENTRADA_NO_CONFIGURADA = "entrada_no_configurada"
+    """La entrada de correo de pagos no tiene su clave en este entorno: no recibe nada (`0132`)."""
+    PAGO_POR_CORREO_DESCARTADO = "pago_por_correo_descartado"
+    """Lo recibido por correo ya se descartó: no se informa (`0132`)."""
+    PAGO_POR_CORREO_INFORMADO = "pago_por_correo_informado"
+    """Lo recibido por correo ya se informó: no se descarta (`0132`)."""
 
 
 class Error(BaseModel):
