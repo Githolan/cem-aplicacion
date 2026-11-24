@@ -22,12 +22,15 @@ FROM python:3.12-slim
 # El locale en_US.UTF-8: cem-postgres (postgres:18-alpine, musl) crea sus bases con
 # `en_US.utf8`, y una copia física suya (cem-copia-continua, H2c §6) no deja conectar a `cem` si
 # ese locale no existe en el sistema que la restaura. Solo ese, generado con localedef.
+# La versión menor va fija y es la de cem-postgres: la base efímera no puede ser más vieja que la
+# de origen (copias.exigir_version_para_verificar). Cambiarla rehace esta capa.
+ARG POSTGRES_18=18.7
 RUN apt-get update \
  && apt-get install -y --no-install-recommends postgresql-common ca-certificates \
  && sed -i 's/^#\? *create_main_cluster.*/create_main_cluster = false/' \
       /etc/postgresql-common/createcluster.conf \
  && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
- && apt-get install -y --no-install-recommends postgresql-18 age locales \
+ && apt-get install -y --no-install-recommends "postgresql-18=${POSTGRES_18}-*" age locales \
  && localedef -i en_US -f UTF-8 en_US.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 ENV PATH=/venv/bin:/usr/lib/postgresql/18/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

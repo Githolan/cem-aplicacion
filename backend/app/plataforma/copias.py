@@ -40,6 +40,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import urllib.error
@@ -184,11 +185,48 @@ def _correr(
         raise ErrorCopia(f"{argumentos[0]} terminó con {hecho.returncode}: {hecho.stderr.strip()}")
 
 
+VERSION_LOCAL = re.compile(r"\(PostgreSQL\) ([0-9]+)\.([0-9]+)")
+"""`postgres --version`: «postgres (PostgreSQL) 18.7 (Debian 18.7-1.pgdg13+5)»."""
+
+
+def version_servidor_local() -> int:
+    """La versión del servidor con que se verifica cada copia (§17.3), como `server_version_num`
+    (18.7 → 180007)."""
+    hecho = subprocess.run(
+        ["postgres", "--version"], env=entorno_minimo(), capture_output=True, text=True
+    )
+    encontrada = VERSION_LOCAL.search(hecho.stdout)
+    if hecho.returncode != 0 or encontrada is None:
+        raise ErrorCopia(f"no se pudo leer la versión de postgres: {hecho.stdout}{hecho.stderr}")
+    return int(encontrada[1]) * 10000 + int(encontrada[2])
+
+
+def legible(version: int) -> str:
+    return f"{version // 10000}.{version % 10000}"
+
+
+def exigir_version_para_verificar(conn: Connection) -> None:
+    """La base efímera no puede ser más vieja que la de origen: una versión menor más nueva puede
+    volcar lo que la anterior no restaura (el 23-11-2026, la 18.7 de `postgres:18-alpine` le
+    agregó `pg_attver` a cada columna nueva y la 18.6 de la imagen no lo reconocía). Se avisa
+    antes de volcar, con las dos versiones, en lugar de fallar en la restauración."""
+    origen = int(conn.execute(text("show server_version_num")).scalar_one())
+    local = version_servidor_local()
+    if local < origen:
+        raise ErrorCopia(
+            f"la base es PostgreSQL {legible(origen)} y el servidor que verifica la copia es"
+            f" {legible(local)}: hay que reconstruir cem-backend con la versión de la base"
+            " (POSTGRES_18 en backend/Dockerfile)"
+        )
+
+
 def volcar(url_backup: str, destino: Path) -> Controles:
     """`pg_dump -Fc` y controles de la misma instantánea de la base."""
     url = make_url(url_backup)
     motor = create_engine(url, poolclass=NullPool)
     try:
+        with motor.connect() as conn:
+            exigir_version_para_verificar(conn)
         with motor.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
             instantanea = conn.execute(text("select pg_export_snapshot()")).scalar_one()
             # La contraseña va por el entorno: en los argumentos la vería cualquiera con `ps`.
