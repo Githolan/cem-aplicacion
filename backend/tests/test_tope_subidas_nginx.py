@@ -17,6 +17,12 @@ from tests.conftest import RAIZ
 PLANTILLA = RAIZ.parent / "frontend" / "nginx" / "cem-frontend.conf.template"
 _REGLA = re.compile(r"location ~ (\S+) \{\s*client_max_body_size 21m;")
 _PARAMETRO = re.compile(r"\{[^}]+\}")
+ENTRADA_CORREO = "POST /api/v1/entrada/correo-pagos"
+"""La entrada del correo de pagos (`0132`): un correo entero de hasta 25 MiB, con su regla."""
+_REGLA_CORREO = re.compile(
+    r"location = /api/v1/entrada/correo-pagos \{\s*client_max_body_size 27m;\s*"
+    r"proxy_request_buffering off;"
+)
 
 
 def expresion_de_21m(plantilla: str) -> re.Pattern:
@@ -52,12 +58,25 @@ def test_toda_subida_de_archivo_tiene_el_tope_de_21_mb():
         "POST /api/v1/consorcios/{consorcio_id}/pagos/cotejo/extracto",
     } <= con_archivo
 
+    assert ENTRADA_CORREO in con_archivo
+    con_archivo.discard(ENTRADA_CORREO)
     sin_tope = sorted(o for o in con_archivo if not coincide(expresion, o))
     assert sin_tope == [], f"subidas que nginx corta en 1 MB: {sin_tope}"
 
     # La regla no es un comodín: ninguna ruta sin archivo cae en ella.
     de_mas = sorted(o for o in otras if coincide(expresion, o))
     assert de_mas == [], f"rutas sin archivo con el tope de 21 MB: {de_mas}"
+
+
+def test_la_entrada_del_correo_tiene_su_regla_de_27_mb():
+    """El correo de pagos (`0132`) llega entero: 25 MiB de Email Routing más la codificación. Su
+    regla es exacta (`location =`) y no la toma la de 21 MB."""
+    plantilla = PLANTILLA.read_text(encoding="utf-8")
+    assert len(_REGLA_CORREO.findall(plantilla)) == 1
+    assert not coincide(expresion_de_21m(plantilla), ENTRADA_CORREO)
+    # Control: la misma búsqueda no encuentra la regla con otro tope.
+    otra = plantilla.replace("client_max_body_size 27m", "client_max_body_size 1m")
+    assert not _REGLA_CORREO.findall(otra)
 
 
 def test_el_control_detecta_una_subida_que_falta():
@@ -76,4 +95,5 @@ def test_el_control_detecta_una_subida_que_falta():
         "POST /api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/documentacion",
         "POST /api/v1/consorcios/{consorcio_id}/reparaciones/{reparacion_id}/adjuntos",
         "POST /api/v1/consorcios/{consorcio_id}/solicitudes-formales/{solicitud_id}/adjuntos",
+        ENTRADA_CORREO,
     ]

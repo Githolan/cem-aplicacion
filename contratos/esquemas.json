@@ -1118,7 +1118,15 @@
           "comprobante_en_revision",
           "comprobante_rechazado",
           "correccion_de_pago_invalida",
-          "pago_ya_corregido"
+          "pago_ya_corregido",
+          "remitente_no_identificado",
+          "remitente_en_varios_consorcios",
+          "sin_comprobantes",
+          "demasiados_comprobantes",
+          "clave_de_entrada_invalida",
+          "entrada_no_configurada",
+          "pago_por_correo_descartado",
+          "pago_por_correo_informado"
         ],
         "title": "CodigoError",
         "type": "string"

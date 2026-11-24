@@ -62,6 +62,9 @@ CLAVES_ACTIVAS = frozenset(
 )  # fmt: skip
 ACCIONES_ACTIVAS = frozenset({"/JavaScript", "/Launch", "/RichMediaExecute"})
 TRABAJO_BORRAR = "documentos.borrar_rechazado"
+TRABAJO_LEER_CORREO = "pagos_informados.leer_correo"
+"""La lectura de un comprobante recibido por correo (`0132`): la misma capa y el mismo pedido que
+`documentos.leer`; lo leído va a la fila del correo, no a la de una orden."""
 YA_BORRADO = frozenset({"NoSuchKey", "NoSuchVersion"})
 """Respuestas del almacén que, para una versión ya rechazada y confirmada, significan que el
 borrado anterior llegó a hacerse."""
@@ -192,6 +195,17 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
                 clave_unica=f"{lectura_comprobantes.TRABAJO_LEER}:{version}",
             )
         elif conn.execute(
+            text("select nucleo.version_es_pago_por_correo(:v)"), {"v": version}
+        ).scalar_one():
+            # Un comprobante que llegó por correo (`0132`): la lectura propone, la persona completa.
+            cola.encolar(
+                conn,
+                TRABAJO_LEER_CORREO,
+                carga={"version": str(version)},
+                consorcio_id=trabajo.consorcio_id,
+                clave_unica=f"{TRABAJO_LEER_CORREO}:{version}",
+            )
+        elif conn.execute(
             text("select nucleo.version_es_documento_para_carga(:v)"), {"v": version}
         ).scalar_one():
             # Un documento para carga (`0088`) nunca es un comprobante de pago: o una lectura o la
@@ -234,6 +248,31 @@ def leer_comprobante(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         {"v": version, "prompt": lectura_comprobantes.VERSION_PROMPT, **asdict(lectura)},
     )
     return {"leida": lectura.legible, "error": lectura.error}
+
+
+@cola.REGISTRO.tipo(TRABAJO_LEER_CORREO, maximo_intentos=1)
+def leer_pago_por_correo(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Lee un comprobante recibido por correo y guarda lo leído en su fila (`0132`), una sola vez.
+    Lo mismo que `leer_comprobante`: apagada no llama a nadie y el resultado no lleva lo leído."""
+    if not lectura_comprobantes.encendida():
+        return {"leida": False, "motivo": "apagada"}
+    version = UUID(trabajo.carga["version"])
+    v = _version(conn, version)
+    if v is None or v["estado"] != "disponible":
+        raise cola.ErrorDefinitivo(f"la versión {version} no está disponible: no se lee")
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
+    contenido = origen.cliente().get_object(**_lugar(origen, v))["Body"].read()
+    lectura = lectura_comprobantes.leer(contenido, v["tipo"])
+    guardada = conn.execute(
+        text(
+            "select nucleo.guardar_lectura_pago_por_correo(:v, :modelo, :legible, :error,"
+            " :importe, :moneda, :numero, :fecha)"
+        ),
+        {"v": version, "modelo": lectura.modelo, "legible": lectura.legible,
+         "error": lectura.error, "importe": lectura.importe, "moneda": lectura.moneda,
+         "numero": lectura.numero, "fecha": lectura.fecha},
+    ).scalar_one()  # fmt: skip
+    return {"leida": lectura.legible, "error": lectura.error, "guardada": guardada}
 
 
 @cola.REGISTRO.tipo(lectura_carga.TRABAJO_LEER_CARGA, maximo_intentos=1)
