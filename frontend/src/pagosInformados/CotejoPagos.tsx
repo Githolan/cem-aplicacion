@@ -89,6 +89,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               ev.preventDefault();
               setLectura({ tipo: "cargando" });
               setPedido(mes);
+              // El mismo mes otra vez también se vuelve a leer: sin esto quedaba «Cargando» para siempre.
+              setVuelta((v) => v + 1);
             }}
           >
             <label htmlFor={idMes}>Mes de la liquidación (vacío: la última)</label>

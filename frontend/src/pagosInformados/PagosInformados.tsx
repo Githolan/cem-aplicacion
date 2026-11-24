@@ -11,6 +11,7 @@ import { RUTA_INICIO } from "../enlace";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { CONSULTAS_MAXIMAS, ESPERA_ENTRE_CONSULTAS_MS } from "../reparaciones/archivoDelActo";
 import { type Resultado, ResultadoDelActo } from "../ResultadoDelActo";
 import { FichaCorreo } from "./FichaCorreo";
 import { FichaPago } from "./FichaPago";
@@ -78,6 +79,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const [informando, setInformando] = useState(false);
   const fichas = useFichas<string>();
   const [abierta, setAbierta] = useState<Abierta | null>(null);
+  /** Cuántas veces se volvió a leer porque un comprobante seguía en el antivirus. */
+  const [consultas, setConsultas] = useState(0);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -110,6 +113,20 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
 
+  // Mientras un comprobante sigue en el antivirus, el pago no se confirma ni se ve: se vuelve a leer
+  // cada tanto, con el mismo ritmo y tope que los archivos de una reparación.
+  const enAntivirus =
+    lectura.tipo === "ok" &&
+    [...lectura.lista.elementos, ...lectura.correo.elementos].some((e) => e.comprobante_estado === "en_cuarentena");
+  useEffect(() => {
+    if (!enAntivirus || consultas >= CONSULTAS_MAXIMAS) return;
+    const reloj = setTimeout(() => {
+      setConsultas((c) => c + 1);
+      setVuelta((v) => v + 1);
+    }, ESPERA_ENTRE_CONSULTAS_MS);
+    return () => clearTimeout(reloj);
+  }, [enAntivirus, consultas, lectura]);
+
   const ok = lectura.tipo === "ok" ? lectura : null;
   const lista = ok?.lista ?? null;
   const correo = ok?.correo.elementos ?? [];
@@ -131,6 +148,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     cerrar(false);
     setInformando(false);
     setResultado({ texto, ok: true });
+    setConsultas(0);
     setVuelta((v) => v + 1);
   };
   const filaPago = (p: PagoInformado) => {

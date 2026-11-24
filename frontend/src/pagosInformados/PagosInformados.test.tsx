@@ -260,6 +260,28 @@ describe("pantalla /pagos-informados", () => {
     expect(await rechazo?.json()).toEqual({ motivo: "No corresponde a esta unidad. SINTETICO" });
   });
 
+  it("mientras el comprobante está en el antivirus, la lista se vuelve a leer hasta que se puede confirmar", async () => {
+    const enAntivirus = pago({ propio: false, comprobante_estado: "en_cuarentena", acciones: ["rechazar"] });
+    const listo = pago({ propio: false, acciones: ["confirmar", "rechazar"] });
+    let analizado = false;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: CONSEJO,
+      [`GET ${PAGOS}`]: () => Response.json(lista([analizado ? listo : enAntivirus], { unidades: [] })),
+      [`GET ${CORREO}`]: correo(),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const seccion = within((await screen.findByRole("heading", { name: POR_CONFIRMAR })).closest("section") as HTMLElement);
+    fireEvent.click(seccion.getByRole("button", { name: /Unidad 1-A/ }));
+    expect(within(await screen.findByRole("dialog")).queryByRole("button", { name: CONFIRMAR })).toBeNull();
+    analizado = true;  // el antivirus termina
+    expect(await within(screen.getByRole("dialog")).findByRole("button", { name: CONFIRMAR }, { timeout: 5000 })).toBeTruthy();
+    const antes = pedidos(api, "GET", PAGOS).length;
+    await new Promise((listo) => setTimeout(listo, 2500));
+    expect(pedidos(api, "GET", PAGOS)).toHaveLength(antes);  // control: sin nada en el antivirus, no vuelve a leer
+  }, 15000);
+
   it("el rechazo del servidor se dice con su texto", async () => {
     const ajeno = pago({ propio: false, acciones: ["confirmar", "rechazar"] });
     const texto = "El antivirus todavía revisa el comprobante: el pago se confirma cuando lo acepte.";
@@ -369,6 +391,23 @@ describe("pantalla /pagos-informados/cotejo", () => {
     expect(screen.getByText(/Una unidad para revisar/)).toBeTruthy();
     expect(screen.getByText(/del 01\/10\/2026 al 31\/10\/2026/)).toBeTruthy();
     expect((await axe.run(container)).violations).toEqual([]);
+  });
+
+  it("pedir el mismo mes otra vez vuelve a leer y no queda cargando", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: VECINA,
+      [`GET ${PAGOS}/cotejo`]: () => Response.json({ liquidacion: null }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(RUTA_COTEJO_PAGOS_INFORMADOS);
+    const sin = "Todavía no hay una liquidación oficial confirmada para comparar.";
+    expect(await screen.findByText(sin)).toBeTruthy();
+    const antes = pedidos(api, "GET", `${PAGOS}/cotejo`).length;
+    fireEvent.click(screen.getByRole("button", { name: "Ver ese mes" }));
+    expect(await screen.findByText(sin)).toBeTruthy();
+    expect(screen.queryByText("Cargando el cotejo…")).toBeNull();
+    expect(pedidos(api, "GET", `${PAGOS}/cotejo`).length).toBeGreaterThan(antes);
   });
 
   it("sin liquidación vigente lo dice", async () => {
