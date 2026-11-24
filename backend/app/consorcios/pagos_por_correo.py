@@ -95,38 +95,40 @@ de más abajo los puede haber escrito cualquiera."""
 POR_CORREO = BASE + "/por-correo"
 
 REBOTE_REMITENTE = (
-    "No se pudo identificar a quien envía este correo. Puede informar el pago desde la app de"
-    " Consorcio en Mano."
+    "No se pudo identificar a quien envía este correo. El pago se puede informar desde la"
+    " aplicación Consorcio en Mano."
 )
 """El aviso de Q3 (propietario, 23-11-2026)."""
 REBOTE_VARIOS = (
-    "Su cuenta tiene unidades en más de un edificio y no se puede saber de cuál es este pago."
-    " Infórmelo desde la app de Consorcio en Mano."
+    "La cuenta tiene unidades en más de un edificio y no se puede saber de cuál es este pago."
+    " Hay que informarlo desde la aplicación Consorcio en Mano."
 )
 REBOTE_SIN_COMPROBANTES = (
     "El correo no trae ningún comprobante: se aceptan archivos PDF, JPG o PNG adjuntos de hasta"
     " 20 MB."
 )
 REBOTE_DEMASIADOS = (
-    f"El correo trae más de {MAXIMO_COMPROBANTES_POR_CORREO} comprobantes: mándelos en varios"
-    " correos."
+    f"El correo trae más de {MAXIMO_COMPROBANTES_POR_CORREO} comprobantes: hay que mandarlos en"
+    " varios correos."
 )
 REBOTE_TOPE_DIARIO = (
-    "Se recibieron demasiados comprobantes de esta cuenta en las últimas 24 horas. Puede"
-    " informar el pago desde la app de Consorcio en Mano."
+    "Se recibieron demasiados comprobantes de esta cuenta en las últimas 24 horas. El pago se"
+    " puede informar desde la aplicación Consorcio en Mano."
 )
-ASUNTO_ACUSE = "Recibimos su comprobante de pago"
+ASUNTO_ACUSE = "Comprobante de pago recibido"
 TEXTO_ACUSE = (
-    "Recibimos {n} en Consorcio en Mano.\n\n"
-    "Para que el Consejo lo vea, entre a Consorcio en Mano, abra «Pagos informados», revise los"
-    " datos y confírmelos. Si un archivo no era un comprobante, puede descartarlo ahí mismo.\n"
+    "Consorcio en Mano recibió {n}.\n\n"
+    "Para que el Consejo lo vea, hay que entrar a Consorcio en Mano, abrir «Pagos informados»,"
+    " revisar los datos e informar el pago. Si un archivo no era un comprobante, se descarta ahí"
+    " mismo.\n"
 )
 
 ERRORES = {
     "no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO),
     "pago_por_correo_descartado": (
         409, CodigoError.PAGO_POR_CORREO_DESCARTADO,
-        "Ese comprobante se descartó: no se puede informar. Si era un pago, súbalo de nuevo.",
+        "Ese comprobante se descartó: no se puede informar. Si era un pago, hay que subirlo de"
+        " nuevo.",
     ),
     "pago_por_correo_informado": (
         409, CodigoError.PAGO_POR_CORREO_INFORMADO,
@@ -289,7 +291,8 @@ def guardar(motor, persona: UUID, consorcio: UUID, recibido: Correo) -> EntradaC
     destino = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
     cuenta = {"nuevo": 0, "ya_recibido": 0, "ya_informado": 0}
     try:
-        with transaccion(motor, persona_id=None, consorcio_id=consorcio) as conn:
+        # En el ámbito de quien manda: la API nunca abre uno sin persona (barrera de trabajos).
+        with transaccion(motor, persona_id=persona, consorcio_id=consorcio) as conn:
             for adjunto in recibido.adjuntos:
                 suma = hashlib.sha256(adjunto.contenido).hexdigest()
                 fila = conn.execute(
