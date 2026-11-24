@@ -37,6 +37,8 @@ import { LiquidacionOficial, RUTA_LIQUIDACION_OFICIAL } from "./fiscalizacion/Li
 import { MisExpensas, RUTA_MIS_EXPENSAS } from "./fiscalizacion/MisExpensas";
 import { Reclamos, RUTA_RECLAMOS } from "./fiscalizacion/Reclamos";
 import { Reparaciones, RUTA_REPARACIONES } from "./reparaciones/Reparaciones";
+import { CotejoPagos, RUTA_COTEJO_PAGOS_INFORMADOS } from "./pagosInformados/CotejoPagos";
+import { PagosInformados, RUTA_PAGOS_INFORMADOS } from "./pagosInformados/PagosInformados";
 import { RUTA_SOLICITUDES, Solicitudes } from "./fiscalizacion/Solicitudes";
 import { Comunicados, RUTA_COMUNICADOS } from "./comunicados/Comunicados";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
@@ -155,6 +157,8 @@ export function App() {
           <Route path={RUTA_COMUNICADOS} element={<Exige requisito={REQUISITOS.comunicados}><Comunicados /></Exige>} />
           <Route path={RUTA_RECLAMOS} element={<Exige requisito={REQUISITOS.reclamos}><Reclamos /></Exige>} />
           <Route path={RUTA_REPARACIONES} element={<Exige requisito={REQUISITOS.reparaciones}><Reparaciones /></Exige>} />
+          <Route path={RUTA_PAGOS_INFORMADOS} element={<Exige requisito={REQUISITOS.pagosInformados}><PagosInformados /></Exige>} />
+          <Route path={RUTA_COTEJO_PAGOS_INFORMADOS} element={<Exige requisito={REQUISITOS.pagosInformados}><CotejoPagos /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

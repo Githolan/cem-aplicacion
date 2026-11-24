@@ -50,6 +50,7 @@ from cem_contracts.pagos_informados import (
     PasoPagoInformado,
     ResultadoCotejoLiquidacion,
     UnidadCotejada,
+    UnidadParaInformar,
 )
 from cem_contracts.politicas import CodigoSeparacion
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -165,6 +166,10 @@ RESPUESTAS = {
     404: {"description": "Sin vínculo ni mandato en el consorcio."},
 }
 LEER = "select * from nucleo.pagos_informados_lectura(:actor, 'api', :sesion)"
+UNIDADES = (
+    "select unidad_id, designacion"
+    " from nucleo.unidades_para_informar_lectura(:actor, 'api', :sesion)"
+)
 INFORMAR_SQL = (
     "select pago_id, ya_informado from nucleo.informar_pago(:u, :importe, :fecha, :medio,"
     " :numero, :comprobante, :corrige, :actor, 'api', :sesion)"
@@ -281,12 +286,17 @@ def listar_pagos_informados(permisos: PermisosDep, motor: MotorDep) -> ListaPago
     ctx = permisos.ver.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
         elementos = leer(c, permisos)
+        unidades = [
+            UnidadParaInformar(id=f.unidad_id, designacion=f.designacion)
+            for f in ejecutar(c, permisos.ver, UNIDADES, {}).all()
+        ]
     decidibles = {AccionPagoInformado.CONFIRMAR, AccionPagoInformado.RECHAZAR}
     return ListaPagosInformados(
         elementos=elementos,
         largo_numero_operacion=LARGO_NUMERO_OPERACION,
         largo_motivo=LARGO_MOTIVO,
         por_confirmar=sum(1 for p in elementos if decidibles & set(p.acciones)),
+        unidades=unidades,
     )
 
 

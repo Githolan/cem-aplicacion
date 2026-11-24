@@ -19,6 +19,7 @@ import { RUTA_LIQUIDACION_OFICIAL, TITULO_LIQUIDACION_OFICIAL } from "./fiscaliz
 import { RUTA_MIS_EXPENSAS, TITULO_MIS_EXPENSAS } from "./fiscalizacion/MisExpensas";
 import { RUTA_RECLAMOS, TITULO_RECLAMOS } from "./fiscalizacion/Reclamos";
 import { RUTA_REPARACIONES, TITULO_REPARACIONES } from "./reparaciones/textos";
+import { RUTA_COTEJO_PAGOS_INFORMADOS, RUTA_PAGOS_INFORMADOS, TITULO_PAGOS_INFORMADOS } from "./pagosInformados/textos";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "./fiscalizacion/Solicitudes";
 import { RUTA_AYUDA } from "./ayuda/estadoAyuda";
 import { useSolicitudesDirigidas } from "./fiscalizacion/solicitudesDirigidas";
@@ -91,6 +92,8 @@ export const DE_ADMINISTRACION: readonly Destino[] = [
   // Las reparaciones (RF19, app 0124): también para quien pide (propietario, inquilino u ocupante);
   // en el teléfono se llega desde el inicio, sin una pestaña más.
   { ruta: RUTA_REPARACIONES, texto: TITULO_REPARACIONES, icono: "herramienta", requisito: REQUISITOS.reparaciones },
+  // Los pagos informados (app 0129 a 0134): también para quien informa; en el teléfono, desde el inicio.
+  { ruta: RUTA_PAGOS_INFORMADOS, texto: TITULO_PAGOS_INFORMADOS, icono: "billetera", requisito: REQUISITOS.pagosInformados },
   { ruta: RUTA_LIQUIDACION_ADMINISTRADOR, texto: TITULO_LIQUIDACION_ADMINISTRADOR, icono: "documento", requisito: REQUISITOS.importarLiquidacion },
   { ruta: RUTA_LIQUIDACION_OFICIAL, texto: TITULO_LIQUIDACION_OFICIAL, icono: "calculadora", requisito: REQUISITOS.liquidacionOficial },
 ];
@@ -139,6 +142,7 @@ const RUTAS_CON_NAVEGACION: readonly string[] = [
   `${RUTA_PAGOS}/:orden`,
   RUTA_POR_ACLARAR,
   RUTA_AYUDA,
+  RUTA_COTEJO_PAGOS_INFORMADOS,
 ];
 
 /** Adónde lleva la entrada para esta persona; null si no se le ofrece. La misma regla en el menú y

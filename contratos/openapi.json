@@ -9949,13 +9949,22 @@
             "description": "Cuántos pagos `informado` puede confirmar o rechazar quien lee ahora: el número de la bandeja del Consejo.",
             "title": "Por Confirmar",
             "type": "integer"
+          },
+          "unidades": {
+            "description": "Las unidades para las que la persona puede informar un pago, por designación (`0134`); vacía si no puede informar ninguno.",
+            "items": {
+              "$ref": "#/components/schemas/UnidadParaInformar"
+            },
+            "title": "Unidades",
+            "type": "array"
           }
         },
         "required": [
           "elementos",
           "largo_numero_operacion",
           "largo_motivo",
-          "por_confirmar"
+          "por_confirmar",
+          "unidades"
         ],
         "title": "ListaPagosInformados",
         "type": "object"
@@ -9997,6 +10006,18 @@
       "ListaPagosPorCorreo": {
         "description": "`GET …/pagos-informados/por-correo`: lo que la persona mandó y le falta completar.",
         "properties": {
+          "direccion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La dirección a la que se mandan los comprobantes en este entorno (PC-1); nula mientras la entrada por correo no está configurada: la pantalla no la ofrece.",
+            "title": "Direccion"
+          },
           "elementos": {
             "items": {
               "$ref": "#/components/schemas/PagoPorCorreo"
@@ -10006,7 +10027,8 @@
           }
         },
         "required": [
-          "elementos"
+          "elementos",
+          "direccion"
         ],
         "title": "ListaPagosPorCorreo",
         "type": "object"
@@ -17769,6 +17791,26 @@
           "total"
         ],
         "title": "UnidadEnLaLiquidacion",
+        "type": "object"
+      },
+      "UnidadParaInformar": {
+        "description": "Una unidad para la que la persona puede informar un pago (`0134`).",
+        "properties": {
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "designacion"
+        ],
+        "title": "UnidadParaInformar",
         "type": "object"
       },
       "UnidadParaPedir": {

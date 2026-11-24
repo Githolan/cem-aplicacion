@@ -80,6 +80,11 @@ export function simularInicioSinPendientes(ruta: Route, camino: string) {
   if (/^\/api\/v1\/consorcios\/[^/]+\/(solicitudes-formales|mandatos|contactos\/gestion|pedidos-salteo|reclamos-liquidacion|reparaciones)$/.test(camino))
     return ruta.fulfill({ json: { elementos: [] } });
   if (/^\/api\/v1\/consorcios\/[^/]+\/liquidaciones-importadas$/.test(camino)) return ruta.fulfill({ json: [] });
+  // Los pagos informados (app 0129 a 0134): nada por confirmar, por revisar ni por completar.
+  if (/^\/api\/v1\/consorcios\/[^/]+\/pagos-informados$/.test(camino))
+    return ruta.fulfill({ json: { elementos: [], largo_numero_operacion: 60, largo_motivo: 500, por_confirmar: 0, unidades: [] } });
+  if (/^\/api\/v1\/consorcios\/[^/]+\/pagos-informados\/cotejo$/.test(camino)) return ruta.fulfill({ json: { liquidacion: null } });
+  if (/^\/api\/v1\/consorcios\/[^/]+\/pagos-informados\/por-correo$/.test(camino)) return ruta.fulfill({ json: { elementos: [], direccion: null } });
   if (/^\/api\/v1\/consorcios\/[^/]+\/proveedores$/.test(camino))
     return ruta.fulfill({
       json: {

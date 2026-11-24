@@ -7,6 +7,7 @@ import { codigoDe, mensajeDeFalla } from "../fallas";
 import { RUTA_LIQUIDACION_ADMINISTRADOR, TITULO_LIQUIDACION_ADMINISTRADOR } from "../fiscalizacion/LiquidacionDelAdministrador";
 import { RUTA_RECLAMOS, TITULO_RECLAMOS } from "../fiscalizacion/Reclamos";
 import { RUTA_REPARACIONES, TITULO_REPARACIONES } from "../reparaciones/textos";
+import { RUTA_COTEJO_PAGOS_INFORMADOS, RUTA_PAGOS_INFORMADOS, TITULO_COTEJO, TITULO_PAGOS_INFORMADOS } from "../pagosInformados/textos";
 import { RUTA_SOLICITUDES, TITULO_SOLICITUDES } from "../fiscalizacion/Solicitudes";
 import type { NombreIcono } from "../Iconos";
 import { RUTA_MANDATOS } from "../Mandatos";
@@ -490,5 +491,70 @@ export function usePendientesContactos({ porEdificio, edificios }: Comunes): Fue
             ),
           ],
     siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, "Contactos de emergencia", edificio, varios),
+  });
+}
+
+// --- Pagos informados (app 0129 a 0134) ------------------------------------------------------------
+// Para quien confirma: los que esperan su decisión y las unidades cuyo cotejo con la liquidación hay
+// que revisar (`para_revisar`, app 0131). Para quien mandó comprobantes por correo: los que le falta
+// completar (PC-4, app 0132); ayudando no se leen (PI-D23).
+
+export function textoPorConfirmar(n: number): string | null {
+  return n === 0 ? null : plural(n, "pago informado espera confirmación", "pagos informados esperan confirmación");
+}
+
+export function textoParaRevisar(n: number): string | null {
+  return n === 0 ? null : plural(n, "unidad para revisar", "unidades para revisar");
+}
+
+export function textoPorCompletar(n: number): string | null {
+  return n === 0 ? null : plural(n, "comprobante llegó por correo y falta completarlo", "comprobantes llegaron por correo y falta completarlos");
+}
+
+export function usePendientesPagosInformados({ porEdificio, edificios }: Comunes): Fuente {
+  const varios = edificios.length > 1;
+  const base = { ruta: RUTA_PAGOS_INFORMADOS, icono: "billetera" } as const;
+  const cotejo = { ruta: RUTA_COTEJO_PAGOS_INFORMADOS, icono: "billetera" } as const;
+  return usePorEdificio({
+    clave: "pagos-informados",
+    porEdificio,
+    edificios,
+    requisito: REQUISITOS.confirmarPagosInformados,
+    leer: async (consorcio) => {
+      const ruta = { params: { path: { consorcio_id: consorcio } } };
+      const [lista, cotejado] = await Promise.all([
+        api.GET("/api/v1/consorcios/{consorcio_id}/pagos-informados", ruta),
+        api.GET("/api/v1/consorcios/{consorcio_id}/pagos-informados/cotejo", ruta),
+      ]);
+      return { porConfirmar: exigir(lista).por_confirmar, paraRevisar: exigir(cotejado).liquidacion?.para_revisar ?? 0 };
+    },
+    filas: ({ porConfirmar, paraRevisar }, edificio) => {
+      const confirmar = textoPorConfirmar(porConfirmar);
+      const revisar = textoParaRevisar(paraRevisar);
+      return [
+        ...(confirmar === null ? [] : [fila({ ...base, detalle: confirmar }, TITULO_PAGOS_INFORMADOS, edificio, varios)]),
+        ...(revisar === null ? [] : [fila({ ...cotejo, detalle: revisar }, TITULO_COTEJO, edificio, varios)]),
+      ];
+    },
+    siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_PAGOS_INFORMADOS, edificio, varios),
+  });
+}
+
+export function usePendientesPagosPorCorreo({ porEdificio, edificios }: Comunes): Fuente {
+  const varios = edificios.length > 1;
+  const base = { ruta: RUTA_PAGOS_INFORMADOS, icono: "billetera" } as const;
+  return usePorEdificio({
+    clave: "pagos-por-correo",
+    porEdificio,
+    edificios,
+    requisito: REQUISITOS.pagosInformados,
+    leer: async (consorcio) =>
+      exigir(await api.GET("/api/v1/consorcios/{consorcio_id}/pagos-informados/por-correo", { params: { path: { consorcio_id: consorcio } } }))
+        .elementos.length,
+    filas: (cuantos, edificio) => {
+      const detalle = textoPorCompletar(cuantos);
+      return detalle === null ? [] : [fila({ ...base, detalle }, TITULO_PAGOS_INFORMADOS, edificio, varios, { correo: "1" })];
+    },
+    siFalla: (edificio) => fila({ ...base, detalle: DETALLE_SIN_LECTURA }, TITULO_PAGOS_INFORMADOS, edificio, varios, { correo: "1" }),
   });
 }
