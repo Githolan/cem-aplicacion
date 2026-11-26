@@ -81,9 +81,11 @@ def autenticacion(dominio: str, resultado: str = "pass",
 def correo(de: str, adjuntos: list[tuple[bytes, str, str]] | None = None, *,
            autenticaciones: list[str] | None = None, mensaje_id: str | None = None,
            asunto: str = "Pago de expensas noviembre",
-           en_linea: bytes | None = None) -> bytes:  # fmt: skip
+           en_linea: bytes | None = None, en_linea_tipo: str = "image/png",
+           como_gmail: bool = False) -> bytes:  # fmt: skip
     """El correo crudo, con los encabezados de autenticación en el orden dado (el primero arriba).
-    Cada adjunto es (contenido, tipo, nombre)."""
+    Cada adjunto es (contenido, tipo, nombre). `en_linea` va pegada en el texto; `como_gmail` la
+    arma como Gmail al arrastrar una foto al cuerpo (`inline` con nombre de archivo)."""
     msg = EmailMessage()
     for a in autenticaciones if autenticaciones is not None else [
             autenticacion(de.rpartition("@")[2])]:  # fmt: skip
@@ -94,7 +96,9 @@ def correo(de: str, adjuntos: list[tuple[bytes, str, str]] | None = None, *,
     msg["Message-ID"] = mensaje_id or f"<{uuid4()}@{de.rpartition('@')[2]}>"
     msg.set_content("Les mando el comprobante. Saludos.")
     if en_linea is not None:
-        msg.add_related(en_linea, maintype="image", subtype="png", cid="<logo>")
+        principal, sub = en_linea_tipo.split("/")
+        extra = {"disposition": "inline", "filename": "comprobante.png"} if como_gmail else {}
+        msg.add_related(en_linea, maintype=principal, subtype=sub, cid="<logo>", **extra)
     for contenido, tipo, nombre in adjuntos if adjuntos is not None else [
             (archivo(str(uuid4())), "application/pdf", "comprobante.pdf")]:  # fmt: skip
         principal, sub = tipo.split("/")
@@ -354,30 +358,58 @@ def test_con_unidades_en_dos_edificios_rebota(e, motor_migrate, motor_app):
 # --- Los adjuntos -------------------------------------------------------------------------------
 
 
-def test_sin_comprobantes_rebota_y_la_imagen_en_linea_no_cuenta(e, motor_migrate):
+def tipo_de(motor_migrate, fila) -> str:
+    with motor_migrate.connect() as c:
+        return c.execute(text("select tipo from nucleo.version_documento where id = :v"),
+                         {"v": fila["version_documento_id"]}).scalar_one()  # fmt: skip
+
+
+def test_sin_comprobantes_rebota(e, motor_migrate):
     direccion = de(motor_migrate, e, "prop")
-    png = pdf_a_png()
     casos = [
-        [],
-        [(b"texto que dice ser un PDF", "application/pdf", "falso.pdf")],
+        dict(adjuntos=[]),
+        dict(adjuntos=[(b"texto que dice ser un PDF", "application/pdf", "falso.pdf")]),
+        # En línea cuenta solo una imagen: un PDF pegado en el texto no.
+        dict(adjuntos=[], en_linea=archivo(str(uuid4())), en_linea_tipo="application/pdf"),
+        # Una imagen en línea que no es una imagen de verdad tampoco.
+        dict(adjuntos=[], en_linea=b"no soy un PNG"),
     ]
-    for adjuntos in casos:
-        r = mandar(correo(direccion, adjuntos, en_linea=png))
-        assert rechazo(r) == (422, "sin_comprobantes"), adjuntos
+    for caso in casos:
+        r = mandar(correo(direccion, **caso))
+        assert rechazo(r) == (422, "sin_comprobantes"), caso
         assert r.json()["mensaje"] == pagos_por_correo.REBOTE_SIN_COMPROBANTES
     assert recibidos(motor_migrate, e["cons"]) == []
-    # Control: la misma imagen como adjunto sí entra, y la que va en línea sigue sin contar.
-    r = mandar(correo(direccion, [(png, "image/png", "foto.png")], en_linea=png))
+
+
+@pytest.mark.parametrize("como_gmail", [False, True], ids=["relacionada", "como-gmail"])
+def test_sin_adjuntos_la_imagen_en_linea_entra_como_comprobante(e, motor_migrate, como_gmail):
+    """PI-D36 (propietario, 26-11-2026): la foto del comprobante pegada en el cuerpo del correo."""
+    direccion = de(motor_migrate, e, "prop")
+    r = mandar(correo(direccion, [], en_linea=pdf_a_png(), como_gmail=como_gmail))
+    assert r.status_code == 200, r.text
     assert r.json()["nuevos"] == 1
     [fila] = recibidos(motor_migrate, e["cons"])
-    with motor_migrate.connect() as c:
-        tipo = c.execute(text("select tipo from nucleo.version_documento where id = :v"),
-                         {"v": fila["version_documento_id"]}).scalar_one()  # fmt: skip
-        assert tipo == "image/png"
+    assert tipo_de(motor_migrate, fila) == "image/png"
 
 
-def pdf_a_png() -> bytes:
-    """Un PNG mínimo válido (1 × 1, sintético)."""
+def test_con_un_adjunto_que_sirve_la_imagen_en_linea_no_cuenta(e, motor_migrate):
+    """El logo de una firma no entra cuando el correo trae su comprobante adjunto."""
+    direccion = de(motor_migrate, e, "prop")
+    r = mandar(correo(direccion, [(archivo(str(uuid4())), "application/pdf", "pago.pdf")],
+                      en_linea=pdf_a_png(), como_gmail=True))  # fmt: skip
+    assert r.json()["nuevos"] == 1
+    [fila] = recibidos(motor_migrate, e["cons"])
+    assert tipo_de(motor_migrate, fila) == "application/pdf"
+    # Con un adjunto que no sirve (no es PDF, JPG ni PNG de verdad), la imagen en línea sí cuenta.
+    r = mandar(correo(direccion, [(b"texto que dice ser un PDF", "application/pdf", "falso.pdf")],
+                      en_linea=pdf_a_png(b"\x00\x00\xff\x00")))  # fmt: skip
+    assert r.json()["nuevos"] == 1
+    assert [tipo_de(motor_migrate, f) for f in recibidos(motor_migrate, e["cons"])] == [
+        "application/pdf", "image/png"]
+
+
+def pdf_a_png(pixel: bytes = b"\x00\xff\x00\x00") -> bytes:
+    """Un PNG mínimo válido (1 × 1, sintético); otro `pixel` da otro archivo."""
     import struct
     import zlib
 
@@ -387,7 +419,7 @@ def pdf_a_png() -> bytes:
 
     cabecera = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
     return (b"\x89PNG\r\n\x1a\n" + trozo(b"IHDR", cabecera)
-            + trozo(b"IDAT", zlib.compress(b"\x00\xff\x00\x00")) + trozo(b"IEND", b""))  # fmt: skip
+            + trozo(b"IDAT", zlib.compress(pixel)) + trozo(b"IEND", b""))  # fmt: skip
 
 
 def test_mas_comprobantes_de_los_que_se_aceptan_juntos_rebota(e, motor_migrate):

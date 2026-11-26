@@ -235,23 +235,35 @@ def _un_renglon(valor: object, largo: int) -> str | None:
     return limpio[:largo] or None
 
 
+IMAGENES = frozenset({TipoArchivo.PNG, TipoArchivo.JPEG})
+
+
 def adjuntos(mensaje: EmailMessage) -> list[Adjunto]:
-    """Las partes adjuntas (no las imágenes en línea, que suelen ser logos) con un tipo real PDF,
-    JPG o PNG y hasta 20 MB. El tipo lo decide el contenido, no lo que declara el correo."""
-    encontrados = []
+    """Las partes adjuntas con un tipo real PDF, JPG o PNG y hasta 20 MB. El tipo lo decide el
+    contenido, no lo que declara el correo.
+
+    Las imágenes en línea (pegadas en el texto) suelen ser logos de firmas: cuentan solo si el
+    correo no trae ningún adjunto que sirva, y solo JPG o PNG. Así entra la foto del comprobante
+    pegada en el cuerpo, como lo arma Gmail al arrastrarla (decisión del propietario del
+    26-11-2026, PI-D36)."""
+    adjuntas: list[Adjunto] = []
+    en_linea: list[Adjunto] = []
     for parte in mensaje.walk():
         if parte.is_multipart():
             continue
         disposicion = parte.get_content_disposition()
-        if disposicion != "attachment" and not (disposicion is None and parte.get_filename()):
-            continue
+        adjunta = disposicion == "attachment" or (disposicion is None and bool(parte.get_filename()))
         contenido = parte.get_payload(decode=True)
         if not contenido or len(contenido) > TOPE_BYTES:
             continue
         tipo = tipo_real(contenido)
-        if tipo is not None:
-            encontrados.append(Adjunto(contenido, tipo))
-    return encontrados
+        if tipo is None:
+            continue
+        if adjunta:
+            adjuntas.append(Adjunto(contenido, tipo))
+        elif tipo in IMAGENES:
+            en_linea.append(Adjunto(contenido, tipo))
+    return adjuntas or en_linea
 
 
 def leer_correo(crudo: bytes) -> Correo:
