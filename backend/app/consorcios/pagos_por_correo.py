@@ -252,7 +252,8 @@ def adjuntos(mensaje: EmailMessage) -> list[Adjunto]:
         if parte.is_multipart():
             continue
         disposicion = parte.get_content_disposition()
-        adjunta = disposicion == "attachment" or (disposicion is None and bool(parte.get_filename()))
+        sin_disposicion = disposicion is None and bool(parte.get_filename())
+        adjunta = disposicion == "attachment" or sin_disposicion
         contenido = parte.get_payload(decode=True)
         if not contenido or len(contenido) > TOPE_BYTES:
             continue

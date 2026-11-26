@@ -404,8 +404,8 @@ def test_con_un_adjunto_que_sirve_la_imagen_en_linea_no_cuenta(e, motor_migrate)
     r = mandar(correo(direccion, [(b"texto que dice ser un PDF", "application/pdf", "falso.pdf")],
                       en_linea=pdf_a_png(b"\x00\x00\xff\x00")))  # fmt: skip
     assert r.json()["nuevos"] == 1
-    assert [tipo_de(motor_migrate, f) for f in recibidos(motor_migrate, e["cons"])] == [
-        "application/pdf", "image/png"]
+    tipos = [tipo_de(motor_migrate, f) for f in recibidos(motor_migrate, e["cons"])]
+    assert tipos == ["application/pdf", "image/png"]
 
 
 def pdf_a_png(pixel: bytes = b"\x00\xff\x00\x00") -> bytes:
