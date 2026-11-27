@@ -283,6 +283,23 @@ def test_un_porcentaje_redondeado_no_es_para_mirar() -> None:
     assert all("AySA" not in linea for linea in c.lineas), c.lineas
 
 
+def test_un_grupo_negativo_repartido_justo_no_es_para_mirar() -> None:
+    """Revisión de Codex (cem-aplicacion 297): un grupo con total negativo (un reintegro) repartido
+    exacto por porcentaje está bien."""
+    leidos = noviembre()
+    valor(leidos, "total:prorrateo")["grupos"][AYSA]["monto"] = "-30000.00"
+    for uf in ("1", "2", "3", "4", "5"):
+        pct, monto = ("50.00", "-15000.00") if uf in ("1", "2") else ("0.00", "0.00")
+        valor(leidos, f"importe_unidad:{uf}")["grupos"][AYSA] = {"porcentaje": pct, "monto": monto}
+    c = por_numero(leidos)[7]
+    assert all("AySA" not in linea for linea in c.lineas), c.lineas
+    valor(leidos, "importe_unidad:1")["grupos"][AYSA]["monto"] = "-14000.00"  # control: se ve
+    assert any(
+        linea.startswith("PB (UF 1) paga -$ 14.000 de AySA")
+        for linea in por_numero(leidos)[7].lineas
+    ), por_numero(leidos)[7].lineas
+
+
 def test_porcentajes_que_no_suman_cien() -> None:
     leidos = noviembre()
     valor(leidos, "importe_unidad:5")["grupos"][AYSA]["porcentaje"] = "10.00"
@@ -433,3 +450,19 @@ def test_un_rubro_sin_gastos_no_cierra() -> None:
     c = por_numero(leidos)[2]
     assert c.estado == EstadoControl.PARA_MIRAR
     assert c.lineas == ["Limpieza: sus gastos suman $ 0 y el rubro dice $ 150.000."]
+
+
+def test_lo_que_no_se_pudo_comprobar_no_se_da_por_bien() -> None:
+    """Revisión de Codex (cem-aplicacion 297): un rubro sin total (una lectura con IA puede no
+    traerlo) queda para mirar; si ningún rubro trae total, el control no aplica."""
+    leidos = noviembre()
+    valor(leidos, "rubro:2")["total"] = None
+    c = por_numero(leidos)[2]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert c.lineas == ["Limpieza: no se pudo comprobar: falta un importe en lo leído."]
+    valor(leidos, "rubro:1")["total"] = None
+    assert por_numero(leidos)[2].estado == EstadoControl.NO_APLICA
+    leidos = noviembre()
+    valor(leidos, "importe_unidad:2")["redondeo"] = None
+    c = por_numero(leidos)[6]
+    assert "1° A (UF 2): no se pudo comprobar: falta un importe en lo leído." in c.lineas

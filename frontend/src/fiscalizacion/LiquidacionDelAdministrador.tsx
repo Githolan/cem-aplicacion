@@ -18,7 +18,7 @@ import { type Aviso, cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, ESTADO, mensajeDeAc
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus, useConsorcio } from "../egresos/useConsorcio";
-import { type Control, ResumenDeLaLiquidacion, textoDePregunta } from "./ResumenLiquidacion";
+import { type Control, ResumenDeLaLiquidacion, textoDePregunta, vistoDe } from "./ResumenLiquidacion";
 import { type Propuesta, RUTA_SOLICITUDES } from "./Solicitudes";
 
 // Página /importar-liquidacion (H5-3, app 0115; diseño H5 §5; rediseño de la confirmación, RL1-A a
@@ -68,6 +68,8 @@ export const EN_ANTIVIRUS = "El archivo está en la revisión del antivirus; cua
 export const LEYENDO = "Se está leyendo la liquidación.";
 export const CORREGIR_DATO = "Corregir";
 export const DESCARTAR_DATO = "Descartar";
+/** Deshace una corrección o un descarte: el dato vuelve a lo que leyó CEM (revisión de Codex en 297). */
+export const VOLVER_AL_LEIDO = "Volver al valor leído";
 /** «Aceptar la liquidación de noviembre» (RL1-A): el único botón para que cuente. */
 export const aceptarLa = (periodo: string | null) => (periodo ? `Aceptar la liquidación de ${mesSolo(periodo)}` : "Aceptar la liquidación");
 export const ACEPTAR = "Aceptar";
@@ -651,7 +653,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     }
   }
 
-  const decidir = (c: Campo, decision: "confirmado" | "corregido" | "descartado", corregido?: Record<string, unknown>) =>
+  const decidir = (c: Campo, decision: "confirmado" | "corregido" | "descartado", corregido?: Record<string, unknown>, hecho?: string) =>
     actuar(
       (k) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/campos/{campo_id}/decision", {
@@ -659,7 +661,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           params: { path: { consorcio_id: consorcio, importacion_id: elegida ?? "", campo_id: c.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: k } },
           body: { decision, valor_corregido: corregido ?? null },
         }),
-      `${TEXTO_TIPO[c.tipo]}: ${TEXTO_ESTADO_CAMPO[decision].toLowerCase()}.`,
+      hecho ?? `${TEXTO_TIPO[c.tipo]}: ${TEXTO_ESTADO_CAMPO[decision].toLowerCase()}.`,
     );
 
   async function enviarCorreccion(c: Campo): Promise<FinDeEnvio> {
@@ -708,6 +710,12 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
     directo(decidir(c, decision), setFallaEnFicha);
   };
 
+  /** El dato vuelve a lo leído: queda confirmado tal como se leyó, por quien lo pide. */
+  const volverAlLeido = (c: Campo) => {
+    setFallaEnFicha(null);
+    directo(decidir(c, "confirmado", undefined, `${TEXTO_TIPO[c.tipo]}: volvió al valor leído.`), setFallaEnFicha);
+  };
+
   /** Acepta la liquidación entera (RL1-A): los datos pendientes quedan confirmados por quien acepta. */
   const aceptar = (): Promise<FinDeEnvio> =>
     actuar(
@@ -753,7 +761,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const enFicha = importacion?.campos.find((c) => c.id === fichas.abierta);
   const seConfirma = importacion?.estado === "para_confirmar";
   const edificio = pantalla.tipo === "lista" ? pantalla.consorcios.find((c) => c.id === consorcio)?.nombre : undefined;
-  const abiertos = importacion?.controles.filter((c) => c.estado === "para_mirar" && !vistos.has(c.clave)) ?? [];
+  const abiertos = importacion?.controles.filter((c) => c.estado === "para_mirar" && !vistos.has(vistoDe(c))) ?? [];
   const mostrados = importacion === null ? [] : filtros.size === 0 ? importacion.campos : importacion.campos.filter((c) => filtros.has(c.tipo));
 
   return (
@@ -988,6 +996,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
               <button type="button" className="secundario" onClick={() => abrirVentana({ tipo: "corregir", campo: enFicha })}>
                 {CORREGIR_DATO}
               </button>
+              {(enFicha.estado === "corregido" || enFicha.estado === "descartado") && (
+                <button type="button" className="secundario" onClick={() => volverAlLeido(enFicha)}>
+                  {VOLVER_AL_LEIDO}
+                </button>
+              )}
               {enFicha.estado !== "descartado" && (
                 <button type="button" className="secundario peligro" onClick={() => decidirDirecto(enFicha, "descartado")}>
                   {DESCARTAR_DATO}

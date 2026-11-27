@@ -78,6 +78,10 @@ export function lineaDeControles(controles: readonly Control[]): string {
 
 export const sePuedePreguntar = (c: Control) => !SOLO_SE_EXPLICA.has(c.clave);
 
+/** Lo que se marca como visto es la tarjeta con su contenido: si el control cambia (porque se
+ * corrigió un dato), vuelve a estar abierta. */
+export const vistoDe = (c: Control) => [c.clave, ...c.lineas].join("\n");
+
 /** El texto de la solicitud formal desde una tarjeta: la cuenta y su base, sin calificarla (RN33). */
 export function textoDePregunta(c: Control, periodo: string | null): string {
   const de = periodo ? ` de ${mesDe(periodo)}` : "";
@@ -124,7 +128,7 @@ export function ResumenDeLaLiquidacion({ importacion, edificio, vistos, alVer, a
       {mirar.length > 0 && (
         <ul className="para-mirar" aria-label="Para mirar">
           {mirar.map((c) =>
-            vistos.has(c.clave) ? (
+            vistos.has(vistoDe(c)) ? (
               <li key={c.clave} className="tarjeta para-mirar__vista">
                 <p>{`Visto: ${c.titulo.toLowerCase()}.`}</p>
               </li>
@@ -138,7 +142,7 @@ export function ResumenDeLaLiquidacion({ importacion, edificio, vistos, alVer, a
                   ))}
                 </ul>
                 <p className="ficha-registro__acciones">
-                  <button type="button" className="secundario" onClick={() => alVer(c.clave)}>
+                  <button type="button" className="secundario" onClick={() => alVer(vistoDe(c))}>
                     {ENTENDIDO}
                   </button>
                   {alPreguntar !== null && sePuedePreguntar(c) && (

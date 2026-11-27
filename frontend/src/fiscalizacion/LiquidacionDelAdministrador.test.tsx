@@ -17,6 +17,7 @@ import {
   aceptarLa,
   CORREGIR_DATO,
   DESCARTAR_DATO,
+  VOLVER_AL_LEIDO,
   enPalabras,
   enPorcentaje,
   ELEGIR_COEFICIENTES,
@@ -329,6 +330,40 @@ describe("pantalla /importar-liquidacion", () => {
     expect(valor("Interés por la deuda")).toBe("$ 4,00");
     expect(valor("Saldo a favor")).toBe("$ 0,00");
     expect(valor("Estado")).toBe("Corregido");
+  });
+
+  it("un dato descartado puede volver al valor leído", async () => {
+    const descartado = { ...LUZ, estado: "descartado" as const };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, campos: [descartado] }),
+      [DECISION]: DETALLE(),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gasto" });
+    expect(within(ficha).queryByRole("button", { name: DESCARTAR_DATO })).toBeNull();
+    fireEvent.click(within(ficha).getByRole("button", { name: VOLVER_AL_LEIDO }));
+    expect(await screen.findByText("Gasto: volvió al valor leído.")).toBeTruthy();
+    const [pedido] = pedidos(api, "POST", DECISION.replace("POST ", ""));
+    expect(await pedido?.json()).toEqual({ decision: "confirmado", valor_corregido: null });
+  });
+
+  it("un dato pendiente no ofrece volver al valor leído", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gasto" });
+    expect(within(ficha).getByRole("button", { name: DESCARTAR_DATO })).toBeTruthy();  // control: la ficha tiene sus botones
+    expect(within(ficha).queryByRole("button", { name: VOLVER_AL_LEIDO })).toBeNull();
   });
 
   it("un dato que el servidor no deja decidir dice por qué en la ficha", async () => {
@@ -737,6 +772,27 @@ describe("resumen de la liquidación", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: ACEPTAR_SEPTIEMBRE })).toBeNull());
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+
+  it("si un control cambia después de «Entendido», su tarjeta vuelve a estar abierta", async () => {
+    const OTRA_LINEA: Control = { ...DEUDA, lineas: [...DEUDA.lineas, "1-A (UF 2) debe $ 50 del mes anterior, sin interés."] };
+    const corregida = { ...CON_CONTROLES, controles: [BIEN, PORCENTAJE, OTRA_LINEA, SIN_ANTERIOR] };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_CONTROLES),
+      [DECISION]: DETALLE(corregida),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    const mirar = screen.getByRole("list", { name: "Para mirar" });
+    const deuda = within(mirar).getByRole("heading", { name: DEUDA.titulo }).closest("li") as HTMLElement;
+    fireEvent.click(within(deuda).getByRole("button", { name: ENTENDIDO }));
+    expect(await screen.findByText("Visto: deuda e interés de cada unidad.")).toBeTruthy();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Gasto" })).getByRole("button", { name: DESCARTAR_DATO }));
+    expect(await screen.findByText(OTRA_LINEA.lineas[1] ?? "")).toBeTruthy();
+    expect(screen.queryByText("Visto: deuda e interés de cada unidad.")).toBeNull();
   });
 
   it("«Preguntar al administrador» abre la solicitud formal ya armada con la cuenta", async () => {
