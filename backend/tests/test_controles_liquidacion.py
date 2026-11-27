@@ -364,6 +364,19 @@ def test_cada_gasto_dice_su_comprobante() -> None:
     assert c.texto == "Los 3 gastos dicen su comprobante y ninguna factura se repite."
 
 
+def test_el_tipo_sin_numero_no_dice_su_comprobante() -> None:
+    """RL-D7: «Factura B» sin «Nº …» no alcanza para buscar el comprobante. Así viene la
+    liquidación sintética de la lección 26."""
+    leidos = noviembre()
+    valor(leidos, "gasto:1:1")["concepto"] = "Periodo Noviembre/2026 - Factura B"
+    valor(leidos, "gasto:1:2")["concepto"] = "AGUA SINTETICA SA - Factura B"
+    valor(leidos, "gasto:2:1")["concepto"] = "LIMPIEZA SINTETICA - Abono de Noviembre"
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert len(c.lineas) == 3
+    assert all(linea.endswith("no dice su comprobante.") for linea in c.lineas), c.lineas
+
+
 def test_una_factura_en_dos_gastos_es_para_mirar() -> None:
     leidos = _con_comprobantes(noviembre())
     valor(leidos, "gasto:1:2")["concepto"] = (
