@@ -259,7 +259,7 @@ export function valoresDe(valor: Record<string, unknown>, camino: string[] = [])
 
 // Como `COMPROBANTE` de `controles.py`: el comprobante que el modelo de Mis Expensas escribe al
 // final del concepto de cada gasto (comentario 43; que la factura esté cargada en CEM es S3b).
-const COMPROBANTE = /(Factura|Recibo|Nota de Cr[eé]dito|Nota de D[eé]bito|Ticket|Otros)(?:\s+[^\s]{1,8})?\s*N\s*[º°o]\.?\s*(?:[0-9][0-9./-]*)?/gi;
+const COMPROBANTE = /(Factura|Recibo|Nota de Cr[eé]dito|Nota de D[eé]bito|Ticket|Otros)(?:\s+[^\s]{1,8})?\s*N\s*[º°o]\.?\s*(?:[0-9][0-9./-]*|\[N\d+\])/gi;
 
 /** «Factura B Nº 0001-00001234» tal como lo dice el concepto, o null si no dice ninguno. */
 export function comprobanteDe(concepto: string): string | null {

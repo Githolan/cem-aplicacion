@@ -575,10 +575,13 @@ def _padron(datos: Sequence[Dato]) -> ControlLiquidacion:
 
 COMPROBANTE = re.compile(
     r"(?P<tipo>Factura|Recibo|Nota de Cr[eé]dito|Nota de D[eé]bito|Ticket|Otros)"
-    r"(?:\s+(?P<letra>[^\s]{1,8}))?\s*N\s*[º°o]\.?\s*(?P<numero>[0-9][0-9./-]*)?",
+    r"(?:\s+(?P<letra>[^\s]{1,8}))?\s*N\s*[º°o]\.?\s*(?P<numero>[0-9][0-9./-]*|\[N\d+\])",
     re.IGNORECASE,
 )
-"""El comprobante que el modelo de Mis Expensas escribe al final del concepto de cada gasto."""
+"""El comprobante que el modelo de Mis Expensas escribe al final del concepto de cada gasto. El
+número es obligatorio: «Factura B Nº» a secas no identifica nada, y «Factura B Noviembre» no es un
+número (revisión de Codex en cem-aplicacion 298). «[N044]» es como las liquidaciones anonimizadas
+dejan el número: lo dice, pero no se cruza."""
 LETRAS = frozenset({"A", "B", "C", "E", "M"})
 """Las letras de factura de ARCA; otra palabra en ese lugar (ilegible) no entra en la clave."""
 CUIT = re.compile(r"CUIT\s*:?\s*(\d{2}-?\d{8}-?\d)")
@@ -610,6 +613,7 @@ def _comprobantes(datos: Sequence[Dato]) -> ControlLiquidacion:
         return _no_aplica(11, "comprobante_gasto", titulo, "La liquidación no trae gastos.")
     malas: list[str] = []
     vistos: dict[tuple[str, str, str, str], str] = {}
+    sin_cuit = 0
     for g in gastos:
         concepto = str(g.valor.get("concepto") or "")
         corto = _corto(concepto)
@@ -630,13 +634,20 @@ def _comprobantes(datos: Sequence[Dato]) -> ControlLiquidacion:
             r"[1-9]", numero.split("-")[-1]
         ):
             continue
+        if numero.startswith("["):  # número anonimizado: lo dice, pero no identifica la factura
+            continue
+        # El número de una factura es del proveedor: sin su CUIT no se puede decir que dos gastos
+        # son la misma (revisión de Codex en cem-aplicacion 298).
+        if cuit is None:
+            sin_cuit += 1
+            continue
         clave = (
             ultimo.group("tipo").lower(),
             (ultimo.group("letra") or "").upper()
             if (ultimo.group("letra") or "").upper() in LETRAS
             else "",
             re.sub(r"\D", "", numero),
-            re.sub(r"\D", "", cuit.group(1)) if cuit else "",
+            re.sub(r"\D", "", cuit.group(1)),
         )
         if clave in vistos:
             malas.append(
@@ -645,14 +656,22 @@ def _comprobantes(datos: Sequence[Dato]) -> ControlLiquidacion:
         else:
             vistos[clave] = corto
     n = len(gastos)
+    if n == 1:
+        bien = "El gasto dice su comprobante."
+    elif sin_cuit == 0:
+        bien = f"Los {n} gastos dicen su comprobante y ninguna factura se repite."
+    else:
+        bien = (
+            f"Los {n} gastos dicen su comprobante. Ninguna factura se repite entre los que dicen"
+            f" el CUIT del proveedor; {sin_cuit} no lo {'dice' if sin_cuit == 1 else 'dicen'} y no"
+            " se pudo cruzar."
+        )
     return _control(
         11,
         "comprobante_gasto",
         titulo,
         malas,
-        f"Los {n} gastos dicen su comprobante y ninguna factura se repite."
-        if n > 1
-        else "El gasto dice su comprobante.",
+        bien,
         "Hay gastos que no dicen su comprobante, o una factura que figura en dos gastos.",
     )
 

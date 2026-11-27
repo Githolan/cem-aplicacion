@@ -408,6 +408,43 @@ def test_el_tipo_sin_numero_no_dice_su_comprobante() -> None:
     assert all(linea.endswith("no dice su comprobante.") for linea in c.lineas), c.lineas
 
 
+@pytest.mark.parametrize(
+    "concepto", ["Agua - CUIT 30-22222222-2 - Factura B Nº", "Agua - Factura B Noviembre"]
+)
+def test_sin_numero_no_hay_comprobante(concepto: str) -> None:
+    """Revisión de Codex (cem-aplicacion 298): el número es obligatorio; «Noviembre» no es «Nº»."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:2")["concepto"] = concepto
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert len(c.lineas) == 1 and c.lineas[0].endswith("no dice su comprobante."), c.lineas
+    assert comprobante_de(concepto) is None
+
+
+def test_un_numero_anonimizado_dice_el_comprobante_y_no_se_cruza() -> None:
+    """Las liquidaciones anonimizadas dejan «Nº [N044]»: dice su comprobante; dos iguales no se
+    dicen repetidas, porque el número real no se conoce."""
+    leidos = _con_comprobantes(noviembre())
+    for clave in ("gasto:1:1", "gasto:1:2"):
+        valor(leidos, clave)["concepto"] = "X - CUIT 30-11111111-1 - Factura B Nº [N044]"
+    assert por_numero(leidos)[11].estado == EstadoControl.BIEN
+    assert comprobante_de("Abril/2026 -\nOtros Nº [N044]") == "Otros Nº [N044]"
+
+
+def test_sin_cuit_no_se_dice_que_se_repite() -> None:
+    """Revisión de Codex (cem-aplicacion 298): el número de factura es de cada proveedor; sin CUIT
+    no se puede decir que dos gastos son la misma factura, y el texto lo dice."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:1")["concepto"] = "Empresa A - Factura B Nº 0001-00001234"
+    valor(leidos, "gasto:1:2")["concepto"] = "Empresa B - Factura B Nº 0001-00001234"
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.BIEN, c.lineas
+    assert c.texto == (
+        "Los 3 gastos dicen su comprobante. Ninguna factura se repite entre los que dicen el CUIT"
+        " del proveedor; 2 no lo dicen y no se pudo cruzar."
+    )
+
+
 def test_una_factura_en_dos_gastos_es_para_mirar() -> None:
     leidos = _con_comprobantes(noviembre())
     valor(leidos, "gasto:1:2")["concepto"] = (

@@ -891,6 +891,8 @@ describe("resumen de la liquidación", () => {
     expect(comprobanteDe("Luz - CUIT 30-11111111-1 - Periodo Mayo/2026 - Factura B Nº 0001-00001234")).toBe("Factura B Nº 0001-00001234");
     expect(comprobanteDe("Seguro - Póliza 1 - Otros Nº 4455")).toBe("Otros Nº 4455");
     expect(comprobanteDe("Luz SINTETICA")).toBeNull();
+    expect(comprobanteDe("Agua - Factura B Nº")).toBeNull();  // sin número no hay comprobante
+    expect(comprobanteDe("Agua - Factura B Noviembre")).toBeNull();
     expect(enPalabras(LUZ)).toContainEqual({ etiqueta: "Comprobante que dice la liquidación", valor: "No dice ninguno" });
   });
 
