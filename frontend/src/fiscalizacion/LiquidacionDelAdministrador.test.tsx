@@ -12,9 +12,12 @@ import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
 import {
   aImporte,
-  CONFIRMAR_DATO,
-  CONFIRMAR_LIQUIDACION,
+  ACEPTAR,
+  aceptarLa,
   CORREGIR_DATO,
+  DESCARTAR_DATO,
+  enPalabras,
+  enPorcentaje,
   ELEGIR_COEFICIENTES,
   FALTA_ESQUEMA,
   PREPARAR_SOLICITUD,
@@ -39,6 +42,7 @@ import {
   TRAER,
   TRANSCRITO,
 } from "./LiquidacionDelAdministrador";
+import { ENTENDIDO, PREGUNTAR, type Control } from "./ResumenLiquidacion";
 
 // Liquidación del administrador (H5-3, app 0115). Datos SINTETICOS: ningún edificio ni importe real.
 
@@ -76,7 +80,10 @@ const IMPORTACION: Importacion = {
   reemplaza_a: null, motivo_reemplazo: null,
   campos: [LUZ, UNIDAD],
   enlaces: [],
+  controles: [],
 };
+const ACEPTAR_SEPTIEMBRE = aceptarLa("2026-09-01");
+const SUBIR_EN = `${SUBIR} de Edificio SINTETICO`;
 const RESUMEN = {
   id: I1, documento_id: D1, version_documento_id: V1, subida_por: PERSONA, creada_en: "2026-11-20T12:00:00Z",
   estado: "para_confirmar", formato: "mis_expensas", periodo: "2026-09-01", motivo: null, diferencias: 0,
@@ -176,17 +183,22 @@ describe("pantalla /importar-liquidacion", () => {
       [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
     }));  // prettier-ignore
     const { container } = abrir();
-    expect(await screen.findByText("2 de 2 datos sin decidir")).toBeTruthy();
+    expect(await screen.findByText("2 datos leídos, para revisar y aceptar")).toBeTruthy();
+    // El edificio, a la vista antes de subir (RL4-A).
+    expect(screen.getByText("Edificio SINTETICO").closest("p")?.textContent).toBe("Edificio: Edificio SINTETICO");
     const datos = await abrirLaImportacion();
     expect(within(datos).getByRole("button", { name: /Gasto · Luz SINTETICA: \$ 1\.000,00/ })).toBeTruthy();
     expect(within(datos).getByRole("button", { name: /Leído con IA/ })).toBeTruthy();
-    // Con datos pendientes no se ofrece confirmar la liquidación entera (C9: nada que se sabe que falla).
-    expect(screen.queryByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeNull();
-    expect(screen.getByText("Quedan 2 datos sin decidir.")).toBeTruthy();
+    // Con datos sin mirar uno por uno, la liquidación se acepta entera (RL1-A).
+    expect(screen.getByRole("button", { name: ACEPTAR_SEPTIEMBRE })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Septiembre de 2026 · Edificio SINTETICO" })).toBeTruthy();
     fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
     const ficha = await screen.findByRole("dialog", { name: "Gasto" });
     expect(within(ficha).getByText("Página 1: «Luz SINTETICA 1.000,00 1.000,00»")).toBeTruthy();
-    expect(within(ficha).getByText("100 %")).toBeTruthy();
+    expect(within(ficha).getByText("Se reparte en Gastos Comunes").nextElementSibling?.textContent).toBe("$ 1.000,00");
+    // Sin confianza a la vista en lo leído sin IA, y sin «Confirmar» de a uno.
+    expect(within(ficha).queryByText("100 %")).toBeNull();
+    expect(within(ficha).queryByRole("button", { name: "Confirmar" })).toBeNull();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
   });
@@ -281,28 +293,20 @@ describe("pantalla /importar-liquidacion", () => {
     expect(screen.queryByText(new RegExp(TRANSCRITO))).toBeNull();
   });
 
-  it("confirmar un dato lo manda sin valor corregido y muestra la importación como queda", async () => {
-    const confirmado = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, UNIDAD] };
-    const api = backend({
+  it("leído con IA, la ficha dice cómo se leyó y con qué confianza", async () => {
+    vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
       [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
-      [DECISION]: DETALLE(confirmado),
-    });
-    vi.stubGlobal("fetch", api);
+    }));  // prettier-ignore
     abrir();
     const datos = await abrirLaImportacion();
-    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "Gasto" })).getByRole("button", { name: CONFIRMAR_DATO }));
-    await waitFor(() => expect(pedidos(api, "POST", DECISION.split(" ")[1] ?? "")).toHaveLength(1));
-    const [pedido] = pedidos(api, "POST", DECISION.split(" ")[1] ?? "");
-    expect(await pedido?.json()).toEqual({ decision: "confirmado", valor_corregido: null });
-    expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
-    expect(await screen.findByText("Gasto: confirmado.")).toBeTruthy();
-    expect(screen.getByText("Quedan 1 datos sin decidir.")).toBeTruthy();
+    fireEvent.click(within(datos).getByRole("button", { name: /Unidad · UF 1 PB-A/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Unidad" });
+    expect(within(ficha).getByText("Cómo se leyó").nextElementSibling?.textContent).toBe("Con IA, que informó una confianza del 90 %");
   });
 
-  it("la ficha muestra cada valor del dato y, corregido, cada cambio al lado de lo leído", async () => {
+  it("la ficha del saldo de una unidad lo dice en palabras, con lo corregido", async () => {
     const saldo = campo(F2, 1, {
       tipo: "saldo_unidad", clave: "saldo_unidad:1", estado: "corregido",
       valor: { uf: "1", depto: "PB-A", saldo_anterior: "500.00", pagos: "100.00", deuda: "400.00", interes: "4.00", disponible: "0.00" },
@@ -318,11 +322,12 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.click(within(datos).getByRole("button", { name: /Saldo de la unidad/ }));
     const ficha = await screen.findByRole("dialog", { name: "Saldo de la unidad" });
     const valor = (etiqueta: string) => within(ficha).getByText(etiqueta).nextElementSibling?.textContent;
-    expect(valor("Pagos")).toBe("$ 100,00 → corregido: $ 150,00");
-    expect(valor("Deuda")).toBe("$ 400,00");
-    expect(valor("Interés")).toBe("$ 4,00");
-    expect(valor("Disponible")).toBe("$ 0,00");
-    expect(valor("Unidad funcional")).toBe("1");
+    expect(valor("Le cobraban el mes pasado")).toBe("$ 500,00");
+    expect(valor("Pagó")).toBe("$ 150,00");
+    expect(valor("Quedó debiendo")).toBe("$ 400,00");
+    expect(valor("Interés por la deuda")).toBe("$ 4,00");
+    expect(valor("Saldo a favor")).toBe("$ 0,00");
+    expect(valor("Estado")).toBe("Corregido");
   });
 
   it("un dato que el servidor no deja decidir dice por qué en la ficha", async () => {
@@ -338,22 +343,22 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
     const ficha = await screen.findByRole("dialog", { name: "Gasto" });
     expect(within(ficha).queryByRole("alert")).toBeNull();  // control: antes del pedido no hay falla
-    fireEvent.click(within(ficha).getByRole("button", { name: CONFIRMAR_DATO }));
+    fireEvent.click(within(ficha).getByRole("button", { name: DESCARTAR_DATO }));
     expect((await within(ficha).findByRole("alert")).textContent).toBe("Esta cuenta no tiene la facultad para esto en este edificio.");
   });
 
-  it("si la confirmación de la liquidación no llega, lo dice", async () => {
-    const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "descartado" as const }] };
+  it("si la aceptación de la liquidación no llega, lo dice", async () => {
     vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
-      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
       [`POST ${BASE}/liquidaciones-importadas/${I1}/confirmacion`]: () => Promise.reject(new TypeError("Failed to fetch")),
     }));  // prettier-ignore
     abrir();
     await abrirLaImportacion();
     expect(screen.queryByText(SIN_CONEXION)).toBeNull();  // control
-    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    fireEvent.click(await screen.findByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: ACEPTAR_SEPTIEMBRE })).getByRole("button", { name: ACEPTAR }));
     expect(await screen.findByText(SIN_CONEXION)).toBeTruthy();
   });
 
@@ -421,23 +426,30 @@ describe("pantalla /importar-liquidacion", () => {
     expect(total.valor_corregido).toEqual({ total: "1000.00", vencimientos: ["2026-10-10", "2026-10-25"] });
   });
 
-  it("sin datos pendientes ofrece confirmar la liquidación y la confirma", async () => {
-    const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "descartado" as const }] };
+  it("aceptar la liquidación la manda entera, con lo pendiente, y aceptada ya no se decide nada", async () => {
     const CONFIRMACION = `${BASE}/liquidaciones-importadas/${I1}/confirmacion`;
+    const aceptada = { ...IMPORTACION, estado: "confirmada" as const, decidida_por: PERSONA, decidida_en: "2026-11-20T13:00:00Z", campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "confirmado" as const }] };
     const api = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
-      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(decidida),
-      [`POST ${CONFIRMACION}`]: DETALLE({ ...decidida, estado: "confirmada", decidida_por: PERSONA, decidida_en: "2026-11-20T13:00:00Z" }),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
+      [`POST ${CONFIRMACION}`]: DETALLE(aceptada),
+      [`GET ${BASE}/liquidaciones-importadas/${I1}/recalculo`]: () => Response.json({ importacion_id: I1, periodo: "2026-09-01", sin_grupos: true, grupos: [], esquemas: [] }),
     });
     vi.stubGlobal("fetch", api);
     abrir();
     await abrirLaImportacion();
-    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    fireEvent.click(await screen.findByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
+    const ventana = await screen.findByRole("dialog", { name: ACEPTAR_SEPTIEMBRE });
+    expect(within(ventana).getByText(/Queda registrado quién la aceptó y cuándo/)).toBeTruthy();
+    expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(0);  // control: abrir la ventana no manda nada
+    fireEvent.click(within(ventana).getByRole("button", { name: ACEPTAR }));
     await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
-    expect(await screen.findByText(/Se confirmó la liquidación/)).toBeTruthy();
-    // Confirmada, ya no se decide nada.
-    expect(screen.queryByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeNull();
+    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.json()).toEqual({ aceptar_pendientes: true });
+    expect(await screen.findByText(/Se aceptó la liquidación/)).toBeTruthy();
+    expect(screen.getByText(/aceptada el/)).toBeTruthy();
+    // Aceptada, ya no se decide nada.
+    expect(screen.queryByRole("button", { name: ACEPTAR_SEPTIEMBRE })).toBeNull();
     expect(screen.queryByRole("button", { name: DESCARTAR_LIQUIDACION })).toBeNull();
   });
 
@@ -478,7 +490,7 @@ describe("pantalla /importar-liquidacion", () => {
     abrir();
     expect(await screen.findByText("Todavía no se subió ninguna liquidación del administrador.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: SUBIR }));
-    const ventana = await screen.findByRole("dialog", { name: SUBIR });
+    const ventana = await screen.findByRole("dialog", { name: SUBIR_EN });
     fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
     expect(await within(ventana).findByText("Falta elegir el archivo.")).toBeTruthy();
     // Acepta el PDF y también una foto (H5-5).
@@ -507,7 +519,7 @@ describe("pantalla /importar-liquidacion", () => {
     abrir();
     expect(await screen.findByText("Todavía no se subió ninguna liquidación del administrador.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: SUBIR }));
-    const ventana = await screen.findByRole("dialog", { name: SUBIR });
+    const ventana = await screen.findByRole("dialog", { name: SUBIR_EN });
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "liquidacion.pdf", { type: "application/pdf" });
     fireEvent.change(within(ventana).getByLabelText("Archivo de la liquidación"), { target: { files: [pdf] } });
     fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
@@ -533,7 +545,7 @@ describe("pantalla /importar-liquidacion", () => {
     abrir();
     expect(await screen.findByText("Todavía no se subió ninguna liquidación del administrador.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: SUBIR }));
-    const ventana = await screen.findByRole("dialog", { name: SUBIR });
+    const ventana = await screen.findByRole("dialog", { name: SUBIR_EN });
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "liquidacion.pdf", { type: "application/pdf" });
     fireEvent.change(within(ventana).getByLabelText("Archivo de la liquidación"), { target: { files: [pdf] } });
     fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
@@ -547,7 +559,7 @@ describe("pantalla /importar-liquidacion", () => {
     expect(screen.queryByRole("button", { name: IMPORTAR_DE_NUEVO })).toBeNull();
   }, 15000);
 
-  it("si el período ya tiene su liquidación oficial, confirmar ofrece reemplazarla con el motivo, o Cancelar", async () => {
+  it("si el período ya tiene su liquidación oficial, aceptar ofrece reemplazarla con el motivo, o Cancelar", async () => {
     const I2 = "77777777-7777-4777-8777-777777777777";
     const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "confirmado" as const }] };
     const OFICIAL = { ...RESUMEN, id: I2, estado: "confirmada", pendientes: 0, decidida_por: PERSONA, decidida_en: "2026-10-05T15:00:00Z" };
@@ -563,7 +575,7 @@ describe("pantalla /importar-liquidacion", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09.*Para confirmar/ }));
     await screen.findByRole("list", { name: "Datos leídos" });
-    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    fireEvent.click(await screen.findByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
     let ventana = await screen.findByRole("dialog", { name: REEMPLAZAR_OFICIAL });
     // Dice cuál es la oficial: el período y cuándo se confirmó.
     expect(within(ventana).getByText(textoOficial("2026-09-01", "2026-10-05T15:00:00Z"))).toBeTruthy();
@@ -571,7 +583,7 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: REEMPLAZAR_OFICIAL })).toBeNull());
     expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    fireEvent.click(screen.getByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
     ventana = await screen.findByRole("dialog", { name: REEMPLAZAR_OFICIAL });
     fireEvent.click(within(ventana).getByRole("button", { name: REEMPLAZARLA }));
     expect(await within(ventana).findByText(FALTA_MOTIVO)).toBeTruthy();
@@ -579,12 +591,12 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.change(within(ventana).getByLabelText("Motivo del reemplazo"), { target: { value: " Mandó otra versión " } });
     fireEvent.click(within(ventana).getByRole("button", { name: REEMPLAZARLA }));
     await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
-    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.json()).toEqual({ reemplaza_a: I2, motivo: "Mandó otra versión" });
+    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.json()).toEqual({ reemplaza_a: I2, motivo: "Mandó otra versión", aceptar_pendientes: true });
     expect(await screen.findByText(/reemplazó a la anterior, que queda como historia/)).toBeTruthy();
     expect(screen.getByText(/Motivo: Mandó otra versión/)).toBeTruthy();
   }, 15000);
 
-  it("sin otra oficial del período, confirmar no abre nada y va sin cuerpo", async () => {
+  it("sin otra oficial del período, aceptar no ofrece reemplazar y va solo con lo pendiente", async () => {
     const decidida = { ...IMPORTACION, campos: [{ ...LUZ, estado: "confirmado" as const }, { ...UNIDAD, estado: "confirmado" as const }] };
     const CONFIRMACION = `${BASE}/liquidaciones-importadas/${I1}/confirmacion`;
     // Una confirmada de otro período no cuenta.
@@ -599,10 +611,11 @@ describe("pantalla /importar-liquidacion", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09/ }));
-    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
-    await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
+    fireEvent.click(await screen.findByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
     expect(screen.queryByRole("dialog", { name: REEMPLAZAR_OFICIAL })).toBeNull();
-    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.text()).toBe("");
+    fireEvent.click(within(await screen.findByRole("dialog", { name: ACEPTAR_SEPTIEMBRE })).getByRole("button", { name: ACEPTAR }));
+    await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
+    expect(await pedidos(api, "POST", CONFIRMACION)[0]?.json()).toEqual({ aceptar_pendientes: true });
   });
 
   it("si una corrección deja dos datos del mismo tipo en una unidad, el aviso dice cuál y cuáles, y la importación sigue para corregir", async () => {
@@ -627,14 +640,15 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Período 2026-09/ }));
     await screen.findByRole("list", { name: "Datos leídos" });
     const lecturas = pedidos(api, "GET", `${BASE}/liquidaciones-importadas/${I1}`).length;
-    fireEvent.click(await screen.findByRole("button", { name: CONFIRMAR_LIQUIDACION }));
+    fireEvent.click(await screen.findByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: ACEPTAR_SEPTIEMBRE })).getByRole("button", { name: ACEPTAR }));
     await waitFor(() => expect(pedidos(api, "POST", CONFIRMACION)).toHaveLength(1));
     const aviso = await screen.findByText(textoUnidadRepetida({ unidad: "PB-A", tipo: "importe_unidad", campos: [1, 2] }, decidida.campos));
     // La unidad y los dos datos, cada uno como se ve en la lista.
     expect(aviso.textContent).toMatch(/unidad PB-A \(«UF 001 PB-A: .+» y «UF 002 PB-A: .+»\)\. Corrija uno de los dos o descarte/);
     // No cambió lo visto: no se relee la importación y se sigue pudiendo corregir o descartar.
     expect(pedidos(api, "GET", `${BASE}/liquidaciones-importadas/${I1}`)).toHaveLength(lecturas);
-    expect(screen.getByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeTruthy();
+    expect(screen.getByRole("button", { name: ACEPTAR_SEPTIEMBRE })).toBeTruthy();
     expect(screen.getByRole("button", { name: DESCARTAR_LIQUIDACION })).toBeTruthy();
   });
 
@@ -654,7 +668,7 @@ describe("pantalla /importar-liquidacion", () => {
     fireEvent.click(fila);
     expect(await screen.findByText(/Reemplazada por la liquidación confirmada el .*\. Motivo: Corrigió el rubro 2/)).toBeTruthy();
     // Historia: ni se confirma ni se descarta.
-    expect(screen.queryByRole("button", { name: CONFIRMAR_LIQUIDACION })).toBeNull();
+    expect(screen.queryByRole("button", { name: ACEPTAR_SEPTIEMBRE })).toBeNull();
     expect(screen.queryByRole("button", { name: DESCARTAR_LIQUIDACION })).toBeNull();
   });
 
@@ -666,6 +680,129 @@ describe("pantalla /importar-liquidacion", () => {
     abrir();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Liquidación del administrador" })).toBeNull());
     expect(screen.queryByRole("button", { name: SUBIR })).toBeNull();
+  });
+});
+
+// El resumen con los controles (rediseño de la confirmación, RL1-A a RL3-A). Datos SINTETICOS.
+
+const BIEN: Control = { numero: 1, clave: "gasto_suma_grupos", estado: "bien", titulo: "Cada gasto suma lo de sus grupos", texto: "El gasto suma lo de sus grupos.", lineas: [] };
+const PORCENTAJE: Control = {
+  numero: 7, clave: "porcentaje_grupo", estado: "para_mirar", titulo: "Lo que paga cada unidad coincide con su porcentaje",
+  texto: "Hay unidades que no pagan su porcentaje del total del grupo.",
+  lineas: ["PB-A (UF 1) paga $ 750 de Gastos Comunes: $ 250 más de lo que le toca por su 50 % de $ 1.000 ($ 500)."],
+};  // prettier-ignore
+const DEUDA: Control = {
+  numero: 8, clave: "deuda_unidad", estado: "para_mirar", titulo: "Deuda e interés de cada unidad",
+  texto: "Hay unidades que deben del mes anterior: su total incluye la deuda y el interés.",
+  lineas: ["PB-A (UF 1) debe $ 100 del mes anterior, más $ 3 de interés (3 % de la deuda)."],
+};  // prettier-ignore
+const SIN_ANTERIOR: Control = { numero: 9, clave: "saldo_anterior", estado: "no_aplica", titulo: "El saldo anterior es lo que pagaba el mes pasado", texto: "No hay liquidación aceptada del mes anterior en CEM para comparar.", lineas: [] };
+const TOTAL_GASTOS = campo("99999999-9999-4999-8999-999999999991", 2, { tipo: "total", clave: "total:gastos", valor: { grupos: { "Gastos Comunes": "1000.00" }, total: "1000.00", vencimientos: [] } });
+const CON_CONTROLES: Importacion = { ...IMPORTACION, campos: [LUZ, UNIDAD, TOTAL_GASTOS], controles: [BIEN, PORCENTAJE, DEUDA, SIN_ANTERIOR] };
+
+describe("resumen de la liquidación", () => {
+  it("dice las cifras y cuántos controles están bien, muestra solo lo raro y aceptar dice lo que queda abierto", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_CONTROLES),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir();
+    await abrirLaImportacion();
+    expect(screen.getByText("Gastos del mes: $ 1.000.")).toBeTruthy();
+    expect(screen.getByText("CEM revisó 3 controles: 1 está bien, 2 para mirar.")).toBeTruthy();
+    const mirar = screen.getByRole("list", { name: "Para mirar" });
+    expect(within(mirar).getByRole("heading", { name: PORCENTAJE.titulo })).toBeTruthy();
+    expect(within(mirar).getByText(PORCENTAJE.lineas[0] ?? "")).toBeTruthy();
+    // La deuda se explica: no se pregunta al administrador por ella.
+    const deuda = within(mirar).getByRole("heading", { name: DEUDA.titulo }).closest("li") as HTMLElement;
+    expect(within(deuda).queryByRole("button", { name: PREGUNTAR })).toBeNull();
+    // Lo que está bien y lo que no se pudo comprobar, plegados.
+    expect(screen.getByText(`✓ ${BIEN.texto}`)).toBeTruthy();
+    expect(screen.getByText(`${SIN_ANTERIOR.titulo}: ${SIN_ANTERIOR.texto}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
+    let ventana = await screen.findByRole("dialog", { name: ACEPTAR_SEPTIEMBRE });
+    expect(within(ventana).getByText(/Quedan 2 cosas para mirar sin responder/)).toBeTruthy();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: ACEPTAR_SEPTIEMBRE })).toBeNull());
+    // «Entendido» deja la tarjeta como vista y ya no cuenta como abierta.
+    fireEvent.click(within(deuda).getByRole("button", { name: ENTENDIDO }));
+    expect(await screen.findByText("Visto: deuda e interés de cada unidad.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: ACEPTAR_SEPTIEMBRE }));
+    ventana = await screen.findByRole("dialog", { name: ACEPTAR_SEPTIEMBRE });
+    expect(within(ventana).getByText(/Quedan una cosa para mirar sin responder: lo que paga cada unidad coincide con su porcentaje\./)).toBeTruthy();
+    fireEvent.click(within(ventana).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: ACEPTAR_SEPTIEMBRE })).toBeNull());
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+
+  it("«Preguntar al administrador» abre la solicitud formal ya armada con la cuenta", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_CONTROLES),
+      [`GET ${BASE}/solicitudes-formales`]: () =>
+        Response.json({ elementos: [], puede_preparar: true, plazo_por_defecto_dias: 15, plazo_minimo_dias: 5, plazo_maximo_dias: 60, hay_administrador_vigente: true }),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    fireEvent.click(screen.getByRole("button", { name: PREGUNTAR }));
+    const ventana = await screen.findByRole("dialog", { name: "Preparar una solicitud" });
+    expect((within(ventana).getByLabelText(/^Cuál/) as HTMLInputElement).value).toBe("Liquidación de septiembre de 2026");
+    const texto = (within(ventana).getByLabelText(/Documentación o aclaración/) as HTMLTextAreaElement).value;
+    expect(texto).toContain(`- ${PORCENTAJE.lineas[0] ?? ""}`);
+    expect(texto).toContain("Se pide la base de cálculo");
+  });
+
+  it("sin `solicitud_formal.preparar` no se ofrece preguntar", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/mis-acciones`]: alcanza("liquidacion.importar"),
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_CONTROLES),
+    }));  // prettier-ignore
+    abrir();
+    await abrirLaImportacion();
+    expect(screen.getAllByRole("button", { name: ENTENDIDO })).toHaveLength(2);  // control: las tarjetas están
+    expect(screen.queryByRole("button", { name: PREGUNTAR })).toBeNull();
+  });
+
+  it("los filtros de lo leído se combinan y «Todos» los saca", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_CONTROLES),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    const filtros = screen.getByRole("group", { name: "Qué datos mostrar" });
+    expect(within(datos).getAllByRole("button")).toHaveLength(3);
+    fireEvent.click(within(filtros).getByRole("button", { name: "Gastos" }));
+    expect(within(datos).getAllByRole("button").map((x) => x.textContent?.slice(0, 5))).toEqual(["Gasto"]);
+    fireEvent.click(within(filtros).getByRole("button", { name: "Unidades" }));
+    expect(within(datos).getAllByRole("button")).toHaveLength(2);
+    expect(within(filtros).getByRole("button", { name: "Gastos" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(filtros).getByRole("button", { name: "Todos" }));
+    expect(within(datos).getAllByRole("button")).toHaveLength(3);
+    // Solo hay filtro para lo que la liquidación trae.
+    expect(within(filtros).queryByRole("button", { name: "Saldos" })).toBeNull();
+  });
+
+  it("un porcentaje se lee como porcentaje y lo que paga una unidad, por grupo", () => {
+    expect(enPorcentaje("16.00")).toBe("16 %");
+    expect(enPorcentaje("3.50")).toBe("3,5 %");
+    const paga = campo(F2, 1, {
+      tipo: "importe_unidad", clave: "importe_unidad:5",
+      valor: { uf: "5", depto: "2° B", grupos: { "Gastos Comunes": { porcentaje: "21.00", monto: "41500.00" } }, otros_gastos: "0.00", redondeo: "0.00", total: "41500.00" },
+    });  // prettier-ignore
+    expect(enPalabras(paga)).toEqual([
+      { etiqueta: "Gastos Comunes", valor: "le toca el 21 % → $ 41.500,00" },
+      { etiqueta: "Otros gastos", valor: "$ 0,00" },
+      { etiqueta: "Redondeo", valor: "$ 0,00" },
+      { etiqueta: "Total a pagar este mes", valor: "$ 41.500,00" },
+    ]);
   });
 });
 

@@ -18,15 +18,17 @@ import { type Aviso, cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, ESTADO, mensajeDeAc
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus, useConsorcio } from "../egresos/useConsorcio";
+import { type Control, ResumenDeLaLiquidacion, textoDePregunta } from "./ResumenLiquidacion";
 import { type Propuesta, RUTA_SOLICITUDES } from "./Solicitudes";
 
-// Página /importar-liquidacion (H5-3, app 0115; diseño H5 §5): en Modo Consejo, quien tiene
-// `liquidacion.importar` sube el PDF que manda la administración, o una foto (H5-5, app 0117), la
-// aplicación lo lee (sin IA el formato Mis Expensas; con IA, dentro del tope del mes, lo demás, y
-// una foto o un PDF sin texto como imágenes, de las que la IA transcribe cada renglón) y una persona confirma cada dato
-// antes de que cuente (RN30). Cada dato muestra su valor, su confianza y el renglón del documento de
-// donde salió; se confirma, se corrige o se descarta, y cuando no queda ninguno pendiente se confirma
-// la liquidación entera. Nada se borra: lo descartado queda con su motivo.
+// Página /importar-liquidacion (H5-3, app 0115; diseño H5 §5; rediseño de la confirmación, RL1-A a
+// RL5-A del 26-11-2026): en Modo Consejo, quien tiene `liquidacion.importar` elige el edificio, sube
+// el PDF que manda la administración, o una foto (H5-5, app 0117), y la aplicación lo lee (sin IA el
+// formato Mis Expensas; con IA, dentro del tope del mes, lo demás, y una foto o un PDF sin texto como
+// imágenes, de las que la IA transcribe cada renglón). La persona ve un resumen en palabras con los
+// controles de CEM, solo lo raro como tarjetas, y acepta la liquidación entera: esa aceptación es la
+// confirmación humana de sus datos (RN30, RL1-A). Lo leído queda plegado, con filtros, para corregir
+// un número mal leído. Nada se borra: lo descartado queda con su motivo.
 
 type Resumen = components["schemas"]["ImportacionResumen"];
 type Importacion = components["schemas"]["ImportacionLiquidacion"];
@@ -64,10 +66,18 @@ export function sitioDe(url: string): string {
 }
 export const EN_ANTIVIRUS = "El archivo está en la revisión del antivirus; cuando pase, se lee solo.";
 export const LEYENDO = "Se está leyendo la liquidación.";
-export const CONFIRMAR_DATO = "Confirmar";
 export const CORREGIR_DATO = "Corregir";
 export const DESCARTAR_DATO = "Descartar";
-export const CONFIRMAR_LIQUIDACION = "Confirmar la liquidación";
+/** «Aceptar la liquidación de noviembre» (RL1-A): el único botón para que cuente. */
+export const aceptarLa = (periodo: string | null) => (periodo ? `Aceptar la liquidación de ${mesSolo(periodo)}` : "Aceptar la liquidación");
+export const ACEPTAR = "Aceptar";
+export const VER_TODO = "Ver todo lo que leyó CEM";
+export const TODOS_LOS_DATOS = "Todos";
+/** Al aceptar con tarjetas sin responder (RL3-A): aceptar no es aprobar lo raro. */
+export const textoAceptar = (abiertos: readonly Control[]) =>
+  abiertos.length === 0
+    ? "Desde ahora sus datos cuentan como la liquidación oficial del mes. Queda registrado quién la aceptó y cuándo."
+    : `Quedan ${abiertos.length === 1 ? "una cosa" : `${abiertos.length} cosas`} para mirar sin responder: ${abiertos.map((c) => c.titulo.toLowerCase()).join("; ")}. Aceptar la liquidación no es aprobarlas: siguen a la vista. Queda registrado quién la aceptó y cuándo.`;
 export const DESCARTAR_LIQUIDACION = "Descartar la liquidación";
 export const VOLVER_A_LA_LISTA = "Volver a la lista";
 export const FALTA_ARCHIVO = "Falta elegir el archivo.";
@@ -100,6 +110,15 @@ const TEXTO_TIPO: Record<Campo["tipo"], string> = {
   importe_unidad: "Lo que paga la unidad",
   saldo_unidad: "Saldo de la unidad",
 };
+/** Los filtros de lo leído, combinables (comentario 44), en el orden en que se lee una liquidación. */
+const FILTROS: { tipo: Campo["tipo"]; texto: string }[] = [
+  { tipo: "gasto", texto: "Gastos" },
+  { tipo: "rubro", texto: "Rubros" },
+  { tipo: "unidad", texto: "Unidades" },
+  { tipo: "saldo_unidad", texto: "Saldos" },
+  { tipo: "importe_unidad", texto: "Lo que paga" },
+  { tipo: "total", texto: "Totales" },
+];
 const TEXTO_ESTADO_CAMPO: Record<Campo["estado"], string> = {
   pendiente: "Pendiente",
   confirmado: "Confirmado",
@@ -217,22 +236,60 @@ function enSuForma(h: Hoja, crudo: string): string | number | string[] | null | 
   }
 }
 
-/** Cada valor del dato, con su etiqueta (también los números): lo que se confirma entero. */
+/** «16.00» como porcentaje («16 %»), no como pesos (comentario 46). */
+export function enPorcentaje(texto: string): string {
+  const [enteros = "0", decimales = ""] = texto.split(".");
+  const sinCeros = decimales.replace(/0+$/, "");
+  return `${enteros}${sinCeros === "" ? "" : `,${sinCeros}`} %`;
+}
+
+/** Cada valor del dato, con su etiqueta (también los números). Un porcentaje se lee como porcentaje. */
 export function valoresDe(valor: Record<string, unknown>, camino: string[] = []): { clave: string; etiqueta: string; valor: string }[] {
   return Object.entries(valor).flatMap(([clave, v]) => {
     const aca = [...camino, clave];
     if (v !== null && typeof v === "object" && !Array.isArray(v)) return valoresDe(v as Record<string, unknown>, aca);
-    return [{ clave: aca.join("."), etiqueta: aca.map((k) => TEXTO_CLAVE[k] ?? k).join(" · "), valor: texto(Array.isArray(v) ? v.join(", ") : v) }];
+    const dicho = clave === "porcentaje" && typeof v === "string" && IMPORTE_LEIDO.test(v) ? enPorcentaje(v) : texto(Array.isArray(v) ? v.join(", ") : v);
+    return [{ clave: aca.join("."), etiqueta: aca.map((k) => TEXTO_CLAVE[k] ?? k).join(" · "), valor: dicho }];
   });
 }
 
-/** Lo leído de un dato y, si se corrigió, cada valor que cambió con su corrección al lado. */
-function datosDelValor(c: Campo): { etiqueta: string; valor: string }[] {
-  const corregido = c.valor_corregido === null ? null : new Map(valoresDe(c.valor_corregido as Record<string, unknown>).map((v) => [v.clave, v.valor]));
-  return valoresDe(c.valor as Record<string, unknown>).map((v) => {
-    const nuevo = corregido?.get(v.clave);
-    return { etiqueta: v.etiqueta, valor: nuevo === undefined || nuevo === v.valor ? v.valor : `${v.valor} → corregido: ${nuevo}` };
-  });
+/** La ficha de un dato en palabras (comentario 46): lo que paga una unidad por grupo, con su
+ * porcentaje; el saldo con lo que debía; un gasto con lo de cada grupo. Los demás, valor por valor. */
+export function enPalabras(c: Campo): { etiqueta: string; valor: string }[] {
+  const v = (c.valor_corregido ?? c.valor) as Record<string, unknown>;
+  const pesos = (x: unknown) => (typeof x === "string" && IMPORTE_LEIDO.test(x) ? enPesos(x) : "—");
+  const grupos = (v.grupos ?? v.importes) as Record<string, unknown> | undefined;
+  switch (c.tipo) {
+    case "importe_unidad":
+      if (grupos === undefined) break;
+      return [
+        ...Object.entries(grupos).map(([nombre, p]) => {
+          const parte = p as { porcentaje?: unknown; monto?: unknown };
+          const pct = typeof parte.porcentaje === "string" && IMPORTE_LEIDO.test(parte.porcentaje) ? `le toca el ${enPorcentaje(parte.porcentaje)} → ` : "";
+          return { etiqueta: nombre, valor: `${pct}${pesos(parte.monto)}` };
+        }),
+        { etiqueta: "Otros gastos", valor: pesos(v.otros_gastos) },
+        { etiqueta: "Redondeo", valor: pesos(v.redondeo) },
+        { etiqueta: "Total a pagar este mes", valor: pesos(v.total) },
+      ];
+    case "saldo_unidad":
+      if (v.deuda === undefined) break;
+      return [
+        { etiqueta: "Le cobraban el mes pasado", valor: pesos(v.saldo_anterior) },
+        { etiqueta: "Pagó", valor: pesos(v.pagos) },
+        { etiqueta: "Quedó debiendo", valor: pesos(v.deuda) },
+        { etiqueta: "Interés por la deuda", valor: pesos(v.interes) },
+        { etiqueta: "Saldo a favor", valor: pesos(v.disponible) },
+      ];
+    case "gasto":
+      if (grupos === undefined) break;
+      return [
+        { etiqueta: "Concepto", valor: String(v.concepto ?? "") },
+        ...Object.entries(grupos).map(([nombre, x]) => ({ etiqueta: `Se reparte en ${nombre}`, valor: pesos(x) })),
+        { etiqueta: "Total", valor: pesos(v.total) },
+      ];
+  }
+  return valoresDe(v);
 }
 
 function conHoja(valor: Record<string, unknown>, camino: string[], nuevo: unknown): Record<string, unknown> {
@@ -243,7 +300,7 @@ function conHoja(valor: Record<string, unknown>, camino: string[], nuevo: unknow
 
 /** La línea de cada importación en la lista: lo que falta decidir, o el reemplazo con su motivo. */
 function resumenDeLaFila(r: Resumen, todas: readonly Resumen[]): string {
-  if (r.estado === "para_confirmar") return `${r.pendientes} de ${r.campos} datos sin decidir`;
+  if (r.estado === "para_confirmar") return `${r.campos} datos leídos, para revisar y aceptar`;
   if (r.estado === "reemplazada") {
     const por = todas.find((x) => x.reemplaza_a === r.id);
     return por?.motivo_reemplazo ? `Motivo del reemplazo: ${por.motivo_reemplazo}` : `Subida el ${fechaCorta(r.creada_en)}`;
@@ -254,7 +311,7 @@ function resumenDeLaFila(r: Resumen, todas: readonly Resumen[]): string {
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Resumen[] };
 type Detalle = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; importacion: Importacion };
 type Subida = { consorcio: string; documento: string; version: string };
-type Ventana = { tipo: "subir" } | { tipo: "corregir"; campo: Campo } | { tipo: "descartar" } | { tipo: "reemplazar"; oficial: Resumen };
+type Ventana = { tipo: "subir" } | { tipo: "corregir"; campo: Campo } | { tipo: "descartar" } | { tipo: "aceptar" } | { tipo: "reemplazar"; oficial: Resumen };
 
 export function LiquidacionDelAdministrador() {
   const elegido = useConsorcio(REQUISITOS.importarLiquidacion);
@@ -277,6 +334,12 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [enviando, setEnviando] = useState(false);
   const [fallaEnFicha, setFallaEnFicha] = useState<string | null>(null);
+  // Las tarjetas «para mirar» que la persona marcó como vistas: solo en esta pantalla (RL3-A: no
+  // traban la aceptación ni se guardan).
+  const [vistos, setVistos] = useState<ReadonlySet<string>>(new Set());
+  const [filtros, setFiltros] = useState<ReadonlySet<Campo["tipo"]>>(new Set());
+  const navigate = useNavigate();
+  const puede = usePuede(consorcio);
   const fichas = useFichas<string>();
   const clave = useRef<string | null>(null);
   const claveImportar = useRef<string | null>(null);
@@ -424,6 +487,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   }
 
   function abrir(importacion: string) {
+    setVistos(new Set());
+    setFiltros(new Set());
     setDetalle({ tipo: "cargando" });
     setElegida(importacion);
     setVentana(null);
@@ -626,20 +691,28 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       if (typeof r === "object") mostrar(r.rechazo);
     });
 
-  const decidirDirecto = (c: Campo, decision: "confirmado" | "descartado") => {
+  const decidirDirecto = (c: Campo, decision: "descartado") => {
     setFallaEnFicha(null);
     directo(decidir(c, decision), setFallaEnFicha);
   };
 
-  const confirmar = () =>
-    directo(actuar(
+  /** Acepta la liquidación entera (RL1-A): los datos pendientes quedan confirmados por quien acepta. */
+  const aceptar = (): Promise<FinDeEnvio> =>
+    actuar(
       (k) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion", {
           headers: encabezadoCsrf(),
           params: { path: { consorcio_id: consorcio, importacion_id: elegida ?? "" }, header: { [ENCABEZADO_IDEMPOTENCIA]: k } },
+          body: { aceptar_pendientes: true },
         }),
-      "Se confirmó la liquidación: sus datos confirmados y corregidos ya cuentan.",
-    ), (texto) => setAviso({ texto, ok: false }));
+      "Se aceptó la liquidación: ya es la oficial del mes.",
+    );
+
+  /** La solicitud formal desde una tarjeta (RL2-A): se abre armada, para revisarla y mandarla. */
+  function preguntar(c: Control, periodo: string | null) {
+    const propuesta: Propuesta = { consorcio, objeto: "periodo", referencia: periodo ? `Liquidación de ${mesDe(periodo)}` : TITULO_LIQUIDACION_ADMINISTRADOR, documentacion: textoDePregunta(c, periodo) };
+    void navigate(RUTA_SOLICITUDES, { state: { propuesta } });
+  }
 
   /** Reemplaza la oficial del período con esta, con el motivo. */
   async function reemplazar(oficial: Resumen): Promise<FinDeEnvio> {
@@ -653,9 +726,9 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
         api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion", {
           headers: encabezadoCsrf(),
           params: { path: { consorcio_id: consorcio, importacion_id: elegida ?? "" }, header: { [ENCABEZADO_IDEMPOTENCIA]: k } },
-          body: { reemplaza_a: oficial.id, motivo: motivo.trim() },
+          body: { reemplaza_a: oficial.id, motivo: motivo.trim(), aceptar_pendientes: true },
         }),
-      "Se confirmó la liquidación: reemplazó a la anterior, que queda como historia.",
+      "Se aceptó la liquidación: reemplazó a la anterior, que queda como historia.",
     );
   }
 
@@ -666,8 +739,10 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const reemplazadaPor = importacion === null ? undefined : elementos.find((r) => r.reemplaza_a === importacion.id);
   const reemplazo = importacion?.reemplaza_a === null || importacion === null ? undefined : elementos.find((r) => r.id === importacion.reemplaza_a);
   const enFicha = importacion?.campos.find((c) => c.id === fichas.abierta);
-  const pendientes = importacion?.campos.filter((c) => c.estado === "pendiente").length ?? 0;
   const seConfirma = importacion?.estado === "para_confirmar";
+  const edificio = pantalla.tipo === "lista" ? pantalla.consorcios.find((c) => c.id === consorcio)?.nombre : undefined;
+  const abiertos = importacion?.controles.filter((c) => c.estado === "para_mirar" && !vistos.has(c.clave)) ?? [];
+  const mostrados = importacion === null ? [] : filtros.size === 0 ? importacion.campos : importacion.campos.filter((c) => filtros.has(c.tipo));
 
   return (
     <>
@@ -688,6 +763,11 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
 
       {pantalla.tipo === "lista" && elegida === null && (
         <>
+          {edificio !== undefined && (
+            <p className="edificio-actual">
+              Edificio: <strong>{edificio}</strong>
+            </p>
+          )}
           {/* Con un archivo en el antivirus o sin importar todavía, no se sube otro: se perdería el primero. */}
           {subida === null && porImportar === null && (
             <p>
@@ -748,10 +828,10 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           )}
           {importacion !== null && (
             <>
-              <h2 id={`${id}-titulo`}>{importacion.periodo ? `Período ${importacion.periodo.slice(0, 7)}` : TITULO_LIQUIDACION_ADMINISTRADOR}</h2>
+              <h2 id={`${id}-titulo`}>{TEXTO_ESTADO[importacion.estado]}</h2>
               <p>
-                {TEXTO_ESTADO[importacion.estado]}
-                {importacion.formato ? ` · ${TEXTO_FORMATO[importacion.formato]}` : ""}
+                {importacion.formato ? TEXTO_FORMATO[importacion.formato] : ""}
+                {importacion.decidida_en !== null && (importacion.estado === "confirmada" || importacion.estado === "reemplazada") ? ` · aceptada el ${fechaCorta(importacion.decidida_en)}` : ""}
               </p>
               {importacion.estado === "leyendo" && <p role="status">{LEYENDO}</p>}
               {importacion.motivo && <p className="tarjeta">{importacion.motivo}</p>}
@@ -769,22 +849,33 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   Motivo: {importacion.motivo_reemplazo}
                 </p>
               )}
-              {importacion.diferencias.length > 0 && (
-                <>
-                  <h3>Lo que no cierra</h3>
-                  <ul>
-                    {importacion.diferencias.map((d, i) => {
-                      const { esperado, informado } = d as Record<string, unknown>;
-                      return (
-                        <li key={`${d.regla}-${i}`}>
-                          {d.detalle} (página {d.pagina})
-                          {typeof esperado === "string" && typeof informado === "string" ? `: suma ${enPesos(esperado)}, dice ${enPesos(informado)}` : ""}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </>
+              {importacion.campos.length > 0 && (
+                <ResumenDeLaLiquidacion
+                  importacion={importacion}
+                  edificio={edificio}
+                  vistos={vistos}
+                  alVer={(c) => setVistos((actual) => new Set([...actual, c]))}
+                  alPreguntar={puede("solicitud_formal.preparar") ? (c) => preguntar(c, importacion.periodo) : null}
+                />
               )}
+              {seConfirma && (
+                <p className="ficha-registro__acciones">
+                  <button type="button" onClick={() => abrirVentana(oficialDelPeriodo === undefined ? { tipo: "aceptar" } : { tipo: "reemplazar", oficial: oficialDelPeriodo })}>
+                    {aceptarLa(importacion.periodo)}
+                  </button>
+                  <button type="button" className="secundario peligro" onClick={() => abrirVentana({ tipo: "descartar" })}>
+                    {DESCARTAR_LIQUIDACION}
+                  </button>
+                </p>
+              )}
+              {importacion.estado === "no_reconocida" && (
+                <p className="ficha-registro__acciones">
+                  <button type="button" className="secundario peligro" onClick={() => abrirVentana({ tipo: "descartar" })}>
+                    {DESCARTAR_LIQUIDACION}
+                  </button>
+                </p>
+              )}
+              {(importacion.estado === "confirmada" || importacion.estado === "reemplazada") && <RecalculoDeLaLiquidacion key={importacion.id} consorcio={consorcio} importacion={importacion.id} aEntrar={aEntrar} />}
               {importacion.enlaces.length > 0 && (
                 <>
                   <h3>{ENLACES}</h3>
@@ -807,48 +898,52 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
                   </ul>
                 </>
               )}
-              {seConfirma && (
-                <p className="ficha-registro__acciones">
-                  {pendientes === 0 && (
-                    <button type="button" onClick={oficialDelPeriodo === undefined ? confirmar : () => abrirVentana({ tipo: "reemplazar", oficial: oficialDelPeriodo })}>
-                      {CONFIRMAR_LIQUIDACION}
-                    </button>
-                  )}
-                  <button type="button" className="secundario peligro" onClick={() => abrirVentana({ tipo: "descartar" })}>
-                    {DESCARTAR_LIQUIDACION}
-                  </button>
-                </p>
-              )}
-              {importacion.estado === "no_reconocida" && (
-                <p className="ficha-registro__acciones">
-                  <button type="button" className="secundario peligro" onClick={() => abrirVentana({ tipo: "descartar" })}>
-                    {DESCARTAR_LIQUIDACION}
-                  </button>
-                </p>
-              )}
-              {seConfirma && pendientes > 0 && <p>{`Quedan ${pendientes} datos sin decidir.`}</p>}
-              {(importacion.estado === "confirmada" || importacion.estado === "reemplazada") && <RecalculoDeLaLiquidacion key={importacion.id} consorcio={consorcio} importacion={importacion.id} aEntrar={aEntrar} />}
               {importacion.campos.length > 0 && (
-                <ul className="filas-registro" aria-label="Datos leídos">
-                  {importacion.campos.map((c) => (
-                    <li key={c.id}>
-                      <FilaDeRegistro
-                        titulo={`${TEXTO_TIPO[c.tipo]} · ${resumenDe(c)}`}
-                        resumen={`Página ${c.pagina}${c.origen === "ia" ? " · Leído con IA" : ""}`}
-                        estado={TEXTO_ESTADO_CAMPO[c.estado]}
-                        alAbrir={() => {
-                          setAviso(null);
-                          setFallaEnFicha(null);
-                          setVentana(null);
-                          fichas.abrir(c.id);
-                        }}
-                        refFila={fichas.refFila(c.id)}
-                        abierta={fichas.abierta === c.id}
-                        deshabilitada={enviando}
-                      />
-                    </li>
-                  ))}
-                </ul>
+                <details className="historial">
+                  <summary>{`${VER_TODO} (${importacion.campos.length} datos)`}</summary>
+                  <div className="filtros-pago" role="group" aria-label="Qué datos mostrar">
+                    <button type="button" aria-pressed={filtros.size === 0} onClick={() => setFiltros(new Set())}>
+                      {TODOS_LOS_DATOS}
+                    </button>
+                    {FILTROS.filter((f) => importacion.campos.some((c) => c.tipo === f.tipo)).map((f) => (
+                      <button
+                        key={f.tipo}
+                        type="button"
+                        aria-pressed={filtros.has(f.tipo)}
+                        onClick={() =>
+                          setFiltros((actual) => {
+                            const otro = new Set(actual);
+                            if (otro.has(f.tipo)) otro.delete(f.tipo);
+                            else otro.add(f.tipo);
+                            return otro;
+                          })
+                        }
+                      >
+                        {f.texto}
+                      </button>
+                    ))}
+                  </div>
+                  <ul className="filas-registro" aria-label="Datos leídos">
+                    {mostrados.map((c) => (
+                      <li key={c.id}>
+                        <FilaDeRegistro
+                          titulo={`${TEXTO_TIPO[c.tipo]} · ${resumenDe(c)}`}
+                          resumen={`Página ${c.pagina}${c.origen === "ia" ? " · Leído con IA" : ""}`}
+                          estado={c.estado === "corregido" || c.estado === "descartado" ? TEXTO_ESTADO_CAMPO[c.estado] : undefined}
+                          alAbrir={() => {
+                            setAviso(null);
+                            setFallaEnFicha(null);
+                            setVentana(null);
+                            fichas.abrir(c.id);
+                          }}
+                          refFila={fichas.refFila(c.id)}
+                          abierta={fichas.abierta === c.id}
+                          deshabilitada={enviando}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               )}
             </>
           )}
@@ -859,13 +954,13 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
         <FichaDeRegistro
           titulo={`${TEXTO_TIPO[enFicha.tipo]}`}
           datos={[
-            ...datosDelValor(enFicha),
+            ...enPalabras(enFicha),
             {
-              etiqueta: "En el documento",
+              etiqueta: "Renglón del documento",
               valor: `Página ${enFicha.pagina}${enFicha.fragmento ? `${importacion.formato === "lectura_ia_imagen" ? ` (${TRANSCRITO})` : ""}: «${enFicha.fragmento}»` : ""}`,
             },
-            { etiqueta: "Confianza", valor: `${Math.round(Number(enFicha.confianza) * 100)} %${enFicha.origen === "ia" ? " (leído con IA)" : ""}` },
-            { etiqueta: "Estado", valor: TEXTO_ESTADO_CAMPO[enFicha.estado] },
+            ...(enFicha.origen === "ia" ? [{ etiqueta: "Cómo se leyó", valor: `Con IA, que informó una confianza del ${Math.round(Number(enFicha.confianza) * 100)} %` }] : []),
+            ...(enFicha.estado === "corregido" || enFicha.estado === "descartado" ? [{ etiqueta: "Estado", valor: TEXTO_ESTADO_CAMPO[enFicha.estado] }] : []),
           ]}
           alCerrar={() => fichas.cerrar()}
           ocupada={enviando}
@@ -878,11 +973,6 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           )}
           {seConfirma && (
             <p className="ficha-registro__acciones">
-              {enFicha.estado !== "confirmado" && (
-                <button type="button" onClick={() => decidirDirecto(enFicha, "confirmado")}>
-                  {CONFIRMAR_DATO}
-                </button>
-              )}
               <button type="button" className="secundario" onClick={() => abrirVentana({ tipo: "corregir", campo: enFicha })}>
                 {CORREGIR_DATO}
               </button>
@@ -897,7 +987,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       )}
 
       {ventana?.tipo === "subir" && (
-        <VentanaDeFormulario titulo={SUBIR} textoEnviar="Subir" alEnviar={subir} alCerrar={() => setVentana(null)}>
+        <VentanaDeFormulario titulo={edificio === undefined ? SUBIR : `${SUBIR} de ${edificio}`} textoEnviar="Subir" alEnviar={subir} alCerrar={() => setVentana(null)}>
           <SubirArchivo
             de="de la liquidación"
             tipos={[PDF, JPEG, PNG]}
@@ -914,9 +1004,16 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
         </VentanaDeFormulario>
       )}
 
+      {ventana?.tipo === "aceptar" && importacion !== null && (
+        <VentanaDeFormulario titulo={aceptarLa(importacion.periodo)} textoEnviar={ACEPTAR} alEnviar={aceptar} alCerrar={() => setVentana(null)}>
+          <p>{textoAceptar(abiertos)}</p>
+        </VentanaDeFormulario>
+      )}
+
       {ventana?.tipo === "reemplazar" && importacion !== null && (
         <VentanaDeFormulario titulo={REEMPLAZAR_OFICIAL} textoEnviar={REEMPLAZARLA} alEnviar={() => reemplazar(ventana.oficial)} alCerrar={() => setVentana(null)}>
           <p>{textoOficial(ventana.oficial.periodo ?? "", ventana.oficial.decidida_en ?? "")}</p>
+          <p>{textoAceptar(abiertos)}</p>
           <label htmlFor={`${id}-motivo-reemplazo`}>Motivo del reemplazo</label>
           <textarea
             id={`${id}-motivo-reemplazo`}
@@ -1008,6 +1105,7 @@ const nombreDeEsquema = (grupo: string) => `«${grupo.replaceAll("_", " ")}»`;
 /** Un día como «1 de enero de 2024»; al mediodía para que la zona horaria no lo corra. */
 const fechaLarga = (dia: string) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${dia}T12:00:00`));
 const mesDe = (periodo: string) => new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" }).format(new Date(`${periodo}T12:00:00`));
+const mesSolo = (periodo: string) => new Intl.DateTimeFormat("es-AR", { month: "long" }).format(new Date(`${periodo}T12:00:00`));
 const porcentajeDe = (texto: string | null | undefined) =>
   texto === null || texto === undefined ? "—" : `${Number(texto).toLocaleString("es-AR", { maximumFractionDigits: 6 })} %`;
 const pesos = (texto: string | null | undefined) => (texto === null || texto === undefined ? "—" : enPesos(texto));

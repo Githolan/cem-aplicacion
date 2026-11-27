@@ -214,6 +214,61 @@ def test_la_importacion_se_confirma_sin_pendientes_y_solo_eso_es_oficial(
         assert respuesta.json()["codigo"] == "importacion_decidida"
 
 
+def test_aceptar_la_liquidacion_entera_confirma_lo_pendiente_con_quien_acepta(
+    escena, bucket, motor_app, motor_migrate
+):
+    """RL1-A (26-11-2026): aceptar la liquidación entera confirma cada dato pendiente a nombre de
+    quien acepta, en la misma transacción; lo corregido y lo descartado quedan como estaban. La
+    importación vuelve con sus controles en palabras."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    assert [c["numero"] for c in i["controles"]] == list(range(1, 11))
+    assert {c["estado"] for c in i["controles"]} <= {"bien", "para_mirar", "no_aplica"}
+    assert next(c for c in i["controles"] if c["numero"] == 9)["estado"] == "no_aplica"
+    rubro = next(c for c in i["campos"] if c["clave"] == "rubro:2")
+    corregido = rubro["valor"] | {"total": "999.99"}
+    assert decidir(e, i, "rubro:2", "corregido", corregido).status_code == 200
+    assert decidir(e, i, "unidad:003", "descartado").status_code == 200
+    # Control: sin `aceptar_pendientes`, la confirmación sigue negándose con datos pendientes.
+    r = post(e, ruta(e, i["id"], "confirmacion"))
+    assert r.status_code == 409 and r.json()["codigo"] == "campos_pendientes", r.text
+    r = post(e, ruta(e, i["id"], "confirmacion"), {"aceptar_pendientes": True})
+    assert r.status_code == 200, r.text
+    hecha = r.json()
+    assert (hecha["estado"], hecha["decidida_por"]) == ("confirmada", str(e["mc"]))
+    estados = {c["clave"]: c["estado"] for c in hecha["campos"]}
+    assert estados.pop("rubro:2") == "corregido" and estados.pop("unidad:003") == "descartado"
+    assert set(estados.values()) == {"confirmado"}
+    assert {c["confirmado_por"] for c in hecha["campos"]} == {str(e["mc"])}
+    claves = {clave: valor for clave, valor in oficiales(e, motor_app, i)}
+    assert len(claves) == 15 and claves["rubro:2"] == corregido and "unidad:003" not in claves
+    with motor_migrate.connect() as c:
+        confirmados = c.execute(text(
+            "select count(*) from auditoria.eventos"
+            " where accion = 'consorcio.liquidacion.decidir_dato' and consorcio_id = :c"
+            " and despues->>'decision' = 'confirmado'"), {"c": e["cons"]},
+        ).scalar_one()  # fmt: skip
+    assert confirmados == 14  # cada dato aceptado queda auditado, como si se confirmara de a uno
+
+
+def test_aceptar_entera_con_un_dato_mal_leido_no_deja_nada_a_medias(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Si la confirmación se niega después de aceptar los pendientes (aquí: el período ya tiene su
+    oficial), nada queda confirmado: es una sola transacción."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    r = post(e, ruta(e, i["id"], "confirmacion"), {"aceptar_pendientes": True})
+    assert r.status_code == 200, r.text
+    otra = importada(e, motor_app, pdf_de(liquidacion()))
+    r = post(e, ruta(e, otra["id"], "confirmacion"), {"aceptar_pendientes": True})
+    assert r.status_code == 409 and r.json()["codigo"] == "periodo_ya_confirmado", r.text
+    with cliente(e["mc"], e["sesion"]) as c:
+        sigue = c.get(ruta(e, otra["id"])).json()
+    assert sigue["estado"] == "para_confirmar"
+    assert {c["estado"] for c in sigue["campos"]} == {"pendiente"}
+
+
 def test_una_unidad_corregida_es_oficial_con_la_unidad_del_valor_corregido(
     escena, bucket, motor_app, motor_migrate
 ):

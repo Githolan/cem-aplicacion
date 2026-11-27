@@ -2364,6 +2364,12 @@
         "additionalProperties": false,
         "description": "Confirmar la importación (`0119`): una sola liquidación oficial por período. Sin cuerpo (o\nvacío), no reemplaza nada y se niega si el período ya tiene su liquidación oficial\n(`periodo_ya_confirmado`). Con `reemplaza_a` (la importación confirmada que hoy es la oficial)\ny `motivo`, la reemplaza: la anterior pasa a `reemplazada` y queda como historia. Van los dos o\nninguno.",
         "properties": {
+          "aceptar_pendientes": {
+            "default": false,
+            "description": "Aceptar la liquidación entera (RL1-A): los datos todavía pendientes quedan confirmados por quien acepta, en la misma transacción. Sin esto, con datos pendientes se niega (`campos_pendientes`).",
+            "title": "Aceptar Pendientes",
+            "type": "boolean"
+          },
           "motivo": {
             "anyOf": [
               {
@@ -3303,6 +3309,52 @@
           "cuenta_destino"
         ],
         "title": "ContratoRevision",
+        "type": "object"
+      },
+      "ControlLiquidacion": {
+        "description": "Un control sobre lo leído, dicho en palabras: lo que se comprobó y cómo salió. Se calcula al\npedir la importación, con lo leído y lo corregido; no se guarda. Dice la cuenta, no califica a\nla administración (RN33).",
+        "properties": {
+          "clave": {
+            "title": "Clave",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoControl"
+          },
+          "lineas": {
+            "description": "El detalle: cada unidad, gasto o grupo que lo explica.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Lineas",
+            "type": "array"
+          },
+          "numero": {
+            "description": "El número del control en el diseño (§4).",
+            "minimum": 1.0,
+            "title": "Numero",
+            "type": "integer"
+          },
+          "texto": {
+            "description": "El resultado, en palabras.",
+            "title": "Texto",
+            "type": "string"
+          },
+          "titulo": {
+            "description": "Qué se comprueba, en una línea.",
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "numero",
+          "clave",
+          "estado",
+          "titulo",
+          "texto",
+          "lineas"
+        ],
+        "title": "ControlLiquidacion",
         "type": "object"
       },
       "CopiaDatosPropios": {
@@ -5558,6 +5610,16 @@
         "title": "EstadoContrato",
         "type": "string"
       },
+      "EstadoControl": {
+        "description": "Cómo salió un control de la liquidación leída (rediseño de la confirmación, RL1-A).",
+        "enum": [
+          "bien",
+          "para_mirar",
+          "no_aplica"
+        ],
+        "title": "EstadoControl",
+        "type": "string"
+      },
       "EstadoDeMiVersion": {
         "description": "`GET …/documentos/{id}/versiones/{v}/estado`: cómo terminó el análisis de un archivo que\nsubió quien pregunta (tanda 6 de fricción, G-09). Es para quien carga sin ver la lista (el\nadministrador externo, documento 08 §4): sin esto, nunca se entera si el antivirus lo rechazó.\nSolo de las versiones propias; de las ajenas, 404 (`0097`).",
         "properties": {
@@ -7561,6 +7623,14 @@
             "title": "Campos",
             "type": "array"
           },
+          "controles": {
+            "description": "Los controles sobre lo leído y corregido, en el orden del diseño; vacío mientras no hay datos leídos.",
+            "items": {
+              "$ref": "#/components/schemas/ControlLiquidacion"
+            },
+            "title": "Controles",
+            "type": "array"
+          },
           "creada_en": {
             "format": "date-time",
             "title": "Creada En",
@@ -7731,7 +7801,8 @@
           "reemplaza_a",
           "motivo_reemplazo",
           "campos",
-          "enlaces"
+          "enlaces",
+          "controles"
         ],
         "title": "ImportacionLiquidacion",
         "type": "object"
@@ -23499,7 +23570,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/liquidaciones-importadas/{importacion_id}/confirmacion": {
       "post": {
-        "description": "Sin cuerpo, no reemplaza nada. Con `reemplaza_a` y `motivo`, reemplaza la oficial del\nperíodo, que pasa a `reemplazada` en la misma transacción.",
+        "description": "Sin cuerpo, no reemplaza nada. Con `reemplaza_a` y `motivo`, reemplaza la oficial del\nperíodo, que pasa a `reemplazada` en la misma transacción. Con `aceptar_pendientes` (RL1-A),\nquien acepta confirma, en la misma transacción, cada dato que seguía pendiente: cada uno queda\ncon su nombre y su hora, como si lo hubiera confirmado de a uno.",
         "operationId": "confirmar_importacion_api_v1_consorcios__consorcio_id__liquidaciones_importadas__importacion_id__confirmacion_post",
         "parameters": [
           {
@@ -23540,7 +23611,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConfirmacionImportacion",
-                "default": {}
+                "default": {
+                  "aceptar_pendientes": false
+                }
               }
             }
           }
