@@ -11,6 +11,12 @@ corrigió o descartó mientras tanto ya no está pendiente y no se toca: la trab
 decisiones (revisión de Codex en cem-aplicacion 297). Devuelve cuántos confirmó. La importación
 tiene que estar `para_confirmar`; si no, `importacion_decidida`.
 
+**`unidades_de_los_campos_lectura`** (ruta, la misma barrera que `campos_preliminares_lectura`):
+la unidad del padrón de cada dato tal como quedaría oficial, con `unidad_oficial_del_campo`
+(`0119`): la del valor corregido si se corrigió, la leída si no. Los controles de la pantalla
+(padrón, saldo anterior) hablan de los datos que van a ser oficiales (revisión de Codex en
+cem-aplicacion 297).
+
 Datos de prueba: SINTETICOS / NO REAL.
 
 Revisión: 0135
@@ -24,7 +30,10 @@ down_revision = "0134"
 branch_labels = None
 depends_on = None
 
-RUTAS = ("nucleo.aceptar_datos_pendientes(uuid, uuid, text, uuid)",)
+RUTAS = (
+    "nucleo.aceptar_datos_pendientes(uuid, uuid, text, uuid)",
+    "nucleo.unidades_de_los_campos_lectura(uuid, uuid, text, uuid)",
+)
 
 FUNCIONES = """
 create function nucleo.aceptar_datos_pendientes(importacion uuid, actor uuid,
@@ -55,6 +64,24 @@ create function nucleo.aceptar_datos_pendientes(importacion uuid, actor uuid,
     return n;
   end
   $$;
+
+create function nucleo.unidades_de_los_campos_lectura(importacion uuid, actor uuid,
+                                                      origen_pedido text, sesion uuid)
+  returns table (campo_id uuid, unidad_id uuid)
+  language plpgsql volatile security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+  begin
+    perform nucleo.exigir_acto_importacion(c, actor, sesion, origen_pedido);
+    return query
+      select p.id, nucleo.unidad_oficial_del_campo(c, p.tipo, p.valor_corregido, p.unidad_id)
+        from nucleo.campo_preliminar p
+       where p.consorcio_id = c and p.importacion_id = importacion
+       order by p.orden;
+  end
+  $$;
 """
 
 
@@ -66,5 +93,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for funcion in RUTAS:
+    for funcion in reversed(RUTAS):
         op.execute(f"drop function {funcion}")

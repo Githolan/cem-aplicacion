@@ -411,3 +411,12 @@ def test_una_letra_ilegible_igual_cuenta_como_comprobante() -> None:
     assert comprobante_de("Limpieza - Factura [N141] Nº 0001-00000001") == (
         "Factura [N141] Nº 0001-00000001"
     )
+
+
+def test_un_rubro_sin_gastos_no_cierra() -> None:
+    """Revisión de Codex (cem-aplicacion 297): un rubro con importe cuyo único gasto se descartó no
+    se da por bien."""
+    leidos = [x for x in noviembre() if x["clave"] != "gasto:2:1"]
+    c = por_numero(leidos)[2]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert c.lineas == ["Limpieza: sus gastos suman $ 0 y el rubro dice $ 150.000."]

@@ -172,8 +172,10 @@ def _gastos(datos: Sequence[Dato]) -> list[ControlLiquidacion]:
             total = _num(r.valor.get("total"))
             numero = r.valor.get("numero")
             suyos = [_num(g.valor.get("total")) for g in gastos if g.valor.get("rubro") == numero]
-            if total is None or not suyos:
+            if total is None:
                 continue
+            # Un rubro con importe y sin ningún gasto (por ejemplo, porque se descartó el único)
+            # no cierra: sus gastos suman cero.
             suma = sum((x for x in suyos if x is not None), Decimal(0))
             if _difiere(suma, total):
                 malas.append(
