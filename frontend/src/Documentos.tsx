@@ -7,6 +7,7 @@ import { hoyDelDispositivo, TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } fr
 import { ComandoNoDisponible } from "./ComandoNoDisponible";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
+import { seAbandono, textoDeDemora } from "./demoraDelAntivirus";
 import {
   ErrorDeCampo,
   type ErroresDeCampo,
@@ -244,7 +245,16 @@ type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: s
 type Aviso = { texto: string; ok: boolean };
 /** Un archivo subido por quien solo carga, a la espera del antivirus (G-09), con las consultas
  * seguidas que fallaron por algo pasajero y el estado de la última. */
-type Pendiente = { consorcio: string; documento: string; version: string; titulo: string; fallas: number; estadoFalla: number };
+type Pendiente = {
+  consorcio: string;
+  documento: string;
+  version: string;
+  titulo: string;
+  fallas: number;
+  estadoFalla: number;
+  /** Por qué el antivirus todavía no terminó (`textoDeDemora`). */
+  demora: string | null;
+};
 /** Un documento que quedó esperando un archivo, o un archivo cuyo análisis no se puede saber:
  * rechazado (`subir` dice el botón que lo resuelve), creado sin archivo porque la carga se canceló
  * (FL-DOC-03), o imposible de consultar (404, 403: ya no hay nada que esperar; `subir` null). Uno
@@ -550,8 +560,13 @@ export function Documentos() {
             else terminado(sinResultado(cual.titulo, response.status, codigoDe(error)), false);
             return;
           }
+          if (seAbandono(data)) {
+            terminado(`«${cual.titulo}»: ${textoDeDemora(data) ?? ""}`, true);
+            return;
+          }
           if (data.estado === "en_cuarentena") {
-            setEsperando((lista) => lista.map((p) => (esta(p) ? { ...p, fallas: 0 } : p)));
+            const demora = textoDeDemora(data);
+            setEsperando((lista) => lista.map((p) => (esta(p) ? { ...p, fallas: 0, demora } : p)));
             return;
           }
           if (data.estado === "disponible") {
@@ -846,7 +861,7 @@ export function Documentos() {
       // termina (G-09). Con la lista caída no hay refresco automático: queda «Consultar de nuevo»
       // (DOC-06, DOC-14).
       if (soloCarga)
-        setEsperando((lista) => [...lista, { consorcio, documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA }]);
+        setEsperando((lista) => [...lista, { consorcio, documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA, demora: null }]);
       // Ese documento ya tiene otro archivo: su rechazo anterior está atendido.
       setRechazados((lista) => lista.filter((r) => r.documento !== documento));
       // DOC-08: con la lista, la fila ya dice «En revisión»; sin ella (quien solo carga), el estado de lo
@@ -869,7 +884,11 @@ export function Documentos() {
 
   // El error de una carga o de un retiro se dice en su ventana: la página de atrás queda inerte
   // mientras está abierta (G-01).
-  const conMensaje = aviso !== null || rechazados.length > 0 || esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR) || pantalla.tipo !== "lista";
+  const conMensaje =
+    aviso !== null ||
+    rechazados.length > 0 ||
+    esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR || p.demora !== null) ||
+    pantalla.tipo !== "lista";
 
   if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
 
@@ -936,10 +955,21 @@ export function Documentos() {
             {aviso.texto}
           </p>
         )}
-        {esperando.length > 0 && antivirusTarda && (
+        {esperando
+          .filter((p) => p.demora !== null)
+          .map((p) => (
+            <p key={`demora-${p.version}`} role="alert" className="aviso-error">
+              «{p.titulo}»: {p.demora}
+            </p>
+          ))}
+        {esperando.some((p) => p.demora === null) && antivirusTarda && (
           <p>
-            El antivirus está tardando más que de costumbre con {esperando.map((p) => `«${p.titulo}»`).join(", ")}: esta
-            pantalla sigue esperando.
+            El antivirus está tardando más que de costumbre con{" "}
+            {esperando
+              .filter((p) => p.demora === null)
+              .map((p) => `«${p.titulo}»`)
+              .join(", ")}
+            : esta pantalla sigue esperando.
           </p>
         )}
         {esperando

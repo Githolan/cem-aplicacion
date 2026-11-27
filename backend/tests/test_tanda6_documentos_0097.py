@@ -125,13 +125,70 @@ def test_quien_subio_el_archivo_ve_como_termino_el_analisis(motor_migrate, e):
     version = version_a_mano(motor_migrate, e, doc, e.adm)
     r = estado(e, e.adm, doc, version)
     assert r.status_code == 200, r.text
-    assert r.json() == {"estado": "en_cuarentena", "motivo_rechazo": None}
+    assert r.json() == {"estado": "en_cuarentena", "motivo_rechazo": None} | SIN_DEMORA
+    with motor_migrate.begin() as c:
+        c.execute(RECHAZAR, {"v": version})
+    assert (
+        estado(e, e.adm, doc, version).json()
+        == {
+            "estado": "rechazado",
+            "motivo_rechazo": "virus",
+        }
+        | SIN_DEMORA
+    )
+
+
+SIN_DEMORA = {"demora": None, "se_abandono": False, "proximo_intento": None}
+
+TRABAJO_A_MANO = text(
+    "insert into plataforma.jobs (tipo, consorcio_id, carga, estado, intentos, maximo_intentos,"
+    " disponible_desde, error, clave_unica)"
+    " values ('documentos.verificar', :c, jsonb_build_object('version', cast(:v as text)),"
+    " 'pendiente', 0, 10, now(), null, 'documentos.verificar:' || cast(:v as text))"
+)
+FALLO = text(
+    "update plataforma.jobs set intentos = intentos + 1, error = :error,"
+    " disponible_desde = now() + interval '1 hour', estado = :estado"
+    " where clave_unica = 'documentos.verificar:' || cast(:v as text)"
+)
+
+
+@pytest.mark.parametrize(
+    ("error", "demora"),
+    [
+        ("FirmasViejas: firmas de 2026-11-25T06:26:59+00:00: no se aprueba nada", "firmas_viejas"),
+        ("AntivirusNoDisponible: clamd no responde: timed out", "antivirus_no_disponible"),
+        ("ClientError: An error occurred (NoSuchKey) cem/sintetica/x", "otra_falla"),
+    ],
+)
+def test_la_pantalla_sabe_por_que_el_antivirus_no_termina(motor_migrate, e, error, demora):
+    """Ningún sistema falla en silencio (regla del propietario, 27-11-2026): mientras el análisis
+    falla, quien subió el archivo ve por qué y cuándo se vuelve a probar (`0136`)."""
+    doc = documento_comun(e, "seguros")
+    version = version_a_mano(motor_migrate, e, doc, e.adm)
+    with motor_migrate.begin() as c:
+        c.execute(TRABAJO_A_MANO, {"c": e.cons, "v": version})
+    # Control: encolado y sin fallar todavía, no hay demora que decir.
+    assert estado(e, e.adm, doc, version).json() == {
+        "estado": "en_cuarentena", "motivo_rechazo": None,
+    } | SIN_DEMORA  # fmt: skip
+    with motor_migrate.begin() as c:
+        c.execute(FALLO, {"v": version, "error": error, "estado": "pendiente"})
+    pendiente = estado(e, e.adm, doc, version).json()
+    assert pendiente["demora"] == demora and pendiente["se_abandono"] is False
+    assert pendiente["proximo_intento"] is not None
+    assert error not in str(pendiente)  # el texto del error no sale de la base
+    with motor_migrate.begin() as c:
+        c.execute(FALLO, {"v": version, "error": error, "estado": "muerto"})
+    muerto = estado(e, e.adm, doc, version).json()
+    assert muerto["demora"] == demora and muerto["se_abandono"] is True
+    assert muerto["proximo_intento"] is None
+    # Control: resuelta la versión, la demora deja de valer aunque el trabajo siga ahí.
     with motor_migrate.begin() as c:
         c.execute(RECHAZAR, {"v": version})
     assert estado(e, e.adm, doc, version).json() == {
-        "estado": "rechazado",
-        "motivo_rechazo": "virus",
-    }
+        "estado": "rechazado", "motivo_rechazo": "virus",
+    } | SIN_DEMORA  # fmt: skip
 
 
 def test_la_version_de_otra_persona_responde_como_si_no_existiera(motor_migrate, e):

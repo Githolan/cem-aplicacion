@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
@@ -8,6 +8,7 @@ import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
 import { mensajeDeError as mensajeDeCarga } from "../Documentos";
 import { ErrorDeCampo, type ErroresDeCampo, faltaCompletar, hayErrores, marcaDe, SIN_ERRORES, sinElDe } from "../ErrorDeCampo";
+import { seAbandono, textoDeDemora } from "../demoraDelAntivirus";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
 import { SubirArchivo } from "../SubirArchivo";
@@ -188,7 +189,7 @@ export function descripcionDe(requisitos: readonly RequisitoLegal[], codigo: str
   return requisitos.find((r) => r.codigo === codigo)?.descripcion ?? codigo;
 }
 
-type Fase = { tipo: "elegir" } | { tipo: "subiendo" } | { tipo: "revisando" } | { tipo: "rechazada" };
+type Fase = { tipo: "elegir" } | { tipo: "subiendo" } | { tipo: "revisando" } | { tipo: "rechazada" } | { tipo: "abandonada"; texto: string };
 
 type PropsHoja = {
   consorcio: string;
@@ -216,6 +217,9 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, fijo, requ
   /** Con requisitos de este tipo que faltan, «Ninguno en particular» no es lo que se elige sin mirar (FL-LEG-06). */
   const hayQueElegir = fijo === undefined && deEsteTipo.length > 0 && faltantes.some((f) => f.tipo === tipo);
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
+  /** Por qué el antivirus todavía no terminó (`textoDeDemora`); vuelve a nulo con cada fase. */
+  const [demora, setDemora] = useState<string | null>(null);
+  useEffect(() => setDemora(null), [fase.tipo]);
   const [falla, setFalla] = useState<string | null>(null);
   /** El archivo elegido antes de completar los datos: queda para «Cargar» (SEG-10). */
   const [archivo, setArchivo] = useState<File | null>(null);
@@ -233,7 +237,16 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, fijo, requ
       })
       .then(({ data, response }) => {
         exigirSesion(response);
-        if (enEspera.current !== cual || data === undefined || data.estado === "en_cuarentena") return;
+        if (enEspera.current !== cual || data === undefined) return;
+        if (seAbandono(data)) {
+          enEspera.current = null;
+          setFase({ tipo: "abandonada", texto: textoDeDemora(data) ?? "" });
+          return;
+        }
+        if (data.estado === "en_cuarentena") {
+          setDemora(textoDeDemora(data));
+          return;
+        }
         enEspera.current = null;
         // Aceptado, la hoja se cierra sola y la ficha, al volver a leerse, muestra el documento con su
         // etiqueta (SEG-09). El rechazo queda en la hoja, para elegir otro archivo.
@@ -326,7 +339,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, fijo, requ
   const cerrar = () => alCerrar(cambio.current);
   const enviando = fase.tipo === "subiendo";
   useAvisoAlSalir(enviando);
-  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
+  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada" || fase.tipo === "abandonada";
   const titulo = fijo !== undefined ? `${CARGAR}: ${fijo.descripcion}` : reemplaza === null ? AGREGAR : `Reemplazar: ${reemplaza.descripcion}`;
 
   return (
@@ -337,8 +350,18 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, fijo, requ
           Listo: quedó cargado. El antivirus está revisando el archivo; cuenta cuando lo acepte.
         </p>
       )}
-      {fase.tipo === "revisando" && tarda && (
+      {fase.tipo === "revisando" && demora !== null && (
+        <p role="alert" className="aviso-error">
+          {demora}
+        </p>
+      )}
+      {fase.tipo === "revisando" && demora === null && tarda && (
         <p className="aviso-info">El antivirus está tardando. Se puede cerrar: la ficha lo muestra cuando termine.</p>
+      )}
+      {fase.tipo === "abandonada" && (
+        <p role="alert" className="aviso-error">
+          {fase.texto}
+        </p>
       )}
       {fase.tipo === "rechazada" && (
         <p role="alert" className="aviso-error">

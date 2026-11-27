@@ -118,6 +118,15 @@ class EstadoVersion(StrEnum):
     RECHAZADO = "rechazado"
 
 
+class DemoraAnalisis(StrEnum):
+    """Por qué el análisis de una versión todavía no terminó (`0136`)."""
+
+    FIRMAS_VIEJAS = "firmas_viejas"
+    """Las firmas del antivirus pasan de `CEM_ANTIVIRUS_FIRMAS_HORAS`: no se aprueba nada."""
+    ANTIVIRUS_NO_DISPONIBLE = "antivirus_no_disponible"
+    OTRA_FALLA = "otra_falla"
+
+
 class MotivoRechazo(StrEnum):
     VIRUS = "virus"
     CONTENIDO_ACTIVO = "contenido_activo"
@@ -191,6 +200,19 @@ class EstadoDeMiVersion(BaseModel):
 
     estado: EstadoVersion
     motivo_rechazo: MotivoRechazo | None = None
+    demora: DemoraAnalisis | None = Field(
+        default=None,
+        description="Mientras sigue en cuarentena: por qué falló el último intento del análisis"
+        " (`0136`). Nula si no falló ninguno. La pantalla lo dice: nunca «se sigue esperando» a"
+        " secas para algo que está fallando.",
+    )
+    se_abandono: bool = Field(
+        default=False,
+        description="En cuarentena y sin más intentos: hay que subir el archivo de nuevo.",
+    )
+    proximo_intento: datetime | None = Field(
+        default=None, description="Cuándo vuelve a probar, después de un intento fallido."
+    )
 
 
 CARGAS_PROPIAS_DIAS = 30

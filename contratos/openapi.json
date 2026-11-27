@@ -4010,6 +4010,16 @@
         "title": "DeclaracionRegistrada",
         "type": "object"
       },
+      "DemoraAnalisis": {
+        "description": "Por qué el análisis de una versión todavía no terminó (`0136`).",
+        "enum": [
+          "firmas_viejas",
+          "antivirus_no_disponible",
+          "otra_falla"
+        ],
+        "title": "DemoraAnalisis",
+        "type": "string"
+      },
       "DerechoPrivacidad": {
         "enum": [
           "acceso",
@@ -5623,6 +5633,17 @@
       "EstadoDeMiVersion": {
         "description": "`GET …/documentos/{id}/versiones/{v}/estado`: cómo terminó el análisis de un archivo que\nsubió quien pregunta (tanda 6 de fricción, G-09). Es para quien carga sin ver la lista (el\nadministrador externo, documento 08 §4): sin esto, nunca se entera si el antivirus lo rechazó.\nSolo de las versiones propias; de las ajenas, 404 (`0097`).",
         "properties": {
+          "demora": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemoraAnalisis"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mientras sigue en cuarentena: por qué falló el último intento del análisis (`0136`). Nula si no falló ninguno. La pantalla lo dice: nunca «se sigue esperando» a secas para algo que está fallando."
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoVersion"
           },
@@ -5635,6 +5656,25 @@
                 "type": "null"
               }
             ]
+          },
+          "proximo_intento": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuándo vuelve a probar, después de un intento fallido.",
+            "title": "Proximo Intento"
+          },
+          "se_abandono": {
+            "default": false,
+            "description": "En cuarentena y sin más intentos: hay que subir el archivo de nuevo.",
+            "title": "Se Abandono",
+            "type": "boolean"
           }
         },
         "required": [

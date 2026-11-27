@@ -10,7 +10,7 @@ import io
 import os
 import time
 import zlib
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import boto3
@@ -27,7 +27,7 @@ from sqlalchemy.exc import DBAPIError
 from app.consorcios import documentos_analisis
 from app.consorcios.documentos import TRABAJO_VERIFICAR
 from app.db import transaccion
-from app.plataforma import almacen, cola
+from app.plataforma import almacen, antivirus, cola
 from app.plataforma.trabajos import Trabajador
 from tests.conftest import clave_idempotencia
 from tests.test_contexto_mandatos import cliente
@@ -78,8 +78,8 @@ def pdf(js: str | None = None, clave: str | None = None, flujo: bytes | None = N
 @pytest.fixture(autouse=True)
 def firmas_de_la_imagen(monkeypatch):
     """Las pruebas corren sin freshclam, con las firmas que trae la imagen, que pueden tener
-    días: el tope de 48 horas se prueba aparte (`test_con_firmas_viejas_no_se_aprueba_nada`)."""
-    monkeypatch.setattr(documentos_analisis, "FIRMAS_VIGENTES", timedelta(days=3650))
+    días: el tope se prueba aparte (`test_con_firmas_viejas_no_se_aprueba_nada`)."""
+    monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, str(3650 * 24))
 
 
 @pytest.fixture
@@ -443,13 +443,15 @@ def test_con_firmas_viejas_no_se_aprueba_nada(
 ):
     e = escena
     r = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf")
-    # Con un margen de cero, cualquier firma es vieja.
-    monkeypatch.setattr(documentos_analisis, "FIRMAS_VIGENTES", timedelta(0))
+    # Firmas de hace 2 horas con un plazo de 1: viejas.
+    hace_dos = antivirus.Firmas("ClamAV 1.5.4/1", datetime.now(UTC) - timedelta(hours=2))
+    monkeypatch.setattr(antivirus, "firmas", lambda: hace_dos)
+    monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, "1")
     assert analizar(motor_app) == 1
     assert version(motor_migrate, r.json()["id"])["estado"] == "en_cuarentena"
     [(estado, _, error)] = trabajos(motor_migrate)
     assert estado == "pendiente" and "no se aprueba nada" in error
-    monkeypatch.setattr(documentos_analisis, "FIRMAS_VIGENTES", timedelta(days=3650))  # control
+    monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, "3")  # control: el mismo plazo leído
     with motor_migrate.begin() as c:
         c.execute(text("update plataforma.jobs set disponible_desde = now()"))
     assert analizar(motor_app) == 1

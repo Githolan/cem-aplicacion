@@ -7,6 +7,7 @@ import { CampoCuit, cuitConError } from "./CampoCuit";
 import type { components } from "./api/tipos";
 import { ComandoNoDisponible } from "./ComandoNoDisponible";
 import { encabezadoCsrf } from "./csrf";
+import { seAbandono, textoDeDemora } from "./demoraDelAntivirus";
 import {
   ErrorDeCampo,
   type ErroresDeCampo,
@@ -555,6 +556,9 @@ export function Mandatos() {
   const [actaCreada, setActaCreada] = useState<{ documento: string; titulo: string } | null>(null);
   /** El archivo subido que el antivirus todavía revisa: cuando queda disponible, se elige. */
   const [actaEnRevision, setActaEnRevision] = useState<{ documento: string; version: string; titulo: string } | null>(null);
+  /** Por qué el antivirus todavía no terminó con el acta (`textoDeDemora`); vuelve a nulo con cada acta. */
+  const [demoraActa, setDemoraActa] = useState<string | null>(null);
+  useEffect(() => setDemoraActa(null), [actaEnRevision]);
   const [estadoActa, setEstadoActa] = useState<{ texto: string; ok: boolean } | null>(null);
   /** Decisión 6 del propietario (FL-DEC-01): con el acta en revisión, «Registrar decisión» no manda la
    * decisión sin ella; espera, y la registra sola cuando el acta queda elegida. El ref lo lee la
@@ -1342,6 +1346,13 @@ export function Mandatos() {
         exigirSesion(response);
         if (generacion !== generacionActa.current) return;
         if (data === undefined) avisarActa(noSeSupo, false);
+        else if (seAbandono(data)) {
+          setActaEnRevision(null);
+          setActaSubida(false);
+          const laEsperaba = esperandoActa.current;
+          esperarElActa(false);
+          avisarActa(`El acta «${cual.titulo}»: ${textoDeDemora(data) ?? ""}${laEsperaba ? " La decisión no se registró." : ""}`, false);
+        } else if (data.estado === "en_cuarentena") setDemoraActa(textoDeDemora(data));
         else if (data.estado === "disponible") pedirActas(cual.documento);
         else if (data.estado === "rechazado") {
           setActaEnRevision(null);
@@ -1928,7 +1939,12 @@ export function Mandatos() {
         )}
         {/* FL-DEC-01: con el acta en revisión, la decisión espera; no se invita a registrarla sin ella. */}
         {actaEnRevision !== null && esperaElActa && <p>{DECISION_ESPERA_EL_ACTA}</p>}
-        {actaEnRevision !== null && antivirusTarda && <p>El antivirus está tardando: se sigue consultando.</p>}
+        {actaEnRevision !== null && demoraActa !== null && (
+          <p role="alert" className="aviso-error">
+            {demoraActa}
+          </p>
+        )}
+        {actaEnRevision !== null && demoraActa === null && antivirusTarda && <p>El antivirus está tardando: se sigue consultando.</p>}
       </>
     );
   }
