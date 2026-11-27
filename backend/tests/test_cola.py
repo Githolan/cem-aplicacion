@@ -519,7 +519,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
     procesos.append(planificador)
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 9)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 10)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
@@ -532,12 +532,13 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
     # `CEM_ORIGEN_PUBLICO` para el enlace: lo dice y no manda un correo sin enlace.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
-                        " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena')"
+                        " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena',"
+                        " 'documentos.revivir_verificaciones')"
                         " or error like '%faltan variables de las copias%'"
                         " or error like '%falta CEM_DATABASE_URL_BACKUP%'"
                         " or error like '%faltan variables de entorno: CEM_DOCUMENTOS%'"
                         " or error like '%CEM_ORIGEN_PUBLICO sin configurar%'")
-           == 9)  # fmt: skip
+           == 10)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -549,8 +550,8 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
     assert "cem-planificador es el líder" in [x["mensaje"] for x in registros["planificador"]]
     hechos = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
     assert sorted(x["tipo_trabajo"] for x in hechos) == [
-        "consorcio.revocar_por_vencimiento", "documentos.vigilar_cuarentena",
-        "plataforma.purgar_cola"]  # fmt: skip
+        "consorcio.revocar_por_vencimiento", "documentos.revivir_verificaciones",
+        "documentos.vigilar_cuarentena", "plataforma.purgar_cola"]  # fmt: skip
     assert all(x["consorcio_id"] is None for x in hechos)
     with motor_migrate.connect() as c:
         assert c.execute(
@@ -558,6 +559,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
         ).all() == [
             ("consorcio.revocar_por_vencimiento",),
             ("documentos.limpiar_huerfanos",),
+            ("documentos.revivir_verificaciones",),
             ("documentos.vigilar_cuarentena",),
             ("pagos.avisar_pendientes",),
             ("plataforma.controlar_tamano_copias",),

@@ -374,23 +374,13 @@ def vigilar_cuarentena(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any
     problemas = []
     if demoradas:
         problemas.append(f"{demoradas} versiones en cuarentena hace más de {DEMORA_AVISO}")
-    antivirus_al_dia = False
     try:
         f = antivirus.firmas()
         if datetime.now(UTC) - f.fecha > antivirus.firmas_vigentes():
             problemas.append(f"firmas de {f.fecha.isoformat()}")
-        else:
-            antivirus_al_dia = True
     except (antivirus.AntivirusNoDisponible, antivirus.ConfiguracionDelAntivirus) as e:
         problemas.append(str(e))
-    # Con el antivirus de vuelta, lo que se rindió por su culpa se revisa solo (`0136`): nadie tiene
-    # que volver a subir el archivo.
-    revividas = (
-        conn.execute(text("select nucleo.revivir_verificaciones()")).scalar_one()
-        if antivirus_al_dia
-        else 0
-    )
-    resumen = {"demoradas": demoradas, "problemas": problemas, "revividas": revividas}
+    resumen = {"demoradas": demoradas, "problemas": problemas}
     url = os.environ.get(VARIABLE_AVISO)
     if not url:
         return resumen | {"aviso": "sin CEM_DOCUMENTOS_AVISO_URL"}
@@ -403,3 +393,24 @@ def vigilar_cuarentena(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any
 
 # Cada 5 minutos; el monitor de Kuma alerta si deja de recibirlo o recibe `down`.
 periodica("documentos.vigilar_cuarentena", timedelta(minutes=5))
+
+
+@cola.REGISTRO.tipo("documentos.revivir_verificaciones")
+def revivir_verificaciones(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Con el antivirus de vuelta, lo que la cola abandonó por su culpa se revisa solo (`0136`):
+    nadie tiene que volver a subir el archivo. Es un trabajo aparte de `vigilar_cuarentena`: si el
+    aviso a Kuma falla, esa transacción se deshace, y esta no tiene que deshacerse con ella.
+
+    Con las firmas viejas o sin `clamd`, no revive nada y lo deja en su resultado; quien avisa del
+    antivirus es `vigilar_cuarentena`."""
+    try:
+        f = antivirus.firmas()
+    except antivirus.AntivirusNoDisponible as e:
+        return {"revividas": 0, "antivirus": str(e)}
+    if datetime.now(UTC) - f.fecha > antivirus.firmas_vigentes():
+        return {"revividas": 0, "antivirus": f"firmas de {f.fecha.isoformat()}"}
+    return {"revividas": conn.execute(text("select nucleo.revivir_verificaciones()")).scalar_one()}
+
+
+# Cada 5 minutos, como `vigilar_cuarentena`.
+periodica("documentos.revivir_verificaciones", timedelta(minutes=5))

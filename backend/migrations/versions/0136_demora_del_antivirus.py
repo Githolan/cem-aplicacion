@@ -25,11 +25,12 @@ nunca sale de la base: puede nombrar claves de objeto o rutas internas.
 
 **Si la falla es del antivirus, el archivo no tiene la culpa.** `nucleo.revivir_verificaciones()`
 vuelve a encolar (`pendiente`, intentos en cero) cada `documentos.verificar` muerto por
-`FirmasViejas` o `AntivirusNoDisponible` cuya versión siga en cuarentena. La llama
-`documentos.vigilar_cuarentena` (cada 5 minutos) solo cuando las firmas están al día y `clamd`
-responde: el archivo se revisa solo, sin que nadie lo vuelva a subir. Mientras tanto la pantalla
-dice que CEM lo vuelve a probar cuando el antivirus se recupere. Como `versiones_demoradas`
-(`0035`), solo corre sin persona en la sesión, que es como corre un trabajo.
+`FirmasViejas` o `AntivirusNoDisponible` cuya versión siga en cuarentena. La llama el trabajo
+periódico `documentos.revivir_verificaciones` (cada 5 minutos, aparte del aviso a Kuma) solo cuando
+las firmas están al día y `clamd` responde: el archivo se revisa solo, sin que nadie lo vuelva a
+subir. Mientras tanto la pantalla dice que CEM lo vuelve a probar cuando el antivirus se recupere.
+Como `versiones_demoradas` (`0035`), solo corre sin persona en la sesión, que es como corre un
+trabajo.
 
 Downgrade: borra `revivir_verificaciones` y vuelve a la función de `0097`.
 
