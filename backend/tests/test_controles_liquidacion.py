@@ -246,6 +246,20 @@ def test_padron_dice_la_unidad_que_falta() -> None:
     assert c[10].lineas == ["2° A (UF 4) no está en el padrón del edificio."]
 
 
+def test_padron_mira_tambien_lo_que_paga_y_el_saldo() -> None:
+    """Revisión de Codex (cem-aplicacion 297): lo que paga una unidad corregido a una unidad que no
+    está en el padrón también es para mirar, y una unidad se dice una sola vez."""
+    leidos = noviembre()
+    assert por_numero(leidos)[10].texto == "Las 5 unidades de la liquidación están en el padrón."
+    for x in leidos:
+        if x["clave"] in ("importe_unidad:5", "saldo_unidad:5"):
+            x["valor"]["uf"] = "9"
+            x["unidad"] = None
+    c = por_numero(leidos)[10]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert c.lineas == ["2° B (UF 9) no está en el padrón del edificio."]
+
+
 def test_saldo_anterior_con_la_liquidacion_del_mes_pasado() -> None:
     cobrado = {IDS[uf]: Decimal(deuda) for uf, _, _, _, deuda, _ in UNIDADES}
     assert por_numero(noviembre(), cobrado)[9].estado == EstadoControl.BIEN
