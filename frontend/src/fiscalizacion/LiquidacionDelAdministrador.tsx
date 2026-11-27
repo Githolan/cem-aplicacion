@@ -18,7 +18,7 @@ import { type Aviso, cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, ESTADO, mensajeDeAc
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus, useConsorcio } from "../egresos/useConsorcio";
-import { type Control, ResumenDeLaLiquidacion, textoDePregunta } from "./ResumenLiquidacion";
+import { type Control, ResumenDeLaLiquidacion, textoDePregunta, vistoDe } from "./ResumenLiquidacion";
 import { type Propuesta, RUTA_SOLICITUDES } from "./Solicitudes";
 
 // Página /importar-liquidacion (H5-3, app 0115; diseño H5 §5; rediseño de la confirmación, RL1-A a
@@ -741,7 +741,7 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const enFicha = importacion?.campos.find((c) => c.id === fichas.abierta);
   const seConfirma = importacion?.estado === "para_confirmar";
   const edificio = pantalla.tipo === "lista" ? pantalla.consorcios.find((c) => c.id === consorcio)?.nombre : undefined;
-  const abiertos = importacion?.controles.filter((c) => c.estado === "para_mirar" && !vistos.has(c.clave)) ?? [];
+  const abiertos = importacion?.controles.filter((c) => c.estado === "para_mirar" && !vistos.has(vistoDe(c))) ?? [];
   const mostrados = importacion === null ? [] : filtros.size === 0 ? importacion.campos : importacion.campos.filter((c) => filtros.has(c.tipo));
 
   return (

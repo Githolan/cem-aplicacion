@@ -738,6 +738,27 @@ describe("resumen de la liquidación", () => {
     expect(resultado.violations).toEqual([]);
   });
 
+  it("si un control cambia después de «Entendido», su tarjeta vuelve a estar abierta", async () => {
+    const OTRA_LINEA: Control = { ...DEUDA, lineas: [...DEUDA.lineas, "1-A (UF 2) debe $ 50 del mes anterior, sin interés."] };
+    const corregida = { ...CON_CONTROLES, controles: [BIEN, PORCENTAJE, OTRA_LINEA, SIN_ANTERIOR] };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(CON_CONTROLES),
+      [DECISION]: DETALLE(corregida),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    const mirar = screen.getByRole("list", { name: "Para mirar" });
+    const deuda = within(mirar).getByRole("heading", { name: DEUDA.titulo }).closest("li") as HTMLElement;
+    fireEvent.click(within(deuda).getByRole("button", { name: ENTENDIDO }));
+    expect(await screen.findByText("Visto: deuda e interés de cada unidad.")).toBeTruthy();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Gasto" })).getByRole("button", { name: DESCARTAR_DATO }));
+    expect(await screen.findByText(OTRA_LINEA.lineas[1] ?? "")).toBeTruthy();
+    expect(screen.queryByText("Visto: deuda e interés de cada unidad.")).toBeNull();
+  });
+
   it("«Preguntar al administrador» abre la solicitud formal ya armada con la cuenta", async () => {
     vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,

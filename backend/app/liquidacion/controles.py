@@ -119,6 +119,8 @@ def _de(datos: Iterable[Dato], tipo: str) -> list[Dato]:
 
 
 SIN_COLUMNAS = "La lectura no trae esas columnas: no se puede comprobar."
+SIN_COMPROBAR = "no se pudo comprobar: falta un importe en lo leído."
+"""Lo que un control no pudo comprobar se dice como para mirar; nunca se da por bien."""
 
 
 def _gastos(datos: Sequence[Dato]) -> list[ControlLiquidacion]:
@@ -136,8 +138,11 @@ def _gastos(datos: Sequence[Dato]) -> list[ControlLiquidacion]:
         for g in con_grupos:
             partes = [_num(x) for x in g.valor["importes"].values()]
             total = _num(g.valor.get("total"))
+            if total is None or None in partes:
+                malas.append(f"{g.valor.get('concepto', '')}: {SIN_COMPROBAR}")
+                continue
             suma = sum((p for p in partes if p is not None), Decimal(0))
-            if total is not None and _difiere(suma, total):
+            if _difiere(suma, total):
                 malas.append(
                     f"{g.valor.get('concepto', '')}: sus grupos suman {pesos(suma)} y el"
                     f" total dice {pesos(total)}."
@@ -159,13 +164,16 @@ def _gastos(datos: Sequence[Dato]) -> list[ControlLiquidacion]:
     titulo = "Cada rubro suma sus gastos"
     if not rubros:
         salida.append(_no_aplica(2, "rubro_suma_gastos", titulo, "La lectura no trae rubros."))
+    elif all(_num(r.valor.get("total")) is None for r in rubros):
+        salida.append(_no_aplica(2, "rubro_suma_gastos", titulo, SIN_COLUMNAS))
     else:
         malas = []
         for r in rubros:
             total = _num(r.valor.get("total"))
             numero = r.valor.get("numero")
             suyos = [_num(g.valor.get("total")) for g in gastos if g.valor.get("rubro") == numero]
-            if total is None:
+            if total is None or None in suyos:
+                malas.append(f"{r.valor.get('nombre', '')}: {SIN_COMPROBAR}")
                 continue
             # Un rubro con importe y sin ningún gasto (por ejemplo, porque se descartó el único)
             # no cierra: sus gastos suman cero.
@@ -306,6 +314,7 @@ def _total_unidad(datos: Sequence[Dato]) -> ControlLiquidacion:
             _num(p.get("monto")) for p in d.valor["grupos"].values() if isinstance(p, Mapping)
         ]
         if any(v is None for v in partes.values()) or None in montos:
+            malas.append(f"{_unidad(d.valor)}: {SIN_COMPROBAR}")
             continue
         p = {k: v for k, v in partes.items() if v is not None}
         esperado = (

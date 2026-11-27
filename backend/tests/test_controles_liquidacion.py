@@ -348,3 +348,19 @@ def test_un_rubro_sin_gastos_no_cierra() -> None:
     c = por_numero(leidos)[2]
     assert c.estado == EstadoControl.PARA_MIRAR
     assert c.lineas == ["Limpieza: sus gastos suman $ 0 y el rubro dice $ 150.000."]
+
+
+def test_lo_que_no_se_pudo_comprobar_no_se_da_por_bien() -> None:
+    """Revisión de Codex (cem-aplicacion 297): un rubro sin total (una lectura con IA puede no
+    traerlo) queda para mirar; si ningún rubro trae total, el control no aplica."""
+    leidos = noviembre()
+    valor(leidos, "rubro:2")["total"] = None
+    c = por_numero(leidos)[2]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert c.lineas == ["Limpieza: no se pudo comprobar: falta un importe en lo leído."]
+    valor(leidos, "rubro:1")["total"] = None
+    assert por_numero(leidos)[2].estado == EstadoControl.NO_APLICA
+    leidos = noviembre()
+    valor(leidos, "importe_unidad:2")["redondeo"] = None
+    c = por_numero(leidos)[6]
+    assert "1° A (UF 2): no se pudo comprobar: falta un importe en lo leído." in c.lineas
