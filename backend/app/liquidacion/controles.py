@@ -552,14 +552,14 @@ def _saldo_anterior(
 
 def _padron(datos: Sequence[Dato]) -> ControlLiquidacion:
     titulo = "Las unidades son las del padrón"
-    unidades = _de(datos, "unidad")
-    if not unidades:
+    # Todo dato que lleva una unidad, no solo el de la unidad: una corrección puede dejar lo que
+    # paga una unidad en otra que no está en el padrón (revisión de Codex en cem-aplicacion 297).
+    con_unidad = [d for d in datos if d.tipo in ("unidad", "importe_unidad", "saldo_unidad")]
+    if not con_unidad:
         return _no_aplica(10, "padron", titulo, "La lectura no trae unidades.")
-    fuera = [
-        f"{_unidad(u.valor)} no está en el padrón del edificio."
-        for u in unidades
-        if u.unidad_id is None
-    ]
+    unidades = list(dict.fromkeys(_unidad(d.valor) for d in con_unidad))
+    afuera = list(dict.fromkeys(_unidad(d.valor) for d in con_unidad if d.unidad_id is None))
+    fuera = [f"{u} no está en el padrón del edificio." for u in afuera]
     n = len(unidades)
     return _control(
         10,
