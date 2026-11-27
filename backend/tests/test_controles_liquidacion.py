@@ -339,3 +339,12 @@ def test_el_total_impreso_del_prorrateo_se_compara_con_sus_unidades() -> None:
     assert c.lineas == [
         "La columna total del prorrateo dice $ 999.999 y sus unidades suman $ 279.440."
     ]
+
+
+def test_un_rubro_sin_gastos_no_cierra() -> None:
+    """Revisión de Codex (cem-aplicacion 297): un rubro con importe cuyo único gasto se descartó no
+    se da por bien."""
+    leidos = [x for x in noviembre() if x["clave"] != "gasto:2:1"]
+    c = por_numero(leidos)[2]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert c.lineas == ["Limpieza: sus gastos suman $ 0 y el rubro dice $ 150.000."]

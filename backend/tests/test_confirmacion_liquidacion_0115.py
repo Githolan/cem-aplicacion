@@ -252,6 +252,21 @@ def test_aceptar_la_liquidacion_entera_confirma_lo_pendiente_con_quien_acepta(
     assert confirmados == 14  # cada dato aceptado queda auditado, como si se confirmara de a uno
 
 
+def test_los_controles_usan_la_unidad_del_valor_corregido(escena, bucket, motor_app, motor_migrate):
+    """Revisión de Codex (cem-aplicacion 297): corregir la unidad de un dato a una que no está en el
+    padrón la saca del control del padrón, como la sacaría de lo oficial (`0135`)."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    padron = next(c for c in i["controles"] if c["numero"] == 10)
+    assert padron["estado"] == "bien", padron  # control: antes de corregir, todas en el padrón
+    unidad = next(c for c in i["campos"] if c["tipo"] == "unidad")
+    r = decidir(e, i, unidad["clave"], "corregido", unidad["valor"] | {"depto": "ZZ-9"})
+    assert r.status_code == 200, r.text
+    padron = next(c for c in r.json()["controles"] if c["numero"] == 10)
+    assert padron["estado"] == "para_mirar"
+    assert len(padron["lineas"]) == 1 and "ZZ-9" in padron["lineas"][0]
+
+
 def test_aceptar_entera_no_pisa_una_correccion_que_llega_a_la_vez(
     escena, bucket, motor_app, motor_migrate
 ):

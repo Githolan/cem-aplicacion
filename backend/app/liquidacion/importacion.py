@@ -524,9 +524,18 @@ def _importacion(conn: Connection, permiso: Permiso, i: UUID) -> ImportacionLiqu
     datos = dict(cabeza)
     datos["diferencias"] = [DiferenciaLeida(**d) for d in datos["diferencias"]]
     leidos = [CampoPreliminar(**f) for f in filas]
+    # La unidad de cada dato como quedaría oficial: la del valor corregido, si se corrigió (`0135`).
+    oficial = {
+        f["campo_id"]: f["unidad_id"]
+        for f in _ejecutar(
+            conn, permiso,
+            "select * from nucleo.unidades_de_los_campos_lectura(:i, :actor, 'api', :sesion)",
+            {"i": i},
+        ).mappings()
+    }  # fmt: skip
     vigentes = [
         controles.Dato(tipo=c.tipo.value, clave=c.clave, valor=c.valor_corregido or c.valor,
-                       unidad_id=c.unidad_id)
+                       unidad_id=oficial.get(c.id))
         for c in leidos if c.estado != EstadoCampo.DESCARTADO
     ]  # fmt: skip
     anterior = _cobrado_el_mes_anterior(conn, permiso, i, datos["periodo"])
