@@ -15,6 +15,7 @@ import { REQUISITOS, usePuede } from "../permisos";
 import { SubirArchivo } from "../SubirArchivo";
 import { type FinDeEnvio, VentanaDeFormulario } from "../VentanaDeFormulario";
 import { type Aviso, cambioLoVisto, ENCABEZADO_IDEMPOTENCIA, ESTADO, mensajeDeActo, mensajeDeError, renovarClave, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
+import { seAbandono, textoDeDemora } from "../demoraDelAntivirus";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus, useConsorcio } from "../egresos/useConsorcio";
@@ -343,6 +344,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
   const [detalle, setDetalle] = useState<Detalle>({ tipo: "cargando" });
   const [vueltaDetalle, setVueltaDetalle] = useState(0);
   const [subida, setSubida] = useState<Subida | null>(null);
+  /** Por qué el antivirus todavía no terminó con el archivo subido (`textoDeDemora`). */
+  const [demora, setDemora] = useState<string | null>(null);
   const [ventana, setVentana] = useState<Ventana | null>(null);
   const [archivo, setArchivo] = useState<File | null>(null);
   const [motivo, setMotivo] = useState("");
@@ -447,8 +450,18 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
           }
           return;
         }
-        if (data.estado === "en_cuarentena") return;
+        if (seAbandono(data)) {
+          setSubida(null);
+          setDemora(null);
+          setAviso({ texto: textoDeDemora(data) ?? "", ok: false });
+          return;
+        }
+        if (data.estado === "en_cuarentena") {
+          setDemora(textoDeDemora(data));
+          return;
+        }
         setSubida(null);
+        setDemora(null);
         if (data.estado === "rechazado") {
           setAviso({ texto: `El antivirus rechazó el archivo${data.motivo_rechazo ? `: ${data.motivo_rechazo}` : ""}.`, ok: false });
           return;
@@ -775,7 +788,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
-      {subida !== null && antivirusTarda && <p role="status">El antivirus está tardando más de lo habitual; se sigue esperando.</p>}
+      {subida !== null && demora !== null && <p role="alert">{demora}</p>}
+      {subida !== null && demora === null && antivirusTarda && <p role="status">El antivirus está tardando más de lo habitual; se sigue esperando.</p>}
       {porImportar !== null && !enviando && (
         <p>
           <button type="button" className="secundario" onClick={() => void importar(porImportar)}>

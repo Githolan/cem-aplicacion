@@ -895,7 +895,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Para desplegar (hecho el 26-10; el monitor de Kuma, de 19:58 a 20:05 UTC, CEM #97):**
      - `cem-antivirus-staging` y `cem-antivirus` en Coolify;
      - en `cem-backend`, `CEM_DOCUMENTOS_S3_ENDPOINT`/`_REGION`; en `cem-trabajos`, `CEM_DOCUMENTOS_ANALISIS_S3_ENDPOINT`/`_REGION`; en las dos, `CEM_DOCUMENTOS_BUCKET`;
-     - en `cem-trabajos`, `CEM_ANTIVIRUS_SERVIDOR`/`_PUERTO` y `CEM_DOCUMENTOS_AVISO_URL` con su monitor de Kuma.
+     - en `cem-trabajos`, `CEM_ANTIVIRUS_SERVIDOR`/`_PUERTO`, `CEM_ANTIVIRUS_FIRMAS_HORAS` (obligatoria desde el 27-11-2026: sin ella `cem-trabajos` no arranca; staging 168, producción 48) y `CEM_DOCUMENTOS_AVISO_URL` con su monitor de Kuma.
    - En producción, además, los usuarios, grupos, políticas y claves de §3.1.
    - **Sin lectura ni descarga en este corte:** llegaron con 2c-2 (punto 19).
    - **Verificado al desplegar (26-10):**

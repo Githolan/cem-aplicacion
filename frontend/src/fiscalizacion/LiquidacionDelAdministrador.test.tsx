@@ -603,6 +603,50 @@ describe("pantalla /importar-liquidacion", () => {
     expect(screen.queryByRole("button", { name: SUBIR })).toBeNull();
   });
 
+  /** Sube un PDF con el antivirus respondiendo `estado` en cada consulta. */
+  function subirConAntivirus(estado: Record<string, unknown>) {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: () => Response.json([]),
+      [`POST ${BASE}/documentos`]: () => Response.json({ id: D1 }, { status: 201 }),
+      [`POST ${BASE}/documentos/${D1}/versiones`]: () => Response.json({ id: V1 }, { status: 201 }),
+      [`GET ${BASE}/documentos/${D1}/versiones/${V1}/estado`]: () => Response.json(estado),
+    }));  // prettier-ignore
+    abrir();
+  }
+
+  async function elegirYSubir() {
+    expect(await screen.findByText("Todavía no se subió ninguna liquidación del administrador.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: SUBIR }));
+    const ventana = await screen.findByRole("dialog", { name: SUBIR_EN });
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "liquidacion.pdf", { type: "application/pdf" });
+    fireEvent.change(within(ventana).getByLabelText("Archivo de la liquidación"), { target: { files: [pdf] } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Subir" }));
+    expect(await screen.findByText(EN_ANTIVIRUS)).toBeTruthy();
+  }
+
+  it("si el antivirus falla, dice por qué y cuándo vuelve a probar, no «se sigue esperando»", async () => {
+    subirConAntivirus({
+      estado: "en_cuarentena", motivo_rechazo: null, demora: "firmas_viejas", se_abandono: false,
+      proximo_intento: "2026-11-27T21:42:00Z",
+    });  // prettier-ignore
+    await elegirYSubir();
+    const alerta = await screen.findByRole("alert", {}, { timeout: 6000 });
+    expect(alerta.textContent).toMatch(/^Todavía no se puede revisar el archivo: el antivirus no tiene al día su base de virus/);
+    expect(alerta.textContent).toMatch(/CEM lo vuelve a probar solo a las \d{2}:\d{2}\.$/);
+    expect(screen.queryByText(/se sigue esperando/)).toBeNull();
+  }, 15000);
+
+  it("si la cola dejó de intentarlo por otra falla, deja de esperar y lo dice", async () => {
+    subirConAntivirus({ estado: "en_cuarentena", motivo_rechazo: null, demora: "otra_falla", se_abandono: true, proximo_intento: null });
+    await elegirYSubir();
+    expect(screen.queryByRole("button", { name: SUBIR })).toBeNull(); // control: mientras espera, no se ofrece
+    expect(
+      await screen.findByText("CEM dejó de intentar revisar el archivo: la revisión del archivo falló varias veces. Hay que avisar a soporte.", {}, { timeout: 6000 }),
+    ).toBeTruthy();
+    expect(await screen.findByRole("button", { name: SUBIR })).toBeTruthy();
+  }, 15000);
+
   it("si el pedido de importar no llega, el archivo subido queda para reintentar con la misma clave", async () => {
     let intentos = 0;
     const api = backend({

@@ -801,7 +801,10 @@ def estado_de_mi_version(
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         try:
             filas = conn.execute(
-                text("select estado, motivo_rechazo from nucleo.estado_de_mi_version(:d, :v)"),
+                text(
+                    "select estado, motivo_rechazo, demora, se_abandono, proximo_intento"
+                    " from nucleo.estado_de_mi_version(:d, :v)"
+                ),
                 {"d": documento_id, "v": version_id},
             ).mappings().all()  # fmt: skip
         except DBAPIError as e:

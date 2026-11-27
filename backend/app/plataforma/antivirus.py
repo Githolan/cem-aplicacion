@@ -4,19 +4,51 @@
 manda cada archivo por `INSTREAM` y le pregunta la fecha de sus firmas con `VERSION`. Se usa el
 formato `z…\\0` del protocolo de `clamd` (comandos y respuestas terminados en un byte nulo).
 
-Variables: `CEM_ANTIVIRUS_SERVIDOR` (el alias de red) y `CEM_ANTIVIRUS_PUERTO`.
+Variables: `CEM_ANTIVIRUS_SERVIDOR` (el alias de red), `CEM_ANTIVIRUS_PUERTO` y
+`CEM_ANTIVIRUS_FIRMAS_HORAS` (cuántas horas pueden tener las firmas antes de que no se apruebe
+nada).
 """
 
 import os
 import socket
 import struct
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 TRAMO = 64 * 1024
 TIEMPO_DE_ESPERA = 120
 """Segundos por operación: un archivo de 20 MB se analiza en pocos segundos; un `clamd` colgado
 no debe retener al trabajador hasta el final de su reserva (5 minutos)."""
+
+
+VARIABLE_FIRMAS_HORAS = "CEM_ANTIVIRUS_FIRMAS_HORAS"
+
+
+class ConfiguracionDelAntivirus(RuntimeError):
+    """Falta `CEM_ANTIVIRUS_FIRMAS_HORAS` o no es un entero positivo: `cem-trabajos` no arranca y
+    ningún archivo se aprueba. No hay valor por omisión en el código (regla del propietario,
+    27-11-2026: todo valor configurable vive fuera del código)."""
+
+
+def firmas_vigentes() -> timedelta:
+    """Firmas más viejas que esto: `freshclam` falla o ClamAV no publica, y no se aprueba nada."""
+    valor = os.environ.get(VARIABLE_FIRMAS_HORAS)
+    if valor is None or not valor.strip():
+        raise ConfiguracionDelAntivirus(f"falta la variable de entorno {VARIABLE_FIRMAS_HORAS}")
+    try:
+        horas = int(valor)
+    except ValueError as e:
+        raise ConfiguracionDelAntivirus(
+            f"{VARIABLE_FIRMAS_HORAS} tiene que ser un número entero de horas"
+        ) from e
+    if horas <= 0:
+        raise ConfiguracionDelAntivirus(f"{VARIABLE_FIRMAS_HORAS} tiene que ser positiva")
+    return timedelta(hours=horas)
+
+
+def exigir_configuracion() -> None:
+    """Al arrancar `cem-trabajos`: sin el plazo de las firmas, no arranca."""
+    firmas_vigentes()
 
 
 class AntivirusNoDisponible(RuntimeError):

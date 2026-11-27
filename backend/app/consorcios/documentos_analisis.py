@@ -5,7 +5,7 @@
 2. En un PDF rechaza el contenido activo (`/JavaScript`, `/JS`, `/OpenAction`, `/AA`,
    `/Launch`, `/EmbeddedFile`, `/RichMedia`, XFA), el cifrado y lo que el analizador no puede
    leer.
-3. Lo manda a `clamd`. Con firmas de más de `FIRMAS_VIGENTES` no aprueba nada.
+3. Lo manda a `clamd`. Con firmas de más de `CEM_ANTIVIRUS_FIRMAS_HORAS` no aprueba nada.
 4. Limpio → `disponible`. Detectado → `rechazado` con el motivo (auditado por `0035`) y, en la
    misma transacción, el trabajo `documentos.borrar_rechazado`, que borra el binario (por
    `VersionId` en un bucket con versiones) y se reintenta por su cuenta.
@@ -49,8 +49,6 @@ from app.plataforma.planificador import periodica
 
 log = logging.getLogger("cem.documentos")
 
-FIRMAS_VIGENTES = timedelta(hours=48)
-"""Firmas más viejas: `freshclam` está fallando y no se aprueba nada (§3, paso 6)."""
 DEMORA_AVISO = timedelta(hours=2)
 """Una versión en cuarentena por más tiempo es un análisis que no se completa."""
 VARIABLE_AVISO = "CEM_DOCUMENTOS_AVISO_URL"
@@ -79,7 +77,8 @@ nada."""
 
 
 class FirmasViejas(RuntimeError):
-    """Las firmas de `clamd` pasan de 48 horas: se reintenta, nunca se aprueba."""
+    """Las firmas de `clamd` pasan de `CEM_ANTIVIRUS_FIRMAS_HORAS`: se reintenta, nunca se
+    aprueba."""
 
 
 def motivo_pdf(contenido: bytes) -> str | None:
@@ -160,7 +159,7 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         motivo = motivo_pdf(contenido)
     if motivo is None:
         firmas = antivirus.firmas()
-        if datetime.now(UTC) - firmas.fecha > FIRMAS_VIGENTES:
+        if datetime.now(UTC) - firmas.fecha > antivirus.firmas_vigentes():
             raise FirmasViejas(f"firmas de {firmas.fecha.isoformat()}: no se aprueba nada")
         if antivirus.analizar(contenido) is not None:
             motivo = "virus"
@@ -377,9 +376,9 @@ def vigilar_cuarentena(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any
         problemas.append(f"{demoradas} versiones en cuarentena hace más de {DEMORA_AVISO}")
     try:
         f = antivirus.firmas()
-        if datetime.now(UTC) - f.fecha > FIRMAS_VIGENTES:
+        if datetime.now(UTC) - f.fecha > antivirus.firmas_vigentes():
             problemas.append(f"firmas de {f.fecha.isoformat()}")
-    except antivirus.AntivirusNoDisponible as e:
+    except (antivirus.AntivirusNoDisponible, antivirus.ConfiguracionDelAntivirus) as e:
         problemas.append(str(e))
     resumen = {"demoradas": demoradas, "problemas": problemas}
     url = os.environ.get(VARIABLE_AVISO)
@@ -394,3 +393,24 @@ def vigilar_cuarentena(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any
 
 # Cada 5 minutos; el monitor de Kuma alerta si deja de recibirlo o recibe `down`.
 periodica("documentos.vigilar_cuarentena", timedelta(minutes=5))
+
+
+@cola.REGISTRO.tipo("documentos.revivir_verificaciones")
+def revivir_verificaciones(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Con el antivirus de vuelta, lo que la cola abandonó por su culpa se revisa solo (`0136`):
+    nadie tiene que volver a subir el archivo. Es un trabajo aparte de `vigilar_cuarentena`: si el
+    aviso a Kuma falla, esa transacción se deshace, y esta no tiene que deshacerse con ella.
+
+    Con las firmas viejas o sin `clamd`, no revive nada y lo deja en su resultado; quien avisa del
+    antivirus es `vigilar_cuarentena`."""
+    try:
+        f = antivirus.firmas()
+    except antivirus.AntivirusNoDisponible as e:
+        return {"revividas": 0, "antivirus": str(e)}
+    if datetime.now(UTC) - f.fecha > antivirus.firmas_vigentes():
+        return {"revividas": 0, "antivirus": f"firmas de {f.fecha.isoformat()}"}
+    return {"revividas": conn.execute(text("select nucleo.revivir_verificaciones()")).scalar_one()}
+
+
+# Cada 5 minutos, como `vigilar_cuarentena`.
+periodica("documentos.revivir_verificaciones", timedelta(minutes=5))

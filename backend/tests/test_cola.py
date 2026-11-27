@@ -322,6 +322,7 @@ def test_cem_trabajos_no_arranca_con_un_lote_invalido():
     entorno = os.environ | {
         "CEM_PROCESO": "trabajos",
         "CEM_TRABAJOS_LOTE": "cero",
+        "CEM_ANTIVIRUS_FIRMAS_HORAS": "48",
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
     }
     proceso = subprocess.run(
@@ -329,6 +330,20 @@ def test_cem_trabajos_no_arranca_con_un_lote_invalido():
     )
     assert proceso.returncode != 0
     assert "CEM_TRABAJOS_LOTE debe ser un entero" in proceso.stderr
+
+
+def test_cem_trabajos_no_arranca_sin_el_plazo_de_las_firmas():
+    """Regla del propietario (27-11-2026): ningún valor configurable en el código. Sin
+    `CEM_ANTIVIRUS_FIRMAS_HORAS` no hay plazo por omisión: el proceso no arranca y lo dice."""
+    entorno = {k: v for k, v in os.environ.items() if k != "CEM_ANTIVIRUS_FIRMAS_HORAS"} | {
+        "CEM_PROCESO": "trabajos",
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    }
+    proceso = subprocess.run(
+        ["sh", "arranque.sh"], cwd=RAIZ, env=entorno, capture_output=True, text=True, timeout=30
+    )
+    assert proceso.returncode != 0
+    assert "falta la variable de entorno CEM_ANTIVIRUS_FIRMAS_HORAS" in proceso.stderr
 
 
 # Seguridad por fila --------------------------------------------------------------------
@@ -496,6 +511,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
     entorno = os.environ | {
         "CEM_DATABASE_URL": url_rol("app"),
         "CEM_LATIDO": str(tmp_path / "l"),
+        "CEM_ANTIVIRUS_FIRMAS_HORAS": "48",
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
     }
     salida = {"stdout": subprocess.PIPE, "text": True}
@@ -503,7 +519,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
     procesos.append(planificador)
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 9)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 10)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
@@ -516,12 +532,13 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
     # `CEM_ORIGEN_PUBLICO` para el enlace: lo dice y no manda un correo sin enlace.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
-                        " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena')"
+                        " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena',"
+                        " 'documentos.revivir_verificaciones')"
                         " or error like '%faltan variables de las copias%'"
                         " or error like '%falta CEM_DATABASE_URL_BACKUP%'"
                         " or error like '%faltan variables de entorno: CEM_DOCUMENTOS%'"
                         " or error like '%CEM_ORIGEN_PUBLICO sin configurar%'")
-           == 9)  # fmt: skip
+           == 10)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -533,8 +550,8 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
     assert "cem-planificador es el líder" in [x["mensaje"] for x in registros["planificador"]]
     hechos = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
     assert sorted(x["tipo_trabajo"] for x in hechos) == [
-        "consorcio.revocar_por_vencimiento", "documentos.vigilar_cuarentena",
-        "plataforma.purgar_cola"]  # fmt: skip
+        "consorcio.revocar_por_vencimiento", "documentos.revivir_verificaciones",
+        "documentos.vigilar_cuarentena", "plataforma.purgar_cola"]  # fmt: skip
     assert all(x["consorcio_id"] is None for x in hechos)
     with motor_migrate.connect() as c:
         assert c.execute(
@@ -542,6 +559,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
         ).all() == [
             ("consorcio.revocar_por_vencimiento",),
             ("documentos.limpiar_huerfanos",),
+            ("documentos.revivir_verificaciones",),
             ("documentos.vigilar_cuarentena",),
             ("pagos.avisar_pendientes",),
             ("plataforma.controlar_tamano_copias",),

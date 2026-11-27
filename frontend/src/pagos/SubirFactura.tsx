@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import { useAvisoAlSalir } from "../avisoAlSalir";
@@ -8,6 +8,7 @@ import { encabezadoCsrf } from "../csrf";
 import { mensajeDeError as mensajeDeCarga } from "../Documentos";
 import { ENCABEZADO_IDEMPOTENCIA, LARGO_TITULO, mensajeDeActo, renovarClave } from "../egresos/comun";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
+import { seAbandono, textoDeDemora } from "../demoraDelAntivirus";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
 import { SubirArchivo } from "../SubirArchivo";
@@ -68,7 +69,8 @@ type Fase =
   | { tipo: "subiendo" }
   | { tipo: "revisando"; documento: string; version: string }
   | { tipo: "aceptada" }
-  | { tipo: "rechazada" };
+  | { tipo: "rechazada" }
+  | { tipo: "abandonada"; texto: string };
 
 type Props = {
   consorcio: string;
@@ -90,6 +92,9 @@ type Props = {
 export function SubirFactura({ consorcio, orden, version, descripcion, cerrarAlSubir = false, reemplaza, aEntrar, alCerrar }: Props) {
   const textos = reemplaza === null ? TEXTOS.subir : TEXTOS.reemplazar;
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
+  /** Por qué el antivirus todavía no terminó (`textoDeDemora`); vuelve a nulo con cada fase. */
+  const [demora, setDemora] = useState<string | null>(null);
+  useEffect(() => setDemora(null), [fase.tipo]);
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
   /** El archivo del último pedido sin respuesta clara: elegirlo otra vez es reintentar ese pedido. */
@@ -106,7 +111,16 @@ export function SubirFactura({ consorcio, orden, version, descripcion, cerrarAlS
       })
       .then(({ data, response }) => {
         exigirSesion(response);
-        if (enEspera.current !== cual || data === undefined || data.estado === "en_cuarentena") return;
+        if (enEspera.current !== cual || data === undefined) return;
+        if (seAbandono(data)) {
+          enEspera.current = null;
+          setFase({ tipo: "abandonada", texto: textoDeDemora(data) ?? "" });
+          return;
+        }
+        if (data.estado === "en_cuarentena") {
+          setDemora(textoDeDemora(data));
+          return;
+        }
         enEspera.current = null;
         setFase({ tipo: data.estado === "disponible" ? "aceptada" : "rechazada" });
       })
@@ -194,7 +208,17 @@ export function SubirFactura({ consorcio, orden, version, descripcion, cerrarAlS
           {textos.listo}
         </p>
       )}
-      {fase.tipo === "revisando" && tarda && <p className="aviso-info">{textos.tarda}</p>}
+      {fase.tipo === "revisando" && demora !== null && (
+        <p role="alert" className="aviso-error">
+          {demora}
+        </p>
+      )}
+      {fase.tipo === "revisando" && demora === null && tarda && <p className="aviso-info">{textos.tarda}</p>}
+      {fase.tipo === "abandonada" && (
+        <p role="alert" className="aviso-error">
+          {fase.texto}
+        </p>
+      )}
       {fase.tipo === "aceptada" && (
         <p role="status" className="aviso-ok">
           {textos.aceptada}
