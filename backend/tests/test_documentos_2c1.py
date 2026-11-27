@@ -561,6 +561,7 @@ def test_con_el_antivirus_de_vuelta_lo_que_se_rindio_por_su_culpa_se_revisa_solo
 
     # Control: con las firmas todavía viejas, no se revive nada.
     hace_dos = antivirus.Firmas("ClamAV 1.5.4/1", datetime.now(UTC) - timedelta(hours=2))
+    firmas_de_clamd = antivirus.firmas
     monkeypatch.setattr(antivirus, "firmas", lambda: hace_dos)
     monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, "1")
     assert revivir() == {"revividas": 0, "antivirus": f"firmas de {hace_dos.fecha.isoformat()}"}
@@ -571,7 +572,8 @@ def test_con_el_antivirus_de_vuelta_lo_que_se_rindio_por_su_culpa_se_revisa_solo
     assert estado_del_trabajo(del_antivirus) == ("pendiente", 0)
     assert estado_del_trabajo(otra)[0] == "muerto"
     # Y se revisa: queda disponible sin volver a subirlo.
-    monkeypatch.undo()
+    # Con las firmas reales de `clamd` (sin `undo`: desharía también el almacén del fixture).
+    monkeypatch.setattr(antivirus, "firmas", firmas_de_clamd)
     monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, str(3650 * 24))
     assert analizar(motor_app) == 1
     assert version(motor_migrate, del_antivirus)["estado"] == "disponible"
