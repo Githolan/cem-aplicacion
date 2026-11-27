@@ -217,6 +217,8 @@ def test_sin_datos_no_hay_controles() -> None:
         (4, "total:gastos", ("grupos", GC), "199000.00"),
         (5, "total:gastos", ("total",), "231000.00"),
         (6, "importe_unidad:2", ("total",), "46100.00"),
+        (6, "total:prorrateo", ("total",), "999999.00"),
+        (6, "total:prorrateo", ("pagos",), "10.00"),
         (7, "importe_unidad:4", ("grupos", GC, "porcentaje"), "18.00"),
         (8, "saldo_unidad:5", ("deuda",), "100.00"),
     ],
@@ -326,3 +328,14 @@ def test_pesos(importe: str, texto: str) -> None:
 def test_porcentaje() -> None:
     assert porcentaje(Decimal("16.00")) == "16 %"
     assert porcentaje(Decimal("3.50")) == "3,5 %"
+
+
+def test_el_total_impreso_del_prorrateo_se_compara_con_sus_unidades() -> None:
+    """Revisión de Codex (cem-aplicacion 297): el total impreso de una columna del prorrateo que no
+    es la suma de las unidades se dice, como `prorrateo_columna` de D5."""
+    leidos = noviembre()
+    valor(leidos, "total:prorrateo")["total"] = "999999.00"
+    c = por_numero(leidos)[6]
+    assert c.lineas == [
+        "La columna total del prorrateo dice $ 999.999 y sus unidades suman $ 279.440."
+    ]

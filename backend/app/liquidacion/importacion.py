@@ -712,14 +712,13 @@ def confirmar_importacion(
 
     def efecto(conn: Connection) -> tuple[int, ImportacionLiquidacion]:
         if confirmacion.aceptar_pendientes:
-            for c in _importacion(conn, permiso, importacion_id).campos:
-                if c.estado == EstadoCampo.PENDIENTE:
-                    _ejecutar(
-                        conn, permiso,
-                        "select nucleo.resolver_campo_preliminar(:i, :campo, 'confirmado', null,"
-                        " :actor, 'api', :sesion)",
-                        {"i": importacion_id, "campo": c.id},
-                    )  # fmt: skip
+            # La base traba la importación antes de mirar qué sigue pendiente (`0135`): una
+            # corrección que llega a la vez no se pisa.
+            _ejecutar(
+                conn, permiso,
+                "select nucleo.aceptar_datos_pendientes(:i, :actor, 'api', :sesion)",
+                {"i": importacion_id},
+            )  # fmt: skip
         _ejecutar(
             conn, permiso,
             "select nucleo.confirmar_importacion_liquidacion(:i, :r, :m, :actor, 'api', :sesion)",

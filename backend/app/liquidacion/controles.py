@@ -319,6 +319,7 @@ def _total_unidad(datos: Sequence[Dato]) -> ControlLiquidacion:
                 f"{_unidad(d.valor)}: deuda, interés, saldo a favor y lo del mes suman"
                 f" {pesos(esperado)} y el total dice {pesos(p['total'])}."
             )
+    malas += _columnas_del_prorrateo(datos, importes, list(saldos.values()))
     n = len(importes)
     return _control(
         6,
@@ -326,9 +327,62 @@ def _total_unidad(datos: Sequence[Dato]) -> ControlLiquidacion:
         titulo,
         malas,
         f"El total de cada una de las {n} unidades es la suma de lo que debía, el"
-        " interés y lo del mes, menos su saldo a favor.",
-        "Hay unidades cuyo total no es la suma de sus partes.",
+        " interés y lo del mes, menos su saldo a favor, y cada columna del prorrateo suma su"
+        " total.",
+        "Hay unidades cuyo total no es la suma de sus partes, o columnas del prorrateo que no"
+        " suman su total.",
     )
+
+
+COLUMNAS_SALDO = {
+    "saldo_anterior": "saldo anterior",
+    "pagos": "pagos",
+    "deuda": "deuda",
+    "interes": "interés",
+    "disponible": "saldo a favor",
+}
+COLUMNAS_IMPORTE = {"otros_gastos": "otros gastos", "redondeo": "redondeo", "total": "total"}
+
+
+def _columnas_del_prorrateo(
+    datos: Sequence[Dato], importes: Sequence[Dato], saldos: Sequence[Mapping[str, Any]]
+) -> list[str]:
+    """Cada columna del prorrateo frente a la suma de sus unidades (`prorrateo_columna` de D5):
+    el total impreso de una columna puede no ser la suma de las filas."""
+    prorrateo = next((d.valor for d in datos if d.clave == "total:prorrateo"), None)
+    if prorrateo is None:
+        return []
+    malas = []
+
+    def comparar(nombre: str, filas: Iterable[Any], impreso: Any) -> None:
+        dicho = _num(impreso)
+        valores = [_num(x) for x in filas]
+        if dicho is None or not valores or None in valores:
+            return
+        suma = sum((x for x in valores if x is not None), Decimal(0))
+        if _difiere(suma, dicho):
+            malas.append(
+                f"La columna {nombre} del prorrateo dice {pesos(dicho)} y sus unidades suman"
+                f" {pesos(suma)}."
+            )
+
+    for clave, nombre in COLUMNAS_SALDO.items():
+        comparar(nombre, (s.get(clave) for s in saldos), prorrateo.get(clave))
+    for clave, nombre in COLUMNAS_IMPORTE.items():
+        comparar(nombre, (d.valor.get(clave) for d in importes), prorrateo.get(clave))
+    grupos = prorrateo.get("grupos")
+    if isinstance(grupos, Mapping):
+        for g, parte in grupos.items():
+            if not isinstance(parte, Mapping):
+                continue
+            montos = [
+                d.valor["grupos"][g].get("monto")
+                if isinstance(d.valor["grupos"].get(g), Mapping)
+                else None
+                for d in importes
+            ]
+            comparar(f"de {g}", montos, parte.get("monto"))
+    return malas
 
 
 def _porcentaje_grupo(datos: Sequence[Dato]) -> ControlLiquidacion:

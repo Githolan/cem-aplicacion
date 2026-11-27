@@ -4,6 +4,7 @@ Contra servicios reales: PostgreSQL, el almacén S3 de pruebas y ClamAV. La liqu
 inventada de H5-1 (`test_mis_expensas.liquidacion`), leída sin IA. Datos SINTETICOS / NO REAL.
 """
 
+import json
 import threading
 from uuid import uuid4
 
@@ -249,6 +250,46 @@ def test_aceptar_la_liquidacion_entera_confirma_lo_pendiente_con_quien_acepta(
             " and despues->>'decision' = 'confirmado'"), {"c": e["cons"]},
         ).scalar_one()  # fmt: skip
     assert confirmados == 14  # cada dato aceptado queda auditado, como si se confirmara de a uno
+
+
+def test_aceptar_entera_no_pisa_una_correccion_que_llega_a_la_vez(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Revisión de Codex (cem-aplicacion 297): la aceptación traba la importación antes de mirar
+    qué sigue pendiente (`0135`). Si otra persona corrige un dato a la vez, la aceptación espera y
+    deja la corrección como está."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    rubro = next(c for c in i["campos"] if c["clave"] == "rubro:2")
+    corregido = rubro["valor"] | {"total": "999.99"}
+    resolver = text("select nucleo.resolver_campo_preliminar(:i, :f, 'corregido',"
+                    " cast(:v as jsonb), :a, 'api', :s)")  # fmt: skip
+    aceptar = text("select nucleo.aceptar_datos_pendientes(:i, :a, 'api', :s)")
+    valores = {"i": i["id"], "a": e["mc"], "s": e["sesion"]}
+    aceptados: list[int] = []
+    fallas: list[BaseException] = []
+
+    def aceptar_todo():
+        try:
+            with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
+                aceptados.append(c.execute(aceptar, valores).scalar_one())
+        except BaseException as falla:  # se vuelve a lanzar abajo, en el hilo de la prueba
+            fallas.append(falla)
+
+    with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as primera:
+        pid = primera.execute(text("select pg_backend_pid()")).scalar_one()
+        primera.execute(resolver, valores | {"f": rubro["id"], "v": json.dumps(corregido)})
+        hilo = threading.Thread(target=aceptar_todo)
+        hilo.start()
+        assert esperar_trabado(motor_migrate, pid) == 1  # control: la aceptación espera
+    hilo.join()
+    if fallas:
+        raise fallas[0]
+    assert aceptados == [15]  # los 16 menos el corregido
+    with cliente(e["mc"], e["sesion"]) as c:
+        campos = {x["clave"]: x for x in c.get(ruta(e, i["id"])).json()["campos"]}
+    assert campos["rubro:2"]["estado"] == "corregido"
+    assert campos["rubro:2"]["valor_corregido"] == corregido
 
 
 def test_aceptar_entera_con_un_dato_mal_leido_no_deja_nada_a_medias(
