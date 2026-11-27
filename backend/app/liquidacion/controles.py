@@ -607,7 +607,9 @@ def _comprobantes(datos: Sequence[Dato]) -> ControlLiquidacion:
     gastos = [
         g
         for g in _de(datos, "gasto")
-        if g.valor.get("rubro") not in sueldos and (_num(g.valor.get("total")) or Decimal(0)) != 0
+        # Solo un cero explícito exime: un total que falta no impide mirar el concepto (revisión
+        # de Codex en cem-aplicacion 298).
+        if g.valor.get("rubro") not in sueldos and _num(g.valor.get("total")) != Decimal(0)
     ]
     if not gastos:
         return _no_aplica(11, "comprobante_gasto", titulo, "La liquidación no trae gastos.")

@@ -431,6 +431,15 @@ def test_un_numero_anonimizado_dice_el_comprobante_y_no_se_cruza() -> None:
     assert comprobante_de("Abril/2026 -\nOtros Nº [N044]") == "Otros Nº [N044]"
 
 
+def test_un_gasto_sin_total_igual_se_mira() -> None:
+    """Revisión de Codex (cem-aplicacion 298): un total borrado (null) no es un cero."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:2")["concepto"] = "Agua sin comprobante"
+    valor(leidos, "gasto:1:2")["total"] = None
+    c = por_numero(leidos)[11]
+    assert c.lineas == ["«Agua sin comprobante» no dice su comprobante."]
+
+
 def test_sin_cuit_no_se_dice_que_se_repite() -> None:
     """Revisión de Codex (cem-aplicacion 298): el número de factura es de cada proveedor; sin CUIT
     no se puede decir que dos gastos son la misma factura, y el texto lo dice."""
