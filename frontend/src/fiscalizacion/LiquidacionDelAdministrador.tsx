@@ -84,7 +84,9 @@ export const DESCARTAR_LIQUIDACION = "Descartar la liquidación";
 export const VOLVER_A_LA_LISTA = "Volver a la lista";
 export const FALTA_ARCHIVO = "Falta elegir el archivo.";
 export const FALTA_MOTIVO = "Falta escribir el motivo.";
-export const SIN_CAMBIOS = "El valor corregido es igual al leído: para dejarlo así, se confirma.";
+export const SIN_CAMBIOS = "El valor es igual al que ya tiene: no cambia nada.";
+/** Corregir un dato corregido con lo que se leyó es deshacer la corrección: tiene su botón. */
+export const ES_EL_LEIDO = "Es el valor leído: para volver a él, «Volver al valor leído».";
 export const NUMERO_MAL = "Va un número entero, por ejemplo 2.";
 export const IMPORTE_MAL = "Un importe va con dos decimales, por ejemplo 1.234,50.";
 export const LARGO_MOTIVO = 500;
@@ -255,6 +257,17 @@ export function valoresDe(valor: Record<string, unknown>, camino: string[] = [])
   });
 }
 
+// Como `COMPROBANTE` de `controles.py`: el comprobante que el modelo de Mis Expensas escribe al
+// final del concepto de cada gasto (comentario 43; que la factura esté cargada en CEM es S3b).
+const COMPROBANTE = /(Factura|Recibo|Nota de Cr[eé]dito|Nota de D[eé]bito|Ticket|Otros)(?:\s+[^\s]{1,8})?\s*N\s*[º°o]\.?\s*(?:[0-9][0-9./-]*|\[N\d+\])/gi;
+
+/** «Factura B Nº 0001-00001234» tal como lo dice el concepto, o null si no dice ninguno. */
+export function comprobanteDe(concepto: string): string | null {
+  const hallados = [...concepto.matchAll(COMPROBANTE)];
+  const ultimo = hallados.at(-1);
+  return ultimo === undefined ? null : ultimo[0].replace(/\s+/g, " ").trim();
+}
+
 /** La ficha de un dato en palabras (comentario 46): lo que paga una unidad por grupo, con su
  * porcentaje; el saldo con lo que debía; un gasto con lo de cada grupo. Los demás, valor por valor. */
 export function enPalabras(c: Campo): { etiqueta: string; valor: string }[] {
@@ -287,6 +300,7 @@ export function enPalabras(c: Campo): { etiqueta: string; valor: string }[] {
       if (grupos === undefined) break;
       return [
         { etiqueta: "Concepto", valor: String(v.concepto ?? "") },
+        { etiqueta: "Comprobante que dice la liquidación", valor: comprobanteDe(String(v.concepto ?? "")) ?? "No dice ninguno" },
         ...Object.entries(grupos).map(([nombre, x]) => ({ etiqueta: `Se reparte en ${nombre}`, valor: pesos(x) })),
         { etiqueta: "Total", valor: pesos(v.total) },
       ];
@@ -666,7 +680,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       setErrores(marcados);
       return "seguir";
     }
-    if (JSON.stringify(nuevo) === JSON.stringify(c.valor) || JSON.stringify(nuevo) === JSON.stringify(leido)) return { rechazo: SIN_CAMBIOS };
+    if (JSON.stringify(nuevo) === JSON.stringify(leido)) return { rechazo: SIN_CAMBIOS };
+    if (JSON.stringify(nuevo) === JSON.stringify(c.valor)) return { rechazo: ES_EL_LEIDO };
     return decidir(c, "corregido", nuevo);
   }
 

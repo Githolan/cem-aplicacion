@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 import pytest
 from cem_contracts.importacion_liquidacion import EstadoControl
 
-from app.liquidacion.controles import Dato, controles, pesos, porcentaje
+from app.liquidacion.controles import Dato, comprobante_de, controles, pesos, porcentaje
 
 GC, AYSA = "Gastos Comunes", "AySA"
 UNIDADES = [
@@ -185,7 +185,12 @@ def valor(leidos: list[dict], clave: str) -> dict:
 def test_noviembre_dice_lo_que_hay_para_mirar() -> None:
     c = por_numero(noviembre())
     assert [n for n, x in c.items() if x.estado == EstadoControl.BIEN] == [1, 2, 3, 4, 5, 6, 10]
-    assert [n for n, x in c.items() if x.estado == EstadoControl.PARA_MIRAR] == [7, 8]
+    assert [n for n, x in c.items() if x.estado == EstadoControl.PARA_MIRAR] == [7, 8, 11]
+    assert c[11].lineas == [
+        "«Luz» ($ 50.000) no dice su comprobante.",
+        "«Agua» ($ 30.000) no dice su comprobante.",
+        "«Limpieza» ($ 150.000) no dice su comprobante.",
+    ]
     assert c[9].estado == EstadoControl.NO_APLICA
     assert c[7].lineas == [
         "PB (UF 1) paga $ 32.500 de Gastos Comunes: $ 500 más de lo que le toca por su 16 % de"
@@ -346,6 +351,7 @@ def test_lectura_con_ia_sin_columnas_no_aplica() -> None:
     c = por_numero(leidos)
     assert {n for n, x in c.items() if x.estado == EstadoControl.NO_APLICA} == {1, 3, 4, 6, 7, 8, 9}
     assert {n for n, x in c.items() if x.estado == EstadoControl.BIEN} == {2, 5, 10}
+    assert c[11].estado == EstadoControl.PARA_MIRAR  # «Luz» no dice su comprobante
 
 
 @pytest.mark.parametrize(
@@ -370,6 +376,131 @@ def test_el_total_impreso_del_prorrateo_se_compara_con_sus_unidades() -> None:
     assert c.lineas == [
         "La columna total del prorrateo dice $ 999.999 y sus unidades suman $ 279.440."
     ]
+
+
+def _con_comprobantes(leidos: list[dict]) -> list[dict]:
+    conceptos = {
+        "gasto:1:1": "Luz - EDENOR SINTETICA - CUIT 30-11111111-1 - Factura B Nº 0001-00001234",
+        "gasto:1:2": "Agua - AYSA SINTETICA - CUIT 30-22222222-2 - Factura B Nº 0002-00000077",
+        "gasto:2:1": "Limpieza - SINTETICA - CUIT 20-33333333-3 - Otros Nº 4455",
+    }
+    for clave, concepto in conceptos.items():
+        valor(leidos, clave)["concepto"] = concepto
+    return leidos
+
+
+def test_cada_gasto_dice_su_comprobante() -> None:
+    c = por_numero(_con_comprobantes(noviembre()))[11]
+    assert c.estado == EstadoControl.BIEN
+    assert c.texto == "Los 3 gastos dicen su comprobante y ninguna factura se repite."
+
+
+def test_el_tipo_sin_numero_no_dice_su_comprobante() -> None:
+    """RL-D7: «Factura B» sin «Nº …» no alcanza para buscar el comprobante. Así viene la
+    liquidación sintética de la lección 26."""
+    leidos = noviembre()
+    valor(leidos, "gasto:1:1")["concepto"] = "Periodo Noviembre/2026 - Factura B"
+    valor(leidos, "gasto:1:2")["concepto"] = "AGUA SINTETICA SA - Factura B"
+    valor(leidos, "gasto:2:1")["concepto"] = "LIMPIEZA SINTETICA - Abono de Noviembre"
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert len(c.lineas) == 3
+    assert all(linea.endswith("no dice su comprobante.") for linea in c.lineas), c.lineas
+
+
+@pytest.mark.parametrize(
+    "concepto", ["Agua - CUIT 30-22222222-2 - Factura B Nº", "Agua - Factura B Noviembre"]
+)
+def test_sin_numero_no_hay_comprobante(concepto: str) -> None:
+    """Revisión de Codex (cem-aplicacion 298): el número es obligatorio; «Noviembre» no es «Nº»."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:2")["concepto"] = concepto
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.PARA_MIRAR
+    assert len(c.lineas) == 1 and c.lineas[0].endswith("no dice su comprobante."), c.lineas
+    assert comprobante_de(concepto) is None
+
+
+def test_un_numero_anonimizado_dice_el_comprobante_y_no_se_cruza() -> None:
+    """Las liquidaciones anonimizadas dejan «Nº [N044]»: dice su comprobante; dos iguales no se
+    dicen repetidas, porque el número real no se conoce."""
+    leidos = _con_comprobantes(noviembre())
+    for clave in ("gasto:1:1", "gasto:1:2"):
+        valor(leidos, clave)["concepto"] = "X - CUIT 30-11111111-1 - Factura B Nº [N044]"
+    assert por_numero(leidos)[11].estado == EstadoControl.BIEN
+    assert comprobante_de("Abril/2026 -\nOtros Nº [N044]") == "Otros Nº [N044]"
+
+
+def test_un_gasto_sin_total_igual_se_mira() -> None:
+    """Revisión de Codex (cem-aplicacion 298): un total borrado (null) no es un cero."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:2")["concepto"] = "Agua sin comprobante"
+    valor(leidos, "gasto:1:2")["total"] = None
+    c = por_numero(leidos)[11]
+    assert c.lineas == ["«Agua sin comprobante» no dice su comprobante."]
+
+
+def test_sin_cuit_no_se_dice_que_se_repite() -> None:
+    """Revisión de Codex (cem-aplicacion 298): el número de factura es de cada proveedor; sin CUIT
+    no se puede decir que dos gastos son la misma factura, y el texto lo dice."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:1")["concepto"] = "Empresa A - Factura B Nº 0001-00001234"
+    valor(leidos, "gasto:1:2")["concepto"] = "Empresa B - Factura B Nº 0001-00001234"
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.BIEN, c.lineas
+    assert c.texto == (
+        "Los 3 gastos dicen su comprobante. Ninguna factura se repite entre los que dicen el CUIT"
+        " del proveedor; 2 no lo dicen y no se pudo cruzar."
+    )
+
+
+def test_una_factura_en_dos_gastos_es_para_mirar() -> None:
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:2")["concepto"] = (
+        "Luz otra vez - EDENOR SINTETICA - CUIT 30-11111111-1 - Factura B Nº 0001-00001234"
+    )
+    c = por_numero(leidos)[11]
+    assert len(c.lineas) == 1
+    assert c.lineas[0].startswith("Factura B Nº 0001-00001234 figura en dos gastos: «Luz - EDENOR")
+    assert "» y «Luz otra vez - EDENOR" in c.lineas[0]
+
+
+def test_la_misma_factura_de_otro_proveedor_no_se_repite() -> None:
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:2")["concepto"] = (
+        "Agua - AYSA SINTETICA - CUIT 30-22222222-2 - Factura B Nº 0001-00001234"
+    )
+    assert por_numero(leidos)[11].estado == EstadoControl.BIEN
+
+
+def test_un_numero_en_cero_no_cuenta_como_repetido() -> None:
+    """Un número sin cifras distintas de cero no identifica un comprobante (así quedan las
+    liquidaciones anonimizadas)."""
+    leidos = _con_comprobantes(noviembre())
+    for clave in ("gasto:1:1", "gasto:1:2"):
+        valor(leidos, clave)["concepto"] = "X - CUIT 30-00000000-0 - Factura B Nº 0001-00000000"
+    assert por_numero(leidos)[11].estado == EstadoControl.BIEN
+
+
+def test_el_detalle_del_sueldo_y_un_gasto_en_cero_no_piden_comprobante() -> None:
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "rubro:2")["nombre"] = "DETALLE DE SUELDO Y CARGAS SOCIALES"
+    valor(leidos, "gasto:2:1")["concepto"] = "Sueldo básico, cargas, total neto"
+    valor(leidos, "gasto:1:2")["concepto"] = "Sin movimientos"
+    valor(leidos, "gasto:1:2")["total"] = "0.00"
+    c = por_numero(leidos)[11]
+    assert c.estado == EstadoControl.BIEN, c.lineas
+    assert c.texto == "El gasto dice su comprobante."
+
+
+def test_una_letra_ilegible_igual_cuenta_como_comprobante() -> None:
+    """Medido sobre las anonimizadas: la letra de la factura puede quedar ilegible («[N141]»)."""
+    leidos = _con_comprobantes(noviembre())
+    valor(leidos, "gasto:1:1")["concepto"] = "Limpieza - Factura [N141] Nº 0001-00000001"
+    assert por_numero(leidos)[11].estado == EstadoControl.BIEN
+    assert comprobante_de("Limpieza - Factura [N141] Nº 0001-00000001") == (
+        "Factura [N141] Nº 0001-00000001"
+    )
 
 
 def test_un_rubro_sin_gastos_no_cierra() -> None:

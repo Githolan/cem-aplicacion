@@ -13,10 +13,13 @@ import { ContextoVersion } from "../version";
 import {
   aImporte,
   ACEPTAR,
+  comprobanteDe,
   aceptarLa,
   CORREGIR_DATO,
   DESCARTAR_DATO,
   VOLVER_AL_LEIDO,
+  SIN_CAMBIOS,
+  ES_EL_LEIDO,
   enPalabras,
   enPorcentaje,
   ELEGIR_COEFICIENTES,
@@ -423,6 +426,44 @@ describe("pantalla /importar-liquidacion", () => {
       decision: "corregido",
       valor_corregido: { rubro: 1, concepto: "Luz SINTETICA", importes: { "Gastos Comunes": "1000.00" }, total: "1000.05" },
     });
+  });
+
+  it("corregir sin cambiar nada lo dice y no manda nada", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
+      [DECISION]: DETALLE(),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Gasto" })).getByRole("button", { name: CORREGIR_DATO }));
+    const ventana = await screen.findByRole("dialog", { name: "Corregir: Gasto" });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Guardar la corrección" }));
+    expect(await within(ventana).findByText(SIN_CAMBIOS)).toBeTruthy();
+    expect(pedidos(api, "POST", DECISION.split(" ")[1] ?? "")).toHaveLength(0);
+  });
+
+  it("corregir un dato corregido con lo leído remite a volver al valor leído", async () => {
+    const corregido = { ...LUZ, estado: "corregido" as const, valor_corregido: { ...LUZ.valor, total: "1000.05" } };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, campos: [corregido] }),
+      [DECISION]: DETALLE(),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Gasto" })).getByRole("button", { name: CORREGIR_DATO }));
+    const ventana = await screen.findByRole("dialog", { name: "Corregir: Gasto" });
+    fireEvent.change(within(ventana).getByLabelText("Total"), { target: { value: "1.000,00" } });
+    fireEvent.click(within(ventana).getByRole("button", { name: "Guardar la corrección" }));
+    expect(await within(ventana).findByText(ES_EL_LEIDO)).toBeTruthy();
+    expect(pedidos(api, "POST", DECISION.split(" ")[1] ?? "")).toHaveLength(0);
   });
 
   it("corregir el número de rubro y una lista los manda en su forma", async () => {
@@ -844,6 +885,15 @@ describe("resumen de la liquidación", () => {
     expect(within(datos).getAllByRole("button")).toHaveLength(3);
     // Solo hay filtro para lo que la liquidación trae.
     expect(within(filtros).queryByRole("button", { name: "Saldos" })).toBeNull();
+  });
+
+  it("la ficha de un gasto dice el comprobante que trae el concepto", () => {
+    expect(comprobanteDe("Luz - CUIT 30-11111111-1 - Periodo Mayo/2026 - Factura B Nº 0001-00001234")).toBe("Factura B Nº 0001-00001234");
+    expect(comprobanteDe("Seguro - Póliza 1 - Otros Nº 4455")).toBe("Otros Nº 4455");
+    expect(comprobanteDe("Luz SINTETICA")).toBeNull();
+    expect(comprobanteDe("Agua - Factura B Nº")).toBeNull();  // sin número no hay comprobante
+    expect(comprobanteDe("Agua - Factura B Noviembre")).toBeNull();
+    expect(enPalabras(LUZ)).toContainEqual({ etiqueta: "Comprobante que dice la liquidación", valor: "No dice ninguno" });
   });
 
   it("un porcentaje se lee como porcentaje y lo que paga una unidad, por grupo", () => {
