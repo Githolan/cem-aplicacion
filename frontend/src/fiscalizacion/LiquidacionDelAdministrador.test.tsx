@@ -16,6 +16,7 @@ import {
   aceptarLa,
   CORREGIR_DATO,
   DESCARTAR_DATO,
+  VOLVER_AL_LEIDO,
   enPalabras,
   enPorcentaje,
   ELEGIR_COEFICIENTES,
@@ -328,6 +329,40 @@ describe("pantalla /importar-liquidacion", () => {
     expect(valor("Interés por la deuda")).toBe("$ 4,00");
     expect(valor("Saldo a favor")).toBe("$ 0,00");
     expect(valor("Estado")).toBe("Corregido");
+  });
+
+  it("un dato descartado puede volver al valor leído", async () => {
+    const descartado = { ...LUZ, estado: "descartado" as const };
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE({ ...IMPORTACION, campos: [descartado] }),
+      [DECISION]: DETALLE(),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gasto" });
+    expect(within(ficha).queryByRole("button", { name: DESCARTAR_DATO })).toBeNull();
+    fireEvent.click(within(ficha).getByRole("button", { name: VOLVER_AL_LEIDO }));
+    expect(await screen.findByText("Gasto: volvió al valor leído.")).toBeTruthy();
+    const [pedido] = pedidos(api, "POST", DECISION.replace("POST ", ""));
+    expect(await pedido?.json()).toEqual({ decision: "confirmado", valor_corregido: null });
+  });
+
+  it("un dato pendiente no ofrece volver al valor leído", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones-importadas`]: LISTA,
+      [`GET ${BASE}/liquidaciones-importadas/${I1}`]: DETALLE(),
+    }));  // prettier-ignore
+    abrir();
+    const datos = await abrirLaImportacion();
+    fireEvent.click(within(datos).getByRole("button", { name: /Luz SINTETICA/ }));
+    const ficha = await screen.findByRole("dialog", { name: "Gasto" });
+    expect(within(ficha).getByRole("button", { name: DESCARTAR_DATO })).toBeTruthy();  // control: la ficha tiene sus botones
+    expect(within(ficha).queryByRole("button", { name: VOLVER_AL_LEIDO })).toBeNull();
   });
 
   it("un dato que el servidor no deja decidir dice por qué en la ficha", async () => {
