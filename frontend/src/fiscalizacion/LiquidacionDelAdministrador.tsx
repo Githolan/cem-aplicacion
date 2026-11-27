@@ -84,7 +84,9 @@ export const DESCARTAR_LIQUIDACION = "Descartar la liquidación";
 export const VOLVER_A_LA_LISTA = "Volver a la lista";
 export const FALTA_ARCHIVO = "Falta elegir el archivo.";
 export const FALTA_MOTIVO = "Falta escribir el motivo.";
-export const SIN_CAMBIOS = "El valor corregido es igual al leído: para dejarlo así, se confirma.";
+export const SIN_CAMBIOS = "El valor es igual al que ya tiene: no cambia nada.";
+/** Corregir un dato corregido con lo que se leyó es deshacer la corrección: tiene su botón. */
+export const ES_EL_LEIDO = "Es el valor leído: para volver a él, «Volver al valor leído».";
 export const NUMERO_MAL = "Va un número entero, por ejemplo 2.";
 export const IMPORTE_MAL = "Un importe va con dos decimales, por ejemplo 1.234,50.";
 export const LARGO_MOTIVO = 500;
@@ -678,7 +680,8 @@ function DelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, rein
       setErrores(marcados);
       return "seguir";
     }
-    if (JSON.stringify(nuevo) === JSON.stringify(c.valor) || JSON.stringify(nuevo) === JSON.stringify(leido)) return { rechazo: SIN_CAMBIOS };
+    if (JSON.stringify(nuevo) === JSON.stringify(leido)) return { rechazo: SIN_CAMBIOS };
+    if (JSON.stringify(nuevo) === JSON.stringify(c.valor)) return { rechazo: ES_EL_LEIDO };
     return decidir(c, "corregido", nuevo);
   }
 
