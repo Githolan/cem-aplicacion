@@ -374,13 +374,23 @@ def vigilar_cuarentena(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any
     problemas = []
     if demoradas:
         problemas.append(f"{demoradas} versiones en cuarentena hace más de {DEMORA_AVISO}")
+    antivirus_al_dia = False
     try:
         f = antivirus.firmas()
         if datetime.now(UTC) - f.fecha > antivirus.firmas_vigentes():
             problemas.append(f"firmas de {f.fecha.isoformat()}")
+        else:
+            antivirus_al_dia = True
     except (antivirus.AntivirusNoDisponible, antivirus.ConfiguracionDelAntivirus) as e:
         problemas.append(str(e))
-    resumen = {"demoradas": demoradas, "problemas": problemas}
+    # Con el antivirus de vuelta, lo que se rindió por su culpa se revisa solo (`0136`): nadie tiene
+    # que volver a subir el archivo.
+    revividas = (
+        conn.execute(text("select nucleo.revivir_verificaciones()")).scalar_one()
+        if antivirus_al_dia
+        else 0
+    )
+    resumen = {"demoradas": demoradas, "problemas": problemas, "revividas": revividas}
     url = os.environ.get(VARIABLE_AVISO)
     if not url:
         return resumen | {"aviso": "sin CEM_DOCUMENTOS_AVISO_URL"}

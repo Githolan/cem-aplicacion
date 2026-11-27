@@ -198,7 +198,7 @@ export function SubirFactura({ consorcio, orden, version, descripcion, cerrarAlS
   // después no llegaría a la pantalla de atrás, que seguiría ofreciendo subirla.
   const enviando = fase.tipo === "subiendo";
   useAvisoAlSalir(enviando);
-  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada" || fase.tipo === "abandonada";
+  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
 
   return (
     <Hoja titulo={textos.titulo} alEscapar={enviando ? undefined : cerrar}>

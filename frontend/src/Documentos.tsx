@@ -561,7 +561,7 @@ export function Documentos() {
             return;
           }
           if (seAbandono(data)) {
-            terminado(`«${cual.titulo}»: ${textoDeDemora(data) ?? ""}`, true);
+            terminado(`«${cual.titulo}»: ${textoDeDemora(data) ?? ""}`, false);
             return;
           }
           if (data.estado === "en_cuarentena") {

@@ -14,14 +14,24 @@ habitual; se sigue esperando.». El motivo estaba en la cola y nadie lo veía.
   responde o falta su configuración) u `otra_falla` (cualquier otra excepción). Sin intento
   fallido, nula. Se reconoce por el nombre de la excepción con que la cola empieza `error`
   (`app/plataforma/trabajos.py`: `f"{type(e).__name__}: {e}"`).
-- `se_abandono`: la cola agotó los intentos (`muerto`). La pantalla deja de esperar y pide subirlo
-  de nuevo.
+- `se_abandono`: la cola agotó los intentos (`muerto`) por una falla que no es del antivirus
+  (`otra_falla`). La pantalla deja de esperar y pide avisar a soporte. No ofrece subir otro
+  archivo: con la versión en cuarentena, la factura (`0099`) y la documentación del proveedor
+  (`0103`) rechazan otro.
 - `proximo_intento`: cuándo vuelve a probar, mientras está `pendiente` después de una falla.
 
-Nada más cambia: la misma barrera, las mismas filas (`0097`). El texto del error nunca sale de la
-base: puede nombrar claves de objeto o rutas internas.
+Nada más cambia en esa función: la misma barrera, las mismas filas (`0097`). El texto del error
+nunca sale de la base: puede nombrar claves de objeto o rutas internas.
 
-Downgrade: vuelve a la función de `0097`.
+**Si la falla es del antivirus, el archivo no tiene la culpa.** `nucleo.revivir_verificaciones()`
+vuelve a encolar (`pendiente`, intentos en cero) cada `documentos.verificar` muerto por
+`FirmasViejas` o `AntivirusNoDisponible` cuya versión siga en cuarentena. La llama
+`documentos.vigilar_cuarentena` (cada 5 minutos) solo cuando las firmas están al día y `clamd`
+responde: el archivo se revisa solo, sin que nadie lo vuelva a subir. Mientras tanto la pantalla
+dice que CEM lo vuelve a probar cuando el antivirus se recupere. Como `versiones_demoradas`
+(`0035`), solo corre sin persona en la sesión, que es como corre un trabajo.
+
+Downgrade: borra `revivir_verificaciones` y vuelve a la función de `0097`.
 
 Revisión: 0136
 Anterior: 0135
@@ -35,6 +45,34 @@ branch_labels = None
 depends_on = None
 
 MI_VERSION = "nucleo.estado_de_mi_version(uuid, uuid)"
+REVIVIR = "nucleo.revivir_verificaciones()"
+
+CAUSAS_DEL_ANTIVIRUS = "('FirmasViejas', 'AntivirusNoDisponible')"
+
+REVIVIR_SQL = f"""
+create function {REVIVIR}
+  returns integer
+  language plpgsql volatile security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    n integer;
+  begin
+    if plataforma.persona_actual() is not null then
+      raise exception 'solo un trabajo revive las verificaciones' using errcode = '42501';
+    end if;
+    update plataforma.jobs j
+       set estado = 'pendiente', intentos = 0, disponible_desde = now(), terminado_en = null
+      from nucleo.version_documento v
+     where j.tipo = 'documentos.verificar' and j.estado = 'muerto'
+       and split_part(j.error, ':', 1) in {CAUSAS_DEL_ANTIVIRUS}
+       and j.clave_unica = 'documentos.verificar:' || v.id::text
+       and v.estado = 'en_cuarentena';
+    get diagnostics n = row_count;
+    return n;
+  end
+  $$;
+"""
 
 CABECERA = """
 create function nucleo.estado_de_mi_version(documento uuid, version uuid)
@@ -73,7 +111,11 @@ NUEVA = (
                  then 'antivirus_no_disponible'
                else 'otra_falla'
              end,
-             coalesce(v.estado = 'en_cuarentena' and j.estado = 'muerto', false),
+             coalesce(
+               v.estado = 'en_cuarentena' and j.estado = 'muerto'
+               and split_part(j.error, ':', 1) not in ('FirmasViejas', 'AntivirusNoDisponible'),
+               false
+             ),
              case
                when v.estado = 'en_cuarentena' and j.estado = 'pendiente' and j.error is not null
                  then j.disponible_desde
@@ -109,7 +151,11 @@ def _crear(definicion: str) -> None:
 
 def upgrade() -> None:
     _crear(NUEVA)
+    op.execute(REVIVIR_SQL)
+    op.execute(f"revoke all on function {REVIVIR} from public")
+    op.execute(f"grant execute on function {REVIVIR} to cem_app")
 
 
 def downgrade() -> None:
+    op.execute(f"drop function {REVIVIR}")
     _crear(ANTERIOR)

@@ -11,13 +11,13 @@ describe("textoDeDemora: ningún sistema falla en silencio (27-11-2026)", () => 
 
   it("dice la causa de cada demora", () => {
     expect(textoDeDemora({ ...EN_CUARENTENA, demora: "firmas_viejas" })).toBe(
-      "Todavía no se puede revisar el archivo: el antivirus no tiene al día su base de virus y CEM no acepta archivos hasta que se actualice. CEM lo vuelve a probar solo.",
+      "Todavía no se puede revisar el archivo: el antivirus no tiene al día su base de virus y CEM no acepta archivos hasta que se actualice. CEM lo vuelve a probar solo cuando el antivirus se recupere.",
     );
     expect(textoDeDemora({ ...EN_CUARENTENA, demora: "antivirus_no_disponible" })).toBe(
-      "Todavía no se puede revisar el archivo: el antivirus no responde. CEM lo vuelve a probar solo.",
+      "Todavía no se puede revisar el archivo: el antivirus no responde. CEM lo vuelve a probar solo cuando el antivirus se recupere.",
     );
     expect(textoDeDemora({ ...EN_CUARENTENA, demora: "otra_falla" })).toBe(
-      "Todavía no se puede revisar el archivo: la revisión del archivo falló. CEM lo vuelve a probar solo.",
+      "Todavía no se puede revisar el archivo: la revisión del archivo falló. CEM lo vuelve a probar solo cuando el antivirus se recupere.",
     );
   });
 
@@ -26,10 +26,10 @@ describe("textoDeDemora: ningún sistema falla en silencio (27-11-2026)", () => 
     expect(texto).toMatch(/CEM lo vuelve a probar solo a las \d{2}:\d{2}\.$/);
   });
 
-  it("abandonado, pide subirlo de nuevo", () => {
-    const abandonado = { ...EN_CUARENTENA, demora: "firmas_viejas", se_abandono: true } as const;
+  it("abandonado por otra falla, pide avisar a soporte", () => {
+    const abandonado = { ...EN_CUARENTENA, demora: "otra_falla", se_abandono: true } as const;
     expect(seAbandono(abandonado)).toBe(true);
-    expect(textoDeDemora(abandonado)).toMatch(/^CEM dejó de intentar revisar el archivo: .*Hay que subirlo de nuevo más tarde\.$/);
+    expect(textoDeDemora(abandonado)).toBe("CEM dejó de intentar revisar el archivo: la revisión del archivo falló varias veces. Hay que avisar a soporte.");
     expect(seAbandono(EN_CUARENTENA)).toBe(false); // control
   });
 

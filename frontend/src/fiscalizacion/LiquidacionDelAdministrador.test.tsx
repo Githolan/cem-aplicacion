@@ -637,12 +637,12 @@ describe("pantalla /importar-liquidacion", () => {
     expect(screen.queryByText(/se sigue esperando/)).toBeNull();
   }, 15000);
 
-  it("si la cola dejó de intentarlo, deja de esperar y vuelve a ofrecer subir", async () => {
-    subirConAntivirus({ estado: "en_cuarentena", motivo_rechazo: null, demora: "antivirus_no_disponible", se_abandono: true, proximo_intento: null });
+  it("si la cola dejó de intentarlo por otra falla, deja de esperar y lo dice", async () => {
+    subirConAntivirus({ estado: "en_cuarentena", motivo_rechazo: null, demora: "otra_falla", se_abandono: true, proximo_intento: null });
     await elegirYSubir();
     expect(screen.queryByRole("button", { name: SUBIR })).toBeNull(); // control: mientras espera, no se ofrece
     expect(
-      await screen.findByText("CEM dejó de intentar revisar el archivo: el antivirus no responde. Hay que subirlo de nuevo más tarde.", {}, { timeout: 6000 }),
+      await screen.findByText("CEM dejó de intentar revisar el archivo: la revisión del archivo falló varias veces. Hay que avisar a soporte.", {}, { timeout: 6000 }),
     ).toBeTruthy();
     expect(await screen.findByRole("button", { name: SUBIR })).toBeTruthy();
   }, 15000);

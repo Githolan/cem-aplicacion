@@ -154,14 +154,20 @@ FALLO = text(
 
 
 @pytest.mark.parametrize(
-    ("error", "demora"),
+    ("error", "demora", "abandona"),
     [
-        ("FirmasViejas: firmas de 2026-11-25T06:26:59+00:00: no se aprueba nada", "firmas_viejas"),
-        ("AntivirusNoDisponible: clamd no responde: timed out", "antivirus_no_disponible"),
-        ("ClientError: An error occurred (NoSuchKey) cem/sintetica/x", "otra_falla"),
+        (
+            "FirmasViejas: firmas de 2026-11-25T06:26:59+00:00: no se aprueba nada",
+            "firmas_viejas",
+            False,
+        ),
+        ("AntivirusNoDisponible: clamd no responde: timed out", "antivirus_no_disponible", False),
+        ("ClientError: An error occurred (NoSuchKey) cem/sintetica/x", "otra_falla", True),
     ],
 )
-def test_la_pantalla_sabe_por_que_el_antivirus_no_termina(motor_migrate, e, error, demora):
+def test_la_pantalla_sabe_por_que_el_antivirus_no_termina(
+    motor_migrate, e, error, demora, abandona
+):
     """Ningún sistema falla en silencio (regla del propietario, 27-11-2026): mientras el análisis
     falla, quien subió el archivo ve por qué y cuándo se vuelve a probar (`0136`)."""
     doc = documento_comun(e, "seguros")
@@ -181,7 +187,8 @@ def test_la_pantalla_sabe_por_que_el_antivirus_no_termina(motor_migrate, e, erro
     with motor_migrate.begin() as c:
         c.execute(FALLO, {"v": version, "error": error, "estado": "muerto"})
     muerto = estado(e, e.adm, doc, version).json()
-    assert muerto["demora"] == demora and muerto["se_abandono"] is True
+    # Por el antivirus no se abandona: `vigilar_cuarentena` lo revive cuando se recupera.
+    assert muerto["demora"] == demora and muerto["se_abandono"] is abandona
     assert muerto["proximo_intento"] is None
     # Control: resuelta la versión, la demora deja de valer aunque el trabajo siga ahí.
     with motor_migrate.begin() as c:

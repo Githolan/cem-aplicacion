@@ -18,12 +18,16 @@ const HORA = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digi
 export function textoDeDemora(estado: EstadoDeMiVersion): string | null {
   if (estado.estado !== "en_cuarentena" || estado.demora == null) return null;
   const causa = CAUSA[estado.demora];
-  if (estado.se_abandono) return `CEM dejó de intentar revisar el archivo: ${causa}. Hay que subirlo de nuevo más tarde.`;
-  const cuando = estado.proximo_intento == null ? "" : ` a las ${HORA.format(new Date(estado.proximo_intento))}`;
+  // Solo se abandona por una falla que no es del antivirus (`0136`): otro archivo tampoco pasaría.
+  if (estado.se_abandono) return `CEM dejó de intentar revisar el archivo: ${causa} varias veces. Hay que avisar a soporte.`;
+  // Sin próximo intento, la cola se rindió por el antivirus: lo retoma sola cuando se recupera.
+  const cuando =
+    estado.proximo_intento == null ? " cuando el antivirus se recupere" : ` a las ${HORA.format(new Date(estado.proximo_intento))}`;
   return `Todavía no se puede revisar el archivo: ${causa}. CEM lo vuelve a probar solo${cuando}.`;
 }
 
-/** La cola dejó de intentarlo: la pantalla deja de esperar y ofrece subirlo de nuevo. */
+/** La cola dejó de intentarlo por una falla que no es del antivirus: la pantalla deja de esperar y no
+ * ofrece subir otro (con la versión en cuarentena, el servidor lo rechazaría). */
 export function seAbandono(estado: EstadoDeMiVersion): boolean {
   return estado.estado === "en_cuarentena" && estado.se_abandono === true;
 }

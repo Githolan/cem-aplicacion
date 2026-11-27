@@ -339,7 +339,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, fijo, requ
   const cerrar = () => alCerrar(cambio.current);
   const enviando = fase.tipo === "subiendo";
   useAvisoAlSalir(enviando);
-  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada" || fase.tipo === "abandonada";
+  const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
   const titulo = fijo !== undefined ? `${CARGAR}: ${fijo.descripcion}` : reemplaza === null ? AGREGAR : `Reemplazar: ${reemplaza.descripcion}`;
 
   return (

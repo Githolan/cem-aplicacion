@@ -523,8 +523,60 @@ def test_vigilar_avisa_las_demoradas_y_al_resolverse_vuelve_a_cero(
     r = vigilar()
     assert r["demoradas"] == 1 and r["problemas"] and r["aviso"] == "sin CEM_DOCUMENTOS_AVISO_URL"
     assert analizar(motor_app) == 1  # control: resuelta, deja de contar
-    assert vigilar() == {"demoradas": 0, "problemas": [],
+    assert vigilar() == {"demoradas": 0, "problemas": [], "revividas": 0,
                          "aviso": "sin CEM_DOCUMENTOS_AVISO_URL"}  # fmt: skip
+
+
+MATAR = text(
+    "update plataforma.jobs set estado = 'muerto', error = :error, terminado_en = now()"
+    " where clave_unica = 'documentos.verificar:' || cast(:v as text)"
+)
+
+
+def test_con_el_antivirus_de_vuelta_lo_que_se_rindio_por_su_culpa_se_revisa_solo(
+    escena, bucket, motor_app, motor_migrate, monkeypatch
+):
+    """`0136`: un archivo que la cola abandonó porque el antivirus no estaba al día no tiene la
+    culpa. Con las firmas al día, `vigilar_cuarentena` lo vuelve a encolar; nadie lo sube de nuevo.
+    Lo que se rindió por otra causa no se revive (para eso está el aviso a soporte)."""
+    e = escena
+    del_antivirus = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
+    otra = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
+    monkeypatch.delenv(documentos_analisis.VARIABLE_AVISO, raising=False)
+    with motor_migrate.begin() as c:
+        c.execute(MATAR, {"v": del_antivirus, "error": "FirmasViejas: firmas de ayer"})
+        c.execute(MATAR, {"v": otra, "error": "ClientError: NoSuchKey"})
+
+    def vigilar():
+        with transaccion(motor_app, persona_id=None, consorcio_id=None) as c:
+            return documentos_analisis.vigilar_cuarentena(c, None)
+
+    def estado_del_trabajo(v):
+        with motor_migrate.begin() as c:
+            return c.execute(
+                text("select estado::text, intentos from plataforma.jobs"
+                     " where clave_unica = 'documentos.verificar:' || cast(:v as text)"),
+                {"v": v},
+            ).one()  # fmt: skip
+
+    # Control: con las firmas todavía viejas, no se revive nada.
+    hace_dos = antivirus.Firmas("ClamAV 1.5.4/1", datetime.now(UTC) - timedelta(hours=2))
+    monkeypatch.setattr(antivirus, "firmas", lambda: hace_dos)
+    monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, "1")
+    assert vigilar()["revividas"] == 0
+    assert estado_del_trabajo(del_antivirus)[0] == "muerto"
+    # Al día: se revive solo el que murió por el antivirus.
+    monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, "3")
+    assert vigilar()["revividas"] == 1
+    assert estado_del_trabajo(del_antivirus) == ("pendiente", 0)
+    assert estado_del_trabajo(otra)[0] == "muerto"
+    # Y se revisa: queda disponible sin volver a subirlo.
+    monkeypatch.undo()
+    monkeypatch.setenv(antivirus.VARIABLE_FIRMAS_HORAS, str(3650 * 24))
+    monkeypatch.delenv(documentos_analisis.VARIABLE_AVISO, raising=False)
+    assert analizar(motor_app) == 1
+    assert version(motor_migrate, del_antivirus)["estado"] == "disponible"
+    assert version(motor_migrate, otra)["estado"] == "en_cuarentena"
 
 
 def test_0035_ida_y_vuelta(base_aparte):  # noqa: F811
