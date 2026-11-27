@@ -278,6 +278,23 @@ def test_un_porcentaje_redondeado_no_es_para_mirar() -> None:
     assert all("AySA" not in linea for linea in c.lineas), c.lineas
 
 
+def test_un_grupo_negativo_repartido_justo_no_es_para_mirar() -> None:
+    """Revisión de Codex (cem-aplicacion 297): un grupo con total negativo (un reintegro) repartido
+    exacto por porcentaje está bien."""
+    leidos = noviembre()
+    valor(leidos, "total:prorrateo")["grupos"][AYSA]["monto"] = "-30000.00"
+    for uf in ("1", "2", "3", "4", "5"):
+        pct, monto = ("50.00", "-15000.00") if uf in ("1", "2") else ("0.00", "0.00")
+        valor(leidos, f"importe_unidad:{uf}")["grupos"][AYSA] = {"porcentaje": pct, "monto": monto}
+    c = por_numero(leidos)[7]
+    assert all("AySA" not in linea for linea in c.lineas), c.lineas
+    valor(leidos, "importe_unidad:1")["grupos"][AYSA]["monto"] = "-14000.00"  # control: se ve
+    assert any(
+        linea.startswith("PB (UF 1) paga -$ 14.000 de AySA")
+        for linea in por_numero(leidos)[7].lineas
+    ), por_numero(leidos)[7].lineas
+
+
 def test_porcentajes_que_no_suman_cien() -> None:
     leidos = noviembre()
     valor(leidos, "importe_unidad:5")["grupos"][AYSA]["porcentaje"] = "10.00"

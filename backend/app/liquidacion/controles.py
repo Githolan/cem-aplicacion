@@ -432,7 +432,9 @@ def _porcentaje_grupo(datos: Sequence[Dato]) -> ControlLiquidacion:
             sumas[nombre] = sumas.get(nombre, Decimal(0)) + pct
             comprobadas += 1
             decimales = max(0, -int(pct.as_tuple().exponent))
-            tolerancia = base * Decimal(10) ** -decimales / CIEN + CENTAVO
+            # Sobre el total sin signo: un grupo negativo (un reintegro) no da una tolerancia
+            # negativa (revisión de Codex en cem-aplicacion 297).
+            tolerancia = abs(base) * Decimal(10) ** -decimales / CIEN + CENTAVO
             esperado = pct * base / CIEN
             if _difiere(esperado, monto, tolerancia):
                 dif = monto - esperado
