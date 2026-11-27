@@ -13,6 +13,7 @@ import { ContextoVersion } from "../version";
 import {
   aImporte,
   ACEPTAR,
+  comprobanteDe,
   aceptarLa,
   CORREGIR_DATO,
   DESCARTAR_DATO,
@@ -788,6 +789,13 @@ describe("resumen de la liquidación", () => {
     expect(within(datos).getAllByRole("button")).toHaveLength(3);
     // Solo hay filtro para lo que la liquidación trae.
     expect(within(filtros).queryByRole("button", { name: "Saldos" })).toBeNull();
+  });
+
+  it("la ficha de un gasto dice el comprobante que trae el concepto", () => {
+    expect(comprobanteDe("Luz - CUIT 30-11111111-1 - Periodo Mayo/2026 - Factura B Nº 0001-00001234")).toBe("Factura B Nº 0001-00001234");
+    expect(comprobanteDe("Seguro - Póliza 1 - Otros Nº 4455")).toBe("Otros Nº 4455");
+    expect(comprobanteDe("Luz SINTETICA")).toBeNull();
+    expect(enPalabras(LUZ)).toContainEqual({ etiqueta: "Comprobante que dice la liquidación", valor: "No dice ninguno" });
   });
 
   it("un porcentaje se lee como porcentaje y lo que paga una unidad, por grupo", () => {

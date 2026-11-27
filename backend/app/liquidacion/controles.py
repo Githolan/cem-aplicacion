@@ -19,8 +19,14 @@ importación; no se guarda.
   unidades.
 - **10**: las unidades del documento están en el padrón.
 
-El control 11 (la factura de cada gasto) llega con S3b; el 12 (recálculo con los coeficientes del
-edificio) sigue en `recalculo` y se ve después de aceptar.
+- **11**: cada gasto dice su comprobante (tipo y número, como lo pide el modelo de Mis Expensas:
+  «Factura B Nº 0001-00001234», «Otros Nº …») y ninguna factura del mismo proveedor figura en dos
+  gastos. Medido sobre las cinco anonimizadas: todos los gastos lo dicen salvo el detalle del
+  sueldo (rubro de sueldos, que se justifica con el recibo y no con un comprobante del gasto) y
+  los rubros «Sin movimientos». Que la factura esté cargada en CEM es S3b.
+
+El 12 (recálculo con los coeficientes del edificio) sigue en `recalculo` y se ve después de
+aceptar.
 
 Dice la cuenta, no califica a la administración (RN33). Un control que no tiene los datos que
 necesita (una lectura con IA trae menos columnas) sale `no_aplica`, con el motivo.
@@ -28,6 +34,7 @@ necesita (una lectura con IA trae menos columnas) sale `no_aplica`, con el motiv
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -553,6 +560,98 @@ def _padron(datos: Sequence[Dato]) -> ControlLiquidacion:
     )
 
 
+COMPROBANTE = re.compile(
+    r"(?P<tipo>Factura|Recibo|Nota de Cr[eé]dito|Nota de D[eé]bito|Ticket|Otros)"
+    r"(?:\s+(?P<letra>[^\s]{1,8}))?\s*N\s*[º°o]\.?\s*(?P<numero>[0-9][0-9./-]*)?",
+    re.IGNORECASE,
+)
+"""El comprobante que el modelo de Mis Expensas escribe al final del concepto de cada gasto."""
+LETRAS = frozenset({"A", "B", "C", "E", "M"})
+"""Las letras de factura de ARCA; otra palabra en ese lugar (ilegible) no entra en la clave."""
+CUIT = re.compile(r"CUIT\s*:?\s*(\d{2}-?\d{8}-?\d)")
+RUBRO_DE_SUELDOS = re.compile(r"\bSUELDO", re.IGNORECASE)
+"""El rubro del detalle del sueldo (rubro 1 del modelo): se justifica con el recibo de sueldo."""
+
+
+def comprobante_de(concepto: str) -> str | None:
+    """«Factura B Nº 0001-00001234» tal como lo dice el concepto, o `None` si no dice ninguno."""
+    hallados = list(COMPROBANTE.finditer(concepto))
+    if not hallados:
+        return None
+    return re.sub(r"\s+", " ", hallados[-1].group(0)).strip()
+
+
+def _comprobantes(datos: Sequence[Dato]) -> ControlLiquidacion:
+    titulo = "Cada gasto dice su comprobante"
+    sueldos = {
+        r.valor.get("numero")
+        for r in _de(datos, "rubro")
+        if RUBRO_DE_SUELDOS.search(str(r.valor.get("nombre") or ""))
+    }
+    gastos = [
+        g
+        for g in _de(datos, "gasto")
+        if g.valor.get("rubro") not in sueldos and (_num(g.valor.get("total")) or Decimal(0)) != 0
+    ]
+    if not gastos:
+        return _no_aplica(11, "comprobante_gasto", titulo, "La liquidación no trae gastos.")
+    malas: list[str] = []
+    vistos: dict[tuple[str, str, str, str], str] = {}
+    for g in gastos:
+        concepto = str(g.valor.get("concepto") or "")
+        corto = _corto(concepto)
+        hallado = list(COMPROBANTE.finditer(concepto))
+        if not hallado:
+            total = _num(g.valor.get("total"))
+            malas.append(
+                f"«{corto}»{f' ({pesos(total)})' if total is not None else ''} no dice su"
+                " comprobante."
+            )
+            continue
+        ultimo = hallado[-1]
+        numero = (ultimo.group("numero") or "").strip(".-/")
+        cuit = CUIT.search(concepto)
+        # Un número (lo que va después del punto de venta) sin ninguna cifra distinta de cero no
+        # identifica un comprobante.
+        if ultimo.group("tipo").lower() == "otros" or not re.search(
+            r"[1-9]", numero.split("-")[-1]
+        ):
+            continue
+        clave = (
+            ultimo.group("tipo").lower(),
+            (ultimo.group("letra") or "").upper()
+            if (ultimo.group("letra") or "").upper() in LETRAS
+            else "",
+            re.sub(r"\D", "", numero),
+            re.sub(r"\D", "", cuit.group(1)) if cuit else "",
+        )
+        if clave in vistos:
+            malas.append(
+                f"{comprobante_de(concepto)} figura en dos gastos: «{vistos[clave]}» y «{corto}»."
+            )
+        else:
+            vistos[clave] = corto
+    n = len(gastos)
+    return _control(
+        11,
+        "comprobante_gasto",
+        titulo,
+        malas,
+        f"Los {n} gastos dicen su comprobante y ninguna factura se repite."
+        if n > 1
+        else "El gasto dice su comprobante.",
+        "Hay gastos que no dicen su comprobante, o una factura que figura en dos gastos.",
+    )
+
+
+LARGO_CONCEPTO = 60
+
+
+def _corto(concepto: str) -> str:
+    texto = re.sub(r"\s+", " ", concepto).strip()
+    return texto if len(texto) <= LARGO_CONCEPTO else texto[: LARGO_CONCEPTO - 1].rstrip() + "…"
+
+
 def controles(
     datos: Sequence[Dato], anterior: Mapping[UUID, Decimal] | None
 ) -> list[ControlLiquidacion]:
@@ -567,4 +666,5 @@ def controles(
         _deuda(datos),
         _saldo_anterior(datos, anterior),
         _padron(datos),
+        _comprobantes(datos),
     ]

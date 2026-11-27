@@ -223,7 +223,7 @@ def test_aceptar_la_liquidacion_entera_confirma_lo_pendiente_con_quien_acepta(
     importación vuelve con sus controles en palabras."""
     e = escena
     i = leida(e, motor_app, motor_migrate)
-    assert [c["numero"] for c in i["controles"]] == list(range(1, 11))
+    assert [c["numero"] for c in i["controles"]] == list(range(1, 12))
     assert {c["estado"] for c in i["controles"]} <= {"bien", "para_mirar", "no_aplica"}
     assert next(c for c in i["controles"] if c["numero"] == 9)["estado"] == "no_aplica"
     rubro = next(c for c in i["campos"] if c["clave"] == "rubro:2")

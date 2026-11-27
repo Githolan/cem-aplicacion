@@ -253,6 +253,17 @@ export function valoresDe(valor: Record<string, unknown>, camino: string[] = [])
   });
 }
 
+// Como `COMPROBANTE` de `controles.py`: el comprobante que el modelo de Mis Expensas escribe al
+// final del concepto de cada gasto (comentario 43; que la factura esté cargada en CEM es S3b).
+const COMPROBANTE = /(Factura|Recibo|Nota de Cr[eé]dito|Nota de D[eé]bito|Ticket|Otros)(?:\s+[^\s]{1,8})?\s*N\s*[º°o]\.?\s*(?:[0-9][0-9./-]*)?/gi;
+
+/** «Factura B Nº 0001-00001234» tal como lo dice el concepto, o null si no dice ninguno. */
+export function comprobanteDe(concepto: string): string | null {
+  const hallados = [...concepto.matchAll(COMPROBANTE)];
+  const ultimo = hallados.at(-1);
+  return ultimo === undefined ? null : ultimo[0].replace(/\s+/g, " ").trim();
+}
+
 /** La ficha de un dato en palabras (comentario 46): lo que paga una unidad por grupo, con su
  * porcentaje; el saldo con lo que debía; un gasto con lo de cada grupo. Los demás, valor por valor. */
 export function enPalabras(c: Campo): { etiqueta: string; valor: string }[] {
@@ -285,6 +296,7 @@ export function enPalabras(c: Campo): { etiqueta: string; valor: string }[] {
       if (grupos === undefined) break;
       return [
         { etiqueta: "Concepto", valor: String(v.concepto ?? "") },
+        { etiqueta: "Comprobante que dice la liquidación", valor: comprobanteDe(String(v.concepto ?? "")) ?? "No dice ninguno" },
         ...Object.entries(grupos).map(([nombre, x]) => ({ etiqueta: `Se reparte en ${nombre}`, valor: pesos(x) })),
         { etiqueta: "Total", valor: pesos(v.total) },
       ];
