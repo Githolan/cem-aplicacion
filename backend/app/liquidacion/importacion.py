@@ -15,7 +15,9 @@
   `nucleo.campos_oficiales_liquidacion` (RN30).
 - **Confirmación (H5-3, `0115`)**, con la misma facultad (D2-A): la decisión sobre cada campo
   (`…/campos/{campo}/decision`: confirmar, corregir o descartar), la confirmación de la importación
-  entera sin campos pendientes (`…/confirmacion`) y su descarte con motivo (`…/descarte`). Cada una
+  entera (`…/confirmacion`; con `aceptar_pendientes`, RL1-A, confirma también los datos pendientes)
+  y su descarte con motivo (`…/descarte`). La importación vuelve con sus controles en palabras
+  (`controles`), para aceptarla mirando solo lo raro. Cada una
   devuelve la importación como queda. Una sola oficial por período (`0119`): si el período ya
   tiene una, la confirmación la reemplaza con motivo (`reemplaza_a`), o se niega.
 - **Enlaces (H5-5, `0118`)**: la lectura anota los enlaces del documento (anotados, escritos o en
@@ -53,6 +55,7 @@ from cem_contracts.importacion_liquidacion import (
     EnlaceLeido,
     EnlaceTraido,
     EsquemaDelPeriodo,
+    EstadoCampo,
     EstadoImportacion,
     ImportacionCreada,
     ImportacionLiquidacion,
@@ -75,6 +78,7 @@ from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
 from app.liquidacion import (
+    controles,
     descarga,
     enlaces,
     imagenes,
@@ -519,8 +523,61 @@ def _importacion(conn: Connection, permiso: Permiso, i: UUID) -> ImportacionLiqu
     ).mappings().all()  # fmt: skip
     datos = dict(cabeza)
     datos["diferencias"] = [DiferenciaLeida(**d) for d in datos["diferencias"]]
-    return ImportacionLiquidacion(**datos, campos=[CampoPreliminar(**f) for f in filas],
-                                  enlaces=[EnlaceLeido(**e) for e in hallados])  # fmt: skip
+    leidos = [CampoPreliminar(**f) for f in filas]
+    # La unidad de cada dato como quedaría oficial: la del valor corregido, si se corrigió (`0135`).
+    oficial = {
+        f["campo_id"]: f["unidad_id"]
+        for f in _ejecutar(
+            conn, permiso,
+            "select * from nucleo.unidades_de_los_campos_lectura(:i, :actor, 'api', :sesion)",
+            {"i": i},
+        ).mappings()
+    }  # fmt: skip
+    vigentes = [
+        controles.Dato(tipo=c.tipo.value, clave=c.clave, valor=c.valor_corregido or c.valor,
+                       unidad_id=oficial.get(c.id))
+        for c in leidos if c.estado != EstadoCampo.DESCARTADO
+    ]  # fmt: skip
+    anterior = _cobrado_el_mes_anterior(conn, permiso, i, datos["periodo"])
+    return ImportacionLiquidacion(**datos, campos=leidos,
+                                  enlaces=[EnlaceLeido(**e) for e in hallados],
+                                  controles=controles.controles(vigentes, anterior))  # fmt: skip
+
+
+def mes_anterior(periodo: date) -> date:
+    return (periodo.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+
+def _cobrado_el_mes_anterior(
+    conn: Connection, permiso: Permiso, i: UUID, periodo: date | None
+) -> dict[UUID, Decimal] | None:
+    """Lo que cobraba a cada unidad del padrón la liquidación oficial vigente del mes anterior
+    (control 9), o `None` si no hay una."""
+    if periodo is None:
+        return None
+    previo = mes_anterior(periodo)
+    filas = _ejecutar(
+        conn, permiso,
+        "select * from nucleo.importaciones_liquidacion_lectura(:actor, 'api', :sesion)", {},
+    ).mappings()  # fmt: skip
+    vigente = EstadoImportacion.CONFIRMADA
+    oficial = next(
+        (f["id"] for f in filas
+         if f["estado"] == vigente and f["periodo"] == previo and f["id"] != i),
+        None,
+    )  # fmt: skip
+    if oficial is None:
+        return None
+    cobrado: dict[UUID, Decimal] = {}
+    for f in _ejecutar(
+        conn, permiso,
+        "select * from nucleo.campos_oficiales_liquidacion(:i, :actor, 'api', :sesion)",
+        {"i": oficial},
+    ).mappings():  # fmt: skip
+        total = f["valor"].get("total") if f["tipo"] == "importe_unidad" else None
+        if f["unidad_id"] is not None and isinstance(total, str) and IMPORTE_TEXTO.match(total):
+            cobrado[f["unidad_id"]] = Decimal(total)
+    return cobrado
 
 
 @router.get(
@@ -656,11 +713,21 @@ def confirmar_importacion(
     confirmacion: Annotated[ConfirmacionImportacion, Body()] = SIN_REEMPLAZO,
 ) -> Response:
     """Sin cuerpo, no reemplaza nada. Con `reemplaza_a` y `motivo`, reemplaza la oficial del
-    período, que pasa a `reemplazada` en la misma transacción."""
+    período, que pasa a `reemplazada` en la misma transacción. Con `aceptar_pendientes` (RL1-A),
+    quien acepta confirma, en la misma transacción, cada dato que seguía pendiente: cada uno queda
+    con su nombre y su hora, como si lo hubiera confirmado de a uno."""
     ctx = permiso.ctx
     permiso.verificar(Entidad())
 
     def efecto(conn: Connection) -> tuple[int, ImportacionLiquidacion]:
+        if confirmacion.aceptar_pendientes:
+            # La base traba la importación antes de mirar qué sigue pendiente (`0135`): una
+            # corrección que llega a la vez no se pisa.
+            _ejecutar(
+                conn, permiso,
+                "select nucleo.aceptar_datos_pendientes(:i, :actor, 'api', :sesion)",
+                {"i": importacion_id},
+            )  # fmt: skip
         _ejecutar(
             conn, permiso,
             "select nucleo.confirmar_importacion_liquidacion(:i, :r, :m, :actor, 'api', :sesion)",

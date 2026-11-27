@@ -4,6 +4,7 @@ Contra servicios reales: PostgreSQL, el almacén S3 de pruebas y ClamAV. La liqu
 inventada de H5-1 (`test_mis_expensas.liquidacion`), leída sin IA. Datos SINTETICOS / NO REAL.
 """
 
+import json
 import threading
 from uuid import uuid4
 
@@ -212,6 +213,116 @@ def test_la_importacion_se_confirma_sin_pendientes_y_solo_eso_es_oficial(
     ):
         assert respuesta.status_code == 409, respuesta.text
         assert respuesta.json()["codigo"] == "importacion_decidida"
+
+
+def test_aceptar_la_liquidacion_entera_confirma_lo_pendiente_con_quien_acepta(
+    escena, bucket, motor_app, motor_migrate
+):
+    """RL1-A (26-11-2026): aceptar la liquidación entera confirma cada dato pendiente a nombre de
+    quien acepta, en la misma transacción; lo corregido y lo descartado quedan como estaban. La
+    importación vuelve con sus controles en palabras."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    assert [c["numero"] for c in i["controles"]] == list(range(1, 11))
+    assert {c["estado"] for c in i["controles"]} <= {"bien", "para_mirar", "no_aplica"}
+    assert next(c for c in i["controles"] if c["numero"] == 9)["estado"] == "no_aplica"
+    rubro = next(c for c in i["campos"] if c["clave"] == "rubro:2")
+    corregido = rubro["valor"] | {"total": "999.99"}
+    assert decidir(e, i, "rubro:2", "corregido", corregido).status_code == 200
+    assert decidir(e, i, "unidad:003", "descartado").status_code == 200
+    # Control: sin `aceptar_pendientes`, la confirmación sigue negándose con datos pendientes.
+    r = post(e, ruta(e, i["id"], "confirmacion"))
+    assert r.status_code == 409 and r.json()["codigo"] == "campos_pendientes", r.text
+    r = post(e, ruta(e, i["id"], "confirmacion"), {"aceptar_pendientes": True})
+    assert r.status_code == 200, r.text
+    hecha = r.json()
+    assert (hecha["estado"], hecha["decidida_por"]) == ("confirmada", str(e["mc"]))
+    estados = {c["clave"]: c["estado"] for c in hecha["campos"]}
+    assert estados.pop("rubro:2") == "corregido" and estados.pop("unidad:003") == "descartado"
+    assert set(estados.values()) == {"confirmado"}
+    assert {c["confirmado_por"] for c in hecha["campos"]} == {str(e["mc"])}
+    claves = {clave: valor for clave, valor in oficiales(e, motor_app, i)}
+    assert len(claves) == 15 and claves["rubro:2"] == corregido and "unidad:003" not in claves
+    with motor_migrate.connect() as c:
+        confirmados = c.execute(text(
+            "select count(*) from auditoria.eventos"
+            " where accion = 'consorcio.liquidacion.decidir_dato' and consorcio_id = :c"
+            " and despues->>'decision' = 'confirmado'"), {"c": e["cons"]},
+        ).scalar_one()  # fmt: skip
+    assert confirmados == 14  # cada dato aceptado queda auditado, como si se confirmara de a uno
+
+
+def test_los_controles_usan_la_unidad_del_valor_corregido(escena, bucket, motor_app, motor_migrate):
+    """Revisión de Codex (cem-aplicacion 297): corregir la unidad de un dato a una que no está en el
+    padrón la saca del control del padrón, como la sacaría de lo oficial (`0135`)."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    padron = next(c for c in i["controles"] if c["numero"] == 10)
+    assert padron["estado"] == "bien", padron  # control: antes de corregir, todas en el padrón
+    unidad = next(c for c in i["campos"] if c["tipo"] == "unidad")
+    r = decidir(e, i, unidad["clave"], "corregido", unidad["valor"] | {"depto": "ZZ-9"})
+    assert r.status_code == 200, r.text
+    padron = next(c for c in r.json()["controles"] if c["numero"] == 10)
+    assert padron["estado"] == "para_mirar"
+    assert len(padron["lineas"]) == 1 and "ZZ-9" in padron["lineas"][0]
+
+
+def test_aceptar_entera_no_pisa_una_correccion_que_llega_a_la_vez(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Revisión de Codex (cem-aplicacion 297): la aceptación traba la importación antes de mirar
+    qué sigue pendiente (`0135`). Si otra persona corrige un dato a la vez, la aceptación espera y
+    deja la corrección como está."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    rubro = next(c for c in i["campos"] if c["clave"] == "rubro:2")
+    corregido = rubro["valor"] | {"total": "999.99"}
+    resolver = text("select nucleo.resolver_campo_preliminar(:i, :f, 'corregido',"
+                    " cast(:v as jsonb), :a, 'api', :s)")  # fmt: skip
+    aceptar = text("select nucleo.aceptar_datos_pendientes(:i, :a, 'api', :s)")
+    valores = {"i": i["id"], "a": e["mc"], "s": e["sesion"]}
+    aceptados: list[int] = []
+    fallas: list[BaseException] = []
+
+    def aceptar_todo():
+        try:
+            with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
+                aceptados.append(c.execute(aceptar, valores).scalar_one())
+        except BaseException as falla:  # se vuelve a lanzar abajo, en el hilo de la prueba
+            fallas.append(falla)
+
+    with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as primera:
+        pid = primera.execute(text("select pg_backend_pid()")).scalar_one()
+        primera.execute(resolver, valores | {"f": rubro["id"], "v": json.dumps(corregido)})
+        hilo = threading.Thread(target=aceptar_todo)
+        hilo.start()
+        assert esperar_trabado(motor_migrate, pid) == 1  # control: la aceptación espera
+    hilo.join()
+    if fallas:
+        raise fallas[0]
+    assert aceptados == [15]  # los 16 menos el corregido
+    with cliente(e["mc"], e["sesion"]) as c:
+        campos = {x["clave"]: x for x in c.get(ruta(e, i["id"])).json()["campos"]}
+    assert campos["rubro:2"]["estado"] == "corregido"
+    assert campos["rubro:2"]["valor_corregido"] == corregido
+
+
+def test_aceptar_entera_con_un_dato_mal_leido_no_deja_nada_a_medias(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Si la confirmación se niega después de aceptar los pendientes (aquí: el período ya tiene su
+    oficial), nada queda confirmado: es una sola transacción."""
+    e = escena
+    i = leida(e, motor_app, motor_migrate)
+    r = post(e, ruta(e, i["id"], "confirmacion"), {"aceptar_pendientes": True})
+    assert r.status_code == 200, r.text
+    otra = importada(e, motor_app, pdf_de(liquidacion()))
+    r = post(e, ruta(e, otra["id"], "confirmacion"), {"aceptar_pendientes": True})
+    assert r.status_code == 409 and r.json()["codigo"] == "periodo_ya_confirmado", r.text
+    with cliente(e["mc"], e["sesion"]) as c:
+        sigue = c.get(ruta(e, otra["id"])).json()
+    assert sigue["estado"] == "para_confirmar"
+    assert {c["estado"] for c in sigue["campos"]} == {"pendiente"}
 
 
 def test_una_unidad_corregida_es_oficial_con_la_unidad_del_valor_corregido(

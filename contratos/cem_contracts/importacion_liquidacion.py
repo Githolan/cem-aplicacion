@@ -6,8 +6,9 @@ importarlo. `cem-trabajos` lo lee sin IA (formato del Programa Mis Expensas) y d
 campo preliminar, con el renglón de la página de donde salió. Si el formato no se reconoce, lo lee
 el modelo (H5-2, `0114`), dentro del tope mensual de gasto: sus campos llevan origen `ia` y la
 confianza que informó. Nada leído es oficial hasta que una persona lo confirma (H5-3, `0115`):
-campo por campo (confirmar, corregir o descartar) y, cuando no queda ninguno pendiente, la
-importación entera. Una foto o un PDF sin texto los lee el modelo como imágenes (H5-5, `0117`).
+aceptando la importación entera después de ver sus controles (RL1-A, 26-11-2026: los datos
+pendientes quedan confirmados por quien acepta), o campo por campo (corregir o descartar un dato
+mal leído). Una foto o un PDF sin texto los lee el modelo como imágenes (H5-5, `0117`).
 
 Los importes van como texto decimal con dos decimales (`"1234.56"`), tal como los informa la
 liquidación: son lo leído, no un cálculo.
@@ -113,6 +114,29 @@ class DiferenciaLeida(BaseModel):
     renglon: Decimal
 
 
+class EstadoControl(StrEnum):
+    """Cómo salió un control de la liquidación leída (rediseño de la confirmación, RL1-A)."""
+
+    BIEN = "bien"
+    PARA_MIRAR = "para_mirar"
+    NO_APLICA = "no_aplica"
+
+
+class ControlLiquidacion(BaseModel):
+    """Un control sobre lo leído, dicho en palabras: lo que se comprobó y cómo salió. Se calcula al
+    pedir la importación, con lo leído y lo corregido; no se guarda. Dice la cuenta, no califica a
+    la administración (RN33)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    numero: int = Field(ge=1, description="El número del control en el diseño (§4).")
+    clave: str
+    estado: EstadoControl
+    titulo: str = Field(description="Qué se comprueba, en una línea.")
+    texto: str = Field(description="El resultado, en palabras.")
+    lineas: list[str] = Field(description="El detalle: cada unidad, gasto o grupo que lo explica.")
+
+
 class OrigenEnlace(StrEnum):
     ANOTACION = "anotacion"
     TEXTO = "texto"
@@ -178,6 +202,10 @@ class ImportacionLiquidacion(BaseModel):
     enlaces: list[EnlaceLeido] = Field(
         description="Los enlaces del documento, sin seguir (H5-5); se trae uno a pedido."
     )
+    controles: list[ControlLiquidacion] = Field(
+        description="Los controles sobre lo leído y corregido, en el orden del diseño; vacío"
+        " mientras no hay datos leídos."
+    )
 
 
 class ImportacionResumen(BaseModel):
@@ -233,6 +261,12 @@ class ConfirmacionImportacion(BaseModel):
     reemplaza_a: UUID | None = None
     motivo: str | None = Field(
         default=None, min_length=1, max_length=500, description="Por qué se la reemplaza."
+    )
+    aceptar_pendientes: bool = Field(
+        default=False,
+        description="Aceptar la liquidación entera (RL1-A): los datos todavía pendientes quedan"
+        " confirmados por quien acepta, en la misma transacción. Sin esto, con datos pendientes"
+        " se niega (`campos_pendientes`).",
     )
 
     @model_validator(mode="after")

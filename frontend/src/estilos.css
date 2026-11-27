@@ -2280,3 +2280,41 @@ div.fila-registro--lectura {
 .aviso-ayuda button {
   min-height: 44px;
 }
+
+/* Liquidación del administrador (rediseño RL1-A): el edificio a la vista antes de subir (RL4-A), el
+   resumen en palabras y una tarjeta por cada cosa para mirar; lo que está bien va plegado. */
+.edificio-actual {
+  margin-top: var(--space-4);
+  font-size: 1.125rem;
+}
+
+.resumen-liquidacion p {
+  margin: var(--space-2) 0 0;
+}
+
+.resumen-liquidacion__controles {
+  font-weight: 700;
+}
+
+.para-mirar {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.para-mirar__tarjeta {
+  border-left: 0.375rem solid var(--pending-text);
+}
+
+.para-mirar__tarjeta h3 {
+  margin-top: 0;
+  font-size: 1.0625rem;
+}
+
+.para-mirar__tarjeta ul {
+  padding-left: 1.25rem;
+}
+
+.para-mirar__vista {
+  color: var(--ink-muted);
+}
